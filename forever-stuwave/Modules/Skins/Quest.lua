@@ -1297,20 +1297,30 @@ local function GrowGossip(box)
     pcall(box.ForEachFrame, box, function(row)
         if type(row.Icon) == "table" and type(row.Resize) == "function" and GrowIcon(row.Icon, ppu) then grew = true end
     end)
-    -- a row the list laid out before its measuring button grew is still short: lay the list out again, once per open of the
-    -- window (live 2026-11-14: the first quest row at a new NPC stayed 16 units, its card and chip cut)
-    local short = false
-    pcall(box.ForEachFrame, box, function(row)
-        if type(row.Icon) == "table" and type(row.Resize) == "function" then
-            local _, h = Kit.SizePx(row)
-            if h and h < ROW_PX - 1 then short = true end
-        end
-    end)
-    local win = _G.GossipFrame
-    if (grew or short) and not S.relaid and type(win) == "table" and type(win.Update) == "function"
-        and Plain(Try(win.IsShown, win)) then
-        S.relaid = true
-        Kit.Later(function() pcall(win.Update, win) end)
+    -- Never ask the window to lay out again from here: GossipFrame:Update run by this addon writes the window's own state
+    -- (buttons, options, the list's data) as addon code, and the banker's gossip handing over to the bank then opened the bank
+    -- tainted, which blocked every bag click (live 2026-11-14). The Setup post-hook below makes the first layout tall instead.
+    return grew
+end
+
+-- Every gossip row and measuring button runs its kind's Setup before the list asks its height. A secure post-hook on the three
+-- mixins (copied into each button when it is made, so it must be in place before the first window opens) raises the button to
+-- ROW_PX with widget calls only: no Blizzard table is written, and the list measures the taller height on its first layout.
+local function GrowAfterSetup(button)
+    if type(button) ~= "table" or type(button.GetHeight) ~= "function" then return end
+    local ppu = Kit.Ppu(button)
+    if not ppu or ppu <= 0 then return end
+    local want = ROW_PX / ppu
+    local icon = button.Icon
+    if type(icon) == "table" and type(icon.SetHeight) == "function" then pcall(icon.SetHeight, icon, want) end
+    local ok, h = pcall(button.GetHeight, button)
+    if ok and type(h) == "number" and h < want then pcall(button.SetHeight, button, want) end
+end
+
+for _, name in ipairs({ "GossipOptionButtonMixin", "GossipActiveQuestButtonMixin", "GossipAvailableQuestButtonMixin" }) do
+    local mixin = _G[name]
+    if type(mixin) == "table" and type(mixin.Setup) == "function" and type(hooksecurefunc) == "function" then
+        pcall(hooksecurefunc, mixin, "Setup", GrowAfterSetup)
     end
 end
 
@@ -1348,12 +1358,11 @@ local function BuildGossip()
     end)
     if intro then
         Kit.HookScript(win, "OnShow", function()
-            S.relaid = nil
             Q.WindowShown(intro)
             if sweep then sweep() end
             Kit.Later(function() if sweep then sweep() end end)
         end)
-        Kit.HookScript(win, "OnHide", function() S.relaid = nil; Q.WindowHidden(intro) end)
+        Kit.HookScript(win, "OnHide", function() Q.WindowHidden(intro) end)
         Kit.HookScript(win, "OnMouseDown", function() Q.Skip(intro) end)
     end
 end
