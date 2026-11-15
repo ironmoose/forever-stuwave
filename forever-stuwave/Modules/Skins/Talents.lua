@@ -416,7 +416,7 @@ local COL = { CUT = 6, MARGIN = 6, GAP = 6 }
 local function PaintCols()
     for _, col in ipairs(S.cols or {}) do
         local lit = Points(col.head) > 0
-        Kit.PaintPlate(col.plate, C.ink, 0.6, lit and C.violet or C.dim, 1, lit and 2 or 1)
+        Kit.PaintPlate(col.plate, C.ink, 1, lit and C.violet or C.dim, 1, lit and 2 or 1)
     end
 end
 
