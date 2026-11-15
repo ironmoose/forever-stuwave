@@ -647,10 +647,19 @@ local function SetChip(row, rec, on, h)
         Kit.Recolor(rec.chipLabel, spec[2])
         local sw = Plain(Try(rec.chipLabel.GetStringWidth, rec.chipLabel))
         local w = math.ceil((type(sw) == "number" and sw or 30) * Kit.Ppu(row)) + 2 * CHIP.PAD
-        local y = math.floor((h - CHIP.H) / 2)
-        Kit.Place(rec.chip, row, -CHIP.RIGHT, y, w, CHIP.H, "TOPRIGHT", "TOPRIGHT")
-        Kit.Place(rec.chipRing, row, -CHIP.RIGHT, y, w, CHIP.H, "TOPRIGHT", "TOPRIGHT")
-        Kit.Place(rec.chipLabel, rec.chip, 0, 0, nil, nil, "CENTER", "CENTER", row)
+        -- on the card's whole pixels (LayoutRow), never taller than the card: a 1 px edge on a fraction of a pixel is cut
+        local g = rec.grid or { dx = 0, dy = 0, top = 0, ch = h, cw = 300 }
+        local ppu = Kit.Ppu(row)
+        local ch = math.min(CHIP.H, g.ch - 4)
+        local x = g.dx + g.cw - CHIP.RIGHT - w
+        local y = g.top + g.dy + math.floor((g.ch - ch) / 2)
+        for _, t in ipairs({ rec.chip, rec.chipRing }) do
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", row, "TOPLEFT", x / ppu, -y / ppu)
+            t:SetSize(w / ppu, ch / ppu)
+        end
+        rec.chipLabel:ClearAllPoints()
+        rec.chipLabel:SetPoint("CENTER", rec.chip, "CENTER", 0, 0)
     end
     rec.chip:SetShown(on)
     rec.chipRing:SetShown(on)
@@ -674,6 +683,7 @@ local function LayoutRow(row, rec)
     local ch = math.max(8, math.min(h - 2 * ROW_GAP, CARD_H))
     local top = math.floor((h - ch) / 2)
     local cw = w - 1
+    rec.grid = { dx = dx, dy = dy, top = top, ch = ch, cw = cw }
     local function seat(t, inset)
         t:ClearAllPoints()
         t:SetPoint("TOPLEFT", row, "TOPLEFT", (dx + inset) / ppu, -(top + dy + inset) / ppu)
@@ -1272,8 +1282,19 @@ local function GrowGossip(box)
     pcall(box.ForEachFrame, box, function(row)
         if type(row.Icon) == "table" and type(row.Resize) == "function" and GrowIcon(row.Icon, ppu) then grew = true end
     end)
+    -- a row the list laid out before its measuring button grew is still short: lay the list out again, once per open of the
+    -- window (live 2026-11-14: the first quest row at a new NPC stayed 16 units, its card and chip cut)
+    local short = false
+    pcall(box.ForEachFrame, box, function(row)
+        if type(row.Icon) == "table" and type(row.Resize) == "function" then
+            local _, h = Kit.SizePx(row)
+            if h and h < ROW_PX - 1 then short = true end
+        end
+    end)
     local win = _G.GossipFrame
-    if grew and type(win) == "table" and type(win.Update) == "function" and Plain(Try(win.IsShown, win)) then
+    if (grew or short) and not S.relaid and type(win) == "table" and type(win.Update) == "function"
+        and Plain(Try(win.IsShown, win)) then
+        S.relaid = true
         Kit.Later(function() pcall(win.Update, win) end)
     end
 end
@@ -1310,11 +1331,12 @@ local function BuildGossip()
     end)
     if intro then
         Kit.HookScript(win, "OnShow", function()
+            S.relaid = nil
             Q.WindowShown(intro)
             if sweep then sweep() end
             Kit.Later(function() if sweep then sweep() end end)
         end)
-        Kit.HookScript(win, "OnHide", function() Q.WindowHidden(intro) end)
+        Kit.HookScript(win, "OnHide", function() S.relaid = nil; Q.WindowHidden(intro) end)
         Kit.HookScript(win, "OnMouseDown", function() Q.Skip(intro) end)
     end
 end
