@@ -709,6 +709,14 @@ local function GrowRow(row)
     if type(InCombatLockdown) == "function" and InCombatLockdown() then return end
     local _, h = Kit.SizePx(row)
     if h and h < ROW_PX then pcall(row.SetHeight, row, ROW_PX / Kit.Ppu(row)) end
+    -- QuestTitleButtonTemplate pins its label TOPLEFT (20, 0), so in the taller row it rode the top of the card (live
+    -- 2026-11-14); it keeps its 20 units in and is centred on the row's height instead
+    local label = Try(row.GetFontString, row)
+    if type(label) == "table" and type(label.SetPoint) == "function" and not S.centred[label] then
+        S.centred[label] = true
+        label:ClearAllPoints()
+        label:SetPoint("LEFT", row, "LEFT", 20, 0)
+    end
 end
 
 local function BuildRow(row, owner, icon)
@@ -1266,6 +1274,7 @@ end
 -- measuring buttons are first met in the data the list already laid out, so the window is asked to lay out once more.
 local MEASURERS = { "titleOptionButton", "activeQuestButton", "availableQuestButton" }
 S.grownIcons = Weak()
+S.centred = Weak()
 local function GrowIcon(icon, ppu)
     if type(icon) ~= "table" or S.grownIcons[icon] or type(icon.SetHeight) ~= "function" then return false end
     S.grownIcons[icon] = true
