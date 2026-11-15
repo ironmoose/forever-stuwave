@@ -724,6 +724,12 @@ local function BuildRow(row, owner, icon)
     rec.label = type(label) == "table" and label or nil
     if rec.label then Mono(rec.label, row, 13, C.text) end
     rec.state = Kit.Track(row, PaintRow)
+    -- the list grows a row after it was carded (GrowGossip, GrowRow) and moves it: the card follows the new rect
+    Kit.HookScript(row, "OnSizeChanged", function()
+        if not rec.on then return end
+        local h = LayoutRow(row, rec)
+        if rec.chip and rec.chip:IsShown() then SetChip(row, rec, true, h) end
+    end)
     -- a press on a row shows the whole transmission at once; the stock click that follows is untouched
     Kit.HookScript(row, "OnMouseDown", function() Q.Skip(rec.owner) end)
     return rec
@@ -1301,6 +1307,8 @@ end
 
 local function SyncGossip(box)
     Step("gossip.grow", GrowGossip, box)
+    -- the scroll box seats its rows after this pass; seat every card again on the final rects
+    Kit.Later(OnReseatRows)
     local intro = S.intros.gossip
     if not intro then return end
     local greeting, items = nil, {}
