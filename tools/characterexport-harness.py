@@ -6,7 +6,12 @@ with every documented field filled (identity, XP, zone, money, base and effectiv
 hit, armor, health and mana, talents by name and id, professions with Cooking / First Aid / Fishing, gear per slot with
 item id, link, enchant, gems and item level, savedAt and the addon version); a secret answer is left out and never
 touched; nothing is written in combat and the deferred write happens after PLAYER_REGEN_ENABLED; a logout in combat keeps
-the last snapshot; the config switch stops writes; events in one burst coalesce into one write; nothing prints.
+the last snapshot; the config switch stops writes; events in one burst coalesce into one write; nothing prints. A trade
+skill window read (C_TradeSkillUI, as the client documents it) puts each profession's known recipes (difficulty word,
+craftable count, reagents with name, item id, count needed and owned) in `professions.<slot>.recipes` with its own
+capturedAt; the list survives writes made with no window open, a logout teardown and a new session, is dropped when the
+slot's profession changes, and is not recorded for a linked, guild or NPC window, an unmatched profession, in combat or
+with the switch off.
 
 The mock is strict. It is NOT the real client.
 
@@ -115,7 +120,8 @@ C_SpecializationInfo = {
     GetSpecializationInfo = function() return 262, "Shaman", "", 0, "DAMAGER", 4, 0 end,
 }
 C_AddOns = { GetAddOnMetadata = function(_, field) if field == "Version" then return "0.1.0-test" end end }
-function GetServerTime() return 1793750400 end
+NOW = 1793750400
+function GetServerTime() return NOW end
 date, time = os.date, os.time
 
 STATS = { { 40, 52 }, { 30, 41 }, { 45, 60 }, { 35, 38 }, { 50, 55 } }
@@ -259,6 +265,123 @@ C_Item.GetItemStats = function(link)
     if link:find("Hitem:1111") then return { ITEM_MOD_STAMINA_SHORT = 2, ITEM_MOD_INTELLECT_SHORT = 2, RESISTANCE0_NAME = 45 } end
     if link:find("Hitem:2222") then return { ITEM_MOD_AGILITY_SHORT = 3 } end
     return {}
+end
+
+-- items by id: names (4291 is not cached yet), how many the bags hold, and the load requests made
+ITEMNAMES = { [2318] = "Light Leather", [2320] = "Coarse Thread", [2325] = "Black Dye", [5001] = "Tuft of Fur",
+    [5002] = "Thick Tuft of Fur", [5003] = "Dense Tuft of Fur", [769] = "Chunk of Boar Meat", [6889] = "Small Egg",
+    [2678] = "Mild Spices", [2589] = "Linen Cloth" }
+ITEMCOUNT = { [2318] = 14, [2320] = 3, [4291] = 2, [5001] = 1, [5002] = 2, [5003] = 4, [769] = 5, [2589] = 9 }
+LOADREQ = {}
+C_Item.GetItemNameByID = function(id) return ITEMNAMES[id] end
+C_Item.GetItemCount = function(id) return ITEMCOUNT[id] or 0 end
+C_Item.RequestLoadItemDataByID = function(id) LOADREQ[#LOADREQ + 1] = id end
+
+-- trade skill window (the modern C_TradeSkillUI): closed until a case opens one. Names and ids are test data.
+Enum = {
+    TradeskillRelativeDifficulty = { Optimal = 0, Medium = 1, Easy = 2, Trivial = 3 },
+    CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2, Automatic = 3 },
+}
+local function slot(kind, qty, ...)
+    local reagents = {}
+    for _, id in ipairs({ ... }) do reagents[#reagents + 1] = { itemID = id } end
+    return { reagentType = kind, quantityRequired = qty, reagents = reagents, required = kind == 1 }
+end
+RECIPES = {
+    [2152] = { name = "Light Armor Kit", recipeID = 2152, skillLineAbilityID = 9152, learned = true, relativeDifficulty = 0 },
+    [2149] = { name = "Handstitched Leather Boots", recipeID = 2149, skillLineAbilityID = 9149, learned = true, relativeDifficulty = 3 },
+    [3753] = { name = "Fine Leather Belt", recipeID = 3753, skillLineAbilityID = 9753, learned = true, relativeDifficulty = 1 },
+    [3756] = { name = "Embossed Leather Gloves", recipeID = 3756, skillLineAbilityID = 9756, learned = true, relativeDifficulty = 2 },
+    [4001] = { name = "Mystery Recipe", recipeID = 4001, learned = true },
+    [9999] = { name = "Cured Heavy Hide", recipeID = 9999, learned = false, relativeDifficulty = 0 },
+    [2538] = { name = "Roasted Boar Meat", recipeID = 2538, skillLineAbilityID = 9538, learned = true, relativeDifficulty = 0 },
+    [8604] = { name = "Herb Baked Egg", recipeID = 8604, skillLineAbilityID = 9604, learned = true, relativeDifficulty = 2 },
+    [3275] = { name = "Linen Bandage", recipeID = 3275, skillLineAbilityID = 9275, learned = true, relativeDifficulty = 1 },
+}
+SCHEMATICS = {
+    [2152] = { outputItemID = 2304, reagentSlotSchematics = { slot(1, 1, 2318) } },
+    [2149] = { outputItemID = 2307, reagentSlotSchematics = { slot(1, 2, 2318), slot(1, 1, 2320), slot(2, 1, 2325) } },
+    [3753] = { outputItemID = 3779, reagentSlotSchematics = { slot(1, 6, 2318), slot(1, 2, 4291) } },
+    [3756] = { outputItemID = 4237, reagentSlotSchematics = { slot(1, 3, 5001, 5002, 5003), slot(1, 1, 2320) } },
+    [2538] = { outputItemID = 2681, reagentSlotSchematics = { slot(1, 1, 769) } },
+    [8604] = { outputItemID = 6888, reagentSlotSchematics = { slot(1, 1, 6889), slot(1, 1, 2678) } },
+    [3275] = { outputItemID = 1251, reagentSlotSchematics = { slot(1, 1, 2589) } },
+}
+CRAFTABLE = { [2152] = 14, [2149] = 3, [3756] = 1, [2538] = 5, [8604] = 0, [3275] = 9 }
+WINDOWS = {
+    leatherworking = {
+        base = { professionID = 165, professionName = "Leatherworking", skillLevel = 95, maxSkillLevel = 150 },
+        child = { professionID = 2800, professionName = "Classic Leatherworking", parentProfessionID = 165,
+            parentProfessionName = "Leatherworking" },
+        ids = { 2152, 2149, 3753, 3756, 4001, 9999 },
+    },
+    cooking = {
+        base = { professionID = 185, professionName = "Cooking", skillLevel = 40, maxSkillLevel = 75 },
+        child = { professionID = 0 },   -- an NPC style window answers with no child line
+        ids = { 2538, 8604 },
+    },
+    firstaid = {
+        base = { professionID = 129, professionName = "First Aid", skillLevel = 60, maxSkillLevel = 75 },
+        child = { professionID = 0 },
+        ids = { 3275 },
+    },
+    alchemy = {
+        base = { professionID = 171, professionName = "Alchemy", skillLevel = 10, maxSkillLevel = 75 },
+        child = { professionID = 0 },
+        ids = { 2538 },
+    },
+}
+TS = { ready = false, changing = false, linked = false, guild = false, guildMember = false, npc = false, ids = {} }
+TSCALLS, WROTE = 0, nil
+local function mutator(name) return function() WROTE = name end end
+C_TradeSkillUI = {
+    IsTradeSkillReady = function() return TS.ready end,
+    IsDataSourceChanging = function() return TS.changing end,
+    IsTradeSkillLinked = function() return TS.linked, TS.linked and "Mira" or nil end,
+    IsTradeSkillGuild = function() return TS.guild end,
+    IsTradeSkillGuildMember = function() return TS.guildMember end,
+    IsNPCCrafting = function() return TS.npc end,
+    GetBaseProfessionInfo = function() return TS.base end,
+    GetChildProfessionInfo = function() return TS.child end,
+    GetAllRecipeIDs = function() TSCALLS = TSCALLS + 1; return TS.ids end,
+    GetRecipeInfo = function(id) return RECIPES[id] end,
+    GetRecipeSchematic = function(id, isRecraft) return SCHEMATICS[id] end,
+    GetCraftableCount = function(id) return CRAFTABLE[id] or 0 end,
+}
+for _, name in ipairs({ "SetShowLearned", "SetShowUnlearned", "SetRecipeItemNameFilter", "SetOnlyShowMakeableRecipes",
+    "OpenTradeSkill", "CloseTradeSkill", "SetProfessionChildSkillLineID", "CraftRecipe", "SetRecipeFavorite" }) do
+    C_TradeSkillUI[name] = mutator(name)
+end
+function openWindow(name)
+    local w = WINDOWS[name]
+    TS.base, TS.child, TS.ids = w.base, w.child, w.ids
+    TS.ready, TS.changing, TS.linked, TS.guild, TS.guildMember, TS.npc = true, false, false, false, false, false
+    fire("TRADE_SKILL_SHOW")
+    fire("TRADE_SKILL_DATA_SOURCE_CHANGED")
+    fire("TRADE_SKILL_LIST_UPDATE")
+end
+function closeWindow()
+    TS.ready = false
+    fire("TRADE_SKILL_CLOSE")
+end
+-- Runs timers until none are left (the read, the write it schedules, a retry); bounded so a loop fails instead of hanging.
+function settle()
+    for i = 1, 10 do
+        if runTimers() == 0 then return i - 1 end
+    end
+    error("timers kept rescheduling", 2)
+end
+-- The note on a read that recorded nothing lands with the next write; a logout write is the quickest.
+function flush() fire("PLAYER_LOGOUT") end
+-- A new session: the addon starts again with the saved table the client loaded.
+function reload()
+    local keep = ForeverSTUwaveExport
+    FRAMES, TIMERS = {}, {}
+    local fn = assert(loadstring(SOURCE_TEXT, "@CharacterExport.lua"))
+    fn("forever-stuwave", FS)
+    ForeverSTUwaveExport = keep
+    fire("ADDON_LOADED", "forever-stuwave")
+    return FS.CharacterExport
 end
 
 function load()
@@ -726,6 +849,410 @@ load()
 check(SETTINGS["export.reloadButton"] == false, "default off")
 fire("PLAYER_LEVEL_UP", 25)
 check(FS.CharacterExport.ReloadButton() == nil, "no button when switched off")
+""")
+
+
+# Profession recipes ----------------------------------------------------------------------------
+
+case("the_trade_skill_events_are_registered_and_the_read_is_side_effect_free")(r"""
+load()
+for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_DATA_SOURCE_CHANGED", "TRADE_SKILL_CLOSE" }) do
+    local found = false
+    for _, f in ipairs(FRAMES) do if f.events[event] then found = true end end
+    check(found, event .. " is not registered")
+end
+login()
+openWindow("leatherworking")
+settle()
+check(saved().professions.primary2.recipes, "a read happened")
+check(WROTE == nil, "the read called a setter: " .. tostring(WROTE))
+check(#PRINTS == 0, "silent: " .. tostring(PRINTS[1]))
+""")
+
+case("a_trade_window_open_records_the_known_recipes_with_difficulty_count_and_reagents")(r"""
+load()
+login()
+check(saved().professions.primary2.recipes == nil and saved().recipeCapture == nil, "no recipes before a window opens")
+openWindow("leatherworking")
+check(#TIMERS == 1, "show, source change and list update are one read, got " .. #TIMERS)
+check(saved().professions.primary2.recipes == nil, "the read waits for the window to settle")
+settle()
+local c = saved()
+check(c.reason == "recipes" and c.errors == nil, "the read triggers a write: " .. tostring(c.reason))
+local lw = c.professions.primary2
+check(lw.name == "Leatherworking" and lw.skill == 95 and lw.max == 150 and lw.skillLine == 165, "the profession line is as before")
+check(lw.capturedAt == 1793750400 and lw.capturedAtText == "2026-11-04T00:00:00Z" and lw.capturedSkill == 95, "stamp and skill")
+check(lw.recipesIncomplete == 1, "one reagent has no cached name: " .. tostring(lw.recipesIncomplete))
+local r = lw.recipes
+check(#r == 5, "five learned recipes, the unlearned one left out, got " .. #r)
+check(r[1].name == "Embossed Leather Gloves" and r[2].name == "Fine Leather Belt" and r[3].name == "Handstitched Leather Boots"
+    and r[4].name == "Light Armor Kit" and r[5].name == "Mystery Recipe", "sorted by name")
+local kit = r[4]
+check(kit.recipeId == 2152 and kit.skillLineAbilityId == 9152 and kit.outputItemId == 2304, "ids")
+check(kit.difficulty == "orange" and kit.difficultyId == 0 and kit.numCraftable == 14, "difficulty and number craftable")
+check(#kit.reagents == 1 and kit.reagents[1].name == "Light Leather" and kit.reagents[1].itemId == 2318
+    and kit.reagents[1].count == 1 and kit.reagents[1].owned == 14, "reagent: name, item id, needed, owned")
+check(r[1].difficulty == "green" and r[2].difficulty == "yellow" and r[3].difficulty == "grey", "difficulty words")
+check(r[3].numCraftable == 3 and r[2].numCraftable == 0, "craftable counts")
+local boots = r[3]
+check(#boots.reagents == 2 and boots.reagents[1].count == 2 and boots.reagents[2].name == "Coarse Thread"
+    and boots.reagents[2].count == 1 and boots.reagents[2].owned == 3, "the finishing slot is not a needed reagent")
+local belt = r[2]
+check(belt.reagents[2].itemId == 4291 and belt.reagents[2].name == nil and belt.reagents[2].count == 2
+    and belt.reagents[2].owned == 2, "an uncached item keeps its id and count, no name")
+local gloves = r[1]
+check(gloves.reagents[1].itemId == 5001 and gloves.reagents[1].count == 3 and gloves.reagents[1].owned == 7
+    and #gloves.reagents[1].itemIds == 3 and gloves.reagents[1].itemIds[3] == 5003, "alternates: first id, all ids, owned summed")
+check(kit.reagents[1].itemIds == nil, "a single item has no alternates list")
+local odd = r[5]
+check(odd.recipeId == 4001 and odd.difficulty == nil and odd.difficultyId == nil and odd.reagents == nil
+    and odd.outputItemId == nil and odd.numCraftable == 0, "a recipe with no difficulty or schematic keeps what it has")
+local rc = c.recipeCapture
+check(rc.status == "ok" and rc.slot == "primary2" and rc.name == "Leatherworking" and rc.skillLine == 165 and rc.count == 5
+    and rc.at == 1793750400 and rc.failed == 1, "capture note, one recipe without a schematic counted")
+check(LOADREQ[1] == 4291 and #LOADREQ == 1, "only the uncached item is requested")
+""")
+
+case("cooking_and_first_aid_windows_land_in_their_own_slots")(r"""
+load()
+login()
+openWindow("cooking")
+settle()
+openWindow("firstaid")
+settle()
+local p = saved().professions
+check(p.cooking.recipes and #p.cooking.recipes == 2 and p.cooking.recipes[1].name == "Herb Baked Egg", "cooking")
+check(p.cooking.recipes[2].name == "Roasted Boar Meat" and p.cooking.recipes[2].difficulty == "orange"
+    and p.cooking.recipes[2].reagents[1].name == "Chunk of Boar Meat" and p.cooking.recipes[2].numCraftable == 5,
+    "a window with no child line is read from the base line")
+check(p.firstAid.recipes and #p.firstAid.recipes == 1 and p.firstAid.recipes[1].name == "Linen Bandage"
+    and p.firstAid.capturedSkill == 60, "first aid")
+check(p.cooking.capturedSkill == 40 and p.primary2.recipes == nil and p.fishing.recipes == nil, "others untouched")
+check(saved().recipeCapture.slot == "firstAid", "the capture note is the latest read")
+""")
+
+case("recipes_survive_writes_with_no_window_a_logout_teardown_and_a_new_session")(r"""
+load()
+login()
+openWindow("leatherworking")
+settle()
+local at = saved().professions.primary2.capturedAt
+closeWindow()
+NOW = NOW + 600
+fire("BAG_UPDATE_DELAYED")
+check(#TIMERS == 1, "a closed window schedules only the bag write")
+settle()
+local lw = saved().professions.primary2
+check(saved().reason == "bags" and #lw.recipes == 5 and lw.capturedAt == at, "kept with its own stamp, got " .. tostring(lw.capturedAt))
+check(saved().kept == nil, "not torn, so not named in kept")
+-- a logout teardown reads no profession slot: the whole section comes from the last write, recipes with it
+local realP = GetProfessions
+GetProfessions = function() end
+fire("PLAYER_LOGOUT")
+check(saved().professions.primary2.recipes and #saved().professions.primary2.recipes == 5, "logout teardown keeps the recipes")
+GetProfessions = realP
+-- a new session starts with an empty session table and carries the stored list
+reload()
+PROFS[2][3] = 96
+login()
+local again = saved().professions.primary2
+check(again.skill == 96 and #again.recipes == 5 and again.capturedAt == at and again.capturedSkill == 95,
+    "a new session keeps the stored recipes and their capture skill")
+check(again.recipes[4].reagents[1].name == "Light Leather", "the stored list is whole")
+""")
+
+case("a_recapture_replaces_the_list_and_an_empty_read_keeps_the_last")(r"""
+load()
+login()
+openWindow("cooking")
+settle()
+local first = saved().professions.cooking
+check(first.recipes[2].numCraftable == 5, "first read")
+NOW = NOW + 60
+CRAFTABLE[2538] = 2
+fire("TRADE_SKILL_LIST_UPDATE")
+settle()
+local second = saved().professions.cooking
+check(second.recipes[2].numCraftable == 2 and second.capturedAt == NOW, "a list update re-reads the counts")
+-- the client answers with no learned recipe (not loaded yet): the last real list stays
+NOW = NOW + 60
+for _, id in ipairs({ 2538, 8604 }) do RECIPES[id].learned = false end
+fire("TRADE_SKILL_LIST_UPDATE")
+settle()
+flush()
+local third = saved().professions.cooking
+check(#third.recipes == 2 and third.capturedAt == second.capturedAt, "an empty read does not replace the list")
+check(saved().recipeCapture.status == "empty" and saved().recipeCapture.count == 0, "and says so: " .. tostring(saved().recipeCapture.status))
+-- a newly learned recipe shows up on the next read
+RECIPES[2538].learned = true
+fire("TRADE_SKILL_LIST_UPDATE")
+settle()
+check(#saved().professions.cooking.recipes == 1 and saved().professions.cooking.recipes[1].name == "Roasted Boar Meat",
+    "the new read is the list")
+""")
+
+case("a_bag_change_refreshes_the_counts_only_while_a_window_is_open")(r"""
+load()
+login()
+openWindow("cooking")
+settle()
+CRAFTABLE[2538] = 4
+fire("BAG_UPDATE_DELAYED")
+check(#TIMERS == 2, "the bag write and a recipe read, got " .. #TIMERS)
+settle()
+check(saved().professions.cooking.recipes[2].numCraftable == 4, "the count follows the bags")
+closeWindow()
+fire("BAG_UPDATE_DELAYED")
+check(#TIMERS == 1, "no read once the window is closed")
+local calls = TSCALLS
+settle()
+check(TSCALLS == calls, "and none happened")
+""")
+
+case("a_linked_guild_or_npc_window_is_not_recorded")(r"""
+load()
+login()
+for _, flag in ipairs({ "linked", "guild", "guildMember", "npc" }) do
+    openWindow("leatherworking")
+    TS[flag] = true
+    settle()
+    flush()
+    check(saved().professions.primary2.recipes == nil, flag .. " window recorded")
+    check(saved().recipeCapture and saved().recipeCapture.status == (flag == "guildMember" and "guild" or flag),
+        flag .. " status: " .. tostring(saved().recipeCapture and saved().recipeCapture.status))
+    closeWindow()
+end
+-- no way to tell a linked window from our own: not recorded either
+C_TradeSkillUI.IsTradeSkillLinked = nil
+openWindow("leatherworking")
+settle()
+flush()
+check(saved().professions.primary2.recipes == nil and saved().recipeCapture.status == "unverified", "unverifiable")
+closeWindow()
+C_TradeSkillUI.IsTradeSkillLinked = function() return SECRET end
+openWindow("leatherworking")
+settle()
+flush()
+check(saved().professions.primary2.recipes == nil and saved().recipeCapture.status == "unverified", "a secret answer is unverifiable")
+-- our own window again records
+C_TradeSkillUI.IsTradeSkillLinked = function() return false end
+openWindow("leatherworking")
+settle()
+check(saved().professions.primary2.recipes and #saved().professions.primary2.recipes == 5, "own window records")
+""")
+
+case("a_window_that_is_not_ours_or_not_ready_is_not_recorded")(r"""
+load()
+login()
+openWindow("alchemy")
+settle()
+flush()
+local p = saved().professions
+check(p.primary1.recipes == nil and p.primary2.recipes == nil and p.cooking.recipes == nil, "no slot holds Alchemy")
+check(saved().recipeCapture.status == "unmatched" and saved().recipeCapture.name == "Alchemy" and saved().recipeCapture.skillLine == 171,
+    "unmatched, with what was open")
+-- data source still changing: wait for the next event, record nothing
+openWindow("cooking")
+TS.changing = true
+local calls = TSCALLS
+settle()
+check(TSCALLS == calls and saved().professions.cooking.recipes == nil, "not read while the data source changes")
+TS.changing = false
+fire("TRADE_SKILL_DATA_SOURCE_CHANGED")
+settle()
+check(saved().professions.cooking.recipes, "read once it settled")
+-- not ready
+closeWindow()
+TS.base = WINDOWS.leatherworking.base
+fire("TRADE_SKILL_LIST_UPDATE")
+calls = TSCALLS
+settle()
+check(TSCALLS == calls and saved().professions.primary2.recipes == nil, "a closed window is not read")
+""")
+
+case("a_window_matches_its_slot_by_name_when_the_slot_has_no_skill_line")(r"""
+GetProfessions = function() end
+LINES = {
+    { "Professions", true }, { "Leatherworking", false, false, 95, 0, 0, 150 },
+    { "Secondary Skills", true }, { "Cooking", false, false, 40, 0, 0, 75 },
+}
+GetNumSkillLines = function() return #LINES end
+GetSkillLineInfo = function(i) return unpack(LINES[i]) end
+load()
+login()
+check(saved().professions.primary1.skillLine == nil, "the fallback path has no skill line")
+openWindow("leatherworking")
+settle()
+check(saved().professions.primary1.recipes and #saved().professions.primary1.recipes == 5, "matched by profession name")
+""")
+
+case("a_dropped_profession_does_not_keep_the_old_recipes")(r"""
+load()
+login()
+openWindow("leatherworking")
+settle()
+check(saved().professions.primary2.recipes, "captured")
+PROFS[2] = { "Tailoring", 0, 10, 75, 0, 0, 197 }
+fire("SKILL_LINES_CHANGED")
+settle()
+check(saved().professions.primary2.name == "Tailoring" and saved().professions.primary2.recipes == nil
+    and saved().professions.primary2.capturedAt == nil, "the new profession in the slot starts empty")
+reload()
+login()
+check(saved().professions.primary2.recipes == nil, "and a new session does not bring them back")
+""")
+
+case("a_trade_window_read_waits_out_combat")(r"""
+load()
+login()
+COMBAT = true
+openWindow("cooking")
+settle()
+check(TSCALLS == 0, "no recipe read in combat")
+check(saved().professions.cooking.recipes == nil and saved().recipeCapture == nil, "nothing recorded in combat")
+COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+settle()
+check(TSCALLS >= 1 and saved().professions.cooking.recipes and #saved().professions.cooking.recipes == 2, "read after combat")
+-- a window closed during the fight is not read afterwards
+COMBAT = true
+openWindow("firstaid")
+settle()
+closeWindow()
+COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+local calls = TSCALLS
+settle()
+check(TSCALLS == calls and saved().professions.firstAid.recipes == nil, "closed in combat: not read")
+""")
+
+case("the_switch_stops_recipe_reads")(r"""
+load()
+login()
+SETTINGS["export.enabled"] = false
+openWindow("cooking")
+settle()
+check(TSCALLS == 0 and saved().professions.cooking.recipes == nil, "nothing read when off")
+SETTINGS["export.enabled"] = true
+""")
+
+case("secret_recipe_data_is_left_out_and_never_touched")(r"""
+RECIPES[2152] = { name = SECRET, recipeID = 2152, learned = true, relativeDifficulty = SECRET }
+RECIPES[3753].learned = SECRET
+CRAFTABLE[2149] = SECRET
+SCHEMATICS[3756].reagentSlotSchematics[1].reagents[1].itemID = SECRET
+C_Item.GetItemCount = function(id) if id == 2318 then return SECRET end return ITEMCOUNT[id] or 0 end
+load()
+login()
+openWindow("leatherworking")
+settle()
+local c = saved()
+check(c.errors == nil and c.recipeCapture.status == "ok", "nothing threw: " .. tostring(c.recipeCapture.status))
+check(c.recipeCapture.failed == 1, "only the recipe with no schematic failed, so no secret was operated on: " .. tostring(c.recipeCapture.failed))
+local r = c.professions.primary2.recipes
+check(#r == 4, "the recipe with a secret learned flag is skipped, got " .. #r)
+local kit, boots, gloves
+for _, x in ipairs(r) do
+    if x.recipeId == 2152 then kit = x elseif x.recipeId == 2149 then boots = x elseif x.recipeId == 3756 then gloves = x end
+end
+check(kit.name == nil and kit.difficulty == nil and kit.difficultyId == nil and kit.reagents[1].name == "Light Leather"
+    and kit.reagents[1].owned == nil, "a secret name, difficulty and owned count are absent")
+check(boots.numCraftable == nil, "a secret craftable count is absent")
+check(gloves.reagents[1].itemId == 5002 and #gloves.reagents[1].itemIds == 2, "a secret item id is dropped from the alternates")
+-- a secret answer to the readiness or the window guards
+C_TradeSkillUI.IsTradeSkillGuild = function() return SECRET end
+openWindow("cooking")
+settle()
+flush()
+check(saved().professions.cooking.recipes == nil and saved().recipeCapture.status == "unverified",
+    "a secret guild answer is not ours to record")
+""")
+
+case("a_client_without_the_recipe_api_records_nothing_and_throws_nothing")(r"""
+local whole = C_TradeSkillUI
+load()
+login()
+-- the namespace without the list calls
+C_TradeSkillUI = { IsTradeSkillReady = function() return true end, IsTradeSkillLinked = function() return false end }
+fire("TRADE_SKILL_SHOW")
+settle()
+flush()
+check(saved().professions.cooking.recipes == nil and saved().recipeCapture.status == "unavailable", "unavailable, not an error")
+check(saved().errors == nil, "no reader threw")
+-- no namespace at all
+C_TradeSkillUI = nil
+fire("TRADE_SKILL_LIST_UPDATE")
+settle()
+flush()
+check(saved().errors == nil, "no namespace: no throw")
+-- a schematic call that throws costs that recipe's reagents, not the list
+C_TradeSkillUI = whole
+openWindow("cooking")
+local realSchematic = C_TradeSkillUI.GetRecipeSchematic
+C_TradeSkillUI.GetRecipeSchematic = function(id) if id == 2538 then error("boom") end return SCHEMATICS[id] end
+settle()
+flush()
+local cooking = saved().professions.cooking
+check(cooking.recipes and #cooking.recipes == 2 and cooking.recipes[2].name == "Roasted Boar Meat"
+    and cooking.recipes[2].reagents == nil and cooking.recipes[1].reagents[1].name == "Small Egg", "the recipe stays, without reagents")
+check(saved().recipeCapture.failed == 1, "and is counted")
+-- a recipe whose own fields throw while it is read is skipped, not the whole list
+C_TradeSkillUI.GetRecipeSchematic = realSchematic
+SCHEMATICS[2538].reagentSlotSchematics = { setmetatable({}, { __index = function() error("boom") end }) }
+fire("TRADE_SKILL_LIST_UPDATE")
+settle()
+flush()
+cooking = saved().professions.cooking
+check(#cooking.recipes == 1 and cooking.recipes[1].name == "Herb Baked Egg" and saved().recipeCapture.failed == 1,
+    "the throwing recipe is skipped and counted")
+""")
+
+case("a_read_that_throws_is_noted_and_the_next_one_works")(r"""
+local good = WINDOWS.cooking.base
+WINDOWS.cooking.base = setmetatable({}, { __index = function() error("boom") end })
+load()
+login()
+openWindow("cooking")
+settle()
+flush()
+local rc = saved().recipeCapture
+check(rc.status == "error" and rc.detail:find("boom", 1, true), "the throw is noted: " .. tostring(rc.status))
+check(saved().errors == nil and saved().professions.cooking.recipes == nil, "and costs nothing else")
+WINDOWS.cooking.base = good
+openWindow("cooking")
+settle()
+check(saved().professions.cooking.recipes and #saved().professions.cooking.recipes == 2, "the next read works")
+""")
+
+case("the_difficulty_words_need_no_enum_table")(r"""
+Enum = nil
+load()
+login()
+openWindow("leatherworking")
+settle()
+local r = saved().professions.primary2.recipes
+check(r[4].difficulty == "orange" and r[2].difficulty == "yellow" and r[1].difficulty == "green" and r[3].difficulty == "grey",
+    "the documented values 0 to 3")
+check(#r[3].reagents == 2, "the documented Basic value still leaves the finishing slot out")
+""")
+
+case("uncached_reagent_names_are_retried_a_bounded_number_of_times")(r"""
+load()
+login()
+openWindow("leatherworking")
+runTimers()
+check(#TIMERS == 2, "the write and one retry, got " .. #TIMERS)
+ITEMNAMES[4291] = "Silken Thread"
+settle()
+local belt = saved().professions.primary2.recipes[2]
+check(belt.reagents[2].name == "Silken Thread" and saved().professions.primary2.recipesIncomplete == nil, "the retry filled the name in")
+-- a name that never arrives: one read plus two retries, then it stops
+local before = TSCALLS
+ITEMNAMES[4291] = nil
+fire("TRADE_SKILL_DATA_SOURCE_CHANGED")
+settle()
+check(TSCALLS - before == 3, "read and two retries, got " .. (TSCALLS - before))
+check(saved().professions.primary2.recipesIncomplete == 1, "still flagged")
 """)
 
 

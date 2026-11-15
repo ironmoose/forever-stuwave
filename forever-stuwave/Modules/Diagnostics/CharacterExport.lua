@@ -2,8 +2,9 @@
 -- A silent snapshot of the logged-in character in ForeverSTUwaveExport (account-wide SavedVariables), keyed by
 -- the full name GetUnitName("player", true) ("Viktor Oldlight"; UnitName gives only the first name here). Written on
 -- login, level up, talent, gear, profession skill, action bar, key binding and macro changes, and at logout, so a page
--- or a sim reading the saved file gets the level, stats, talents, professions, gear, bars, binds and macros. The shape is documented in docs/EXPORT.md; keep the two in
--- step and bump SCHEMA when a field changes meaning.
+-- or a sim reading the saved file gets the level, stats, talents, professions, gear, bars, binds and macros. A
+-- profession's known recipes are added while its trade skill window is open (see "Profession recipes"). The shape is
+-- documented in docs/EXPORT.md; keep the two in step and bump SCHEMA when a field changes meaning.
 --
 -- Rules: every API is feature-detected and pcalled, and every answer goes through FS.IsSecret before anything else
 -- touches it; a secret, missing or odd value is left out (nil), never guessed. A section that could not be read says so
@@ -122,16 +123,41 @@ local function AddonVersion()
     return r and Str(r[1]) or nil
 end
 
+-- The character's full name ("Viktor Oldlight"), else the first name alone.
+local function PlayerName()
+    local r = Call(Api(nil, "GetUnitName"), "player", true)
+    local name = r and Str(r[1]) or nil
+    if not name then
+        r = Call(Api(nil, "UnitName"), "player")
+        name = r and Str(r[1]) or nil
+    end
+    return name
+end
+
+-- Server time as Unix seconds and as UTC text ("2026-11-04T00:00:00Z"); nil for either the client does not give.
+local function Stamp()
+    local now = CallNum(Api(nil, "GetServerTime")) or CallNum(Api(nil, "time"))
+    if not now then return nil, nil end
+    local r = Call(Api(nil, "date"), "!%Y-%m-%dT%H:%M:%SZ", now)
+    return now, r and Str(r[1]) or nil
+end
+
+-- An item's name from its id, nil while the client has not cached it.
+local function ItemName(id)
+    local r = Call(Api("C_Item", "GetItemNameByID"), id)
+    local name = r and Str(r[1])
+    if not name then
+        r = Call(Api("C_Item", "GetItemInfo") or Api(nil, "GetItemInfo"), id)
+        name = r and Str(r[1])
+    end
+    return name
+end
+
 -- Sections ------------------------------------------------------------------------------------
 
 local function ReadIdentity(snap)
-    local r = Call(Api(nil, "GetUnitName"), "player", true)
-    snap.name = r and Str(r[1]) or nil
-    if not snap.name then
-        r = Call(Api(nil, "UnitName"), "player")
-        snap.name = r and Str(r[1]) or nil
-    end
-    r = Call(Api(nil, "GetRealmName"))
+    snap.name = PlayerName()
+    local r = Call(Api(nil, "GetRealmName"))
     snap.realm = r and Str(r[1]) or nil
     r = Call(Api(nil, "UnitRace"), "player")
     if r then snap.race, snap.raceToken = Str(r[1]), Str(r[2]) end
@@ -394,6 +420,139 @@ local function NoProfessions(p)
         if type(p[slot]) == "table" then return false end
     end
     return true
+end
+
+-- Profession recipes --------------------------------------------------------------------------
+-- A profession's known recipes are readable only while its trade skill window is open. CaptureRecipes (below) reads
+-- them when the window opens or its list changes and keeps each list in recipeSession; every write puts this session's
+-- lists, else the ones in the last write, under their profession slot as `recipes` with their own `capturedAt`, so a
+-- write made with no window open carries the last read. Source: C_TradeSkillUI, which is all this client has (the old
+-- GetNumTradeSkills and GetCraft* globals are not in its API dump): GetAllRecipeIDs, GetRecipeInfo (learned,
+-- relativeDifficulty), GetCraftableCount and GetRecipeSchematic (reagent slots). The client calls a recipe id the
+-- recipe's spell id (the argument is named recipeSpellID). Read only: no filter, tab or profession is ever changed.
+
+local MAX_RECIPES, MAX_REAGENT_SLOTS, MAX_ALTERNATES = 1500, 16, 8
+local RECIPE_FIELDS = { "recipes", "capturedAt", "capturedAtText", "capturedSkill", "recipesIncomplete" }
+
+-- This session's reads, by slot name: { skillLine, name, recipes, capturedAt, capturedAtText, capturedSkill,
+-- recipesIncomplete }, and the outcome of the latest attempt (`recipeCapture` in the export). Kept for one character.
+local recipeSession = { character = nil, slots = {}, capture = nil }
+
+local function NoteCapture(status, fields)
+    local at, text = Stamp()
+    local note = { at = at, atText = text, status = status }
+    for k, v in pairs(fields or {}) do note[k] = v end
+    recipeSession.capture = note
+end
+
+-- TradeskillRelativeDifficulty (Optimal, Medium, Easy, Trivial; 0 to 3 in the client's documentation) as the colour the
+-- recipe list shows it in.
+local function DifficultyWord(value)
+    local v = Num(value)
+    if not v then return nil end
+    local enum = type(_G.Enum) == "table" and type(_G.Enum.TradeskillRelativeDifficulty) == "table"
+        and _G.Enum.TradeskillRelativeDifficulty or {}
+    if v == (Num(enum.Optimal) or 0) then return "orange" end
+    if v == (Num(enum.Medium) or 1) then return "yellow" end
+    if v == (Num(enum.Easy) or 2) then return "green" end
+    if v == (Num(enum.Trivial) or 3) then return "grey" end
+    return nil
+end
+
+-- The needed reagents of one recipe from its schematic: only the Basic slots (modifying and finishing slots are
+-- optional extras). A slot offering several items (quality tiers) lists the first as `itemId` and all as `itemIds`.
+-- ctx.incomplete counts reagents with no cached name, ctx.missing holds their ids.
+local function ReadReagents(schematic, ctx)
+    local slots = Tbl(schematic.reagentSlotSchematics)
+    if not slots then return nil end
+    local types = type(_G.Enum) == "table" and Tbl(_G.Enum.CraftingReagentType) or nil
+    local basic = types and Num(types.Basic) or 1
+    local out = {}
+    for i = 1, math.min(#slots, MAX_REAGENT_SLOTS) do
+        local slot = Tbl(slots[i])
+        local kind = slot and Num(slot.reagentType)
+        local need = slot and Num(slot.quantityRequired)
+        local options = slot and Tbl(slot.reagents)
+        if need and options and (kind == nil or kind == basic) then
+            local ids, currency = {}, nil
+            for j = 1, math.min(#options, MAX_ALTERNATES) do
+                local option = Tbl(options[j])
+                local id = option and Num(option.itemID)
+                if id then
+                    ids[#ids + 1] = id
+                else
+                    currency = currency or (option and Num(option.currencyID))
+                end
+            end
+            if #ids > 0 then
+                local entry = { name = ItemName(ids[1]), itemId = ids[1], count = need }
+                if #ids > 1 then entry.itemIds = ids end
+                local owned
+                for _, id in ipairs(ids) do owned = Sum(owned, CallNum(ctx.owned, id)) end
+                entry.owned = owned
+                if not entry.name then
+                    ctx.incomplete = ctx.incomplete + 1
+                    ctx.missing[ids[1]] = true
+                end
+                out[#out + 1] = entry
+            elseif currency then
+                out[#out + 1] = { currencyId = currency, count = need }
+            end
+        end
+    end
+    return #out > 0 and out or nil
+end
+
+-- One known recipe, or nil when it is not learned (or unreadable). Counted in ctx.failed when its schematic is missing.
+local function ReadRecipe(id, ctx)
+    local info = CallTable(ctx.info, id)
+    if not info then return nil end
+    local learned = info.learned
+    if Secret(learned) or learned ~= true then return nil end
+    local rec = { name = Str(info.name), recipeId = Num(info.recipeID) or id,
+        skillLineAbilityId = Num(info.skillLineAbilityID), difficultyId = Num(info.relativeDifficulty),
+        difficulty = DifficultyWord(info.relativeDifficulty), numCraftable = CallNum(ctx.craftable, id) }
+    local schematic = CallTable(ctx.schematic, id, false)
+    if schematic then
+        rec.outputItemId = Num(schematic.outputItemID)
+        rec.reagents = ReadReagents(schematic, ctx)
+    else
+        ctx.failed = ctx.failed + 1
+    end
+    return rec
+end
+
+-- True when two profession entries are the same profession: the skill line when both have one, else the name.
+local function SameProfession(a, b)
+    if a.skillLine and b.skillLine then return a.skillLine == b.skillLine end
+    return a.name ~= nil and a.name == b.name
+end
+
+-- Puts each slot's recipe list on the snapshot's profession entries: this session's read when it is the same profession,
+-- else the list the last write carried. A profession that changed in a slot starts empty. Not torn, only not open, so
+-- not named in `kept`; the list keeps its own capturedAt.
+local function MergeRecipes(snap, last)
+    local mine = recipeSession.character == snap.name
+    local p = snap.professions
+    if type(p) == "table" then
+        local before = type(last) == "table" and type(last.professions) == "table" and last.professions or nil
+        for _, slot in ipairs(PROFESSION_SLOTS) do
+            local entry = p[slot]
+            if type(entry) == "table" then
+                local src = mine and recipeSession.slots[slot]
+                if not (src and SameProfession(entry, src)) then
+                    src = before and before[slot]
+                    if not (type(src) == "table" and type(src.recipes) == "table" and SameProfession(entry, src)) then
+                        src = nil
+                    end
+                end
+                if src and src ~= entry then
+                    for _, key in ipairs(RECIPE_FIELDS) do entry[key] = src[key] end
+                end
+            end
+        end
+    end
+    snap.recipeCapture = mine and recipeSession.capture or (type(last) == "table" and last.recipeCapture) or nil
 end
 
 -- item:itemID:enchantID:gem1:gem2:gem3:gem4:suffixID:uniqueID:... ; empty fields read as nil.
@@ -713,12 +872,7 @@ local function ActionName(slot, kind, id)
         local r = Call(Api(nil, "GetMacroInfo"), id)
         name = r and Str(r[1])
     elseif kind == "item" and id then
-        local r = Call(Api("C_Item", "GetItemNameByID"), id)
-        name = r and Str(r[1])
-        if not name then
-            r = Call(Api(nil, "GetItemInfo"), id)
-            name = r and Str(r[1])
-        end
+        name = ItemName(id)
     end
     if not name then
         local r = Call(Api(nil, "GetActionText"), slot)
@@ -839,12 +993,7 @@ function Export.Snapshot()
     Guarded(ReadActionBars, snap, "actionBars")
     Guarded(ReadBindings, snap, "bindings")
     Guarded(ReadMacros, snap, "macros")
-    local now = CallNum(Api(nil, "GetServerTime")) or CallNum(Api(nil, "time"))
-    snap.savedAt = now
-    if now then
-        local r = Call(Api(nil, "date"), "!%Y-%m-%dT%H:%M:%SZ", now)
-        snap.savedAtText = r and Str(r[1]) or nil
-    end
+    snap.savedAt, snap.savedAtText = Stamp()
     return snap
 end
 
@@ -959,6 +1108,7 @@ function Export.Write(reason)
         snap.statsFrom = last.statsFrom or last.savedAt
     end
     if type(last) == "table" then KeepTorn(snap, last) end
+    MergeRecipes(snap, last)
     store.characters[snap.name] = snap
     return true
 end
@@ -982,6 +1132,155 @@ local function Schedule(reason, delay)
     end
 end
 Export.Schedule = Schedule
+
+-- Recipe reads --------------------------------------------------------------------------------
+
+-- Seconds after the window opens or its data source changes, after a list update or a bag change while it is open, and
+-- before a retry for item names the client had not cached (at most MAX_RETRIES per window).
+local RECIPE_DELAY, RECIPE_REFRESH, RECIPE_RETRY, MAX_RETRIES = 0.5, 3, 3, 2
+local recipeOpen, recipeWanted, recipeScheduled, recipeRetries = false, false, false, 0
+local recipeAsked = {}   -- item ids already requested since the window opened
+local RecipeSchedule
+
+-- true or false from a plain boolean answer; nil when the call is missing, throws, or answers a secret or odd value.
+local function CallFlag(fn, ...)
+    local r = Call(fn, ...)
+    local v = r and r[1]
+    if Secret(v) or type(v) ~= "boolean" then return nil end
+    return v
+end
+
+-- Why the open trade skill window must not be recorded, or nil when it is this character's own. A linked or guild list
+-- is another player's and an NPC's is not the character's. An answer the client will not give in plain form, or no way
+-- to ask whether it is linked, means it cannot be told apart from someone else's, so it is not recorded either.
+local function WindowBlocker()
+    local linked = Api("C_TradeSkillUI", "IsTradeSkillLinked")
+    if not linked then return "unverified" end
+    local checks = { { linked, "linked" }, { Api("C_TradeSkillUI", "IsTradeSkillGuild"), "guild" },
+        { Api("C_TradeSkillUI", "IsTradeSkillGuildMember"), "guild" }, { Api("C_TradeSkillUI", "IsNPCCrafting"), "npc" } }
+    for _, c in ipairs(checks) do
+        if c[1] then
+            local answer = CallFlag(c[1])
+            if answer == nil then return "unverified" end
+            if answer then return c[2] end
+        end
+    end
+    return nil
+end
+
+-- The slot among this character's own professions that the open window belongs to: by skill line (the base line, the
+-- expansion line or its parent), else by profession name. Nil with the slot's entry when none matches.
+local function OpenSlot(base, child)
+    local lines, names = {}, {}
+    local function line(v) v = Num(v); if v and v > 0 then lines[v] = true end end
+    local function named(v) v = Str(v); if v then names[v] = true end end
+    if base then line(base.professionID); named(base.professionName) end
+    if child then
+        line(child.professionID); line(child.parentProfessionID)
+        named(child.parentProfessionName); named(child.professionName)
+    end
+    local own = {}
+    ReadProfessions(own)
+    local p = own.professions
+    for _, slot in ipairs(PROFESSION_SLOTS) do
+        local e = p[slot]
+        if type(e) == "table" and e.skillLine and lines[e.skillLine] then return slot, e end
+    end
+    for _, slot in ipairs(PROFESSION_SLOTS) do
+        local e = p[slot]
+        if type(e) == "table" and e.name and names[e.name] then return slot, e end
+    end
+end
+
+-- The read itself, for a window that is open and out of combat.
+local function ReadWindow()
+    local readyFn, changingFn = Api("C_TradeSkillUI", "IsTradeSkillReady"), Api("C_TradeSkillUI", "IsDataSourceChanging")
+    -- Not settled yet: the list update or data source event that follows reads it.
+    if readyFn and CallFlag(readyFn) ~= true then return end
+    if changingFn and CallFlag(changingFn) ~= false then return end
+    local listFn, infoFn = Api("C_TradeSkillUI", "GetAllRecipeIDs"), Api("C_TradeSkillUI", "GetRecipeInfo")
+    if not (listFn and infoFn) then return NoteCapture("unavailable") end
+    local blocker = WindowBlocker()
+    if blocker then return NoteCapture(blocker) end
+
+    local base = CallTable(Api("C_TradeSkillUI", "GetBaseProfessionInfo"))
+    local child = CallTable(Api("C_TradeSkillUI", "GetChildProfessionInfo"))
+    local slot, entry = OpenSlot(base, child)
+    if not slot then
+        return NoteCapture("unmatched", { name = base and Str(base.professionName), skillLine = base and Num(base.professionID) })
+    end
+    local who = { slot = slot, name = entry.name, skillLine = entry.skillLine }
+    local ids = CallTable(listFn)
+    if not ids then return NoteCapture("unavailable", who) end
+
+    local ctx = { info = infoFn, craftable = Api("C_TradeSkillUI", "GetCraftableCount"),
+        schematic = Api("C_TradeSkillUI", "GetRecipeSchematic"),
+        owned = Api("C_Item", "GetItemCount") or Api(nil, "GetItemCount"), missing = {}, incomplete = 0, failed = 0 }
+    local recipes = {}
+    for i = 1, math.min(#ids, MAX_RECIPES) do
+        local id = Num(ids[i])
+        if id then
+            local ok, rec = pcall(ReadRecipe, id, ctx)
+            if not ok then ctx.failed = ctx.failed + 1 elseif rec then recipes[#recipes + 1] = rec end
+        end
+    end
+    who.count = #recipes
+    who.failed = ctx.failed > 0 and ctx.failed or nil
+    -- No known recipe is a list the client has not filled yet: the last real list stays.
+    if #recipes == 0 then return NoteCapture("empty", who) end
+
+    table.sort(recipes, function(a, b)
+        local an, bn = a.name or "", b.name or ""
+        if an ~= bn then return an < bn end
+        return (a.recipeId or 0) < (b.recipeId or 0)
+    end)
+    local at, text = Stamp()
+    recipeSession.slots[slot] = { skillLine = entry.skillLine, name = entry.name, recipes = recipes, capturedAt = at,
+        capturedAtText = text, capturedSkill = entry.skill, recipesIncomplete = ctx.incomplete > 0 and ctx.incomplete or nil }
+    NoteCapture("ok", who)
+    -- Item names the client had not cached: ask for them and read again a little later.
+    local request = Api("C_Item", "RequestLoadItemDataByID")
+    for id in pairs(ctx.missing) do
+        if not recipeAsked[id] then
+            recipeAsked[id] = true
+            Call(request, id)
+        end
+    end
+    Schedule("recipes")
+    if ctx.incomplete > 0 and recipeRetries < MAX_RETRIES then
+        recipeRetries = recipeRetries + 1
+        RecipeSchedule(RECIPE_RETRY)
+    end
+end
+
+-- Reads the open window's recipes into recipeSession. Nothing in combat (the read waits for PLAYER_REGEN_ENABLED, and
+-- a window closed meanwhile is not read), nothing with the export off, and a throw only costs this read.
+local function CaptureRecipes()
+    if not (loaded and Enabled() and recipeOpen) then return end
+    if InCombat() then
+        recipeWanted = true
+        return
+    end
+    recipeWanted = false
+    local who = PlayerName()
+    if not who then return end
+    if recipeSession.character ~= who then recipeSession = { character = who, slots = {} } end
+    local ok, err = pcall(ReadWindow)
+    if not ok then NoteCapture("error", { detail = tostring(err):sub(1, 200) }) end
+end
+
+-- One read per burst of events: the window fires several as it opens, and a list update on every search keystroke.
+RecipeSchedule = function(delay)
+    if recipeScheduled then return end
+    local after = Api("C_Timer", "After")
+    if not after then return end
+    recipeScheduled = true
+    local ok = pcall(after, delay, function()
+        recipeScheduled = false
+        CaptureRecipes()
+    end)
+    if not ok then recipeScheduled = false end
+end
 
 -- Reload button ------------------------------------------------------------------------------
 
@@ -1064,7 +1363,9 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("PLAYER_REGEN_DISABLED")
-local events = { "BANKFRAME_CLOSED" }
+-- The trade skill window events are handled apart from REASONS: they read the window rather than the whole character.
+local events = { "BANKFRAME_CLOSED", "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_DATA_SOURCE_CHANGED",
+    "TRADE_SKILL_CLOSE" }
 for event in pairs(REASONS) do events[#events + 1] = event end
 table.sort(events)
 if FS.FrameHelpers and FS.FrameHelpers.RegisterEvents then
@@ -1080,6 +1381,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         pcall(Export.Write, "logout")
     elseif event == "PLAYER_REGEN_ENABLED" then
         if pending then Schedule("combat end") end
+        if recipeWanted and recipeOpen then RecipeSchedule(RECIPE_DELAY) end
         UpdateReloadButton()
     elseif event == "PLAYER_REGEN_DISABLED" then
         UpdateReloadButton(true)
@@ -1088,10 +1390,20 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         if pending then Export.Write("bank") end
         bankOpen = false
     elseif event == "PLAYER_ENTERING_WORLD" then
+        recipeOpen = false
         Schedule("login", LOGIN_DELAY)
+    elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_DATA_SOURCE_CHANGED" then
+        recipeOpen, recipeRetries, recipeAsked = true, 0, {}
+        RecipeSchedule(RECIPE_DELAY)
+    elseif event == "TRADE_SKILL_LIST_UPDATE" then
+        recipeOpen = true
+        RecipeSchedule(RECIPE_REFRESH)
+    elseif event == "TRADE_SKILL_CLOSE" then
+        recipeOpen, recipeWanted = false, false
     else
         if event == "BANKFRAME_OPENED" then bankOpen = true end
         Schedule(REASONS[event])
+        if event == "BAG_UPDATE_DELAYED" and recipeOpen then RecipeSchedule(RECIPE_REFRESH) end
         if event == "PLAYER_LEVEL_UP" then
             reloadWanted = true
             UpdateReloadButton()
