@@ -1045,6 +1045,11 @@ local function KeepTorn(snap, last)
         snap.money, snap.xp, snap.xpMax, snap.restedXp = last.money, last.xp, last.xpMax, last.restedXp
         keep("money"); keep("xp")
     end
+    -- A level never goes down: a read below the last write's (live 2026-11-15, a logout write read 16 for a level 17
+    -- character with the level 17 xp bar) is a stale read, and the last level stands.
+    if type(snap.level) == "number" and type(last.level) == "number" and snap.level < last.level then
+        snap.level = last.level; keep("level")
+    end
     if GearEmpty(snap.gear) and not GearEmpty(last.gear) then snap.gear = last.gear; keep("gear") end
     if type(snap.zone) ~= "table" or not snap.zone.name then
         if type(last.zone) == "table" and last.zone.name then snap.zone = last.zone; keep("zone") end

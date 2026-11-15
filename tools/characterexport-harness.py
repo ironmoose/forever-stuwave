@@ -491,6 +491,23 @@ fire("PLAYER_LOGOUT")
 check(saved().level == 25 and saved().reason == "logout", "logout out of combat writes at once")
 """)
 
+case("a_level_read_below_the_last_write_keeps_the_last_level")(r"""
+-- live 2026-11-15: a logout write read level 16 for a level 17 character, the xp bar still level 17's
+load()
+login()
+check(saved().level == 24, "login level")
+LEVEL = 23
+fire("PLAYER_LOGOUT")
+local c = saved()
+check(c.level == 24, "the level does not go down")
+local named = false
+for _, k in ipairs(c.kept or {}) do if k == "level" then named = true end end
+check(named, "kept names the level")
+LEVEL = 25
+fire("PLAYER_LOGOUT")
+check(saved().level == 25, "a higher level is written")
+""")
+
 case("a_logout_that_reads_every_stat_as_zero_keeps_the_last_stats")(r"""
 -- live 2026-11-04: a snapshot written at logout had all five stats at 0 (the client tears the unit down first)
 load()
