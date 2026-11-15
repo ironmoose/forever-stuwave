@@ -422,7 +422,13 @@ local function Build(widget)
     for r = 1, FOLDER.CUT do f.diag[r] = R(C.border, "BORDER", 1) end
     f.rule = R(C.pink, "BORDER", 2)
     p.fold = f
-    if IsTable(widget.Icon) and type(widget.Icon.SetTexCoord) == "function" then
+    -- a key is an icon tab with no words: a strip tab that merely carries an Icon region (the talent frame's Primary and
+    -- Secondary, live 2026-11-15) was drawn as a 44 px square behind the start of its label
+    local label = widget.Text
+    local words = IsTable(label) and Kit.Plain(Kit.Try(label.GetText, label))
+    local icon = widget.Icon
+    if IsTable(icon) and type(icon.SetTexCoord) == "function"
+        and not (type(words) == "string" and words ~= "") then
         p.key = Kit.Plate(widget, KEY.CUT, KEY.SIZE, KEY.SIZE)
         for _, t in ipairs({ p.fillL, p.fillM, p.fillR, p.extra, p.edgeL, p.edgeR, p.edgeTop, p.edgeBottom, p.diagL, p.diagR,
             p.chev }) do t:Hide(); t:SetAlpha(0) end
