@@ -13,6 +13,12 @@
 -- missing frame is skipped silently. The pooled rows (trainer services, recipes, roster names) are met through their ScrollBox
 -- and skinned once, guarded by a weak table; the channel buttons through the channel list's own Update.
 --
+-- The profession window (ProfessionsFrame.CraftingPage) also swaps its stock art for art of ours, all of it alpha held: the category
+-- bands hold every stock piece and fold with a chevron of cells, the skill up arrows are a chip of one to three chevrons in the
+-- difficulty colour (orange, yellow, green), the rank bar draws its own cyan fill from the stock mask's width, the detail pane's
+-- stock frame is held and ringed, and Create and Create All wear the text button. All of it follows the stock state by post-hooks
+-- (SetAtlas, SetVertexColor, SetWidth), never by calling a stock Update, Init or Refresh.
+--
 -- Left out on purpose, because the mockup shows a computed display and the rule for this pass is "keep the functionality the same
 -- as vanilla": the trainer's level rail, the "short" chips, the "after" line and the train all key; the profession reagent cell
 -- strips, the quantity line, the skill zone strip and the round output and reagent slot art (masked stock art); the channel tuner
@@ -35,7 +41,7 @@ local C = Q.colors
 local function Weak() return setmetatable({}, { __mode = "k" }) end
 local S = {
     trainer = Weak(), tradeRows = Weak(), tradeHighlights = Weak(), insets = Weak(), recipes = Weak(), channels = Weak(),
-    taxi = Weak(), pins = Weak(), routes = Weak(), done = {},
+    taxi = Weak(), pins = Weak(), routes = Weak(), skillUps = Weak(), panes = Weak(), bars = Weak(), labels = Weak(), done = {},
 }
 Sv.state = S
 
@@ -299,43 +305,255 @@ end
 -- The profession window (ProfessionsFrame.CraftingPage)
 -------------------------------------------------------------------------------
 
--- The skill bar's stock frame, background and flare held (the masked fill stays: it is the value), a track box of ours round the
--- rect the fill can reach, the rank text in mono.
+-- The craft mockup's difficulty ramp (DIF): orange a skill up for certain, yellow likely, green unlikely. The stock arrow says it by
+-- its atlas (Professions-Icon-Skill-High, -Medium, -Low: three, two and one chevron), so the chip says it the same way.
+local TIERS = {
+    High = { n = 3, color = { 1, 0.541, 0.239 } },
+    Medium = { n = 2, color = { 1, 0.824, 0.247 } },
+    Low = { n = 1, color = { 0.239, 0.863, 0.518 } },
+}
+local TIER_OTHER = { n = 1, color = C.cyan }   -- an arrow this build names differently is still marked, with one chevron
+
+local function AtlasOf(region)
+    if type(region) ~= "table" then return nil end
+    local atlas = Plain(Try(region.GetAtlas, region))
+    return type(atlas) == "string" and atlas or nil
+end
+
+local function TierOf(atlas)
+    return type(atlas) == "string" and TIERS[atlas:match("Skill%-(%a+)$")] or TIER_OTHER
+end
+
+-- A chevron of 2 px cells, five of them (one per column of an up or down chevron, one per row of a right one), as the page keys of
+-- Quest.lua draw theirs. The numbers are the cells' (left, top) in physical pixels inside the chevron's own w x h box.
+local CELL = 2
+local CHEV = {
+    up = { w = 10, h = 6, { 0, 4 }, { 2, 2 }, { 4, 0 }, { 6, 2 }, { 8, 4 } },
+    down = { w = 10, h = 6, { 0, 0 }, { 2, 2 }, { 4, 4 }, { 6, 2 }, { 8, 0 } },
+    right = { w = 6, h = 10, { 0, 0 }, { 2, 2 }, { 4, 4 }, { 2, 6 }, { 0, 8 } },
+}
+
+local function NewChevron(host)
+    local cells = {}
+    for i = 1, 5 do cells[i] = Kit.Rect(host, 0, 0, CELL, CELL, C.cyan, 1, "OVERLAY", 7) end
+    return cells
+end
+
+-- Seats a chevron with its centre cx px right and cy px down of `point` of `ref`. `host` rules the pixel scale.
+local function SeatChevron(cells, dir, ref, point, cx, cy, host)
+    local shape = CHEV[dir]
+    for i, cell in ipairs(cells) do
+        local at = shape[i]
+        Kit.Place(cell, ref, cx + at[1] + CELL / 2 - shape.w / 2, cy + at[2] + CELL / 2 - shape.h / 2, CELL, CELL, "CENTER", point, host)
+    end
+end
+
+local function PaintCells(cells, color, on)
+    for _, cell in ipairs(cells) do
+        cell:SetColorTexture(color[1], color[2], color[3], 1)
+        cell:SetShown(on)
+    end
+end
+
+-- The skill up mark: the stock arrow (a texture, re-atlased by every row init) held, a chip of ours in its place on the right edge of
+-- the mark frame, so the stock count (a number left of the arrow) keeps its place. It shows and hides with that frame, and takes
+-- its tier from the atlas the stock code last gave the arrow.
+local CHIP_W, CHIP_PAD, CHIP_PITCH = 16, 2, 4
+
+local function BuildChip(ups)
+    local chip = { cells = {} }
+    chip.ref = ups:CreateTexture(nil, "BACKGROUND", nil, -8)
+    Kit.Place(chip.ref, ups, -1, 0, CHIP_W, 10, "RIGHT", "RIGHT")
+    chip.box = Char.Box(ups, "OVERLAY", chip.ref)
+    for i = 1, 3 do chip.cells[i] = NewChevron(ups) end
+    return chip
+end
+
+local function PaintChip(ups, chip, atlas)
+    local tier = TierOf(atlas)
+    local color = tier.color
+    Kit.Move(chip.ref, -1, 0, CHIP_W, CHEV.up.h + CHIP_PITCH * (tier.n - 1) + 2 * CHIP_PAD)
+    Char.PaintBox(chip.box, Kit.Mix(C.ink, color, 0.16), 1, color, 1, 1)
+    for i = 1, 3 do
+        PaintCells(chip.cells[i], color, i <= tier.n)
+        if i <= tier.n then SeatChevron(chip.cells[i], "up", chip.ref, "CENTER", 0, CHIP_PITCH * (i - 1) - CHIP_PITCH / 2 * (tier.n - 1), ups) end
+    end
+end
+
+local function SkinSkillUps(row)
+    local ups = Region(row, "SkillUps")
+    if not ups or S.skillUps[ups] or type(ups.CreateTexture) ~= "function" then return end
+    local icon = Region(ups, "Icon")
+    HeldArt.Hold(icon)
+    local chip = BuildChip(ups)
+    S.skillUps[ups] = chip
+    PaintChip(ups, chip, AtlasOf(icon))
+    Kit.HookFunc(icon, "SetAtlas", function(_, atlas) PaintChip(ups, chip, atlas) end)
+    Mono(ups.Text, ups, 14, { 1, 1, 1, 1 })
+end
+
+-- The fold mark of a category band: a down chevron (cyan) while it is open, a right one (violet) while it is folded, both lit on
+-- hover. The stock icon (a plus or a minus, re-atlased on every click) is held; its atlas says which state the band is in.
+local GLYPH_CX, GLYPH_CY = -17, -2
+
+local function BuildGlyph(row)
+    local glyph = { down = NewChevron(row), right = NewChevron(row) }
+    SeatChevron(glyph.down, "down", row, "RIGHT", GLYPH_CX, GLYPH_CY, row)
+    SeatChevron(glyph.right, "right", row, "RIGHT", GLYPH_CX, GLYPH_CY, row)
+    return glyph
+end
+
+local function PaintGlyph(rec)
+    local glyph = rec.glyph
+    if not glyph then return end
+    local folded = type(rec.atlas) == "string" and rec.atlas:find("expand", 1, true) ~= nil
+    local color = (rec.state and rec.state.hover and C.text) or (folded and C.violet or C.cyan)
+    PaintCells(glyph.down, color, not folded)
+    PaintCells(glyph.right, color, folded)
+end
+
+-- A band's label. The stock code writes its colour with SetVertexColor on every init (gold, or grey for a category not learned), and
+-- its font object on every hover; the text colour is ours, the gold vertex goes to white and a grey one stays a muted tone.
+local MUTED_VERTEX = { 0.62, 0.58, 0.77, 1 }
+
+local function PinHeaderLabel(label)
+    if type(label) ~= "table" or type(label.SetVertexColor) ~= "function" or S.labels[label] then return end
+    S.labels[label] = true
+    local text = C.text
+    local function recolor(self) pcall(self.SetTextColor, self, text[1], text[2], text[3], 1) end
+    recolor(label)
+    local busy = false
+    local function retint(self, r, g, b)
+        r, g, b = Plain(r), Plain(g), Plain(b)
+        if busy or type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then return end
+        busy = true
+        local hi, lo = math.max(r, g, b), math.min(r, g, b)
+        local tint = (hi - lo < 0.1 and hi < 0.75) and MUTED_VERTEX or { 1, 1, 1, 1 }
+        pcall(self.SetVertexColor, self, tint[1], tint[2], tint[3], tint[4])
+        busy = false
+    end
+    Kit.HookFunc(label, "SetVertexColor", retint)
+    Kit.HookFunc(label, "SetFontObject", recolor)
+    local r, g, b = Try(label.GetVertexColor, label)
+    if type(Plain(r)) == "number" then retint(label, r, g, b) else pcall(label.SetVertexColor, label, 1, 1, 1, 1) end
+end
+
+-- The little progress bar a category band carries (only the expansion bands have one): its gold frame held, a violet ring of ours.
+local function SkinCategoryBar(bar)
+    if type(bar) ~= "table" or S.bars[bar] or type(bar.CreateTexture) ~= "function" then return end
+    for _, key in ipairs({ "BorderLeft", "BorderMid", "BorderRight" }) do HeldArt.Hold(bar[key]) end
+    S.bars[bar] = RingOver(bar, bar, C.ink, C.violet) or true
+    Mono(bar.Rank, bar, 10, C.text)
+end
+
+-- The skill bar: the stock frame, background, flare and fill held, a track box of ours round the rect the fill can reach, and a cyan
+-- fill of ours as wide as the stock mask is. The stock code sizes the masked fill by setting the width of its Mask (at once when a
+-- profession is picked, over half a second when a skill goes up), so a post-hook on the mask's SetWidth draws every step; the rank
+-- text is in mono.
+local RANK_TRACK_W = 443
+
+local function PaintRankFill(bar)
+    local rec = S.rankFill
+    if not rec or rec.bar ~= bar then return end
+    local maskW = Plain(Try(bar.Mask and bar.Mask.GetWidth, bar.Mask))
+    local fullW = Plain(Try(bar.Fill and bar.Fill.GetWidth, bar.Fill))
+    if type(maskW) ~= "number" or type(fullW) ~= "number" or fullW <= 0 then return end
+    local ratio = math.max(0, math.min(1, maskW / fullW))
+    local u = Kit.U(bar, 1)
+    local span = Plain(Try(rec.ref.GetWidth, rec.ref))
+    if type(span) ~= "number" or span <= 0 then span = RANK_TRACK_W end
+    local fill = rec.fill
+    fill:ClearAllPoints()
+    fill:SetPoint("TOPLEFT", rec.ref, "TOPLEFT", u, -u)
+    fill:SetPoint("BOTTOMLEFT", rec.ref, "BOTTOMLEFT", u, u)
+    local width = (span - 2 * u) * ratio
+    fill:SetWidth(math.max(width, 0.01))
+    fill:SetShown(width >= u)
+end
+
 local function SkinRankBar(page)
     local bar = page.RankBar
     if type(bar) ~= "table" or S.rankBar or type(bar.CreateTexture) ~= "function" then return end
-    for _, key in ipairs({ "Background", "Border", "Flare" }) do HeldArt.Hold(bar[key]) end
+    for _, key in ipairs({ "Background", "Border", "Flare", "Fill" }) do HeldArt.Hold(bar[key]) end
     local ref = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
     ref:SetPoint("TOPLEFT", bar, "TOPLEFT", 4, -2)
     ref:SetPoint("BOTTOMRIGHT", bar, "TOPLEFT", 447, -22)
     S.rankBar = RingOver(bar, ref, C.ink, C.violet)
+    local fill = bar:CreateTexture(nil, "ARTWORK", nil, 3)
+    fill:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 0.6)
+    Kit.Snap(fill)
+    S.rankFill = { bar = bar, ref = ref, fill = fill }
+    Kit.HookFunc(bar.Mask, "SetWidth", function() PaintRankFill(bar) end)
+    Kit.HookScript(bar, "OnShow", function() PaintRankFill(bar) end)
+    PaintRankFill(bar)
     local rank = Region(bar, "Rank")
     Mono(rank and rank.Text, bar, 12, C.text)
+end
+
+-- The two panes under the skill bar. The stock frame of each (a nine slice the stock code shows again on every recipe) is held at
+-- alpha, which survives a Show; the detail pane takes a ring of ours in its place.
+local function SkinCraftPanes(page)
+    local list, form = page.RecipeList, page.SchematicForm
+    if type(list) == "table" then
+        Kit.HoldFrame(list.BackgroundNineSlice)
+        HeldArt.Hold(list.Background)
+    end
+    if type(form) ~= "table" or S.panes[form] or type(form.CreateTexture) ~= "function" then return end
+    Kit.HoldFrame(form.NineSlice)
+    HeldArt.Hold(form.Background)
+    HeldArt.Hold(form.MinimalBackground)
+    local ring = Char.Box(form, "OVERLAY", form)
+    Char.PaintBox(ring, C.ink, 0.45, C.violet, 1, 1)
+    S.panes[form] = ring
+end
+
+-- Create and Create All (and View Crafters for a guild craft list) are red three slice keys whose label is empty until a recipe is
+-- picked, which is why the sweep that finds text buttons by their label misses them. Create is the cyan key, the others violet.
+local CRAFT_KEYS = { { "CreateButton", "cyan" }, { "CreateAllButton", "violet" }, { "ViewGuildCraftersButton", "violet" } }
+
+local function SkinCraftKeys(page)
+    local skins = FS.ButtonSkins
+    if not (skins and skins.SkinTextButton) then return end
+    for _, spec in ipairs(CRAFT_KEYS) do
+        local button = page[spec[1]]
+        if type(button) == "table" then skins.SkinTextButton(button, { accent = spec[2] }) end
+    end
 end
 
 local function PaintRecipe(row)
     local rec = S.recipes[row]
     if not rec then return end
-    if rec.header then PaintHeader(rec) else PaintRow(rec, row, Shown(row.SelectedOverlay)) end
+    if rec.header then
+        PaintHeader(rec)
+        PaintGlyph(rec)
+    else
+        PaintRow(rec, row, Shown(row.SelectedOverlay))
+    end
 end
 
--- A category row is a band, a recipe row a card with the stock selection as its pick. The label font is Panels' (it re-asserts it on
--- every font swap), the plus and minus, the skill up marks and the count are stock.
+-- A category row is a band, a recipe row a card with the stock selection as its pick. Every stock texture of either is held (read
+-- before our own are made, so ours stay): the three slices and the plus or minus of a band, the selected and hover glow of a recipe.
+-- The label font is Panels' (it re-asserts it on every font swap), the count is stock.
 local function SkinRecipeRow(row)
     if type(row) ~= "table" or S.recipes[row] or type(row.CreateTexture) ~= "function" then return end
     if row.CollapseIcon then
-        for _, key in ipairs({ "LeftPiece", "RightPiece", "CenterPiece" }) do HeldArt.Hold(row[key]) end
+        HoldTextures(row)
         local rec = NewRow(row, -1, false)
         rec.header = true
+        rec.atlas = AtlasOf(row.CollapseIcon)
+        rec.glyph = BuildGlyph(row)
         S.recipes[row] = rec
         rec.state = Kit.Track(row, PaintRecipe)
+        Kit.HookFunc(row.CollapseIcon, "SetAtlas", function(_, atlas) rec.atlas = Plain(atlas); PaintRecipe(row) end)
+        PinHeaderLabel(row.Label)
+        Step("prof.bar", SkinCategoryBar, row.RankBar)
         PaintRecipe(row)
     elseif row.Count then
-        HeldArt.Hold(row.SelectedOverlay)
-        HeldArt.Hold(row.HighlightOverlay)
+        HoldTextures(row)
         S.recipes[row] = NewRow(row, -1, false)
         S.recipes[row].state = Kit.Track(row, PaintRecipe)
         if type(row.SelectedOverlay) == "table" then Watch(row.SelectedOverlay, function() PaintRecipe(row) end) end
+        Step("prof.ups", SkinSkillUps, row)
         PaintRecipe(row)
     end
 end
@@ -345,6 +563,8 @@ local function RefreshProfessions()
     local page = type(win) == "table" and win.CraftingPage or nil
     if type(page) ~= "table" then return end
     Step("prof.rank", SkinRankBar, page)
+    Step("prof.panes", SkinCraftPanes, page)
+    Step("prof.keys", SkinCraftKeys, page)
     local list = page.RecipeList
     Q.WatchRows(type(list) == "table" and list.ScrollBox or nil, SkinRecipeRow)
 end

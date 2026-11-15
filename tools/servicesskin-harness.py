@@ -167,32 +167,63 @@ function BuildBlizzard()
     rbg.NineSlice = blz("Frame", nil, rbg, 10, 10)
     local rm = money(trade, "TradeRecipientMoneyFrame", 300, -64)
     rm.points[1] = { point = "TOPLEFT", rel = trade, relPoint = "TOPLEFT", x = 300, y = -64 }
-    -- the professions window: the rank bar and the recipe list
+    -- the professions window: the rank bar, the recipe list (category bands and recipe rows with their skill up marks), the
+    -- detail pane and the Create keys, shaped as in Blizzard_Professions and Blizzard_ProfessionsTemplates 12.1.0. Stock art is
+    -- marked with a colour so a piece nobody held shows up in a render.
     local prof = blz("Frame", "ProfessionsFrame", UIParent, 780, 480)
     prof.points[1] = { point = "TOPLEFT", rel = UIParent, relPoint = "TOPLEFT", x = 60, y = -520 }
     prof.shown = false
     local page = blz("Frame", nil, prof, 780, 450, "TOPLEFT", 0, -30)
     prof.CraftingPage = page
+    local function stock(t, r, g, b) t.stock = { r, g, b }; return t end
     local rb = blz("Frame", nil, page, 453, 18, "TOPLEFT", 60, -10)
     page.RankBar = rb
-    rb.Background = tex(rb, nil, "ARTWORK"); rb.Border = tex(rb, nil, "ARTWORK"); rb.Flare = tex(rb, nil, "ARTWORK")
-    rb.Fill = tex(rb, nil, "ARTWORK"); rb.Fill.w, rb.Fill.h = 300, 18
+    rb.Background = stock(tex(rb, nil, "ARTWORK"), 0.3, 0.2, 0.1); rb.Border = stock(tex(rb, nil, "ARTWORK"), 0.8, 0.6, 0.2)
+    rb.Flare = stock(tex(rb, nil, "ARTWORK"), 1, 0.9, 0.5)
+    rb.Fill = stock(tex(rb, nil, "ARTWORK"), 1, 0.35, 0.1); rb.Fill.w, rb.Fill.h = 441, 18
+    rb.Fill.points[1] = { point = "TOPLEFT", rel = rb, relPoint = "TOPLEFT", x = 5, y = -3 }
+    rb.Mask = tex(rb, nil, "ARTWORK"); rb.Mask.w, rb.Mask.h = 441 * 0.58, 18
     rb.Rank = blz("Frame", nil, rb, 300, 18, "CENTER", 0, 0)
-    rb.Rank.Text = fstring(rb.Rank, nil, "187 / 225", 12, { 1, 1, 1, 1 })
+    rb.Rank.Text = fstring(rb.Rank, nil, "Blacksmithing 88/150", 12, { 1, 1, 1, 1 })
     local list = blz("Frame", nil, page, 288, 360, "TOPLEFT", 20, -60)
     page.RecipeList = list
+    list.Background = stock(tex(list, nil, "BACKGROUND"), 0.3, 0.25, 0.2)
+    list.BackgroundNineSlice = blz("Frame", nil, list, 288, 360, "TOPLEFT", 0, 0)
+    for _ = 1, 4 do stock(tex(list.BackgroundNineSlice, nil, "BORDER"), 0.7, 0.55, 0.25) end
     list.ScrollBox = scrollBox(list, 288, 360, 0, 0)
-    local function category(label, y)
+    local function category(label, y, collapsed, withBar)
         local c = blz("Button", nil, list.ScrollBox, 270, 25, "TOPLEFT", 0, -y)
         c.Label = fstring(c, nil, label, 12)
         c.Label.points[1] = { point = "LEFT", rel = c, relPoint = "LEFT", x = 10, y = 2 }
-        c.LeftPiece, c.RightPiece, c.CenterPiece = tex(c, nil, "BACKGROUND"), tex(c, nil, "BACKGROUND"), tex(c, nil, "BACKGROUND")
-        c.CollapseIcon = tex(c, nil, "ARTWORK")
+        c.LeftPiece, c.RightPiece, c.CenterPiece = stock(tex(c, nil, "BACKGROUND"), 0.55, 0.4, 0.15), stock(tex(c, nil, "BACKGROUND"), 0.55, 0.4, 0.15),
+            stock(tex(c, nil, "BACKGROUND"), 0.45, 0.3, 0.1)
+        c.CollapseIcon = stock(atex(c, nil, "ARTWORK", collapsed and "Professions-recipe-header-expand" or "Professions-recipe-header-collapse", 12, 12), 1, 0.8, 0.1)
+        c.CollapseIcon.points[1] = { point = "RIGHT", rel = c, relPoint = "RIGHT", x = -10, y = 2 }
+        c.CollapseIconAlphaAdd = atex(c, nil, "HIGHLIGHT", "Professions-recipe-header-collapse", 12, 12)
+        c.Label:SetVertexColor(1, 0.82, 0, 1)
+        if withBar then
+            local bar = blz("StatusBar", nil, c, 58, 14, "RIGHT", -28, 0)
+            bar.BorderLeft, bar.BorderMid, bar.BorderRight = stock(tex(bar, nil, "OVERLAY"), 0.8, 0.6, 0.2), stock(tex(bar, nil, "OVERLAY"), 0.8, 0.6, 0.2),
+                stock(tex(bar, nil, "OVERLAY"), 0.8, 0.6, 0.2)
+            bar.Rank = fstring(bar, nil, "", 10)
+            c.RankBar = bar
+        end
         c.scripts.OnClick = function() end
         return c
     end
-    local function recipe(label, y, selected)
+    local function skillUps(row, atlas, count)
+        local u = blz("Button", nil, row, 26, 15, "LEFT", -9, 0)
+        u.Icon = stock(atex(u, nil, "OVERLAY", atlas, 15, 12), 0.3, 0.9, 0.3)
+        u.Icon.points[1] = { point = "RIGHT", rel = u, relPoint = "RIGHT", x = 0, y = -1 }
+        u.Text = fstring(u, nil, count or "", 12, { 1, 1, 1, 1 })
+        u.Text.points[1] = { point = "RIGHT", rel = u.Icon, relPoint = "LEFT", x = 0, y = 1 }
+        u.Text:SetVertexColor(1, 0.5, 0.25, 1)
+        u.shown = atlas ~= nil
+        row.SkillUps = u
+    end
+    local function recipe(label, y, selected, atlas, count)
         local r = blz("Button", nil, list.ScrollBox, 270, 20, "TOPLEFT", 0, -y)
+        skillUps(r, atlas, count)
         r.Label = fstring(r, nil, label, 12)
         r.Label.w, r.Label.h = 150, 12
         r.Label.points[1] = { point = "LEFT", rel = r, relPoint = "LEFT", x = 26, y = 0 }
@@ -207,10 +238,28 @@ function BuildBlizzard()
         return r
     end
     local rows = list.ScrollBox.rows
-    rows[1] = category("elixirs", 0)
-    rows[2] = recipe("Elixir of Fortitude", 28, false)
-    rows[3] = recipe("Elixir of Wisdom", 52, false)
-    rows[4] = recipe("Elixir of Agility", 76, true)
+    rows[1] = category("elixirs", 0, false, false)
+    rows[2] = recipe("Elixir of Fortitude", 28, false, "Professions-Icon-Skill-Low")
+    rows[3] = recipe("Elixir of Wisdom", 52, false, "Professions-Icon-Skill-Medium")
+    rows[4] = recipe("Elixir of Agility", 76, true, "Professions-Icon-Skill-High", "2")
+    rows[5] = recipe("Elixir of Water Breathing", 100, false, nil)
+    rows[6] = category("potions", 124, true, true)
+    -- the detail pane and the keys under it
+    local form = blz("Frame", nil, page, 440, 360, "TOPLEFT", 320, -60)
+    page.SchematicForm = form
+    form.NineSlice = blz("Frame", nil, form, 440, 360, "TOPLEFT", 0, 0)
+    for _ = 1, 4 do stock(tex(form.NineSlice, nil, "BORDER"), 0.7, 0.55, 0.25) end
+    form.Background = stock(tex(form, nil, "BACKGROUND"), 0.3, 0.25, 0.2)
+    form.MinimalBackground = stock(tex(form, nil, "BACKGROUND"), 0.3, 0.25, 0.2)
+    -- the label is empty until a recipe is picked, so the sweep that finds text buttons by their label does not meet them
+    page.CreateButton = textButton(page, nil, "", 650, -420, 80)
+    page.CreateAllButton = textButton(page, nil, "", 540, -420, 80)
+    page.ViewGuildCraftersButton = textButton(page, nil, "View Crafters", 400, -420, 120)
+    page.ViewGuildCraftersButton.shown = false
+    for _, k in ipairs({ "CreateButton", "CreateAllButton", "ViewGuildCraftersButton" }) do
+        local b = page[k]
+        for _, part in ipairs({ "Left", "Middle", "Right" }) do stock(b[part], 0.8, 0.1, 0.1) end
+    end
     -- the chat channels: a list of pooled buttons under a Child frame, a roster ScrollBox, the add popup
     local ch = blz("Frame", "ChannelFrame", UIParent, 560, 420)
     ch.points[1] = { point = "TOPLEFT", rel = UIParent, relPoint = "TOPLEFT", x = 900, y = -520 }
@@ -415,25 +464,152 @@ case("trade: forbidden money boxes (as on the live client) are skipped without a
     assert(ok, 'threw on a forbidden box: ' .. tostring(err))
 """)
 
-case("professions: the rank bar loses its stock frame and takes a ring, recipe rows are cards that follow the stock selection, category rows a band", """
+case("professions: the rank bar's stock fill, frame and flare are held and our own fill follows the stock mask", """
     Fire('PLAYER_ENTERING_WORLD'); ProfessionsFrame:Show(); FlushTimers()
     local S = FS.ServicesSkin.state
-    local page = ProfessionsFrame.CraftingPage
-    local rb = page.RankBar
-    assert(rb.Background.alpha == 0 and rb.Border.alpha == 0 and rb.Flare.alpha == 0, 'stock bar art kept')
-    assert(rb.Fill.alpha ~= 0, 'the fill must stay')
+    local rb = ProfessionsFrame.CraftingPage.RankBar
+    assert(rb.Background.alpha == 0 and rb.Border.alpha == 0 and rb.Flare.alpha == 0 and rb.Fill.alpha == 0, 'stock bar art kept')
     assert(rb.Rank.Text.fontPath ~= 'stock.ttf', 'rank not mono')
-    assert(S.rankBar, 'no ring box')
-    local rows = page.RecipeList.ScrollBox.rows
-    for i = 1, 4 do assert(S.recipes[rows[i]], 'row ' .. i .. ' not carded') end
-    assert(rows[2].HighlightOverlay.alpha == 0 and rows[4].SelectedOverlay.alpha == 0, 'stock overlays kept')
-    assert(rows[1].LeftPiece.alpha == 0 and rows[1].CenterPiece.alpha == 0, 'stock header art kept')
+    assert(S.rankBar and S.rankFill, 'no track or fill')
+    local fill, inner = S.rankFill.fill, S.rankFill.ref:GetWidth() - 2 / PPU
+    assert(fill.color and fill.color[1] < 0.3 and fill.color[3] > 0.8, 'the fill is not cyan')
+    assert(math.abs(fill:GetWidth() - inner * 0.58) < 0.5, 'fill is ' .. fill:GetWidth() .. ' of ' .. inner)
+    rb.Mask:SetWidth(rb.Fill:GetWidth() * 0.25)
+    assert(math.abs(fill:GetWidth() - inner * 0.25) < 0.5, 'fill did not follow the mask')
+    rb.Mask:SetWidth(0)
+    assert(not fill:IsShown(), 'an empty bar draws a fill')
+    rb.Mask:SetWidth(rb.Fill:GetWidth() * 3)
+    assert(fill:IsShown() and math.abs(fill:GetWidth() - inner) < 0.5, 'a full bar is clamped to the track')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("professions: recipe rows are cards that follow the stock selection, every stock piece held, hover lights the edge", """
+    Fire('PLAYER_ENTERING_WORLD'); ProfessionsFrame:Show(); FlushTimers()
+    local S = FS.ServicesSkin.state
+    local rows = ProfessionsFrame.CraftingPage.RecipeList.ScrollBox.rows
+    for i = 2, 5 do
+        assert(S.recipes[rows[i]], 'row ' .. i .. ' not carded')
+        assert(rows[i].HighlightOverlay.alpha == 0 and rows[i].SelectedOverlay.alpha == 0, 'stock overlays kept on ' .. i)
+    end
     assert(rows[4].SelectedOverlay.shown, 'the stock selection state must survive')
     assert(S.recipes[rows[4]].box.edges[1].color[1] > 0.9, 'selected recipe not pink')
     assert(S.recipes[rows[2]].box.edges[1].color[1] < 0.4, 'idle recipe not dim')
     rows[2]:RunScript('OnEnter')
     assert(S.recipes[rows[2]].box.edges[1].color[2] > 0.8, 'hover not cyan')
     assert(rows[2].scripts.OnClick, 'click lost')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("professions: category rows hold every stock piece, draw their own fold chevron and keep the palette", """
+    Fire('PLAYER_ENTERING_WORLD'); ProfessionsFrame:Show(); FlushTimers()
+    local S = FS.ServicesSkin.state
+    local rows = ProfessionsFrame.CraftingPage.RecipeList.ScrollBox.rows
+    local open, shut = rows[1], rows[6]
+    for _, h in ipairs({ open, shut }) do
+        assert(S.recipes[h] and S.recipes[h].header, 'not a band')
+        for _, key in ipairs({ 'LeftPiece', 'RightPiece', 'CenterPiece', 'CollapseIcon', 'CollapseIconAlphaAdd' }) do
+            assert(h[key].alpha == 0, key .. ' kept')
+        end
+    end
+    local bar = shut.RankBar
+    assert(bar.BorderLeft.alpha == 0 and bar.BorderMid.alpha == 0 and bar.BorderRight.alpha == 0, 'the gold border of the mini bar kept')
+    assert(bar.Rank.fontPath ~= 'stock.ttf', 'mini bar rank not mono')
+    local function shown(cells) local n = 0; for _, c in ipairs(cells) do if c:IsShown() then n = n + 1 end end return n end
+    local g = S.recipes[open].glyph
+    assert(shown(g.down) == 5 and shown(g.right) == 0, 'an open category is not a down chevron')
+    assert(g.down[1].color[2] > 0.8 and g.down[1].color[1] < 0.3, 'open chevron not cyan')
+    local g2 = S.recipes[shut].glyph
+    assert(shown(g2.right) == 5 and shown(g2.down) == 0, 'a folded category is not a right chevron')
+    assert(g2.right[1].color[3] > 0.9 and g2.right[1].color[2] < 0.5, 'folded chevron not violet')
+    open.CollapseIcon:SetAtlas('Professions-recipe-header-expand')
+    assert(shown(g.right) == 5 and shown(g.down) == 0, 'the chevron did not follow the stock fold')
+    open:RunScript('OnEnter')
+    assert(g.right[1].color[1] > 0.8, 'hover does not light the chevron')
+    open:RunScript('OnLeave')
+    -- the stock code writes the label colour on every init: the gold is ours, a grey (unlearned) stays muted
+    open.Label:SetVertexColor(1, 0.82, 0, 1)
+    assert(open.Label.vertex[1] == 1 and open.Label.vertex[2] == 1 and open.Label.vertex[3] == 1, 'gold vertex not cleared')
+    open.Label:SetVertexColor(0.5, 0.5, 0.5, 1)
+    assert(open.Label.vertex[1] > 0.5 and open.Label.vertex[1] < 0.8, 'a grey label is not muted')
+    assert(open.Label.textColor[3] > 0.9, 'the label text is not ours')
+    assert(open.scripts.OnClick, 'click lost')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("professions: skill up marks hold the stock arrow and draw a chip with one to three chevrons in the tier colour", """
+    Fire('PLAYER_ENTERING_WORLD'); ProfessionsFrame:Show(); FlushTimers()
+    local S = FS.ServicesSkin.state
+    local rows = ProfessionsFrame.CraftingPage.RecipeList.ScrollBox.rows
+    local function shown(ups)
+        local chip, out = S.skillUps[ups], {}
+        for i = 1, 3 do
+            local n = 0
+            for _, c in ipairs(chip.cells[i]) do if c:IsShown() then n = n + 1 end end
+            out[i] = n
+        end
+        return out
+    end
+    local function hue(ups) return S.skillUps[ups].cells[1][1].color end
+    local low, med, high = rows[2].SkillUps, rows[3].SkillUps, rows[4].SkillUps
+    for _, u in ipairs({ low, med, high }) do
+        assert(S.skillUps[u], 'no chip')
+        assert(u.Icon.alpha == 0, 'stock arrow kept')
+    end
+    local a, b, c = shown(low), shown(med), shown(high)
+    assert(a[1] == 5 and a[2] == 0 and a[3] == 0, 'easy is not one chevron')
+    assert(b[1] == 5 and b[2] == 5 and b[3] == 0, 'medium is not two chevrons')
+    assert(c[1] == 5 and c[2] == 5 and c[3] == 5, 'optimal is not three chevrons')
+    local g, y, o = hue(low), hue(med), hue(high)
+    assert(g[2] > g[1] and g[2] > 0.8, 'easy not green')
+    assert(y[1] > 0.9 and y[2] > 0.75 and y[3] < 0.4, 'medium not yellow')
+    assert(o[1] > 0.9 and o[2] > 0.45 and o[2] < 0.65 and o[3] < 0.4, 'optimal not orange')
+    assert(S.skillUps[high].box.edges[1].color[1] > 0.9, 'the chip edge is not the tier colour')
+    assert(S.skillUps[high].box.fill.color[1] < 0.5, 'the chip face is not dark')
+    -- the chip sits inside the stock arrow's footprint, right edge on the right edge of the stock frame
+    local _, _, cr = S.skillUps[high].ref:Rect()
+    local _, _, ur = high:Rect()
+    assert(cr <= ur + 0.01, 'the chip pokes out of the mark frame')
+    assert(high.Text.fontPath ~= 'stock.ttf', 'the skill up count is not mono')
+    -- a row with no skill up has its mark frame hidden, so the chip is hidden with it
+    assert(not rows[5].SkillUps.shown and S.skillUps[rows[5].SkillUps], 'a recipe without skill ups shows a chip')
+    -- the stock code swaps the atlas when a recipe is re-initialised: the chip re-tiers
+    low.Icon:SetAtlas('Professions-Icon-Skill-High')
+    local d = shown(low)
+    assert(d[1] == 5 and d[2] == 5 and d[3] == 5, 'the chip did not follow the atlas')
+    assert(hue(low)[1] > 0.9, 'the chip did not take the new tier colour')
+    low.Icon:SetAtlas('Professions-Icon-Skill-Low')
+    assert(shown(low)[2] == 0, 'the chip did not go back')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("professions: the stock nine slices are held and the detail pane takes a ring of ours", """
+    Fire('PLAYER_ENTERING_WORLD'); ProfessionsFrame:Show(); FlushTimers()
+    local S = FS.ServicesSkin.state
+    local page = ProfessionsFrame.CraftingPage
+    assert(page.RecipeList.BackgroundNineSlice.alpha == 0 and page.RecipeList.Background.alpha == 0, 'the list art kept')
+    local form = page.SchematicForm
+    assert(form.NineSlice.alpha == 0, 'the stock frame of the detail pane kept')
+    assert(form.Background.alpha == 0 and form.MinimalBackground.alpha == 0, 'the pane backgrounds kept')
+    local ring = S.panes[form]
+    assert(ring and ring.edges[1].color[3] > 0.9 and ring.edges[1].color[2] < 0.5, 'no violet ring on the detail pane')
+    -- the stock code shows the frame again on every recipe: alpha is what holds
+    form.NineSlice:SetAlpha(1)
+    assert(form.NineSlice.alpha == 0, 'the stock frame came back')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("professions: Create, Create All and View Crafters wear the text button even while their label is empty", """
+    Fire('PLAYER_ENTERING_WORLD'); ProfessionsFrame:Show(); FlushTimers()
+    local page = ProfessionsFrame.CraftingPage
+    local Parts = FS.ButtonSkins.Parts
+    for _, key in ipairs({ 'CreateButton', 'CreateAllButton', 'ViewGuildCraftersButton' }) do
+        local b = page[key]
+        assert(Parts(b), key .. ' not skinned')
+        assert(b.Left.alpha == 0 and b.Middle.alpha == 0 and b.Right.alpha == 0, key .. ' kept its red slices')
+        assert(b.scripts.OnClick, key .. ' lost its click')
+    end
+    assert(Parts(page.CreateButton).accent == 'cyan', 'Create is not the cyan key')
+    assert(Parts(page.CreateAllButton).accent == 'violet', 'Create All is not the violet key')
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
