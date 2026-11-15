@@ -603,7 +603,7 @@ local function TraceBankField(method, field)
     local ok, secure, by = pcall(issecurevariable, panel, field)
     if not ok or secure ~= false then return end
     bankTraced[field] = true
-    local okStack, stack = pcall(debugstack, 3, 20, 0)
+    local okStack, stack = pcall(debugstack, 3, 60, 20) -- deep: 20 frames stopped at SetUIPanel (2026-11-14), short of the origin
     if not okStack or type(stack) ~= "string" or Secret(stack) then stack = "(stack unavailable)" end
     if type(ForeverSTUwaveDB) ~= "table" then return end
     ForeverSTUwaveDB.bankTaintTrace = ForeverSTUwaveDB.bankTaintTrace or {}
