@@ -1035,8 +1035,60 @@ local function CollectAllScripted()
     return found, order
 end
 
+-- "/fsalloc owners [EVENT ...]": settles whose an anonymous frame is. Calls each frame's OnUpdate once (and its OnEvent once
+-- for each named event it is registered for) with the collector stopped, and keeps the calls where OUR attributed memory grew:
+-- the client charges an allocation to the addon that owns the running function. Calling stock handlers taints them: /reload
+-- after.
+local function Owners(events)
+    local tag = "|cff22e0ffForever STUwave|r: "
+    local G, U, M = collectgarbage, UpdateAddOnMemoryUsage, GetAddOnMemoryUsage
+    local rows = {}
+    local function try(f, label, fn, ...)
+        U()
+        local a, h = M(addonName) or 0, G("count")
+        pcall(fn, f, ...)
+        U()
+        local ours, heap = (M(addonName) or 0) - a, G("count") - h
+        if ours > 0.05 or heap > 2 then rows[#rows + 1] = { label = label, ours = ours, heap = heap } end
+    end
+    G("collect")
+    G("stop")
+    local f = EnumerateFrames and EnumerateFrames()
+    while f do
+        local okF, bad = pcall(function() return f:IsForbidden() or f:IsProtected() end)
+        if okF and not bad then
+            local okN, name = pcall(f.GetDebugName, f)
+            name = okN and type(name) == "string" and name or tostring(f)
+            local okP, parent = pcall(function() return f:GetParent() and f:GetParent():GetDebugName() end)
+            if okP and parent and not name:find(parent, 1, true) then name = name .. " in " .. tostring(parent) end
+            local okU, up = pcall(f.GetScript, f, "OnUpdate")
+            if okU and type(up) == "function" then try(f, name .. ":OnUpdate", up, 0.016) end
+            local okE, ev = pcall(f.GetScript, f, "OnEvent")
+            if okE and type(ev) == "function" then
+                for _, event in ipairs(events) do
+                    local okR, reg = pcall(f.IsEventRegistered, f, event)
+                    if okR and reg then try(f, name .. " " .. event, ev, event) end
+                end
+            end
+        end
+        f = EnumerateFrames(f)
+    end
+    G("restart")
+    table.sort(rows, function(a, b) return a.ours > b.ours end)
+    print(tag .. ("one call each, ours / whole UI (%d rows):"):format(#rows))
+    for i = 1, math.min(#rows, 14) do
+        print(("  %.1fK / %.1fK  %s"):format(rows[i].ours, rows[i].heap, rows[i].label))
+    end
+    if type(ForeverSTUwaveDB) == "table" then ForeverSTUwaveDB.allocOwners = { at = date("%Y-%m-%d %H:%M:%S"), rows = rows } end
+end
+
 SLASH_FSALLOC1 = "/fsalloc"
 SlashCmdList["FSALLOC"] = function(msg)
+    if type(msg) == "string" and msg:find("^%s*owners") then
+        local events = {}
+        for word in msg:gmatch("[%u_]+") do events[#events + 1] = word end
+        return Owners(events)
+    end
     local everyFrame = type(msg) == "string" and msg:find("all") ~= nil
     local tag = "|cff22e0ffForever STUwave|r: "
     if sampling then print(tag .. "a sample is already running.") return end
