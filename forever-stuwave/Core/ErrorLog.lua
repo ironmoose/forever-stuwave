@@ -949,6 +949,14 @@ end
 -- ours. Wrapping is only for the sample; a /reload afterwards returns every script to its original state.
 -- The result also lands in ForeverSTUwaveDB.allocSample (on disk after /reload).
 local SAMPLE_SECONDS = 15
+
+-- A debug name can come back as a secret string (nameplates): no method calls or conversion on it, use the address instead.
+local function PlainName(f, getter)
+    local ok, v = pcall(getter, f)
+    if not ok or type(v) ~= "string" then return nil end
+    if type(issecretvalue) == "function" and issecretvalue(v) then return nil end
+    return v
+end
 local sampling = false
 
 local function OursByName(f)
@@ -1016,16 +1024,15 @@ local function CollectAllScripted()
     local f = EnumerateFrames and EnumerateFrames()
     local lastNamed = "?"   -- frames enumerate in creation order: the last named one before an anonymous frame says whose it is
     while f do
-        local okG, gname = pcall(f.GetName, f)
-        if okG and type(gname) == "string" then lastNamed = gname end
+        local gname = PlainName(f, f.GetName)
+        if gname then lastNamed = gname end
         local okF, bad = pcall(function() return f:IsForbidden() or f:IsProtected() end)
         if okF and not bad then
             local okU, up = pcall(f.GetScript, f, "OnUpdate")
             local okE, ev = pcall(f.GetScript, f, "OnEvent")
             if (okU and type(up) == "function") or (okE and type(ev) == "function") then
-                local okN, name = pcall(f.GetDebugName, f)
-                name = okN and type(name) == "string" and name or tostring(f)
-                if not (okG and type(gname) == "string") then name = name .. " (after " .. lastNamed .. ")" end
+                local name = PlainName(f, f.GetDebugName) or tostring(f)
+                if not gname then name = name .. " (after " .. lastNamed .. ")" end
                 found[f] = ours[f] and ("FS " .. ours[f]) or name
                 order[#order + 1] = f
             end
@@ -1053,14 +1060,15 @@ local function Owners(events)
     end
     G("collect")
     G("stop")
+    local okScan, scanErr = pcall(function()
     local f = EnumerateFrames and EnumerateFrames()
     while f do
         local okF, bad = pcall(function() return f:IsForbidden() or f:IsProtected() end)
         if okF and not bad then
-            local okN, name = pcall(f.GetDebugName, f)
-            name = okN and type(name) == "string" and name or tostring(f)
-            local okP, parent = pcall(function() return f:GetParent() and f:GetParent():GetDebugName() end)
-            if okP and parent and not name:find(parent, 1, true) then name = name .. " in " .. tostring(parent) end
+            local name = PlainName(f, f.GetDebugName) or tostring(f)
+            local okP, p = pcall(f.GetParent, f)
+            local parent = okP and type(p) == "table" and PlainName(p, p.GetDebugName)
+            if parent and not name:find(parent, 1, true) then name = name .. " in " .. parent end
             local okU, up = pcall(f.GetScript, f, "OnUpdate")
             if okU and type(up) == "function" then try(f, name .. ":OnUpdate", up, 0.016) end
             local okE, ev = pcall(f.GetScript, f, "OnEvent")
@@ -1073,7 +1081,9 @@ local function Owners(events)
         end
         f = EnumerateFrames(f)
     end
+    end)
     G("restart")
+    if not okScan then print(tag .. "owner scan failed: " .. tostring(scanErr)) end
     table.sort(rows, function(a, b) return a.ours > b.ours end)
     print(tag .. ("one call each, ours / whole UI (%d rows):"):format(#rows))
     for i = 1, math.min(#rows, 14) do
@@ -1082,8 +1092,8 @@ local function Owners(events)
     if type(ForeverSTUwaveDB) == "table" then ForeverSTUwaveDB.allocOwners = { at = date("%Y-%m-%d %H:%M:%S"), rows = rows } end
 end
 
-SLASH_FSALLOC1 = "/fsalloc"
-SlashCmdList["FSALLOC"] = function(msg)
+-- The handler never throws: a slash handler that throws leaves its arguments in the chat box as a Say draft.
+local function Alloc(msg)
     if type(msg) == "string" and msg:find("^%s*owners") then
         local events = {}
         for word in msg:gmatch("[%u_]+") do events[#events + 1] = word end
@@ -1175,6 +1185,16 @@ SlashCmdList["FSALLOC"] = function(msg)
         sampling = false
         if not ok then print(tag .. "sample failed: " .. tostring(err)) end
     end)
+end
+
+SLASH_FSALLOC1 = "/fsalloc"
+SlashCmdList["FSALLOC"] = function(msg)
+    local ok, err = pcall(Alloc, msg)
+    if not ok then
+        collectgarbage("restart")
+        sampling = false
+        print("|cff22e0ffForever STUwave|r: sample failed: " .. tostring(err))
+    end
 end
 
 -------------------------------------------------------------------------------
