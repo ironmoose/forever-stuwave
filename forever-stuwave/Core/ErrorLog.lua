@@ -1093,7 +1093,27 @@ local function Owners(events)
 end
 
 -- The handler never throws: a slash handler that throws leaves its arguments in the chat box as a Say draft.
+-- "/fsalloc fn Path.To.Function [number ...]": calls FS.Path.To.Function(numbers...) once with the collector stopped and
+-- prints the Lua heap it grew by, to price one step of a refresh.
+local function PriceFn(msg)
+    local tag = "|cff22e0ffForever STUwave|r: "
+    local path = msg:match("^%s*fn%s+([%w_%.]+)")
+    local fn = FS
+    for part in (path or ""):gmatch("[^%.]+") do fn = type(fn) == "table" and fn[part] or nil end
+    if type(fn) ~= "function" then print(tag .. "no function FS." .. tostring(path)) return end
+    local args = {}
+    for n in msg:gsub("^%s*fn%s+[%w_%.]+", ""):gmatch("%-?[%d%.]+") do args[#args + 1] = tonumber(n) end
+    collectgarbage("collect")
+    collectgarbage("stop")
+    local before = collectgarbage("count")
+    local ok, err = pcall(fn, unpack(args))
+    local grew = collectgarbage("count") - before
+    collectgarbage("restart")
+    print(tag .. ("FS.%s: %.2fK%s"):format(path, grew, ok and "" or (" (threw: " .. tostring(err) .. ")")))
+end
+
 local function Alloc(msg)
+    if type(msg) == "string" and msg:find("^%s*fn%s") then return PriceFn(msg) end
     if type(msg) == "string" and msg:find("^%s*owners") then
         local events = {}
         for word in msg:gmatch("[%u_]+") do events[#events + 1] = word end
