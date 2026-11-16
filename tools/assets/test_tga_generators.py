@@ -39,6 +39,10 @@ TGA_HEADER_SIZE = 18
 #     slice_button, slice_border, slice_glow).
 EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     "anti_corner": (64, 64),
+    # generate_druid_gunsight.py: the Druid class module's atlas, claw gash fills, energy and rage fills and three cooldown chips.
+    "druid_gunsight": {"druid_gunsight": (512, 512), "druid_slash_lit": (32, 64), "druid_slash_flare": (32, 64),
+                       "druid_energy_fill": (256, 16), "druid_rage_fill": (256, 32), "druid_chip_sp": (32, 32),
+                       "druid_chip_pb": (32, 32), "druid_chip_sm": (32, 32)},
     # generate_loc_tick.py: one glowing tick of the loss of control ring, rotated in Lua.
     "loc_tick": (64, 64),
     # generate_queue_eye.py: our own group finder eye, lid (cyan) and pupil (pink), tinted in Lua.
