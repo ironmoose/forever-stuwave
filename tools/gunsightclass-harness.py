@@ -6,7 +6,7 @@ upper or lower area the area host gives it (the design mockup: states A and B
 for the shard count, state F for the combo points; shardsSlot and comboModule). FS.GunsightAreas is a FAKE here
 with the same API as the real one (its own harness covers it). The checks pin:
 
-  * registration: one "class" spec for WARLOCK, ROGUE and DRUID, with build, seat, onShow and onHide;
+  * registration: one "class" spec for WARLOCK and DRUID (not ROGUE: GunsightRogue.lua), with build, seat, onShow and onHide;
   * the shard module: ONE shard glyph and the count (never a row of four), the label SOUL SHARDS, the glyph, the
     count and the label at the mockup's offsets inside the area rect, a dim glyph and a muted 0 at zero shards,
     nothing drawn for an unknown or secret count, a Hud subscription only while the module is shown;
@@ -417,13 +417,13 @@ def case(name: str):
     return deco
 
 
-case("registers_one_class_module_for_warlock_rogue_and_druid_through_the_seam")(r"""
+case("registers_one_class_module_for_warlock_and_druid_through_the_seam")(r"""
 boot({ class = "WARLOCK" })
 local spec = MODS.class
 check(spec, "no module registered under the id class")
 local seen = {}
 for _, c in ipairs(spec.classes) do seen[c] = true end
-check(#spec.classes == 3 and seen.WARLOCK and seen.ROGUE and seen.DRUID, "classes must be exactly WARLOCK, ROGUE, DRUID, got " .. #spec.classes)
+check(#spec.classes == 2 and seen.WARLOCK and seen.DRUID and not seen.ROGUE, "classes must be exactly WARLOCK, DRUID (the Rogue has its own module), got " .. #spec.classes)
 for _, f in ipairs({ "build", "seat", "onShow", "onHide" }) do
     check(type(spec[f]) == "function", "the module has no " .. f)
 end
@@ -560,7 +560,7 @@ near3(uy, MU.UPPER_Y + (MU.GLYPH_Y - MU.LOWER_Y) + MU.GLYPH_H / 2, "seat to anot
 """)
 
 case("combo_module_is_five_yellow_pips_and_the_count")(r"""
-boot({ class = "ROGUE", combo = 4 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 4 })
 local spec, host = mount("lower")
 local fills = texWith(host, "\\hud_diamond.tga")
 local rings = texWith(host, "glyph_hud_diamond.tga")
@@ -610,7 +610,7 @@ check(COMBO_ARGS[1] and COMBO_ARGS[1][1] == "player" and COMBO_ARGS[1][2] == 4, 
 """)
 
 case("combo_module_follows_the_power_events_and_dims_at_zero")(r"""
-boot({ class = "ROGUE", combo = 0 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 0 })
 local spec, host = mount("lower")
 check(litCount(host) == 0, "all pips unlit at zero")
 local zero = textOf(host, "0")
@@ -640,7 +640,7 @@ check(textOf(host, "2") and litCount(host) == 2, "a max power change repaints")
 """)
 
 case("combo_module_rereads_a_frame_after_a_target_switch")(r"""
-boot({ class = "ROGUE", combo = 4 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 4 })
 local spec, host = mount("lower")
 check(litCount(host) == 4, "four points on the old target")
 -- the switch to a fresh mob: UnitPower still holds the old target's 4 when the event fires, 0 a frame later
@@ -666,7 +666,7 @@ check(litCount(host) == 5 and textOf(host, "5"), "seven points show as five, got
 """)
 
 case("combo_module_registers_only_events_this_client_has_and_logs_nothing")(r"""
-boot({ class = "ROGUE", combo = 1 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 1 })
 local spec, host = mount("lower")
 check(next(DEGRADED) == nil, "an event was refused: " .. tostring(next(DEGRADED)))
 check(PRINTED[1] == nil, "nothing is printed to chat")
@@ -680,14 +680,14 @@ check(next(DEGRADED) == nil, "a Druid event was refused: " .. tostring(next(DEGR
 """)
 
 case("a_refused_power_event_is_recorded_quietly_and_the_other_still_works")(r"""
-boot({ class = "ROGUE", combo = 1 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 1 })
 KNOWN_EVENTS.UNIT_POWER_FREQUENT = nil
 local spec, host = mount("lower")
 check(next(DEGRADED) == nil, "the spare UNIT_POWER_FREQUENT is optional, nothing is logged: " .. tostring(next(DEGRADED)))
 COMBO = 4
 fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
 check(textOf(host, "4") and litCount(host) == 4, "UNIT_POWER_UPDATE still updates the pips and count")
-boot({ class = "ROGUE", combo = 1, db = {} })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 1, db = {} })
 KNOWN_EVENTS.UNIT_POWER_UPDATE = nil
 spec, host = mount("lower")
 check(next(DEGRADED) == nil, "a refused event is not a degrade line: " .. tostring(next(DEGRADED)))
@@ -702,7 +702,7 @@ check(PRINTED[1] == nil, "nothing is printed to chat")
 """)
 
 case("combo_module_registers_events_only_while_shown")(r"""
-boot({ class = "ROGUE", combo = 2 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 2 })
 local spec, host, frame = mount("lower")
 local function listening()
     local n = 0
@@ -722,7 +722,7 @@ check(textOf(host, "3"), "showing again repaints from the live count")
 """)
 
 case("combo_module_secret_count_fills_the_pips_in_the_engine_with_no_lua_comparison")(r"""
-boot({ class = "ROGUE", combo = 3 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 3 })
 local spec, host = mount("lower")
 COMBO = SECRET
 ENGINE_SECRET = 3
@@ -743,7 +743,7 @@ check(textOf(host, "2") and litCount(host) == 2, "a plain count draws again")
 """)
 
 case("combo_module_secret_max_defaults_to_five_pips_and_a_small_max_hides_the_rest")(r"""
-boot({ class = "ROGUE", combo = 2 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 2 })
 UnitPowerMax = function() return SECRET end
 local spec, host = mount("lower")
 local vis = 0
@@ -769,7 +769,7 @@ check(#tex == 0 and #txt == 0, "no UnitPower: nothing drawn, got " .. #tex .. " 
 """)
 
 case("combo_module_draws_nothing_without_a_hostile_live_target_but_shards_do")(r"""
-boot({ class = "ROGUE", combo = 3 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 3 })
 local spec, host = mount("lower")
 check(textOf(host, "3"), "a hostile target: the combo module draws")
 TARGET.exists = false
@@ -798,7 +798,7 @@ check(textOf(host2, "3") and #texWith(host2, "hud_shard_line.tga") == 1, "a moun
 case("combo_module_rereads_a_frame_after_it_is_shown_by_a_target_change")(r"""
 -- The registry shows the module from inside the PLAYER_TARGET_CHANGED dispatch, when UnitPower still holds the old
 -- target's points; onShow reads once now and once more next frame.
-boot({ class = "ROGUE", combo = 0 })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 0 })
 local spec, host = mount("lower")
 spec.onHide("lower")
 COMBO = 0                                  -- the stale answer during the dispatch
@@ -827,7 +827,7 @@ check(#SUBS == subs, "and it subscribes again")
 """)
 
 case("real_areas_a_combo_module_hides_with_no_target_and_rereads_when_it_returns")(r"""
-boot({ class = "ROGUE", combo = 3, realAreas = true })
+boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 3, realAreas = true })
 local host = FS.GunsightAreas.Host("lower")
 check(isVisible(host) and textOf(host, "3") and litCount(host) == 3, "with a target the pips are drawn")
 TARGET.exists = false

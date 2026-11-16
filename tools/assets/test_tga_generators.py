@@ -276,6 +276,14 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "hunter_trap": (512, 256),
         "hunter_trap_lit": (64, 32),
     },
+    # generate_rogue_fan.py: the Rogue Gunsight module (2026-11-16): the dagger fan dead, its five lit daggers, the gold overlay and the
+    # spend flash (each 128 x 64 sprite px at two texels a px), the FINISH plaque (64 x 16 px), the cost gem (8 x 8 px) and the atlas of the
+    # Slice and Dice blade star turns (128 x 64 px).
+    "rogue_fan": {
+        "rogue_dead": (256, 128), "rogue_ready": (256, 128), "rogue_flash": (256, 128), "rogue_finish": (128, 32),
+        "rogue_gem": (16, 16), "rogue_atlas": (256, 128),
+        "rogue_lit_1": (256, 128), "rogue_lit_2": (256, 128), "rogue_lit_3": (256, 128), "rogue_lit_4": (256, 128), "rogue_lit_5": (256, 128),
+    },
     # generate_control_checks.py: the shared controls kit's checkbox and radio art (mockups/shared-controls-2026-11-12.html), white
     # alpha shapes tinted in Lua, one texel a screen pixel: the 16 px radio diamond (solid, 1 px edge, 2 px edge), the 6 px node
     # on an 8 canvas, and the checkbox tick on its 16 px box.

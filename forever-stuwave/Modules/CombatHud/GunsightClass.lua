@@ -1,4 +1,4 @@
--- Forever STUwave: Gunsight Class Module for Warlock (soul shards), Rogue and Druid (combo points).
+-- Forever STUwave: Gunsight Class Module for Warlock (soul shards) and Druid (combo points); the Rogue has its own module (GunsightRogue.lua).
 --
 -- Registers the module "class" with FS.GunsightAreas, which hosts it in the upper or lower area and calls seat(rect)
 -- again on every rescale. Offsets are image px from the area rect's corner (the design mockup,
@@ -356,7 +356,7 @@ local function Build(host)
     frame:SetAllPoints(host)
     built = false
     class = PlayerClass()
-    mode = (class == "WARLOCK" and "shards") or ((class == "ROGUE" or class == "DRUID") and "combo") or nil
+    mode = (class == "WARLOCK" and "shards") or ((class == "DRUID") and "combo") or nil
     if not mode then return frame end
     box = CreateFrame("Frame", nil, frame)
     box:SetAllPoints(frame)
@@ -411,11 +411,15 @@ local function OnHide()
     lastKey = nil
 end
 
-local ok, result = pcall(Areas.RegisterModule, "class", {
-    classes = { "WARLOCK", "ROGUE", "DRUID" },
-    build = Build, seat = Seat, onShow = OnShow, onHide = OnHide,
-})
-if not ok or not result then LogOnce("register", "FS.GunsightAreas.RegisterModule refused the class module (" .. tostring(result) .. ")") end
+-- the classes this generic module still draws; an empty list registers nothing (RegisterModule refuses a spec with no classes)
+local CLASSES = { "WARLOCK", "DRUID" }
+if #CLASSES > 0 then
+    local ok, result = pcall(Areas.RegisterModule, "class", {
+        classes = CLASSES,
+        build = Build, seat = Seat, onShow = OnShow, onHide = OnHide,
+    })
+    if not ok or not result then LogOnce("register", "FS.GunsightAreas.RegisterModule refused the class module (" .. tostring(result) .. ")") end
+end
 
 -------------------------------------------------------------------------------
 -- Coming soon: the fallback for a class with no class module
