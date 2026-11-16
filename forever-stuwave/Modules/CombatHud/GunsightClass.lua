@@ -412,7 +412,7 @@ local function OnHide()
 end
 
 -- the classes this generic module still draws; an empty list registers nothing (RegisterModule refuses a spec with no classes)
-local CLASSES = { "WARLOCK", "DRUID" }
+local CLASSES = { "WARLOCK" }
 if #CLASSES > 0 then
     local ok, result = pcall(Areas.RegisterModule, "class", {
         classes = CLASSES,

@@ -423,7 +423,7 @@ local spec = MODS.class
 check(spec, "no module registered under the id class")
 local seen = {}
 for _, c in ipairs(spec.classes) do seen[c] = true end
-check(#spec.classes == 2 and seen.WARLOCK and seen.DRUID and not seen.ROGUE, "classes must be exactly WARLOCK, DRUID (the Rogue has its own module), got " .. #spec.classes)
+check(#spec.classes == 1 and seen.WARLOCK and not seen.ROGUE and not seen.DRUID, "classes must be exactly WARLOCK (the Rogue and the Druid have their own modules), got " .. #spec.classes)
 for _, f in ipairs({ "build", "seat", "onShow", "onHide" }) do
     check(type(spec[f]) == "function", "the module has no " .. f)
 end
