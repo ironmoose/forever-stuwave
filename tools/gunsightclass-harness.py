@@ -417,7 +417,7 @@ def case(name: str):
     return deco
 
 
-case("registers_one_class_module_for_warlock_and_druid_through_the_seam")(r"""
+case("registers_one_class_module_for_the_warlock_through_the_seam")(r"""
 boot({ class = "WARLOCK" })
 local spec = MODS.class
 check(spec, "no module registered under the id class")
@@ -826,27 +826,16 @@ check(isVisible(host) and textOf(host, "5") and not textOf(host, "3"), "a target
 check(#SUBS == subs, "and it subscribes again")
 """)
 
-case("real_areas_a_combo_module_hides_with_no_target_and_rereads_when_it_returns")(r"""
-boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 3, realAreas = true })
-local host = FS.GunsightAreas.Host("lower")
-check(isVisible(host) and textOf(host, "3") and litCount(host) == 3, "with a target the pips are drawn")
-TARGET.exists = false
-fire("PLAYER_TARGET_CHANGED")
-local tex, txt = drawn(host)
-check(not isVisible(host) and #tex == 0 and #txt == 0, "no target: nothing is visible")
-local n = #COMBO_ARGS
-COMBO = 1
-fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
-check(#COMBO_ARGS == n, "a hidden module reads no power events")
-COMBO = 0
-TARGET.exists = true
-fire("PLAYER_TARGET_CHANGED")
-COMBO = 2                                  -- the new target's points land a frame later
-flushTimers()
-check(isVisible(host) and textOf(host, "2") and litCount(host) == 2, "a target again: the new target's count after the re-read")
-COMBO = 4
-fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
-check(textOf(host, "4"), "and the events follow again")
+case("real_areas_the_rogue_and_druid_get_nothing_from_this_module")(r"""
+-- The Rogue (GunsightRogue.lua) and the Druid (GunsightDruid.lua) have their own class modules, so under the real host this
+-- generic module draws no pips for them even with a target and combo points (its combo path stays for a mount in this harness;
+-- with neither class module loaded here, the host may show its coming soon plate, which is not this module's pips).
+for _, cls in ipairs({ "DRUID", "ROGUE" }) do
+    boot({ class = cls, form = { 3, "ENERGY" }, combo = 3, realAreas = true })
+    local host = FS.GunsightAreas.Host("lower")
+    check(#texWith(host, "\\hud_diamond.tga") == 0 and not textOf(host, "3"),
+        cls .. ": no combo pips and no count from the generic module under the real host")
+end
 """)
 
 case("druid_draws_combo_points_in_cat_form_only")(r"""

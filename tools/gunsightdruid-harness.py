@@ -702,7 +702,8 @@ def static_checks() -> list[str]:
     if any(o not in toc for o in order) or [toc.index(o) for o in order] != sorted(toc.index(o) for o in order):
         errs.append("the toc must load GunsightClass, DruidArt, DruidState, GunsightDruid in that order")
     cls = (CH / "GunsightClass.lua").read_text(encoding="utf-8")
-    m = re.search(r'RegisterModule, "class", \{\s*classes = \{([^}]*)\}', cls)
+    m = (re.search(r'RegisterModule, "class", \{\s*classes = \{([^}]*)\}', cls)
+         or re.search(r'local CLASSES = \{([^}]*)\}', cls))
     if not m or "DRUID" in m.group(1):
         errs.append("GunsightClass.lua still claims DRUID")
     for path in (CH / "GunsightDruid.lua", CH / "DruidState.lua", GENERATOR, HERE / "assets/druid_mockup/composer.js",
