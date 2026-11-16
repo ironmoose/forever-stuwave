@@ -66,7 +66,7 @@ local C = {
     FINISH = { x = 89, y = 50 },
     RAIL = { x = 17, y = 77, w = 130, h = 7 }, NUM_RIGHT = 14,
     GEM_Y = 68,
-    LABEL_SIZE = 11, CUFF_SIZE = 12, BASELINE = 5, CAP = 325 / 1024,
+    LABEL_SIZE = 11, CUFF_SIZE = 12, CUFF_NUDGE_X = 1, BASELINE = 5, CAP = 325 / 1024,
     SND_WARN = 4,                      -- the amber under this many seconds
     SPIN_HZ = 14, BREATH = 5,          -- star frames a second, the breath's angular rate
     THROW = 0.6, FLASH = 0.24, RECOIL = 0.09,
@@ -406,8 +406,20 @@ local function BuildEnergy(root)
     end
 end
 
+-- The digit's centre on the cuff's centre (the pivot). Text() hangs a label from a row top, which put the digit high in the cuff.
 local function BuildCuff(root)
-    P.number = Text(root.text, C.FAN.x + C.PIVOT.x, C.FAN.y + C.PIVOT.y - 6, "CENTER", C.CUFF_SIZE)
+    local fs = root.text:CreateFontString(nil, "OVERLAY")
+    fs.cur = { 1, 1, 1, 1 }
+    fs.fsSize = C.CUFF_SIZE
+    fs:SetJustifyH("CENTER")
+    if fs.SetJustifyV then fs:SetJustifyV("MIDDLE") end
+    Seat(function()
+        FS.Theme.ApplyMono(fs, ui(fs.fsSize), fs.cur)
+        fs:ClearAllPoints()
+        fs:SetPoint("CENTER", mod, "TOPLEFT", S(C.FAN.x + C.PIVOT.x) + ui(C.CUFF_NUDGE_X), -S(C.FAN.y + C.PIVOT.y))
+    end)
+    fs:SetText("")
+    P.number = fs
     Label(P.number, "", K.muted, 1)
 end
 

@@ -155,6 +155,7 @@ Modules/CombatHud/DruidArt.lua
 Modules/CombatHud/DruidState.lua
 Modules/CombatHud/GunsightDruid.lua
 Modules/CombatHud/GunsightWarlock.lua
+Modules/Nameplates/NameplateCombo.lua
 Modules/Compat/Questie.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua

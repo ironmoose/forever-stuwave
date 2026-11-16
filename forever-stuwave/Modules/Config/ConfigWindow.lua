@@ -1484,6 +1484,10 @@ local function NameplatesGroup(page)
     if not (setting and setting.key) then return end
     UI.Header(page, "Nameplates")
     UI.Toggle(page, { label = setting.label, key = setting.key, tip = setting.tip })
+    local combo = FS.NameplateCombo and FS.NameplateCombo.SETTING
+    if combo and combo.key then
+        UI.Toggle(page, { label = combo.label, key = combo.key, tip = combo.tip })
+    end
 end
 
 -- The damage meter's row style (Skins/DamageMeter.lua), neon plates or the ladder, relaid live and explained by its ? tip.
