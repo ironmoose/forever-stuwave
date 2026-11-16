@@ -115,21 +115,27 @@ local function SkinItemSlot(button, read)
     end)
 end
 
+-- One cyan cell of a gw x gh px glyph grid hung from the MIDDLE of `btn` (the grid's middle on the button's), so the glyph stays
+-- centred whatever size the button reports: the pixel scale is not settled when the skin is built, and an offset worked out from
+-- that early size stays wrong (the bank sort glyph sat low and right).
+local function MidRect(btn, gw, gh, x, y, w, h)
+    local t = Kit.Rect(btn, 0, 0, w, h, C.cyan, 1, "OVERLAY", 7)
+    Kit.Place(t, btn, x - math.floor(gw / 2), y - math.floor(gh / 2), w, h, "TOPLEFT", "CENTER", btn)
+    return t
+end
+
 -- A chevron of cells on a small square button: held art, a ring box, the glyph tinted with the state. dir is "<" or ">".
 local function ChevronSquare(btn, dir)
     if type(btn) ~= "table" then return end
     local s = Char.SkinSquare(btn, {})
     if not s then return end
-    local bw, bh = Kit.SizePx(btn)
-    bw, bh = bw or 32, bh or 32
     local step, rows, thick = 2, 7, 2
     local gw, gh = 3 * step + thick, rows * thick
-    local gx, gy = math.floor((bw - gw) / 2), math.floor((bh - gh) / 2)
     s.glyph = {}
     for row = 0, rows - 1 do
         local d = math.abs(row - 3)
         local x = dir == "<" and d * step or (3 - d) * step
-        s.glyph[#s.glyph + 1] = Kit.Rect(btn, gx + x, gy + row * thick, thick, thick, C.cyan, 1, "OVERLAY", 7)
+        s.glyph[#s.glyph + 1] = MidRect(btn, gw, gh, x, row * thick, thick, thick)
     end
     S.pagers[btn] = s
     local function dim()
@@ -168,21 +174,18 @@ end
 local function PagerKey(btn, dir)
     if type(btn) ~= "table" or S.pagers[btn] then return end
     HeldArt.HoldButton(btn)
-    local bw, bh = Kit.SizePx(btn)
-    bw, bh = bw or 32, bh or 32
     local P = PAGER
-    local x, y = math.floor((bw - P.SIZE) / 2), math.floor((bh - P.SIZE) / 2)
     local s = { key = Kit.Plate(btn, P.CUT, P.SIZE, P.SIZE), glyph = {} }
-    Kit.Place(s.key.fill, btn, x, y, P.SIZE, P.SIZE)
-    Kit.Place(s.key.ring, btn, x, y, P.SIZE, P.SIZE)
-    if s.key.ring2 then Kit.Place(s.key.ring2, btn, x + 1, y + 1, P.SIZE - 2, P.SIZE - 2) end
+    local h = P.SIZE / 2
+    Kit.Place(s.key.fill, btn, -h, -h, P.SIZE, P.SIZE, "TOPLEFT", "CENTER", btn)
+    Kit.Place(s.key.ring, btn, -h, -h, P.SIZE, P.SIZE, "TOPLEFT", "CENTER", btn)
+    if s.key.ring2 then Kit.Place(s.key.ring2, btn, 1 - h, 1 - h, P.SIZE - 2, P.SIZE - 2, "TOPLEFT", "CENTER", btn) end
     local half = (P.ROWS - 1) / 2
     local gw, gh = half * P.STEP + P.THICK, P.ROWS * P.THICK
-    local gx, gy = x + math.floor((P.SIZE - gw) / 2), y + math.floor((P.SIZE - gh) / 2)
     for row = 0, P.ROWS - 1 do
         local d = math.abs(row - half)
         local cx = dir == "<" and d * P.STEP or (half - d) * P.STEP
-        s.glyph[#s.glyph + 1] = Kit.Rect(btn, gx + cx, gy + row * P.THICK, P.THICK, P.THICK, C.cyan, 1, "OVERLAY", 7)
+        s.glyph[#s.glyph + 1] = MidRect(btn, gw, gh, cx, row * P.THICK, P.THICK, P.THICK)
     end
     for _, region in ipairs(List(btn, "GetRegions")) do
         if Try(region.GetObjectType, region) == "FontString" then
@@ -404,10 +407,7 @@ local function SkinSortKey(btn)
     local s = Char.SkinSquare(btn, {})
     if not s then return end
     S.pagers[btn] = s
-    local bw, bh = Kit.SizePx(btn)
-    bw, bh = bw or 34, bh or 31
-    local x0, y0 = math.floor((bw - 18) / 2), math.floor((bh - 12) / 2)
-    local function r(x, y, w, h) return Kit.Rect(btn, x0 + x, y0 + y, w, h, C.cyan, 1, "OVERLAY", 7) end
+    local function r(x, y, w, h) return MidRect(btn, 18, 12, x, y, w, h) end
     s.glyph = { r(0, 0, 10, 2), r(0, 5, 7, 2), r(0, 10, 4, 2), r(13, 0, 2, 10), r(11, 8, 2, 2), r(15, 8, 2, 2) }
     Char.PaintSquare(btn)
 end
