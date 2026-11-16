@@ -1090,7 +1090,11 @@ watcher:SetScript("OnEvent", function(_, event)
         Kit.Reseat()
         return
     end
-    if event == "PLAYER_REGEN_ENABLED" and _G.CharacterFrame then Step("extend", ExtendWindow, _G.CharacterFrame) end
+    -- A closed window is refreshed by its OnShow hook, so nothing here while it is shut: the full pass allocates hundreds
+    -- of KB, and durability, inventory and regen events land after every fight.
+    local win = _G.CharacterFrame
+    if not (win and win:IsShown()) then return end
+    if event == "PLAYER_REGEN_ENABLED" then Step("extend", ExtendWindow, win) end
     Step("refresh", Refresh)
 end)
 

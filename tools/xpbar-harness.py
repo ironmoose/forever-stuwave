@@ -160,7 +160,7 @@ function UnitLevel() return __level or 42 end
 function GetXPExhaustion() return __rested end
 function UnitXP() return __xp end
 function UnitXPMax() return __xpmax end
-function CreateColor(r, g, b, a) return { r = r, g = g, b = b, a = a } end
+function CreateColor(r, g, b, a) return { r = r, g = g, b = b, a = a, SetRGBA = function(c, r2, g2, b2, a2) c.r, c.g, c.b, c.a = r2, g2, b2, a2 end } end
 function wipe(t) for k in pairs(t) do t[k] = nil end return t end
 function hooksecurefunc() end
 function GetTime() return 0 end

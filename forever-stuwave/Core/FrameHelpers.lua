@@ -831,13 +831,23 @@ Helpers.RAIL_SPARK_ALPHA = 0.9
 -- fallback without retrying a call already proven to throw. Returns true when
 -- the gradient was applied. Exported because PartyFrames' dispel halo uses the
 -- same gradient-or-flat fallback.
+-- SetGradient copies its colours, so two scratch colours serve every retint (a fresh CreateColor is a table with every
+-- ColorMixin method copied in).
 local railGradientBroken = false
+local railFrom, railTo
 function Helpers.SetRailGradient(tex, r, g, b, alphaFrom, alphaTo)
     if railGradientBroken or not (tex and tex.SetGradient and CreateColor) then
         return false
     end
-    local ok = pcall(tex.SetGradient, tex, "HORIZONTAL",
-        CreateColor(r, g, b, alphaFrom), CreateColor(r, g, b, alphaTo))
+    if not railFrom then railFrom, railTo = CreateColor(0, 0, 0, 0), CreateColor(0, 0, 0, 0) end
+    local from, to = railFrom, railTo
+    if type(from.SetRGBA) == "function" then
+        from:SetRGBA(r, g, b, alphaFrom)
+        to:SetRGBA(r, g, b, alphaTo)
+    else
+        from, to = CreateColor(r, g, b, alphaFrom), CreateColor(r, g, b, alphaTo)
+    end
+    local ok = pcall(tex.SetGradient, tex, "HORIZONTAL", from, to)
     if not ok then
         railGradientBroken = true
         FS.LogDegradeOnce("rail_gradient",

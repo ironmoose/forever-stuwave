@@ -316,11 +316,20 @@ end
 --
 -- SetGradient multiplies against the texture, so the pip's slanted alpha is
 -- preserved. Feature-detected: without it, a flat tint is the honest fallback.
+-- SetGradient copies its colours, so two scratch colours serve every pip: a fresh CreateColor is a table with every
+-- ColorMixin method copied in, and two per pip per refresh made each XP or rested change allocate about 290 KB.
+local pipLow, pipHigh
 local function ShadePip(texture, r, g, b, a)
     if texture.SetGradient and CreateColor then
-        texture:SetGradient("VERTICAL",
-            CreateColor(r * 0.42, g * 0.42, b * 0.42, a),
-            CreateColor(math.min(r * 1.3, 1), math.min(g * 1.3, 1), math.min(b * 1.3, 1), a))
+        if not pipLow then pipLow, pipHigh = CreateColor(0, 0, 0, 0), CreateColor(0, 0, 0, 0) end
+        if type(pipLow.SetRGBA) ~= "function" then
+            texture:SetGradient("VERTICAL", CreateColor(r * 0.42, g * 0.42, b * 0.42, a),
+                CreateColor(math.min(r * 1.3, 1), math.min(g * 1.3, 1), math.min(b * 1.3, 1), a))
+            return
+        end
+        pipLow:SetRGBA(r * 0.42, g * 0.42, b * 0.42, a)
+        pipHigh:SetRGBA(math.min(r * 1.3, 1), math.min(g * 1.3, 1), math.min(b * 1.3, 1), a)
+        texture:SetGradient("VERTICAL", pipLow, pipHigh)
     else
         texture:SetVertexColor(r, g, b, a)
     end
