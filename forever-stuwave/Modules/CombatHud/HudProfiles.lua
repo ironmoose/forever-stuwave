@@ -215,8 +215,8 @@ FS.HudProfiles.WARLOCK = {
         { cast = "life_tap", when = { { "notEnoughMana", "shadow_bolt" },
                                       { "not", { "wandEquipped" } } } },
 
-        -- Shards. On Forever a kill always grants a shard and Drain Soul damage can too
-        -- (client tooltip). The shard top-up sits before the wand; it stops at 3 shards.
+        -- Shards. On Forever only a Drain Soul kill or a Shadowburn kill within 8 s makes a shard (Wowhead, wowfdb Warlock,
+        -- 2026-11-15); a plain kill does not. The shard top-up sits before the wand; it stops at 3 shards.
         { cast = "drain_soul", when = { { "not", { "shardsAtLeast", 3 } } } },
 
         -- Filler: the wand first (free, about 30% spell power, Wowhead), Shadow Bolt when

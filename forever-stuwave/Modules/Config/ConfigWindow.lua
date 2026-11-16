@@ -1661,6 +1661,17 @@ local function WarriorGroup(page)
     end
 end
 
+-- The Warlock class module's cues (WarlockState.lua): one switch per cue. A Warlock's page only.
+local function WarlockGroup(page)
+    local WS = FS.WarlockState
+    if not (WS and WS.SETTINGS and WS.ORDER and WS.Applies and WS.Applies()) then return end
+    UI.Header(page, "Warlock class module", "The cues on the right of the Warlock module. The shard count and the demon stay either way.")
+    for _, name in ipairs(WS.ORDER) do
+        local def = WS.SETTINGS[name]
+        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
+    end
+end
+
 if FS.Gunsight and FS.Gunsight.PIECES then
     CW.RegisterCategory({ key = "gunsight", label = "Gunsight HUD", order = 2, build = function(page)
         local Gunsight = FS.Gunsight
@@ -1673,6 +1684,7 @@ if FS.Gunsight and FS.Gunsight.PIECES then
         TargetSideGroups(page)
         PriestGroup(page)
         WarriorGroup(page)
+        WarlockGroup(page)
         UI.Header(page, "Pieces")
         local known, n = {}, 0
         for _, key in ipairs(Gunsight.PIECES) do known[key] = true end

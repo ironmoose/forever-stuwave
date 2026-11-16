@@ -1,4 +1,6 @@
--- Forever STUwave: Gunsight Class Module for Warlock (soul shards) and Druid (combo points); the Rogue has its own module (GunsightRogue.lua).
+-- Forever STUwave: Gunsight Class Module fallback (combo points) and the coming soon plate. Every class now has its own
+-- class module (the Rogue GunsightRogue.lua, the Druid GunsightDruid.lua, the Warlock GunsightWarlock.lua), so the combo
+-- module registers for no class; its spec stays reachable as FS.GunsightClassCombo for the harness.
 --
 -- Registers the module "class" with FS.GunsightAreas, which hosts it in the upper or lower area and calls seat(rect)
 -- again on every rescale. Offsets are image px from the area rect's corner (the design mockup,
@@ -8,31 +10,23 @@ local _, FS = ...
 
 local Gunsight = FS.Gunsight
 local Areas = FS.GunsightAreas
-if not (Gunsight and Gunsight.ui and Gunsight.Point and Gunsight.G) then return end
+if not (Gunsight and Gunsight.ui and Gunsight.Point) then return end
 if not (Areas and Areas.RegisterModule) then return end
 
-local ui, Point, G = Gunsight.ui, Gunsight.Point, Gunsight.G
+local ui, Point = Gunsight.ui, Gunsight.Point
 
 local M = {
     LABEL_PX = 10, LABEL_ALPHA = 0.85, LABEL_DX = 7, LABEL_BASE = 14,     -- the violet caption
-    GLYPH_DX = 11, GLYPH_DY = 22, GLYPH_W = 16, GLYPH_H = 30,             -- shard glyph box
-    NUM_DX = 39, NUM_BASE = 49, NUM_PX = 32,                              -- shard count, left edge and baseline
+    NUM_BASE = 49, NUM_PX = 32,                                           -- the count's baseline and size
     PIP_DX = 17, PIP_STEP = 20, PIP_DY = 38, PIP_R = 8,                   -- combo pip centres and half diagonal
     COMBO_NUM_DX = 125,                                                   -- combo count, left edge (same baseline and size)
     TEXT_MID = 0.35,                                                      -- a line's centre sits this fraction of its size above the baseline
     MAX_PIPS = 5,
-    CANVAS_W = 16, CANVAS_H = 32, GLOW_CANVAS = 40,                       -- the baked shard files' canvases for a G.SH_W x G.SH_H cell (CombatHud TUNE)
-    FILL = { lit = 0.28, off = 0.06 }, LINE = { lit = 1, off = 0.4 }, FACET = { lit = 1, off = 0.2 },
-    FACET_MIX = 0.45,                                                     -- facet lines: the violet mixed this far toward white
     PIP_FILL = { lit = 0.9, off = 0.06 }, PIP_RING = { lit = 1, off = 0.4 },
     YELLOW = { 1, 244 / 255, 104 / 255 },                                 -- #fff468
 }
 
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
-local SHARD_TEX = {
-    glow = MEDIA .. "hud_shard_glow.tga", line = MEDIA .. "hud_shard_line.tga",
-    fill = MEDIA .. "hud_shard_fill.tga", facet = MEDIA .. "hud_shard_facet.tga",
-}
 local PIP_FILL_TEX, PIP_RING_TEX = MEDIA .. "hud_diamond.tga", MEDIA .. "glyph_hud_diamond.tga"
 -- This client has no PLAYER_COMBO_POINTS (registering it throws); the points are the player's COMBO_POINTS power, as
 -- Blizzard's own Rogue and Druid bars read it (UnitPower with Enum.PowerType.ComboPoints, UNIT_POWER_* and UNIT_MAXPOWER).
@@ -64,15 +58,11 @@ local function PlainCount(v)
     return math.floor(v)
 end
 
-local function Lighten(c, f)
-    return { c[1] + (1 - c[1]) * f, c[2] + (1 - c[2]) * f, c[3] + (1 - c[3]) * f }
-end
-
-local mode, class, caption    -- what the player's class draws here ("shards", "combo" or nil), its token, the caption text (set at build)
+local mode, class, caption    -- what the player's class draws here ("combo" or nil), its token, the caption text (set at build)
 local shown, built, subscribed = false, false, false
 local rect                    -- the corner of the area's image px rect, copied from the last seat() (the host reuses its table)
 local frame, box, label, number
-local glyph, pips = {}, {}
+local pips = {}
 local lastKey                 -- what is painted now: a count, "secret" or "off"; nil forces a repaint
 local pipCount                -- how many pips are shown (UnitPowerMax, at most MAX_PIPS); nil forces a re-apply
 
@@ -96,18 +86,7 @@ local function SeatAll()
     local T = Theme()
     SeatText(label, M.LABEL_PX, { T.COLOR_BORDER[1], T.COLOR_BORDER[2], T.COLOR_BORDER[3], M.LABEL_ALPHA },
         M.LABEL_DX, M.LABEL_BASE)
-    if mode == "shards" then
-        SeatText(number, M.NUM_PX, number.fsColor, M.NUM_DX, M.NUM_BASE)
-        if rect then
-            local gw, gh = ui(M.GLYPH_W), ui(M.GLYPH_H)
-            for name, tex in pairs(glyph) do
-                local cw, ch = M.CANVAS_W, M.CANVAS_H
-                if name == "glow" then cw, ch = M.GLOW_CANVAS, M.GLOW_CANVAS end
-                tex:SetSize(gw * cw / G.SH_W, gh * ch / G.SH_H)
-                Point(tex, "CENTER", rect.x + M.GLYPH_DX + M.GLYPH_W / 2, rect.y + M.GLYPH_DY + M.GLYPH_H / 2)
-            end
-        end
-    else
+    do
         SeatText(number, M.NUM_PX, number.fsColor, M.COMBO_NUM_DX, M.NUM_BASE)
         if rect then
             for i, pip in ipairs(pips) do
@@ -137,49 +116,6 @@ local function Paint(key)
     if key == lastKey and key ~= "secret" then return end
     lastKey = key
     box:SetShown(key ~= "off")
-end
-
--------------------------------------------------------------------------------
--- Shards
--------------------------------------------------------------------------------
-
-local function BuildShards()
-    local violet = Theme().COLOR_BORDER
-    local facet = Lighten(violet, M.FACET_MIX)
-    local specs = {
-        { "glow", "BACKGROUND", 0, violet }, { "line", "ARTWORK", 0, violet },
-        { "fill", "ARTWORK", 1, violet }, { "facet", "ARTWORK", 2, facet },
-    }
-    for _, s in ipairs(specs) do
-        local tex = box:CreateTexture(nil, s[2], nil, s[3])
-        tex:SetTexture(SHARD_TEX[s[1]])
-        tex:SetVertexColor(s[4][1], s[4][2], s[4][3], 1)
-        glyph[s[1]] = tex
-    end
-    caption = "SOUL SHARDS"
-end
-
-local function PaintShards(n)
-    local lit = n > 0
-    local state = lit and "lit" or "off"
-    local violet, facet = Theme().COLOR_BORDER, Lighten(Theme().COLOR_BORDER, M.FACET_MIX)
-    glyph.glow:SetShown(lit)
-    glyph.line:SetVertexColor(violet[1], violet[2], violet[3], M.LINE[state])
-    glyph.fill:SetVertexColor(violet[1], violet[2], violet[3], M.FILL[state])
-    glyph.facet:SetVertexColor(facet[1], facet[2], facet[3], M.FACET[state])
-    SetNumberColor(lit)
-    SetNumber(n)
-end
-
-local function OnHudState(state)
-    if not built or mode ~= "shards" then return end
-    local n = type(state) == "table" and PlainCount(state.shards) or nil
-    if n == nil then
-        Paint("off")
-    else
-        if n ~= lastKey then PaintShards(n) end
-        Paint(n)
-    end
 end
 
 -------------------------------------------------------------------------------
@@ -356,7 +292,7 @@ local function Build(host)
     frame:SetAllPoints(host)
     built = false
     class = PlayerClass()
-    mode = (class == "WARLOCK" and "shards") or ((class == "DRUID") and "combo") or nil
+    mode = (class == "ROGUE" or class == "DRUID") and "combo" or nil
     if not mode then return frame end
     box = CreateFrame("Frame", nil, frame)
     box:SetAllPoints(frame)
@@ -364,7 +300,7 @@ local function Build(host)
     label = NewText(box)
     number = NewText(box)
     number.fsColor = Theme().COLOR_MUTED
-    if mode == "shards" then BuildShards() else BuildCombo() end
+    BuildCombo()
     built = true
     SeatAll()
     label:SetText(caption)
@@ -382,17 +318,7 @@ local function OnShow()
     shown = true
     lastKey = nil
     if not built then return end
-    if mode == "shards" then
-        local Hud = FS.Hud
-        if not (Hud and Hud.Subscribe) then
-            LogOnce("nohud", "FS.Hud is missing, the shard count has no data")
-            return
-        end
-        if not subscribed then
-            subscribed = true
-            Hud.Subscribe(OnHudState)
-        end
-    else
+    do
         SetComboEvents(true)
         RefreshCombo()
         RereadNextFrame()           -- onShow runs inside the PLAYER_TARGET_CHANGED dispatch: UnitPower still holds the old target's points
@@ -402,22 +328,19 @@ end
 local function OnHide()
     shown = false
     if not built then return end
-    if mode == "shards" then
-        if subscribed and FS.Hud and FS.Hud.Unsubscribe then FS.Hud.Unsubscribe(OnHudState) end
-        subscribed = false
-    else
+    do
         SetComboEvents(false)
     end
     lastKey = nil
 end
 
--- the classes this generic module still draws; an empty list registers nothing (RegisterModule refuses a spec with no classes)
-local CLASSES = { "WARLOCK" }
+local SPEC = { build = Build, seat = Seat, onShow = OnShow, onHide = OnHide }
+FS.GunsightClassCombo = SPEC
+-- the classes this generic module still draws: none (each has its own module); an empty list registers nothing
+local CLASSES = {}
 if #CLASSES > 0 then
-    local ok, result = pcall(Areas.RegisterModule, "class", {
-        classes = CLASSES,
-        build = Build, seat = Seat, onShow = OnShow, onHide = OnHide,
-    })
+    SPEC.classes = CLASSES
+    local ok, result = pcall(Areas.RegisterModule, "class", SPEC)
     if not ok or not result then LogOnce("register", "FS.GunsightAreas.RegisterModule refused the class module (" .. tostring(result) .. ")") end
 end
 

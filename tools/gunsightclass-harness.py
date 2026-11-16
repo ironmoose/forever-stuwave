@@ -349,7 +349,7 @@ end
 -- Mounts the registered module the way the area host does: build(host), seat(rect), onShow(area).
 local function mount(area, id)
     STRICT_EVENTS = true
-    local spec = MODS[id or "class"]
+    local spec = MODS[id or "class"] or ((id == nil or id == "class") and FS.GunsightClassCombo) or nil
     check(spec, "no " .. (id or "class") .. " module registered")
     local host = CreateFrame("Frame", nil, FS.Gunsight.root)
     host:SetSize(1, 1)
@@ -417,16 +417,15 @@ def case(name: str):
     return deco
 
 
-case("registers_one_class_module_for_the_warlock_through_the_seam")(r"""
+case("registers_no_class_module_since_every_class_has_its_own")(r"""
 boot({ class = "WARLOCK" })
-local spec = MODS.class
-check(spec, "no module registered under the id class")
-local seen = {}
-for _, c in ipairs(spec.classes) do seen[c] = true end
-check(#spec.classes == 1 and seen.WARLOCK and not seen.ROGUE and not seen.DRUID, "classes must be exactly WARLOCK (the Rogue and the Druid have their own modules), got " .. #spec.classes)
+check(MODS.class == nil, "the generic module must not register a class spec (Rogue, Druid and Warlock have their own)")
+local spec = FS.GunsightClassCombo
+check(type(spec) == "table", "the combo spec is not reachable as FS.GunsightClassCombo")
 for _, f in ipairs({ "build", "seat", "onShow", "onHide" }) do
     check(type(spec[f]) == "function", "the module has no " .. f)
 end
+check(MODS.classSoon ~= nil, "the coming soon plate still registers")
 check(#DEGRADED == 0 and next(DEGRADED) == nil, "a degrade was logged: " .. tostring(next(DEGRADED)))
 """)
 
@@ -443,120 +442,23 @@ FS.GunsightAreas = nil
 loadAddonFile(CLASS_SRC, "Modules/CombatHud/GunsightClass.lua")
 """)
 
-case("shard_module_is_one_glyph_and_the_count_at_the_mockups_offsets")(r"""
-boot({ class = "WARLOCK", state = shardState(3) })
-local spec, host = mount("lower")
-local k = K * FS.Layout.Scale()
-local lines = texWith(host, "hud_shard_line.tga")
-check(#lines == 1, "one shard glyph, not a row: " .. #lines .. " line textures")
-for _, name in ipairs({ "hud_shard_glow.tga", "hud_shard_fill.tga", "hud_shard_facet.tga" }) do
-    check(#texWith(host, name) == 1, "exactly one " .. name .. " shown")
-end
-local gx, gy = cx(lines[1])
-near3(gx, MU.GLYPH_X + MU.GLYPH_W / 2, "glyph centre x")
-near3(gy, MU.GLYPH_Y + MU.GLYPH_H / 2, "glyph centre y")
--- the canvas is the baked line texture scaled by the glyph box over the 10 x 18 cell the files were baked for
-near3(lines[1].w, MU.GLYPH_W * k * TN.CANVAS_W / FS.Gunsight.G.SH_W, "glyph canvas width")
-near3(lines[1].h, MU.GLYPH_H * k * TN.CANVAS_H / FS.Gunsight.G.SH_H, "glyph canvas height")
-local glow = texWith(host, "hud_shard_glow.tga")[1]
-near3(glow.w, MU.GLYPH_W * k * TN.GLOW / FS.Gunsight.G.SH_W, "glow canvas width")
-local num = textOf(host, "3")
-check(num, "the count 3 is not drawn")
-local nx, ny = cx(num)
-near3(nx, MU.NUM_X, "count x (left edge)")
-near3(ny, MU.NUM_BASE - TEXT_MID * MU.NUM_PX, "count centre sits TEXT_MID of its size above the baseline")
-near3(fsPx(num), MU.NUM_PX, "count size in image px")
-colorIs(num.textColor, FS.Theme.COLOR_TEXT_WHITE, "a held count is white")
-local label = textOf(host, "SOUL SHARDS")
-check(label, "the label SOUL SHARDS is not drawn")
-local lx, ly = cx(label)
-near3(lx, MU.SHARD_LABEL_X, "label x")
-near3(ly, MU.SHARD_LABEL_Y - TEXT_MID * MU.LABEL_PX, "label y")
-near3(fsPx(label), MU.LABEL_PX, "label size")
-near3(label.textColor[4], MU.LABEL_ALPHA, "label alpha")
-colorIs(label.textColor, FS.Theme.COLOR_BORDER, "label is the violet")
--- the glyph is lit: the violet line at full alpha, the halo shown
-near3(lines[1].vertex[4], MU.SHARD_STROKE_LIT, "lit line alpha")
-near3(texWith(host, "hud_shard_fill.tga")[1].vertex[4], MU.SHARD_FILL_LIT, "lit fill alpha")
-""")
-
-case("shard_module_follows_the_hud_count_and_goes_dim_at_zero")(r"""
-boot({ class = "WARLOCK", state = shardState(3) })
-local spec, host = mount("lower")
-push(shardState(7))
-check(textOf(host, "7") and not textOf(host, "3"), "the count follows the push")
-check(#texWith(host, "hud_shard_line.tga") == 1, "still one glyph at seven shards")
-push(shardState(0))
-local zero = textOf(host, "0")
-check(zero, "zero shards still draws the count 0")
-colorIs(zero.textColor, FS.Theme.COLOR_MUTED, "the 0 is muted")
-local line = texWith(host, "hud_shard_line.tga")[1]
-check(line, "the dim glyph is still drawn at zero")
-near3(line.vertex[4], MU.SHARD_STROKE_OFF, "the glyph outline is dim at zero")
-check(#texWith(host, "hud_shard_glow.tga") == 0, "no halo at zero")
-near3(texWith(host, "hud_shard_fill.tga")[1].vertex[4], MU.SHARD_FILL_OFF, "unlit fill alpha")
-push(shardState(2))
-colorIs(textOf(host, "2").textColor, FS.Theme.COLOR_TEXT_WHITE, "back to white when held")
-check(#texWith(host, "hud_shard_glow.tga") == 1, "the halo returns")
-""")
-
-case("shard_module_draws_nothing_for_an_unknown_or_secret_count")(r"""
-boot({ class = "WARLOCK", state = shardState(3) })
-local spec, host = mount("lower")
-local none = shardState(nil)
-push(none)
-local tex, txt = drawn(host)
-check(#tex == 0 and #txt == 0, "an unknown count draws " .. #tex .. " textures and " .. #txt .. " strings")
-push(shardState(4))
-check(textOf(host, "4"), "back after an unknown count")
-push(shardState(SECRET))
-tex, txt = drawn(host)
-check(#tex == 0 and #txt == 0, "a secret count draws " .. #tex .. " textures and " .. #txt .. " strings")
-push(shardState("x"))
-tex, txt = drawn(host)
-check(#tex == 0 and #txt == 0, "a non number count draws nothing")
-""")
-
-case("shard_module_subscribes_to_the_hud_only_while_shown")(r"""
-boot({ class = "WARLOCK", state = shardState(3) })
-check(#SUBS == 0, "no subscription before the module is shown, got " .. #SUBS)
-local spec, host = mount("lower")
-check(#SUBS == 1, "one subscription while shown, got " .. #SUBS)
-spec.onShow("lower")
-check(#SUBS == 1, "a second onShow does not subscribe twice, got " .. #SUBS)
-spec.onHide("lower")
-check(#SUBS == 0, "unsubscribed on hide, got " .. #SUBS)
-spec.onShow("upper")
-check(#SUBS == 1, "subscribed again on the next show")
-check(textOf(host, "3"), "the first push after a re-show repaints at once")
-""")
-
-case("shard_module_sits_in_the_upper_area_with_the_same_offsets")(r"""
-boot({ class = "WARLOCK", state = shardState(5) })
-local spec, host = mount("upper")
-local line = texWith(host, "hud_shard_line.tga")[1]
-local gx, gy = cx(line)
-near3(gx, MU.GLYPH_X + MU.GLYPH_W / 2, "glyph x in the upper area")
-near3(gy, MU.UPPER_Y + (MU.GLYPH_Y - MU.LOWER_Y) + MU.GLYPH_H / 2, "glyph y follows the area")
-""")
-
 case("rescale_reseats_in_place_and_builds_nothing")(r"""
-boot({ class = "WARLOCK", state = shardState(3), height = 1440 })
+boot({ class = "ROGUE", combo = 3, height = 1440 })
 local spec, host = mount("lower")
-local line = texWith(host, "hud_shard_line.tga")[1]
+local fills = texWith(host, "\\hud_diamond.tga")
 local frames, texes, strs = #FRAMES, #TEXTURES, #FONTSTRINGS
 SetScreen(1200)
 fire("UI_SCALE_CHANGED")
 spec.seat(RECTS.lower)
 local k = K * 1200 / 1440
-near3(line.w, MU.GLYPH_W * k * TN.CANVAS_W / FS.Gunsight.G.SH_W, "glyph canvas follows the scale")
-local gx, gy = cx(line)
-near3(gx, MU.GLYPH_X + MU.GLYPH_W / 2, "glyph x after the rescale")
+near3(fills[1].w, 2 * MU.PIP_R * k, "pip width follows the scale")
+local gx = cx(fills[1])
+near3(gx, MU.PIP_X0, "pip x after the rescale")
 near3(fsPx(textOf(host, "3")), MU.NUM_PX, "count size in image px after the rescale")
 check(#FRAMES == frames and #TEXTURES == texes and #FONTSTRINGS == strs, "a rescale built regions")
 spec.seat(RECTS.upper)
-local _, uy = cx(line)
-near3(uy, MU.UPPER_Y + (MU.GLYPH_Y - MU.LOWER_Y) + MU.GLYPH_H / 2, "seat to another rect moves it")
+local _, uy = cx(fills[1])
+near3(uy, MU.UPPER_Y + (MU.PIP_Y - MU.LOWER_Y), "seat to another rect moves it")
 """)
 
 case("combo_module_is_five_yellow_pips_and_the_count")(r"""
@@ -768,8 +670,8 @@ local tex, txt = drawn(host)
 check(#tex == 0 and #txt == 0, "no UnitPower: nothing drawn, got " .. #tex .. " textures and " .. #txt .. " strings")
 """)
 
-case("combo_module_draws_nothing_without_a_hostile_live_target_but_shards_do")(r"""
-boot({ class = "DRUID", form = { 3, "ENERGY" }, combo = 3 })
+case("combo_module_draws_nothing_without_a_hostile_live_target")(r"""
+boot({ class = "ROGUE", combo = 3 })
 local spec, host = mount("lower")
 check(textOf(host, "3"), "a hostile target: the combo module draws")
 TARGET.exists = false
@@ -787,12 +689,6 @@ check(#tex == 0 and #txt == 0, "a dead target: nothing drawn")
 TARGET.dead = false
 fire("PLAYER_TARGET_CHANGED")
 check(textOf(host, "3") and #texWith(host, "\\hud_diamond.tga") == 5, "a hostile target again: drawn")
--- the module itself does not gate on the target (the registry does, see the real areas cases below); it draws what the
--- Hud says whenever it is mounted. CombatHud shows the count under the cast bar while the registry hides this module.
-boot({ class = "WARLOCK", state = shardState(3) })
-TARGET.exists = false
-local _, host2 = mount("lower")
-check(textOf(host2, "3") and #texWith(host2, "hud_shard_line.tga") == 1, "a mounted shard module draws the Hud's count")
 """)
 
 case("combo_module_rereads_a_frame_after_it_is_shown_by_a_target_change")(r"""
@@ -809,28 +705,11 @@ flushTimers()
 check(textOf(host, "4") and litCount(host) == 4, "the next frame's re-read draws them")
 """)
 
-case("real_areas_a_shard_module_hides_and_unsubscribes_with_no_target_and_returns_with_the_count")(r"""
-boot({ class = "WARLOCK", state = shardState(3), realAreas = true })
-local host = FS.GunsightAreas.Host("lower")
-local subs = #SUBS
-check(isVisible(host) and textOf(host, "3"), "with a target the count is drawn")
-TARGET.exists = false
-fire("PLAYER_TARGET_CHANGED")
-local tex, txt = drawn(host)
-check(not isVisible(host) and #tex == 0 and #txt == 0, "no target: nothing is visible")
-check(#SUBS == subs - 1, "and the module left the Hud subscription, got " .. #SUBS .. " from " .. subs)
-push(shardState(5))
-TARGET.exists = true
-fire("PLAYER_TARGET_CHANGED")
-check(isVisible(host) and textOf(host, "5") and not textOf(host, "3"), "a target: the current count, not the stale one")
-check(#SUBS == subs, "and it subscribes again")
-""")
-
-case("real_areas_the_rogue_and_druid_get_nothing_from_this_module")(r"""
--- The Rogue (GunsightRogue.lua) and the Druid (GunsightDruid.lua) have their own class modules, so under the real host this
--- generic module draws no pips for them even with a target and combo points (its combo path stays for a mount in this harness;
--- with neither class module loaded here, the host may show its coming soon plate, which is not this module's pips).
-for _, cls in ipairs({ "DRUID", "ROGUE" }) do
+case("real_areas_the_rogue_druid_and_warlock_get_nothing_from_this_module")(r"""
+-- The Rogue (GunsightRogue.lua), the Druid (GunsightDruid.lua) and the Warlock (GunsightWarlock.lua) have their own class modules,
+-- so under the real host this generic module draws no pips and no count for them (its combo path stays for a mount in this
+-- harness; with none of the class modules loaded here, the host may show its coming soon plate, which is not this module's pips).
+for _, cls in ipairs({ "DRUID", "ROGUE", "WARLOCK" }) do
     boot({ class = cls, form = { 3, "ENERGY" }, combo = 3, realAreas = true })
     local host = FS.GunsightAreas.Host("lower")
     check(#texWith(host, "\\hud_diamond.tga") == 0 and not textOf(host, "3"),

@@ -110,6 +110,8 @@ Modules/CombatHud/ShamanTotems.lua
 Modules/CombatHud/GunsightDots.lua
 Modules/CombatHud/PaladinArt.lua
 Modules/CombatHud/GunsightSeals.lua
+Modules/CombatHud/WarlockArt.lua
+Modules/CombatHud/WarlockState.lua
 Modules/CombatHud/GunsightFrame.lua
 Modules/CombatHud/GunsightBoxes.lua
 Modules/CombatHud/GunsightTape.lua
@@ -152,6 +154,7 @@ Modules/CombatHud/GunsightRogue.lua
 Modules/CombatHud/DruidArt.lua
 Modules/CombatHud/DruidState.lua
 Modules/CombatHud/GunsightDruid.lua
+Modules/CombatHud/GunsightWarlock.lua
 Modules/Compat/Questie.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua
