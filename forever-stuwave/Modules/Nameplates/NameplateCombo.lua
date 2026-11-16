@@ -1,8 +1,9 @@
 -- Forever STUwave: combo points on the target's nameplate
 --
--- Five pips in a row off the right edge of the current target's STUwave plate (Nameplates.lua), for a Rogue, and for a Druid
--- while its power is energy (Cat Form). A pip lights pink when the count reaches it; at five every pip turns gold, the same
--- "ready" cue as the Rogue dagger fan.
+-- Five pips in a row under the current target's STUwave plate (Nameplates.lua), for a Rogue, and for a Druid
+-- while its power is energy (Cat Form). A pip is a hard edged STUwave diamond (combo_pip_*.tga, from
+-- tools/assets/generate_combo_pips.py) that lights pink with a soft glow when the count reaches it; at five every pip turns
+-- gold, the same "ready" cue as the Rogue dagger fan.
 --
 --   * UnitPower(player, ComboPoints) may be secret, so Lua never looks at it: each pip is a StatusBar from i - 1 to i (and a
 --     gold one from 4 to 5) fed the raw value, and the ENGINE decides what fills.
@@ -26,24 +27,23 @@ FS.NameplateCombo = M
 local COMBO_POWER = (Enum and Enum.PowerType and Enum.PowerType.ComboPoints) or 4
 local ENERGY_POWER = (Enum and Enum.PowerType and Enum.PowerType.Energy) or 3
 local COUNT = 5
-local PIP, GAP, LEFT_GAP = 9, 2, 4        -- physical px: a pip, between pips, from the plate's right edge
+local PIP, GAP = 16, 4                    -- physical px: a pip (one texel each), between pips
+-- Under the plate, below the slot Nameplates.lua keeps for the target's cast bar (its gap and height, plate units), so a cast
+-- never covers them.
+local CAST_GAP, CAST_H, BELOW = 2, 6, 3
 local STRATA = "HIGH"
 
-local function Hex(h)
-    return tonumber(h:sub(2, 3), 16) / 255, tonumber(h:sub(4, 5), 16) / 255, tonumber(h:sub(6, 7), 16) / 255
-end
-local COL = {
-    rim = { Hex("#120822") }, track = { Hex("#2a1d48") }, line = { Hex("#6b4fa8") },
-    lit = { Hex("#ff4dd8") }, gold = { Hex("#ffd23f") },
-}
+local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
+local REST, LIT, GLOW = MEDIA .. "combo_pip_rest.tga", MEDIA .. "combo_pip_lit.tga", MEDIA .. "combo_pip_glow.tga"
+local PINK = { 1, 0x4d / 255, 0xd8 / 255 }
+local GOLD = { 1, 0xd2 / 255, 0x3f / 255 }
+local GLOW_A = 0.55
 
 M.SETTING = {
     key = "nameplates.comboPips", default = true, label = "Combo points on the target",
-    tip = "Five pips beside the target's nameplate, pink as they build and gold at five. A Druid sees them in Cat Form.",
+    tip = "Five pips under the target's nameplate, pink as they build and gold at five. A Druid sees them in Cat Form.",
 }
 Config.RegisterDefault(M.SETTING.key, M.SETTING.default)
-
-local FLAT = "Interface\\Buttons\\WHITE8X8"
 
 local host, pips
 local seatedOn            -- the plate root the pips hang from
@@ -56,16 +56,24 @@ local function Applies()
 end
 M.Applies = Applies
 
-local function Bar(parent, level, lo, hi, c)
+-- A pip bar: the ENGINE shows it once the count reaches hi (lo to hi, fed the raw count).
+local function Bar(parent, level, tex, lo, hi, c, a, add)
     local b = CreateFrame("StatusBar", nil, parent)
     b:SetFrameLevel(parent:GetFrameLevel() + level)
-    b:SetStatusBarTexture(FLAT)
-    b:SetStatusBarColor(c[1], c[2], c[3], 1)
+    b:SetStatusBarTexture(tex)
+    b:SetStatusBarColor(c[1], c[2], c[3], a)
+    local t = b.GetStatusBarTexture and b:GetStatusBarTexture()
+    if t then
+        if add and t.SetBlendMode then t:SetBlendMode("ADD") end
+        if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(true); t:SetTexelSnappingBias(0) end
+    end
     b:SetMinMaxValues(lo, hi)
     b:SetValue(lo)
     return b
 end
 
+-- Each pip, back to front: its glow (ADD, twice its size, pink, gold at five), the resting diamond, the lit diamond (pink), the
+-- gold one over it at five.
 local function Build()
     if host then return end
     host = CreateFrame("Frame", nil, UIParent)
@@ -75,16 +83,15 @@ local function Build()
     pips = {}
     for i = 1, COUNT do
         local p = CreateFrame("Frame", nil, host)
-        p:SetFrameLevel(host:GetFrameLevel() + 1)
-        p.rim = p:CreateTexture(nil, "BACKGROUND", nil, 0)
-        p.rim:SetAllPoints(p)
-        p.rim:SetColorTexture(COL.rim[1], COL.rim[2], COL.rim[3], 1)
-        p.line = p:CreateTexture(nil, "BACKGROUND", nil, 1)
-        p.line:SetColorTexture(COL.line[1], COL.line[2], COL.line[3], 1)
-        p.track = p:CreateTexture(nil, "BACKGROUND", nil, 2)
-        p.track:SetColorTexture(COL.track[1], COL.track[2], COL.track[3], 1)
-        p.fill = Bar(p, 1, i - 1, i, COL.lit)
-        p.gold = Bar(p, 2, COUNT - 1, COUNT, COL.gold)
+        p:SetFrameLevel(host:GetFrameLevel() + 2)
+        p.glow = Bar(host, 1, GLOW, i - 1, i, PINK, GLOW_A, true)
+        p.goldGlow = Bar(host, 1, GLOW, COUNT - 1, COUNT, GOLD, GLOW_A, true)
+        p.rest = p:CreateTexture(nil, "BACKGROUND")
+        p.rest:SetAllPoints(p)
+        p.rest:SetTexture(REST, "CLAMP", "CLAMP", "NEAREST")
+        if p.rest.SetSnapToPixelGrid then p.rest:SetSnapToPixelGrid(true); p.rest:SetTexelSnappingBias(0) end
+        p.fill = Bar(p, 1, LIT, i - 1, i, PINK, 1)
+        p.gold = Bar(p, 2, LIT, COUNT - 1, COUNT, GOLD, 1)
         pips[i] = p
     end
 end
@@ -107,21 +114,17 @@ local function Size()
     local pip, gap = PIP * px, GAP * px
     host:SetSize((COUNT * PIP + (COUNT - 1) * GAP) * px, pip)
     host:ClearAllPoints()
-    host:SetPoint("LEFT", seatedOn, "RIGHT", LEFT_GAP * px, 0)
+    local pad = FS.Theme and tonumber(FS.Theme.SLICE_GLOW_PAD) or 0
+    host:SetPoint("TOP", seatedOn, "BOTTOM", 0, -(math.max(CAST_GAP, pad) + CAST_H + BELOW))
     for i, p in ipairs(pips) do
         p:SetSize(pip, pip)
         p:ClearAllPoints()
         p:SetPoint("LEFT", host, "LEFT", (i - 1) * (pip + gap), 0)
-        p.line:ClearAllPoints()
-        p.line:SetPoint("TOPLEFT", p, "TOPLEFT", px, -px)
-        p.line:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -px, px)
-        p.track:ClearAllPoints()
-        p.track:SetPoint("TOPLEFT", p, "TOPLEFT", 2 * px, -2 * px)
-        p.track:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -2 * px, 2 * px)
-        for _, b in ipairs({ p.fill, p.gold }) do
+        for _, b in ipairs({ p.fill, p.gold }) do b:SetAllPoints(p) end
+        for _, b in ipairs({ p.glow, p.goldGlow }) do
+            b:SetSize(2 * pip, 2 * pip)
             b:ClearAllPoints()
-            b:SetPoint("TOPLEFT", p.track, "TOPLEFT")
-            b:SetPoint("BOTTOMRIGHT", p.track, "BOTTOMRIGHT")
+            b:SetPoint("CENTER", p, "CENTER")
         end
     end
 end
@@ -131,8 +134,7 @@ local function Feed()
     local ok, v = pcall(UnitPower, "player", COMBO_POWER)
     if not ok or (v == nil and not FS.IsSecret(v)) then v = 0 end
     for _, p in ipairs(pips) do
-        pcall(p.fill.SetValue, p.fill, v)
-        pcall(p.gold.SetValue, p.gold, v)
+        for _, b in ipairs({ p.glow, p.goldGlow, p.fill, p.gold }) do pcall(b.SetValue, b, v) end
     end
 end
 

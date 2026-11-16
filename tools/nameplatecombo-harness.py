@@ -51,6 +51,10 @@ local function Region()
     local r = { shown = true, points = {} }
     function r:SetAllPoints() end
     function r:SetColorTexture() end
+    function r:SetTexture(t) self.tex = t end
+    function r:SetSnapToPixelGrid() end
+    function r:SetTexelSnappingBias() end
+    function r:SetBlendMode(m) self.blend = m end
     function r:SetPoint(...) self.points[#self.points + 1] = { ... } end
     function r:ClearAllPoints() self.points = {} end
     return r
@@ -74,7 +78,8 @@ function CreateFrame(kind, _, parent)
     function f:RegisterEvent(e) self.events[e] = true end
     function f:RegisterUnitEvent(e) self.events[e] = true end
     function f:CreateTexture() return Region() end
-    function f:SetStatusBarTexture() end
+    function f:SetStatusBarTexture(t) self.bartex = Region() self.bartex.tex = t end
+    function f:GetStatusBarTexture() return self.bartex end
     function f:SetStatusBarColor(r, g, b) self.color = { r, g, b } end
     function f:SetMinMaxValues(lo, hi) self.lo, self.hi = lo, hi end
     function f:SetValue(v) self.value = v end
@@ -121,16 +126,26 @@ Fire("PLAYER_TARGET_CHANGED")
 local host
 for _, f in ipairs(FRAMES()) do if f.parent == a and f.kind == "Frame" and f.strata == "HIGH" then host = f end end
 check(host ~= nil and host.shown, "pips hang from the target's plate and show")
+local pt = host.points[1]
+check(pt and pt[1] == "TOP" and pt[2] == a and pt[3] == "BOTTOM" and pt[5] < -8, "the row sits under the plate, below the cast bar slot")
 
 local fills, golds = {}, {}
 for _, f in ipairs(FRAMES()) do
-    if f.kind == "StatusBar" then
-        if f.lo == 4 and f.hi == 5 and f.color[1] > 0.99 and f.color[2] > 0.8 then golds[#golds + 1] = f
+    if f.kind == "StatusBar" and f.bartex.tex:find("combo_pip_lit") then
+        if f.lo == 4 and f.hi == 5 and f.color[2] > 0.8 then golds[#golds + 1] = f
         else fills[#fills + 1] = f end
     end
 end
 check(#fills == 5 and #golds == 5, "five pink and five gold bars: " .. #fills .. " " .. #golds)
 for i, f in ipairs(fills) do check(f.lo == i - 1 and f.hi == i, "pip " .. i .. " runs " .. (i - 1) .. " to " .. i) end
+local glows = 0
+for _, f in ipairs(FRAMES()) do
+    if f.kind == "StatusBar" and f.bartex.tex:find("combo_pip_glow") then
+        glows = glows + 1
+        check(f.bartex.blend == "ADD", "a glow is additive")
+    end
+end
+check(glows == 10, "a pink and a gold glow per pip: " .. glows)
 
 W.power = 3
 Fire("UNIT_POWER_UPDATE", "player")

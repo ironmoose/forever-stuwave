@@ -45,6 +45,8 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
                        "druid_chip_pb": (32, 32), "druid_chip_sm": (32, 32)},
     # generate_loc_tick.py: one glowing tick of the loss of control ring, rotated in Lua.
     "loc_tick": (64, 64),
+    # generate_combo_pips.py: the nameplate combo pip, rest and lit (white mask) diamonds and its soft glow.
+    "combo_pips": {"combo_pip_rest": (16, 16), "combo_pip_lit": (16, 16), "combo_pip_glow": (32, 32)},
     # generate_queue_eye.py: our own group finder eye, lid (cyan) and pupil (pink), tinted in Lua.
     "queue_eye": {"queue_eye_lid": (64, 64), "queue_eye_pupil": (64, 64)},
     # generate_damage_meter_cells.py: the damage meter ladder's gap tile, one leaning pip and its gap.
