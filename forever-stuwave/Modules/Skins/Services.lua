@@ -357,26 +357,45 @@ end
 
 -- The skill up mark: the stock arrow (a texture, re-atlased by every row init) held, a chip of ours in its place on the right edge of
 -- the mark frame, so the stock count (a number left of the arrow) keeps its place. It shows and hides with that frame, and takes
--- its tier from the atlas the stock code last gave the arrow.
-local CHIP_W, CHIP_PAD, CHIP_PITCH = 16, 2, 4
+-- its tier from the atlas the stock code last gave the arrow. Its chevrons are drawn in 1 px wide, 2 px tall steps (a smooth
+-- diagonal) with a 2 px gap between them: the 2 px cell chevrons of the fold marks touch only at their corners, and stacked
+-- three high they read as a checkerboard.
+local CHIP_W, CHIP_PAD, CHIP_PITCH = 15, 2, 4
+local STEP_W, STEP_H = 9, 6   -- one chip chevron: STEP_W columns, apex at the top, each column 1 x 2 px
+
+local function NewStepChevron(host)
+    local cells = {}
+    for i = 1, STEP_W do cells[i] = Kit.Rect(host, 0, 0, 1, 2, C.cyan, 1, "OVERLAY", 7) end
+    return cells
+end
+
+-- Seats a chip chevron with its box's top left cy px down from the middle of `ref` (and centred across it).
+local function SeatStepChevron(cells, ref, cy, host)
+    local apex = (STEP_W - 1) / 2
+    for i, cell in ipairs(cells) do
+        local x = i - 1
+        Kit.Place(cell, ref, x - apex - 0.5, cy + math.abs(x - apex), 1, 2, "TOPLEFT", "CENTER", host)
+    end
+end
 
 local function BuildChip(ups)
     local chip = { cells = {} }
     chip.ref = ups:CreateTexture(nil, "BACKGROUND", nil, -8)
     Kit.Place(chip.ref, ups, -1, 0, CHIP_W, 10, "RIGHT", "RIGHT")
     chip.box = Char.Box(ups, "OVERLAY", chip.ref)
-    for i = 1, 3 do chip.cells[i] = NewChevron(ups) end
+    for i = 1, 3 do chip.cells[i] = NewStepChevron(ups) end
     return chip
 end
 
 local function PaintChip(ups, chip, atlas)
     local tier = TierOf(atlas)
     local color = tier.color
-    Kit.Move(chip.ref, -1, 0, CHIP_W, CHEV.up.h + CHIP_PITCH * (tier.n - 1) + 2 * CHIP_PAD)
-    Char.PaintBox(chip.box, Kit.Mix(C.ink, color, 0.16), 1, color, 1, 1)
+    local glyphH = STEP_H + CHIP_PITCH * (tier.n - 1)
+    Kit.Move(chip.ref, -1, 0, CHIP_W, glyphH + 2 * CHIP_PAD)
+    Char.PaintBox(chip.box, C.ink, 1, color, 1, 1)
     for i = 1, 3 do
         PaintCells(chip.cells[i], color, i <= tier.n)
-        if i <= tier.n then SeatChevron(chip.cells[i], "up", chip.ref, "CENTER", 0, CHIP_PITCH * (i - 1) - CHIP_PITCH / 2 * (tier.n - 1), ups) end
+        if i <= tier.n then SeatStepChevron(chip.cells[i], chip.ref, CHIP_PITCH * (i - 1) - glyphH / 2, ups) end
     end
 end
 

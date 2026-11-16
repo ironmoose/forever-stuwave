@@ -556,9 +556,16 @@ case("professions: skill up marks hold the stock arrow and draw a chip with one 
         assert(u.Icon.alpha == 0, 'stock arrow kept')
     end
     local a, b, c = shown(low), shown(med), shown(high)
-    assert(a[1] == 5 and a[2] == 0 and a[3] == 0, 'easy is not one chevron')
-    assert(b[1] == 5 and b[2] == 5 and b[3] == 0, 'medium is not two chevrons')
-    assert(c[1] == 5 and c[2] == 5 and c[3] == 5, 'optimal is not three chevrons')
+    assert(a[1] == 9 and a[2] == 0 and a[3] == 0, 'easy is not one chevron')
+    assert(b[1] == 9 and b[2] == 9 and b[3] == 0, 'medium is not two chevrons')
+    assert(c[1] == 9 and c[2] == 9 and c[3] == 9, 'optimal is not three chevrons')
+    -- the chevrons stack with a gap: no cell of one touches a cell of the next
+    local hc = S.skillUps[high].cells
+    for i = 1, 8 do
+        local _, _, _, b1 = hc[1][i]:Rect()
+        local _, t2 = hc[2][i]:Rect()
+        assert((t2 - b1) * PPU >= 1.99, string.format('chevrons touch in column %d (%.2f px apart)', i, (t2 - b1) * PPU))
+    end
     local g, y, o = hue(low), hue(med), hue(high)
     assert(g[2] > g[1] and g[2] > 0.8, 'easy not green')
     assert(y[1] > 0.9 and y[2] > 0.75 and y[3] < 0.4, 'medium not yellow')
@@ -575,7 +582,7 @@ case("professions: skill up marks hold the stock arrow and draw a chip with one 
     -- the stock code swaps the atlas when a recipe is re-initialised: the chip re-tiers
     low.Icon:SetAtlas('Professions-Icon-Skill-High')
     local d = shown(low)
-    assert(d[1] == 5 and d[2] == 5 and d[3] == 5, 'the chip did not follow the atlas')
+    assert(d[1] == 9 and d[2] == 9 and d[3] == 9, 'the chip did not follow the atlas')
     assert(hue(low)[1] > 0.9, 'the chip did not take the new tier colour')
     low.Icon:SetAtlas('Professions-Icon-Skill-Low')
     assert(shown(low)[2] == 0, 'the chip did not go back')
