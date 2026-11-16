@@ -231,6 +231,22 @@ case("the_shards_light_a_gem_each_up_to_five_and_the_number_follows", """
     NoLog()
 """)
 
+case("a_shard_spent_or_gained_while_hidden_plays_nothing_when_the_module_shows", """
+    Build()
+    push(HS(4)); Paint(__now)
+    SPEC.onHide("lower")
+    HUD = HS(3)                              -- a summon with no target: the module is hidden, the Hud moves on
+    __now = __now + 30
+    SPEC.onShow("lower")                     -- Subscribe pushes the current state at once
+    Paint(__now)
+    assert(M.D.spendAt == nil or __now - M.D.spendAt > 5, "no spend plays on show for a shard spent while hidden")
+    assert(M.D.gainAt == nil or __now - M.D.gainAt > 5, "and no gain")
+    assert(Lit() == 3 and Txt(P().num) == "3", "the count is the current one")
+    push(HS(2)); Paint(__now)
+    assert(M.D.spendAt == __now, "a spend after the show still plays")
+    NoLog()
+""")
+
 case("the_cue_lane_names_what_to_do_and_the_priority_holds", """
     Build()
     push(HS(3)); World()

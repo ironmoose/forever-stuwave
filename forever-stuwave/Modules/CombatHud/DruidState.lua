@@ -264,6 +264,7 @@ function State.Cooldown(key)
     if not ok or type(c) ~= "table" or IsSecret(c) then return nil end
     local active, gcd = PlainOf(c.isActive, "boolean"), PlainOf(c.isOnGCD, "boolean")
     if active == nil then return nil end
+    if active and gcd == nil then return nil end   -- an unreadable GCD flag: it may be the GCD alone, so say nothing
     return (active and gcd ~= true) and "cool" or "ready"
 end
 

@@ -671,15 +671,19 @@ local function Paint(now)
     local reduced = Reduced()
     local combat = InCombat()
     local sa = Data.SpendAt()
+    -- A cast is played only while it is fresh: one made while the module was hidden (Slice and Dice with no target is routine)
+    -- is marked seen without a throw or a recoil when the module shows again.
     if sa and sa ~= anim.spendSeen then
         anim.spendSeen = sa
-        anim.spendAt = now
-        anim.thrown = min(5, max(1, Data.SpendPoints() or 5))
+        if now - sa < C.THROW then
+            anim.spendAt = now
+            anim.thrown = min(5, max(1, Data.SpendPoints() or 5))
+        end
     end
     local ba = Data.BuilderAt()
     if ba and ba ~= anim.builderSeen then
         anim.builderSeen = ba
-        anim.recoilAt = now
+        if now - ba < C.THROW then anim.recoilAt = now end
     end
     PaintFan(now, reduced)
     PaintStealth(now, reduced)

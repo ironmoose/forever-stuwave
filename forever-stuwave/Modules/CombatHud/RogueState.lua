@@ -261,7 +261,7 @@ local function NotePoints()
     local power = (Enum and Enum.PowerType and Enum.PowerType.ComboPoints) or TUNING.COMBO_POWER
     local v = Call(UnitPower, "player", power)
     if IsSecret(v) or type(v) ~= "number" or v ~= v or v < 0 then return end
-    if v > 0 then lastPoints, lastPointsAt = math.floor(v), Now() end
+    if v > 0 then lastPoints, lastPointsAt = math.floor(v), Now() else lastPoints = nil end   -- a plain 0: nothing built now
 end
 State.NotePoints = NotePoints
 
@@ -385,6 +385,12 @@ function State.Start()
         elseif event == "UPDATE_STEALTH" then
             Guard("stealth", ReadStealth)
         elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+            if event == "PLAYER_REGEN_DISABLED" then
+                -- a fight starts: a count remembered from before it is no guide to what this fight builds; read it again now
+                -- (it may still be plain at this instant) and otherwise let Slice and Dice assume SND_ASSUME_POINTS
+                lastPoints = nil
+                Guard("points", NotePoints)
+            end
             Notify("combat")
             if event == "PLAYER_REGEN_ENABLED" then Guard("refresh", State.Refresh) end
         elseif event == "PLAYER_TARGET_CHANGED" then

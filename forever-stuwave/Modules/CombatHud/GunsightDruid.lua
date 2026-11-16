@@ -469,12 +469,14 @@ local function FeedPower()
     local kind = D.kind
     if kind == "cat" then
         local e = Power(POW_ENERGY)
-        D.energyNum = e ~= nil and PlainCount(e) or nil
-        if e ~= nil then P.energyBar:SetValue(e); TextCount(P.energyNum, e) else P.energyBar:SetValue(0); TextWord(P.energyNum, "") end
+        -- a secret is tested first: an equality test on a secret is refused by the client
+        local hasE = IsSecret(e) or e ~= nil
+        D.energyNum = (hasE and not IsSecret(e)) and PlainCount(e) or nil
+        if hasE then P.energyBar:SetValue(e); TextCount(P.energyNum, e) else P.energyBar:SetValue(0); TextWord(P.energyNum, "") end
         local c = Power(POW_COMBO)
         local feed = 0
-        if c == nil then D.combo = nil
-        elseif IsSecret(c) then D.combo, feed = nil, c
+        if IsSecret(c) then D.combo, feed = nil, c
+        elseif c == nil then D.combo = nil
         else
             local n = PlainCount(c)
             D.combo = n and min(n, G.SLASH_N) or nil
@@ -486,8 +488,9 @@ local function FeedPower()
         end
     elseif kind == "bear" then
         local r = Power(POW_RAGE)
-        D.rageNum = r ~= nil and PlainCount(r) or nil
-        if r ~= nil then P.rageBar:SetValue(r); TextCount(P.rageNum, r) else P.rageBar:SetValue(0); TextWord(P.rageNum, "") end
+        local hasR = IsSecret(r) or r ~= nil
+        D.rageNum = (hasR and not IsSecret(r)) and PlainCount(r) or nil
+        if hasR then P.rageBar:SetValue(r); TextCount(P.rageNum, r) else P.rageBar:SetValue(0); TextWord(P.rageNum, "") end
     end
 end
 
@@ -870,8 +873,14 @@ end
 -- Events, ticker
 -------------------------------------------------------------------------------
 
-local function OnState()
+local function OnState(reason)
     if not mod then return end
+    if reason == "cooldown" then
+        -- SPELL_UPDATE_COOLDOWN fires many times a second in a fight and a full read allocates (spell lookups and the
+        -- cooldown tables), so a burst only moves the next slow poll up to at most 0.1 s away
+        pollAcc = math.max(pollAcc, C.POLL - 0.1)
+        return
+    end
     local ok, err = pcall(ReadAll)
     if not ok then LogOnce("read", err) end
     if subscribed then SafePaint(GetTime()) end

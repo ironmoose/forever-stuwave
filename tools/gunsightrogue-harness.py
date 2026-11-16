@@ -474,6 +474,26 @@ case("reduced_motion_holds_the_breath_and_the_spin", """
     NoLog()
 """)
 
+case("a_cast_made_while_hidden_does_not_throw_the_fan_when_it_shows", """
+    Fight()
+    local p = P()
+    Tick(0.05)
+    SPEC.onHide("lower")
+    Power(5); Cast("snd"); Power(0)          -- Slice and Dice with no target: the module is hidden
+    Cast("sinister")
+    __now = __now + 5
+    SPEC.onShow("lower")
+    Tick(0.05)
+    local n = 0
+    for j = 1, 5 do for k = 0, 11 do if Shown(p.streak[j][k]) then n = n + 1 end end end
+    check(not Shown(p.flash) and n == 0 and not Shown(p.spark), "an old cast plays no throw on show (" .. n .. " streaks)")
+    -- a fresh cast after the show still throws
+    Power(5); Cast("eviscerate"); Power(0)
+    Tick(0.05)
+    check(Shown(p.flash), "a fresh finisher throws")
+    NoLog()
+""")
+
 case("onhide_stops_the_ticker_and_the_events_but_the_ledger_keeps_listening", """
     Fight()
     check(Ticking() and R.frame.events["UNIT_POWER_UPDATE"] ~= nil, "running")

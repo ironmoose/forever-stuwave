@@ -96,7 +96,12 @@ if not (type(State) == "table" and State.Get) then
     LogOnce("nostate", "FS.WarlockState is missing, the Warlock module is not built")
     return
 end
-if State.Start then State.Start() end
+-- The ledger listens from load (a cast before the first target still counts), but only on a Warlock: any other class would
+-- carry its events and spell book reads for the whole session for nothing.
+do
+    local okC, _, token = pcall(UnitClass, "player")
+    if okC and not (FS.IsSecret and FS.IsSecret(token)) and token == "WARLOCK" and State.Start then State.Start() end
+end
 
 local SPR, SCALE, ATL = Art.sprites, Art.SCALE, Art.ATLAS
 local CX, CY, R_IN = Art.CX, Art.CY, Art.R_IN
@@ -836,6 +841,7 @@ end
 
 local function OnAreaHidden()
     if not mod then return end
+    D.shards = nil      -- the first push after the next show has nothing to compare with, so no stale gain or spend plays
     if subscribed then
         subscribed = false
         State.Unsubscribe(OnWarlockState)

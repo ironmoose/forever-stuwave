@@ -185,6 +185,13 @@ end
 function Near(a, b, eps) return math.abs(a - b) <= (eps or 1e-6) end
 function NoLog() for k, v in pairs(__logged or {}) do error("logged " .. k .. ": " .. tostring(v)) end end
 function Cue() M.Paint(__now); return M.cue.word, M.cue.hot end
+-- A cooldown change: the module coalesces SPELL_UPDATE_COOLDOWN bursts into its next slow poll (at most 0.1 s away), so the
+-- event is followed by 0.11 s of its own ticker, as the client would run it.
+function CooldownChanged()
+    fire("SPELL_UPDATE_COOLDOWN")
+    local f = M.frame and M.frame.scripts and M.frame.scripts.OnUpdate
+    if f then f(M.frame, 0.11) end
+end
 function Refresh() fire("UPDATE_SHAPESHIFT_FORM"); end
 function Form(kind)
     if kind == "cat" then W.powerType = { 3, "ENERGY" }; W.formId = 1
@@ -354,20 +361,20 @@ case("shift_needs_a_plain_low_energy_and_a_ready_chip", """
     w = Cue()
     assert(w == "SHIFT" and M.cue.hot, "ready and under the notch: SHIFT")
     W.cd["Shifting Power"] = true
-    fire("SPELL_UPDATE_COOLDOWN")
+    CooldownChanged()
     w = Cue()
     assert(w == "CAT" and P().chipSp.status == "cool", "cooling")
     assert(P().chipSp.bar.timer ~= nil, "the engine's duration object drives the fill")
     -- no timer API: a ledger fraction
     NO_TIMER = true
     P().chipSp.status = nil
-    fire("SPELL_UPDATE_COOLDOWN")
+    CooldownChanged()
     Cast("Shifting Power", 1000)
     Paint(1004)
     assert(P().chipSp.bar.value and Near(P().chipSp.bar.value, 0.5, 0.06), "a ledger fraction of the 8 s cooldown: " .. tostring(P().chipSp.bar.value))
     NO_TIMER = false
     W.known["Shifting Power"] = false
-    fire("SPELL_UPDATE_COOLDOWN")
+    CooldownChanged()
     assert(P().chipSp.status == "none", "not learned")
     NoLog()
 """)
@@ -402,7 +409,7 @@ case("the_bear_rage_bar_ticks_and_cue_priority", """
     w = Cue()
     assert(w == "BEAR", "five fresh stacks, Primal Bite cooling: BEAR")
     W.cd["Primal Bite"] = false
-    fire("SPELL_UPDATE_COOLDOWN")
+    CooldownChanged()
     w = Cue()
     assert(w == "BITE" and M.cue.hot, "Primal Bite ready: BITE")
     Paint(1000 + 5 + 13)
@@ -448,7 +455,7 @@ case("the_restoration_lanes_follow_our_own_hots_on_the_target", """
     assert(P().lane[1].body.fsOn and P().lane[1].secs.text == "~11s", "the first lane drains: " .. tostring(P().lane[1].secs.text))
     assert(not P().lane[2].body.fsOn)
     Cast("Regrowth", 1002)
-    fire("SPELL_UPDATE_COOLDOWN")
+    CooldownChanged()
     Paint(1003)
     w = Cue()
     assert(w == "SWIFTMEND" and M.cue.hot and P().chipSm.status == "ready", "both up and Swiftmend ready")
@@ -471,7 +478,7 @@ case("every_value_secret_at_once_draws_without_an_error", """
         Start(k)
         for i = 0, 30 do Paint(1000 + i * 0.1) end
         fire("UNIT_POWER_FREQUENT", "player")
-        fire("SPELL_UPDATE_COOLDOWN")
+        CooldownChanged()
         Paint(1040)
     end
     NoLog()
