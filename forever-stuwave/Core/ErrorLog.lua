@@ -1007,19 +1007,41 @@ local function CollectFrames()
     return found, order
 end
 
+-- "/fsalloc all": every frame in the UI with an OnUpdate script, ours or not, labelled by its debug name. Wrapping a stock
+-- frame's script taints it, so /reload after this mode.
+local function CollectAllUpdating()
+    local found, order = {}, {}
+    local f = EnumerateFrames and EnumerateFrames()
+    while f do
+        local okF, bad = pcall(function() return f:IsForbidden() or f:IsProtected() end)
+        if okF and not bad then
+            local okS, fn = pcall(f.GetScript, f, "OnUpdate")
+            if okS and type(fn) == "function" then
+                local okN, name = pcall(f.GetDebugName, f)
+                found[f] = okN and type(name) == "string" and name or tostring(f)
+                order[#order + 1] = f
+            end
+        end
+        f = EnumerateFrames(f)
+    end
+    return found, order
+end
+
 SLASH_FSALLOC1 = "/fsalloc"
-SlashCmdList["FSALLOC"] = function()
+SlashCmdList["FSALLOC"] = function(msg)
+    local everyFrame = type(msg) == "string" and msg:find("all") ~= nil
     local tag = "|cff22e0ffForever STUwave|r: "
     if sampling then print(tag .. "a sample is already running.") return end
     if not (C_Timer and C_Timer.After and UpdateAddOnMemoryUsage and GetAddOnMemoryUsage) then
         print(tag .. "sampling APIs unavailable on this client.")
         return
     end
-    local found, order = CollectFrames()
+    local found, order
+    if everyFrame then found, order = CollectAllUpdating() else found, order = CollectFrames() end
     local kb, calls, wrapped, originals = {}, {}, {}, {}
     local count = collectgarbage
     for _, f in ipairs(order) do
-        for _, script in ipairs({ "OnUpdate", "OnEvent" }) do
+        for _, script in ipairs(everyFrame and { "OnUpdate" } or { "OnUpdate", "OnEvent" }) do
             local okHas, has = pcall(f.HasScript, f, script)
             local orig = okHas and has and f:GetScript(script)
             if type(orig) == "function" then
@@ -1065,7 +1087,7 @@ SlashCmdList["FSALLOC"] = function()
             }
             for i = 1, math.min(#rows, 25) do
                 local r = rows[i]
-                if i <= 8 then print(("  %.1fK/s  %s  (%d calls)"):format(r.kb / SAMPLE_SECONDS, r.label, r.calls)) end
+                if i <= 10 then print(("  %.1fK/s  %s  (%d calls)"):format(r.kb / SAMPLE_SECONDS, r.label, r.calls)) end
                 saved.top[i] = { label = r.label, kb = r.kb, calls = r.calls }
             end
             if type(ForeverSTUwaveDB) == "table" then ForeverSTUwaveDB.allocSample = saved end
