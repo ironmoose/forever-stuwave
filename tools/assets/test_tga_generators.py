@@ -2661,6 +2661,9 @@ def test_priest_medallion_boss_is_centred_on_the_ring(priest_outputs: Path) -> N
 # The only textures that are not written by a generate_*.py: the two micro keys drawn from our own hand drawn shapes
 # (tools/assets/deck_glyph_sources.py), baked by `synthwave_icons.py --bake-own`. No game art goes into them.
 OWN_BAKED = {"glyphart_character", "glyphart_legacy"}
+# The talent spec backgrounds: procedural scenes in tools/assets/talentbg/scenes/*.js, baked by bake.mjs (talentbg-harness.py
+# checks the committed sheets equal a fresh bake). The manifest it writes names every one.
+TALENTBG_MANIFEST = MEDIA_DIR.parent.parent / "Modules/Skins/TalentBgArt.lua"
 
 
 def _generated_stems() -> set[str]:
@@ -2674,7 +2677,8 @@ def test_every_shipped_texture_is_our_own_art() -> None:
     """The manifest of allowed texture files: what a generator in this directory writes, and the two own-art baked keys.
     A texture that came from a game file (a spell icon, a micro button, a class icon) is neither, so this fails."""
     shipped = {p.stem for p in MEDIA_DIR.glob("*.tga")}
-    unknown = sorted(shipped - _generated_stems() - OWN_BAKED)
+    talentbg = set(re.findall(r'"(talentbg_[a-z_]+)"', TALENTBG_MANIFEST.read_text(encoding="utf-8")))
+    unknown = sorted(shipped - _generated_stems() - OWN_BAKED - talentbg)
     assert not unknown, f"textures with no own-art source (a generator or the own-art bake): {unknown[:10]} ({len(unknown)})"
     assert OWN_BAKED <= shipped
 

@@ -1506,6 +1506,18 @@ local function DamageMeterGroup(page)
     })
 end
 
+-- The talent spec backgrounds (Skins/TalentBackdrops.lua): animated, still or off, explained by its ? tip. Out of the list
+-- without the module.
+local function TalentBackdropGroup(page)
+    local bd = FS.TalentBackdrops
+    if not (bd and bd.SETTING and bd.STYLES) then return end
+    local def = bd.SETTING
+    UI.Header(page, "Talents")
+    local options = {}
+    for i, value in ipairs(bd.STYLES) do options[i] = { value = value, text = bd.STYLE_TEXT[value] } end
+    UI.Segmented(page, { label = def.label, tip = def.tip, key = def.key, options = options })
+end
+
 CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
     UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
     UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
@@ -1513,6 +1525,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     PartyFramesGroup(page)
     NameplatesGroup(page)
     DamageMeterGroup(page)
+    TalentBackdropGroup(page)
     local bands = FS.ChatFormat and FS.ChatFormat.BAND_SETTING
     if bands then
         UI.Header(page, "Chat")
