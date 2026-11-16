@@ -1007,18 +1007,22 @@ local function CollectFrames()
     return found, order
 end
 
--- "/fsalloc all": every frame in the UI with an OnUpdate script, ours or not, labelled by its debug name. Wrapping a stock
--- frame's script taints it, so /reload after this mode.
-local function CollectAllUpdating()
+-- "/fsalloc all": every frame in the UI with an OnUpdate or OnEvent script, ours or not, labelled by its debug name (with
+-- "FS " in front when the namespace walk reaches it), event handlers split per event. Wrapping a stock frame's script taints
+-- it, so /reload after this mode.
+local function CollectAllScripted()
+    local ours = CollectFrames()
     local found, order = {}, {}
     local f = EnumerateFrames and EnumerateFrames()
     while f do
         local okF, bad = pcall(function() return f:IsForbidden() or f:IsProtected() end)
         if okF and not bad then
-            local okS, fn = pcall(f.GetScript, f, "OnUpdate")
-            if okS and type(fn) == "function" then
+            local okU, up = pcall(f.GetScript, f, "OnUpdate")
+            local okE, ev = pcall(f.GetScript, f, "OnEvent")
+            if (okU and type(up) == "function") or (okE and type(ev) == "function") then
                 local okN, name = pcall(f.GetDebugName, f)
-                found[f] = okN and type(name) == "string" and name or tostring(f)
+                name = okN and type(name) == "string" and name or tostring(f)
+                found[f] = ours[f] and ("FS " .. ours[f]) or name
                 order[#order + 1] = f
             end
         end
@@ -1037,21 +1041,40 @@ SlashCmdList["FSALLOC"] = function(msg)
         return
     end
     local found, order
-    if everyFrame then found, order = CollectAllUpdating() else found, order = CollectFrames() end
+    if everyFrame then found, order = CollectAllScripted() else found, order = CollectFrames() end
     local kb, calls, wrapped, originals = {}, {}, {}, {}
     local count = collectgarbage
     for _, f in ipairs(order) do
-        for _, script in ipairs(everyFrame and { "OnUpdate" } or { "OnUpdate", "OnEvent" }) do
+        for _, script in ipairs({ "OnUpdate", "OnEvent" }) do
             local okHas, has = pcall(f.HasScript, f, script)
             local orig = okHas and has and f:GetScript(script)
             if type(orig) == "function" then
                 local label = found[f] .. ":" .. script
-                kb[label], calls[label] = 0, 0
-                local w = function(...)
-                    local before = count("count")
-                    orig(...)
-                    kb[label] = kb[label] + (count("count") - before)
-                    calls[label] = calls[label] + 1
+                if script == "OnUpdate" then kb[label], calls[label] = 0, 0 end
+                local w
+                if script == "OnEvent" then
+                    -- one row per event; the row key is made once per event, outside the measured span
+                    local keys = {}
+                    w = function(self, event, ...)
+                        local before = count("count")
+                        orig(self, event, ...)
+                        local grew = count("count") - before
+                        local key = keys[event]
+                        if not key then
+                            key = label .. " " .. tostring(event)
+                            keys[event] = key
+                            kb[key], calls[key] = 0, 0
+                        end
+                        kb[key] = kb[key] + grew
+                        calls[key] = calls[key] + 1
+                    end
+                else
+                    w = function(...)
+                        local before = count("count")
+                        orig(...)
+                        kb[label] = kb[label] + (count("count") - before)
+                        calls[label] = calls[label] + 1
+                    end
                 end
                 if pcall(f.SetScript, f, script, w) then
                     wrapped[#wrapped + 1] = { f = f, script = script, w = w, orig = orig }
@@ -1087,7 +1110,7 @@ SlashCmdList["FSALLOC"] = function(msg)
             }
             for i = 1, math.min(#rows, 25) do
                 local r = rows[i]
-                if i <= 10 then print(("  %.1fK/s  %s  (%d calls)"):format(r.kb / SAMPLE_SECONDS, r.label, r.calls)) end
+                if i <= 14 then print(("  %.1fK/s  %s  (%d calls)"):format(r.kb / SAMPLE_SECONDS, r.label, r.calls)) end
                 saved.top[i] = { label = r.label, kb = r.kb, calls = r.calls }
             end
             if type(ForeverSTUwaveDB) == "table" then ForeverSTUwaveDB.allocSample = saved end
