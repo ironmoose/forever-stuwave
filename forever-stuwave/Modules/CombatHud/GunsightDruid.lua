@@ -3,7 +3,9 @@
 -- The design is the mockup "Druid Gunsight Module: Wildshape Eyes" (2026-11-16). A pair of eyes watches from a thicket and changes
 -- with the form, with one gauge under them per form, and goes HOT with one word under it when there is something to do:
 --   * CASTER / MOONKIN (owl eyes, cyan): four Eclipse moons (a Wrath banks two, a Starfire spends one, 15 s), the drain bar under them
---     and its seconds; the word is WRATH with no charge and STARFIRE with one. Below level 30 the sockets are dotted (ECLIPSE L30);
+--     and its seconds; the word is WRATH with no charge and STARFIRE with one. Below level 30 (Eclipse not learned) the moons, bar
+--     and word are hidden: only what the player has learned is drawn (the same for the chips, the Shifting Power notch, the Bear's
+--     L / B / M marks and Lacerate pips, and the Restoration lanes);
 --     after a reload in combat they are dim with a ? until a cast tells the truth.
 --   * CAT (slit eyes, gold): five claw gashes (the combo points), the energy bar with the Shifting Power notch and its zone, the
 --     number, the Shifting Power chip (it fills from the bottom over the cooldown, glows when ready); FINISH at five points, SHIFT
@@ -132,6 +134,7 @@ local D = {
     rageNum = nil, rageMax = 100,
     spStatus = nil, pbStatus = nil, smStatus = nil,       -- "ready" | "cool" | "none" | nil
     hotKnown = { rejuv = true, regrow = true },           -- false only when the spell is plainly not learned yet
+    bearKnown = { lacerate = true, maul = true },         -- the same for the Bear's rage marks (Primal Bite: pbStatus "none")
     shiftAt = nil,
 }
 Druid.data = D
@@ -524,7 +527,10 @@ local function ReadAll()
     D.shiftAt = State.Stamp("shiftAt")
     if P.chipSp then
         if kind == "cat" then D.spStatus = State.Cooldown("shift"); ChipStatus(P.chipSp, D.spStatus, "shift")
-        elseif kind == "bear" then D.pbStatus = State.Cooldown("bite"); ChipStatus(P.chipPb, D.pbStatus, "bite")
+        elseif kind == "bear" then
+            D.pbStatus = State.Cooldown("bite"); ChipStatus(P.chipPb, D.pbStatus, "bite")
+            D.bearKnown.lacerate = State.Known("lacerate") ~= false
+            D.bearKnown.maul = State.Known("maul") ~= false
         elseif kind == "tree" then
             D.hotKnown.rejuv = State.Known("rejuv") ~= false
             D.hotKnown.regrow = State.Known("regrow") ~= false
@@ -559,7 +565,7 @@ local function ComputeCue(now)
         word = "TRAVEL"
     elseif kind == "moon" then
         local mode, charges = State.Eclipse(now)
-        if mode == "locked" then word = "ECLIPSE L30"
+        if mode == "locked" then word = ""                -- nothing to say before Eclipse is learned
         elseif mode == "unknown" then word = "?"
         elseif charges > 0 then word, color, hot = "STARFIRE", K.gold, true
         else word, color = "WRATH", K.cyan end
@@ -570,9 +576,10 @@ local function ComputeCue(now)
         elseif combo and D.spStatus == "ready" and D.energyNum and D.energyNum < State.TUNING.ENERGY_NOTCH then word, color, hot = "SHIFT", K.cyan, true end
     elseif kind == "bear" then
         local stacks, left = State.Lacerate(now)
-        if stacks >= 5 and left <= C.WARN_S and left > 0 then word, color, hot, blink = "LACERATE", K.amber, true, true
+        local lac = D.bearKnown.lacerate
+        if lac and stacks >= 5 and left <= C.WARN_S and left > 0 then word, color, hot, blink = "LACERATE", K.amber, true, true
         elseif D.pbStatus == "ready" then word, color, hot = "BITE", K.warm, true
-        elseif stacks < 5 then word, color = "LACERATE", K.leaf
+        elseif lac and stacks < 5 then word, color = "LACERATE", K.leaf
         else word = "BEAR" end
     else
         local rj, rg = State.Hot("rejuv", now), State.Hot("regrow", now)
@@ -644,9 +651,8 @@ local function PaintMoon(now)
     for i = 1, G.MOON_N do
         local m = P.moon[i]
         local x, y = G.MOON_X + G.MOON_STEP * (i - 1), G.MOON_Y
-        if locked then
-            Sprite(m.dotted, "moon_dotted", x, y, K.pure, 1, false)
-            Off(m.dark); Off(m.glow); Off(m.lit)
+        if locked then                                   -- not learned yet: nothing drawn
+            Off(m.dotted); Off(m.dark); Off(m.glow); Off(m.lit)
         else
             Off(m.dotted)
             Sprite(m.dark, "moon_dark", x, y, K.pure, unknown and 0.5 or 1, false)
@@ -672,9 +678,12 @@ local function PaintMoon(now)
                 j % 2 == 0 and K.gold or K.pure, Stepped(1 - since / 0.5))
         else Off(P.moonSparks[j]) end
     end
-    Sprite(P.drainTrack, "track_drain", G.DRAIN_X, G.DRAIN_Y, K.pure, 1, false)
     if locked then
-        Off(P.drainBody); Off(P.drainHi); Off(P.drainSecs)
+        Off(P.drainTrack); Off(P.drainBody); Off(P.drainHi); Off(P.drainSecs)
+        return
+    end
+    Sprite(P.drainTrack, "track_drain", G.DRAIN_X, G.DRAIN_Y, K.pure, 1, false)
+    if false then
     elseif not unknown and charges > 0 then
         local w = Round((G.DRAIN_W - 2) * max(0, min(1, left / C.ECLIPSE_LEN)))
         local warn = left <= C.WARN_S
@@ -696,9 +705,9 @@ end
 -- a chip: the ring, the dark glyph, the engine's fill, the glow while ready
 local function PaintChip(ch, x, y, glow, now, fallbackAt, fallbackLen)
     local st = ch.status
+    if st == "none" then Off(ch.ring); Off(ch.dark); Off(ch.bar); Off(ch.halo); return end   -- not learned: hidden
     Sprite(ch.ring, "chip_ring", x - 2, y - 2, st == "ready" and glow or K.pure, 1, false)
-    Sprite(ch.dark, ch.darkName, x, y, K.pure, (st == "none") and 0.35 or 1, false)
-    if st == "none" then Off(ch.bar); Off(ch.halo); return end
+    Sprite(ch.dark, ch.darkName, x, y, K.pure, 1, false)
     local bar = ch.bar
     if bar.fsX ~= x or bar.fsY ~= y then
         bar.fsX, bar.fsY = x, y
@@ -743,8 +752,11 @@ local function PaintCat(now)
     end
     On(fillBar)
     local notchX = Round(G.FILL_W * State.TUNING.ENERGY_NOTCH / 100)
-    ShowDot(P.zone, bx + 1, by + 1, notchX, 6, K.cyan, 0.13)
-    ShowDot(P.notch, bx + 1 + notchX, by + 1, 1, 6, K.cyan, 0.95)
+    if D.spStatus == "none" then Off(P.zone); Off(P.notch)   -- the Shifting Power notch only once it is learned
+    else
+        ShowDot(P.zone, bx + 1, by + 1, notchX, 6, K.cyan, 0.13)
+        ShowDot(P.notch, bx + 1 + notchX, by + 1, 1, 6, K.cyan, 0.95)
+    end
     for i = 1, 9 do ShowDot(P.energyTicks[i], bx + 1 + Round(G.FILL_W * i / 10), by + 7, 1, 1, K.line, 1) end
     On(P.energyNum)
     TextColor(P.energyNum, K.white, 1)
@@ -776,13 +788,18 @@ local function PaintBear(now)
         bar:ClearAllPoints(); bar:SetPoint("TOPLEFT", art, "TOPLEFT", S(x + 1), -S(y + 1))
     end
     On(bar)
+    local kn = D.bearKnown
     for i = 1, 3 do
         local mx = x + 1 + Round(G.FILL_W * MARKS[i] / 100)
+        if (i == 1 and not kn.lacerate) or (i == 2 and D.pbStatus == "none") or (i == 3 and not kn.maul) then
+            Off(P.rageMarks[i]); Off(P.rageTicks[i]); Off(P.letters[i])
+        else
         ShowDot(P.rageMarks[i], mx, y + 1, 1, 10, K.white, 0.35)
         ShowDot(P.rageTicks[i], mx, G.TICK_Y, 1, 3, K.muted, 1)
         local lit = D.rageNum ~= nil and D.rageNum >= MARKS[i]
         Sprite(P.letters[i], LETTER[i], mx - 1, G.LETTER_Y, lit and ((i == 2 and D.pbStatus == "ready") and K.amber or K.white) or K.muted,
             lit and 1 or 0.7, false)
+        end
     end
     On(P.rageNum)
     TextColor(P.rageNum, K.white, 1)
@@ -790,6 +807,10 @@ local function PaintBear(now)
     PaintChip(P.chipPb, G.CHIP_X, G.RAGE_CHIP_Y, K.amber, now, State.Stamp("biteAt"), State.TUNING.BITE_CD)
     -- Lacerate
     local stacks, left = State.Lacerate(now)
+    if not kn.lacerate then                              -- Lacerate not learned: no pips
+        for i = 1, 5 do Off(P.pipDark[i]); Off(P.pipLit[i]) end
+        Off(P.pipHalo); Off(P.lacSecs)
+    else
     local warn = stacks >= 5 and left <= C.WARN_S
     local lacAt = State.Stamp("lacAt")
     local since = lacAt and (now - lacAt) or 9
@@ -810,6 +831,7 @@ local function PaintBear(now)
         TextColor(P.lacSecs, warn and K.amber or K.muted, 1)
         TextAt(P.lacSecs, G.PIP_X + G.PIP_STEP * 5 + 4, G.PIP_Y + 4)
     else Off(P.lacSecs) end
+    end
     local biteAt = State.Stamp("biteAt")
     local bs = biteAt and (now - biteAt) or 9
     if not red and bs >= 0 and bs < 0.4 then ShowDot(P.biteFlash, x + 1, y + 1, G.FILL_W, 10, K.white, Stepped((1 - bs / 0.4) * 0.6))
@@ -825,10 +847,14 @@ local function PaintTree(now)
         local left = State.Hot(HOT_KEYS[i], now)
         local up = left ~= nil
         local c = i == 1 and K.green or K.pink
-        Sprite(l.track, "track_lane", G.LANE_X, y, K.pure, 1, false)
         local learned = D.hotKnown[HOT_KEYS[i]]
-        local idle = learned and not up and not red and floor(now * 2) % 2 == 0
-        Sprite(l.icon, i == 1 and "icon_rejuv" or "icon_regrow", G.ICON_X, y - 1, up and c or K.muted, up and 1 or (idle and 0.9 or (learned and 0.5 or 0.2)), false)
+        if not learned and not up then                   -- a heal not learned yet: no lane
+            Off(l.track); Off(l.icon); Off(l.secs); Off(l.body); Off(l.hi)
+            for k = 1, 5 do Off(l.ticks[k]) end
+        else
+        Sprite(l.track, "track_lane", G.LANE_X, y, K.pure, 1, false)
+        local idle = not up and not red and floor(now * 2) % 2 == 0
+        Sprite(l.icon, i == 1 and "icon_rejuv" or "icon_regrow", G.ICON_X, y - 1, up and c or K.muted, up and 1 or (idle and 0.9 or 0.5), false)
         On(l.secs)
         TextAt(l.secs, G.LANE_SECS_X, y + 4)
         if up then
@@ -844,6 +870,7 @@ local function PaintTree(now)
             for k = 1, 5 do Off(l.ticks[k]) end
             TextWord(l.secs, "--")
             TextColor(l.secs, K.muted, 0.5)
+        end
         end
     end
     local bloomAt = State.Stamp("bloomAt")

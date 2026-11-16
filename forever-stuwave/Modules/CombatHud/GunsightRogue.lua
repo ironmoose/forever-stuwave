@@ -8,7 +8,7 @@
 --     daggers, smoke) and the plaque says OPENER. The count is also a digit on the cuff.
 --   * SLICE AND DICE (right): a four bladed star that spins while it runs (pink, amber under SND_WARN seconds), with a bar that drains
 --     and the seconds above it (a "~" in front while it is an estimate). Down in combat the dashed ring round the empty star and the SND
---     header pulse amber (only when the spell is known); calm out of combat. Not learned: a muted dotted rail and ring.
+--     header pulse amber (only when the spell is known); calm out of combat. Not learned: the whole piece is hidden.
 --   * ENERGY (the bottom rail): the current energy as a gold rail with its number, two cost gems at what the last builder (cyan) and the
 --     last finisher (pink) cost; a gem lights when the energy covers it, and at full energy the whole rail goes pale gold.
 --
@@ -624,11 +624,20 @@ local function PaintSnd(now, reduced, combat)
     local nudge = learned and known == true and not up and combat
     local low = up and left <= C.SND_WARN
     local blink = reduced and 1 or Stepped(0.55 + 0.45 * sin(now * 9))
+    -- not learned yet: the whole Slice and Dice piece is hidden
+    local hide = not learned and not up
+    On(P.head, not hide); On(P.sndBorder, not hide); On(P.sndTrack, not hide); On(P.star, not hide)
+    if hide then
+        P.secs:Hide()
+        for k = 0, 11 do On(P.dots[k], false) end
+        On(P.sndFill, false); On(P.sndFillHi, false); On(P.sndHead, false); On(P.ring, false)
+        return
+    end
     -- the header
     Label(P.head, "SND", not learned and K.off or (nudge and K.amber or K.muted), nudge and (reduced and 1 or Stepped(0.6 + 0.4 * sin(now * 6))) or 1)
     -- the rail's border is dimmer while unlearned
     Tint(P.sndBorder, learned and K.line or K.lineOff, 1)
-    for k = 0, 11 do On(P.dots[k], not learned) end
+    for k = 0, 11 do On(P.dots[k], false) end
     if up then
         local secs = floor(left + 0.999)
         if secs > 60 then secs = 60 end

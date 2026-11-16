@@ -127,7 +127,7 @@ function Areas.RegisterModule(id, spec) Areas.specs[#Areas.specs + 1] = { id = i
 W = { powerType = { 0, "MANA" }, formId = nil, level = 60, name = "Boar", exists = true, canAttack = true, canAssist = false,
       power = { [1] = 0, [3] = 100, [4] = 0 }, powerMax = { [1] = 100, [3] = 100, [4] = 5 }, combat = false,
       spells = {}, known = {}, cd = {}, secretPower = false, secretName = false, secretLevel = false, secretCd = false,
-      secretForm = false, spellById = { [5176] = "Wrath", [2912] = "Starfire", [774] = "Rejuvenation", [8936] = "Regrowth",
+      secretForm = false, spellById = { [5176] = "Wrath", [2912] = "Starfire", [774] = "Rejuvenation", [8936] = "Regrowth", [6807] = "Maul",
       [18562] = "Swiftmend", [33745] = "Lacerate", [22568] = "Ferocious Bite", [1079] = "Rip", [9999] = "Primal Bite",
       [8888] = "Shifting Power", [1] = "Auto Attack" } }
 function UnitPowerType(u) if W.secretForm then return SECRET, SECRET end return W.powerType[1], W.powerType[2] end
@@ -296,10 +296,14 @@ case("the_eclipse_ledger_and_the_moons", """
     -- amber under 3 s
     Cast("Wrath", 1100); Paint(1100 + 13)
     assert(P().drainSecs.tcolor[1] > 0.9 and P().drainSecs.tcolor[3] < 0.4, "the last seconds are amber")
-    -- below level 30 the sockets are dotted
+    -- below level 30 Eclipse is not learned: no moons, no drain bar, no word
     W.level = 20; Refresh(); Paint(1200)
     w = Cue()
-    assert(w == "ECLIPSE L30" and P().moon[1].dotted.fsOn and not P().moon[1].dark.fsOn, "locked under the Eclipse level")
+    for i = 1, 4 do
+        local m = P().moon[i]
+        assert(not (m.dotted.fsOn or m.dark.fsOn or m.lit.fsOn or m.glow.fsOn), "moon " .. i .. " hidden under the Eclipse level")
+    end
+    assert(w == "" and not P().drainTrack.fsOn and not P().drainSecs.fsOn and not P().cue.fsOn, "locked: nothing drawn, no word")
     NoLog()
 """)
 
@@ -375,7 +379,10 @@ case("shift_needs_a_plain_low_energy_and_a_ready_chip", """
     NO_TIMER = false
     W.known["Shifting Power"] = false
     CooldownChanged()
+    Paint(1005)
     assert(P().chipSp.status == "none", "not learned")
+    assert(not (P().chipSp.ring.fsOn or P().chipSp.dark.fsOn or P().chipSp.bar.fsOn), "an unlearned chip is hidden")
+    assert(not P().notch.fsOn and not P().zone.fsOn, "and so is its notch on the energy bar")
     NoLog()
 """)
 
@@ -394,7 +401,7 @@ case("a_finisher_throws_the_streak", """
 """)
 
 case("the_bear_rage_bar_ticks_and_cue_priority", """
-    W.known["Primal Bite"] = true
+    W.known["Primal Bite"], W.known["Lacerate"], W.known["Maul"] = true, true, true
     W.cd["Primal Bite"] = true
     Start("bear")
     W.power[1] = 40
@@ -427,6 +434,7 @@ case("the_bear_rage_bar_ticks_and_cue_priority", """
 """)
 
 case("the_rage_number_is_plain_only_for_the_letters", """
+    W.known["Lacerate"], W.known["Maul"] = true, true
     Start("bear")
     W.power[1] = 18
     fire("UNIT_POWER_FREQUENT", "player")
@@ -485,6 +493,35 @@ case("a_low_level_druid_is_never_told_to_cast_a_heal_it_has_not_learned", """
     Paint(1500)
     w = Cue()
     assert(w == "HEAL", "no heal over time learned at all: " .. tostring(w))
+    NoLog()
+""")
+
+case("a_new_bear_sees_only_what_it_has_learned", """
+    W.known["Primal Bite"], W.known["Lacerate"], W.known["Maul"] = false, false, true
+    Start("bear")
+    W.power[1] = 40
+    fire("UNIT_POWER_FREQUENT", "player")
+    Paint(1000)
+    assert(P().rageBar.fsOn ~= false and P().rageNum.fsOn, "the rage bar and number stay")
+    assert(not P().rageTicks[1].fsOn and not P().letters[1].fsOn, "no Lacerate mark")
+    assert(not P().rageTicks[2].fsOn and not P().letters[2].fsOn, "no Primal Bite mark")
+    assert(P().rageTicks[3].fsOn and P().letters[3].fsOn, "the Maul mark")
+    assert(not (P().chipPb.ring.fsOn or P().chipPb.dark.fsOn), "no Primal Bite chip")
+    for i = 1, 5 do assert(not P().pipDark[i].fsOn and not P().pipLit[i].fsOn, "no Lacerate pip " .. i) end
+    local w = Cue()
+    assert(w == "BEAR", "and never told to Lacerate: " .. tostring(w))
+    NoLog()
+""")
+
+case("a_restoration_lane_for_a_heal_not_learned_is_hidden", """
+    W.canAttack, W.canAssist, W.name = false, true, "Tank"
+    W.known["Rejuvenation"], W.known["Regrowth"], W.known["Swiftmend"] = true, false, false
+    Start("caster")
+    Paint(1000)
+    local l1, l2 = P().lane[1], P().lane[2]
+    assert(l1.track.fsOn and l1.icon.fsOn, "Rejuvenation's lane shows")
+    assert(not (l2.track.fsOn or l2.icon.fsOn or l2.secs.fsOn or l2.body.fsOn), "Regrowth's lane is hidden")
+    assert(not (P().chipSm.ring.fsOn or P().chipSm.dark.fsOn), "and so is the Swiftmend flower")
     NoLog()
 """)
 

@@ -3193,6 +3193,11 @@ def source_checks() -> list[tuple[str, str | None]]:
             if later in toc and toc.index(later) < at:
                 problems.append(f"{later} registers a category, so it must load after {want}")
     out.append(("toc_order", "; ".join(problems) or None))
+    help_src = src[src.find("local CLASS_MODULE_HELP = {"):src.find("FS.ClassModuleHelp")]
+    have = set(re.findall(r"^    ([A-Z]+) = \"", help_src, re.M))
+    want_classes = {"ROGUE", "DRUID", "WARLOCK", "SHAMAN", "WARRIOR", "PALADIN", "PRIEST", "MAGE", "HUNTER"}
+    out.append(("every_class_module_has_an_explanation",
+                f"missing: {sorted(want_classes - have)}" if want_classes - have else None))
     return out
 
 

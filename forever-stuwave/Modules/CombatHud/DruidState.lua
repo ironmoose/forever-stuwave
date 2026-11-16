@@ -47,7 +47,8 @@ local DEFS = {
     ["rip"] = "finisher", ["ferocious bite"] = "finisher",
     ["shifting power"] = "shift",
 }
-local SPELLS = { shift = "Shifting Power", bite = "Primal Bite", swift = "Swiftmend", rejuv = "Rejuvenation", regrow = "Regrowth" }
+local SPELLS = { shift = "Shifting Power", bite = "Primal Bite", swift = "Swiftmend", rejuv = "Rejuvenation", regrow = "Regrowth",
+    lacerate = "Lacerate", maul = "Maul" }
 State.DEFS, State.SPELLS = DEFS, SPELLS
 
 local TRAVEL = { [3] = true, [4] = true, [27] = true, [29] = true }     -- travel, aquatic, flight forms

@@ -375,15 +375,19 @@ case("out_of_combat_the_aura_corrects_the_ledger_and_drops_the_mark", """
     NoLog()
 """)
 
-case("an_unlearned_slice_and_dice_is_a_muted_dotted_rail_and_never_nudges", """
+case("an_unlearned_slice_and_dice_is_hidden_and_never_nudges", """
     __known[5171] = nil
     __combat = true
     Build()
     Tick(0.1)
     check(D.SndKnown() == false, "not learned")
-    check(P().head.tcolor[1] == K.off[1], "muted header")
-    check(Shown(P().dots[0]) and Shown(P().dots[11]), "dotted rail")
-    check(P().ring.color[1] == K.muted[1] and P().ring.color[4] == 0.3, "a dim ring")
+    for _, k in ipairs({ "head", "secs", "sndBorder", "sndTrack", "star", "ring", "sndFill" }) do
+        check(not Shown(P()[k]), "hidden: " .. k)
+    end
+    check(not Shown(P().dots[0]) and not Shown(P().dots[11]), "no dotted rail")
+    __known[5171] = true; fire("SPELLS_CHANGED")
+    Tick(0.1)
+    check(Shown(P().head) and Shown(P().sndBorder) and Shown(P().star), "learned: it shows")
     NoLog()
 """)
 

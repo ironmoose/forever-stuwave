@@ -1665,6 +1665,57 @@ local function WarriorGroup(page)
     end
 end
 
+-- What the player's own class module shows, as the ? tip of a header (one per class; only the player's class is listed).
+local CLASS_MODULE_HELP = {
+    ROGUE = "The dagger fan. Each dagger is a combo point; at five the fan turns gold and FINISH shows. The digit on the ring is "
+        .. "the same count.\n\nRight: Slice and Dice. The star spins and the bar drains while it runs, amber in the last seconds; "
+        .. "the ring pulses in combat when it is down.\n\nBottom: your energy. The blue mark is what your last builder cost, the "
+        .. "pink mark your last finisher; each lights when you can afford it.\n\nStealthed, the fan turns violet and OPENER shows.",
+    DRUID = "The eyes change with your form; the word under them says what to do next.\n\nCaster: four Eclipse moons (Wrath "
+        .. "adds two, Starfire spends one) and their 15 s bar, from level 30.\n\nCat: the five claw marks are your combo points "
+        .. "(FINISH at five), the energy bar and the Shifting Power chip.\n\nBear: the rage bar marked where Lacerate, Primal "
+        .. "Bite and Maul become affordable, the Primal Bite chip and five Lacerate stacks.\n\nHealing a friendly target: "
+        .. "the Rejuvenation and Regrowth lanes and the Swiftmend flower.\n\nOnly what you have learned is shown.",
+    WARLOCK = "The binding circle. The five gems are your soul shards (the number keeps counting past five). The medallion in "
+        .. "the middle is your demon, filled by its health; a dashed ghost means none is out.\n\nThe right lane shows one "
+        .. "prompt at a time: REAPING while Drain Soul runs, BINDING while you summon, BOLT (Shadow Trance) and FIRE "
+        .. "(Decimation) with a 10 s bar, SUMMON when your demon is gone, TAP when your mana cannot pay the next Shadow Bolt, "
+        .. "DRAIN under three shards. Each prompt has a switch below.",
+    SHAMAN = "Four totem poles: Fire, Earth, Water, Air. A pole's blocks sink as its totem runs out, the last block amber. DROP "
+        .. "means nothing stands, FAR that you left its range, a dotted pole that it is not learned yet. Click a pole to drop "
+        .. "that totem.\n\nRight: the shock cooldown (RDY when ready), and under it Fire Nova while a Fire totem stands.",
+    WARRIOR = "Two shout helms. The big ring is Battle Shout: eight runes orbit and go out as it runs down, the last one "
+        .. "amber. The small one is Demoralizing Shout. Click a helm to cast that shout.\n\nThe bar under them lights when "
+        .. "Overpower, Revenge or Victory Rush opens and drains until the chance is gone, amber at the end.",
+    PALADIN = "Left: the wax seal is your active seal, draining from the top; it cracks amber in the last seconds, and a "
+        .. "dashed ring means no seal.\n\nRight: the hammer is Judgement. It fills as the cooldown ends and slams when you "
+        .. "judge, in your seal's colour. The rune under it is the Judgement on your target, its ring draining.",
+    PRIEST = "The shield is Power Word: Shield on your friendly target, or on you. It lights by how much absorb is left, with "
+        .. "the number; the violet ring is Weakened Soul and a teal rim the cooldown.\n\nThe right side shows Prayer of "
+        .. "Mending in a group, or Spirit Tap and Inner Fire solo (amber when Inner Fire is missing). Pick it under Right "
+        .. "side shows.",
+    MAGE = "The left piece follows your talents.\n\nFrost: a snowflake that is Frost Nova (dark and refilling on cooldown), "
+        .. "the ice crust while the target is frozen, two Fingers of Frost crystals and Ice Lance.\n\nArcane: an eye that "
+        .. "opens with Arcane Blast stacks, four gems on their timer, a Clearcasting spark and the next Blast's cost.\n\n"
+        .. "Fire: a flame that grows with Fire Vulnerability stacks, its 30 s ring, and Fire Blast.\n\nRight: Ice Barrier "
+        .. "or Mana Shield, lit by how much absorb is left. Click it to cast.",
+    HUNTER = "The radar: you are the centre dot, the rings are melee, dead zone, shooting range and too far, and the skull "
+        .. "sits on your target's ring.\n\nThe rim is your Auto Shot timer. It fills cyan; the gold zone at the end is when "
+        .. "to stand still. Moving as it winds up turns it pink; out of range it waits with DEAD ZONE, MELEE or FAR. The "
+        .. "quiver warns when ammo runs low.\n\nRight: the trap jaws show the shared trap cooldown (READY, SET on a cast), "
+        .. "with a slot each for your fire and frost traps.",
+}
+FS.ClassModuleHelp = CLASS_MODULE_HELP
+
+local function ClassModuleHelpGroup(page)
+    if type(UnitClass) ~= "function" then return end
+    local _, token = UnitClass("player")
+    local tip = type(token) == "string" and CLASS_MODULE_HELP[token]
+    if not tip then return end
+    local name = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]) or token
+    UI.Header(page, name .. " class module", tip)
+end
+
 -- The Warlock class module's cues (WarlockState.lua): one switch per cue. A Warlock's page only.
 local function WarlockGroup(page)
     local WS = FS.WarlockState
@@ -1686,6 +1737,7 @@ if FS.Gunsight and FS.Gunsight.PIECES then
                 .. "A Gunsight that was off at login, or the classic combat HUD, needs /reload.",
         })
         TargetSideGroups(page)
+        ClassModuleHelpGroup(page)
         PriestGroup(page)
         WarriorGroup(page)
         WarlockGroup(page)
