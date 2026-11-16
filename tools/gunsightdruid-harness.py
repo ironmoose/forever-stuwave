@@ -442,7 +442,7 @@ case("the_rage_number_is_plain_only_for_the_letters", """
 
 case("the_restoration_lanes_follow_our_own_hots_on_the_target", """
     W.canAttack, W.canAssist, W.name = false, true, "Tank"
-    W.known["Swiftmend"] = true
+    W.known["Swiftmend"], W.known["Rejuvenation"], W.known["Regrowth"] = true, true, true
     W.cd["Swiftmend"] = false
     Start("caster")
     assert(M.data.kind == "tree")
@@ -468,6 +468,23 @@ case("the_restoration_lanes_follow_our_own_hots_on_the_target", """
     assert(P().bloom.fsOn, "a HoT that ran out blooms")
     Paint(__now + 1)
     assert(not P().bloom.fsOn)
+    NoLog()
+""")
+
+case("a_low_level_druid_is_never_told_to_cast_a_heal_it_has_not_learned", """
+    W.canAttack, W.canAssist, W.name = false, true, "Tank"
+    W.known["Rejuvenation"], W.known["Regrowth"] = true, false
+    Start("caster")
+    assert(Cue() == "REJUV", "Rejuvenation first")
+    Cast("Rejuvenation", 1000)
+    Paint(1001)
+    local w = Cue()
+    assert(w == "HOTS UP", "no Regrowth yet, so Rejuvenation up is all there is: " .. tostring(w))
+    W.known["Rejuvenation"] = false
+    Start("caster")
+    Paint(1500)
+    w = Cue()
+    assert(w == "HEAL", "no heal over time learned at all: " .. tostring(w))
     NoLog()
 """)
 

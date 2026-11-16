@@ -131,6 +131,7 @@ local D = {
     combo = nil, energyNum = nil, energyMax = 100,        -- plain reads, nil when secret or unreadable
     rageNum = nil, rageMax = 100,
     spStatus = nil, pbStatus = nil, smStatus = nil,       -- "ready" | "cool" | "none" | nil
+    hotKnown = { rejuv = true, regrow = true },           -- false only when the spell is plainly not learned yet
     shiftAt = nil,
 }
 Druid.data = D
@@ -525,6 +526,8 @@ local function ReadAll()
         if kind == "cat" then D.spStatus = State.Cooldown("shift"); ChipStatus(P.chipSp, D.spStatus, "shift")
         elseif kind == "bear" then D.pbStatus = State.Cooldown("bite"); ChipStatus(P.chipPb, D.pbStatus, "bite")
         elseif kind == "tree" then
+            D.hotKnown.rejuv = State.Known("rejuv") ~= false
+            D.hotKnown.regrow = State.Known("regrow") ~= false
             local st = State.Cooldown("swift")
             local now = GetTime()
             if st == "ready" and not (State.Hot("rejuv", now) or State.Hot("regrow", now)) then st = "idle" end
@@ -573,10 +576,12 @@ local function ComputeCue(now)
         else word = "BEAR" end
     else
         local rj, rg = State.Hot("rejuv", now), State.Hot("regrow", now)
-        if not rj then word, color, hot = "REJUV", K.green, true
-        elseif not rg then word, color = "REGROWTH", K.pink
+        -- a heal not learned yet is never the advice (a low level Druid has Rejuvenation before Regrowth)
+        local kn = D.hotKnown
+        if kn.rejuv and not rj then word, color, hot = "REJUV", K.green, true
+        elseif kn.regrow and not rg then word, color = "REGROWTH", K.pink
         elseif D.smStatus == "ready" then word, color, hot = "SWIFTMEND", K.pink, true
-        else word = "HOTS UP" end
+        else word = (kn.rejuv or kn.regrow) and "HOTS UP" or "HEAL" end
     end
     CUE.word, CUE.color, CUE.hot, CUE.blink = word, color, hot, blink
 end
@@ -821,8 +826,9 @@ local function PaintTree(now)
         local up = left ~= nil
         local c = i == 1 and K.green or K.pink
         Sprite(l.track, "track_lane", G.LANE_X, y, K.pure, 1, false)
-        local idle = not up and not red and floor(now * 2) % 2 == 0
-        Sprite(l.icon, i == 1 and "icon_rejuv" or "icon_regrow", G.ICON_X, y - 1, up and c or K.muted, up and 1 or (idle and 0.9 or 0.5), false)
+        local learned = D.hotKnown[HOT_KEYS[i]]
+        local idle = learned and not up and not red and floor(now * 2) % 2 == 0
+        Sprite(l.icon, i == 1 and "icon_rejuv" or "icon_regrow", G.ICON_X, y - 1, up and c or K.muted, up and 1 or (idle and 0.9 or (learned and 0.5 or 0.2)), false)
         On(l.secs)
         TextAt(l.secs, G.LANE_SECS_X, y + 4)
         if up then
