@@ -648,7 +648,7 @@ def static_checks() -> list[str]:
     art, state, mod = (f"Modules/CombatHud/{n}.lua" for n in ("WarlockArt", "WarlockState", "GunsightWarlock"))
     if not all(x in toc for x in (art, state, mod)) or not toc.index(art) < toc.index(mod) or not toc.index(state) < toc.index(mod):
         errs.append("the toc must load WarlockArt.lua and WarlockState.lua before GunsightWarlock.lua")
-    classes = re.search(r"classes = \{([^}]*)\}", CLASSLUA)
+    classes = re.search(r"local CLASSES = \{([^}]*)\}", CLASSLUA) or re.search(r"classes = \{([^}]*)\}", CLASSLUA)
     if not classes or "WARLOCK" in classes.group(1):
         errs.append("GunsightClass.lua must not claim WARLOCK any more")
     for path in (CH / "GunsightWarlock.lua", CH / "WarlockState.lua", GENERATOR, Path(__file__)):

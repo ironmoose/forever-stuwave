@@ -652,8 +652,8 @@ def static_checks() -> list[str]:
     classes = re.search(r"local CLASSES = (\{[^}]*\})", CLASS)
     if not classes or "ROGUE" in classes.group(1):
         errs.append("GunsightClass.lua must not list ROGUE in its classes")
-    if 'class == "ROGUE"' in CLASS:
-        errs.append("GunsightClass.lua still has a ROGUE branch")
+    # Its combo path (and the ROGUE / DRUID branch that picks it) stays for the gunsightclass harness, which mounts the spec
+    # directly; the CLASSES list above is what decides whether a live Rogue gets it.
     for t in TEXTURES:
         p = MEDIA / f"{t}.tga"
         if not p.exists():
