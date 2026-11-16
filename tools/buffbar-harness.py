@@ -784,17 +784,25 @@ def check_the_slow_tick_reads_out_of_combat_and_a_read_does_not_stair_step_the_c
     tick(lua, 1)
     assert len(tip_calls(lua)) == reads, "the slow tick is not every second"
     tick(lua, 6)
+    assert len(tip_calls(lua)) == reads, "a settled hand is not read every five seconds (a read allocates)"
+    tick(lua, 25)
     assert len(tip_calls(lua)) > reads, "the slow tick reads the weapon out of combat"
-    # one minute later the tooltip says 55: the clock stays continuous
-    tick(lua, 54)
+    # a minute in the tooltip says 55: the clock stays continuous
     tip(lua, 16, ["Rockbiter 1 (55 min)"])
-    tick(lua, 6)
+    tick(lua, 31)
     r = float(view(lua, "imbue").remaining)
     assert 3300 - 5 <= r <= 3360 + 1, f"remaining {r} jumped"
-    # a real change (the tooltip says 40) is taken at once
+    # a real change (the tooltip says 40) is taken at the next read
     tip(lua, 16, ["Rockbiter 1 (40 min)"])
-    tick(lua, 6)
+    tick(lua, 31)
     approx(float(view(lua, "imbue").remaining), 2400, "a real change is taken", 1.0)
+
+
+def check_an_imbue_near_its_end_is_read_at_the_fast_cadence_again():
+    lua = world(tips={16: ["Rockbiter 1 (1 min)"]})
+    reads = len(tip_calls(lua))
+    tick(lua, 6)
+    assert len(tip_calls(lua)) > reads, "an imbue under two minutes is read every five seconds"
 
 
 def check_a_cast_starts_a_fresh_hour_and_the_next_read_takes_over():
@@ -4049,6 +4057,7 @@ CHECKS = [
     check_learning_lightning_shield_unlocks_the_tile_whichever_handler_runs_first,
     check_an_unchanged_tick_allocates_nothing_in_or_out_of_combat,
     check_the_slow_tick_reads_out_of_combat_and_a_read_does_not_stair_step_the_clock,
+    check_an_imbue_near_its_end_is_read_at_the_fast_cadence_again,
     check_a_cast_starts_a_fresh_hour_and_the_next_read_takes_over,
     check_a_cast_in_combat_counts_a_fresh_hour_and_a_weapon_swapped_in_combat_is_forgotten,
     check_two_imbue_casts_back_to_back_each_go_to_their_own_hand,

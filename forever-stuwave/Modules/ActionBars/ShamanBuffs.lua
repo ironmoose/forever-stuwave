@@ -43,7 +43,9 @@ local M = {
     SHIELD_S = 600,                         -- Lightning Shield lasts ten minutes
     EXPIRING_S = 300,                       -- five minutes or less turns the tile to the expiring colour
     CAST_GRACE = 1.5,                       -- seconds a cast stands before the weapon or the aura has caught up
-    READ_EVERY = 5,                         -- seconds between tooltip reads out of combat
+    READ_EVERY = 5,                         -- seconds between tooltip reads out of combat while a hand is unsettled
+    READ_SETTLED = 30,                      -- ... and once both hands are settled (a tooltip read allocates ~25 KB)
+    READ_CLOSE = 120,                       -- an imbue with this little left reads at READ_EVERY again (seconds clock)
     AFTER_CAST = { 0.5, 2.0 },              -- reads after an imbue cast: the weapon catches up a moment later
     SHIELD_UNLOCK = 8,                      -- Lightning Shield opens at level 8
     MAIN = 16, OFF = 17,                    -- the weapon slots
@@ -430,12 +432,26 @@ local function Changed()
     end
 end
 
+-- Seconds to the next tooltip read. A read only refines what the model already counts down, so once each hand is
+-- settled (no weapon, a plain "none", or an imbue well away from its end) reads slow down; a swap, a cast or a spellbook
+-- change reads at once through the events, whatever this says.
+local function ReadInterval(now)
+    for i = 1, #SLOTS do
+        local h = hands[SLOTS[i]]
+        if h.weapon ~= false then
+            if h.weapon == nil or h.state == "unknown" or h.estimated or h.castAt then return M.READ_EVERY end
+            if h.state == "imbue" and (not h.expiry or h.expiry - now < M.READ_CLOSE) then return M.READ_EVERY end
+        end
+    end
+    return M.READ_SETTLED
+end
+
 local function ReadSoon(delay)
     if C_Timer and C_Timer.After then
         C_Timer.After(delay, function()
             local ok, err = pcall(function()
                 ReadHands(Now())
-                nextRead = Now() + M.READ_EVERY
+                nextRead = Now() + ReadInterval(Now())
             end)
             if not ok then LogOnce("read", err) end
             Changed()
@@ -643,8 +659,8 @@ end
 function ShamanBuffs.Update(now)
     now = now or Now()
     if now >= nextRead and not InCombat() then
-        nextRead = now + M.READ_EVERY
         ReadHands(now)
+        nextRead = now + ReadInterval(now)
     end
     ReadShield(now)       -- cheap: in combat it only notes that the snapshot is frozen, so the "~" appears at once
     EvaluateImbue(now)
@@ -753,7 +769,7 @@ local function OnEvent(_, event, unit, _, spellId)
         shield.holdUntil = now + M.REGEN_HOLD
         shield.frozen = true
     end
-    nextRead = now + M.READ_EVERY
+    nextRead = now + ReadInterval(now)
     Changed()
 end
 
@@ -786,7 +802,7 @@ function ShamanBuffs.Start()
     local now = Now()
     pcall(ReadHands, now)
     pcall(ReadShield, now)
-    nextRead = now + M.READ_EVERY
+    nextRead = now + ReadInterval(now)
     return true
 end
 
