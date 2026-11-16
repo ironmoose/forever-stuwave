@@ -1014,7 +1014,10 @@ local function CollectAllScripted()
     local ours = CollectFrames()
     local found, order = {}, {}
     local f = EnumerateFrames and EnumerateFrames()
+    local lastNamed = "?"   -- frames enumerate in creation order: the last named one before an anonymous frame says whose it is
     while f do
+        local okG, gname = pcall(f.GetName, f)
+        if okG and type(gname) == "string" then lastNamed = gname end
         local okF, bad = pcall(function() return f:IsForbidden() or f:IsProtected() end)
         if okF and not bad then
             local okU, up = pcall(f.GetScript, f, "OnUpdate")
@@ -1022,6 +1025,7 @@ local function CollectAllScripted()
             if (okU and type(up) == "function") or (okE and type(ev) == "function") then
                 local okN, name = pcall(f.GetDebugName, f)
                 name = okN and type(name) == "string" and name or tostring(f)
+                if not (okG and type(gname) == "string") then name = name .. " (after " .. lastNamed .. ")" end
                 found[f] = ours[f] and ("FS " .. ours[f]) or name
                 order[#order + 1] = f
             end
