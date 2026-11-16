@@ -937,6 +937,146 @@ SlashCmdList["FSMEM"] = function()
 end
 
 -------------------------------------------------------------------------------
+-- Allocation sample
+-------------------------------------------------------------------------------
+
+-- /fsmem says whether the live figure is churn; this says WHERE the churn comes from. It finds our frames (walking the FS
+-- namespace, then their children), wraps each one's OnUpdate and OnEvent with a counter of the Lua heap growth inside the
+-- call, stops the collector for SECONDS so nothing is freed mid sample, then restores every script it still owns and prints
+-- the top sources. "other" is our growth outside any wrapped script: timers, hooks on stock functions, frames not reached.
+--
+-- Skipped: protected and forbidden frames (a script set from addon code would taint them) and named frames that are not
+-- ours. Wrapping is only for the sample; a /reload afterwards returns every script to its original state.
+-- The result also lands in ForeverSTUwaveDB.allocSample (on disk after /reload).
+local SAMPLE_SECONDS = 15
+local sampling = false
+
+local function OursByName(f)
+    local ok, name = pcall(f.GetName, f)
+    if not ok then return false end
+    if name == nil then return true end
+    return type(name) == "string" and (name:find("^ForeverSTU") or name:find("^FS")) ~= nil
+end
+
+local function IsWidget(v)
+    return type(v) == "table" and type(rawget(v, 0)) == "userdata" and type(v.GetObjectType) == "function"
+end
+
+local function Wrappable(f)
+    if type(f.HasScript) ~= "function" then return false end
+    local okF, forbidden = pcall(function() return f.IsForbidden and f:IsForbidden() end)
+    if not okF or forbidden then return false end
+    local okP, protected = pcall(function() return f.IsProtected and f:IsProtected() end)
+    if not okP or protected then return false end
+    return OursByName(f)
+end
+
+local function CollectFrames()
+    local found, order = {}, {}
+    local seen, budget = {}, 200000
+    local function addFrame(f, label)
+        if found[f] then return end
+        if not Wrappable(f) then return end
+        found[f] = label
+        order[#order + 1] = f
+        local ok, kids = pcall(function() return { f:GetChildren() } end)
+        if ok then
+            for i = 1, #kids do
+                if IsWidget(kids[i]) then addFrame(kids[i], label .. ">" .. i) end
+            end
+        end
+    end
+    local function walk(t, path, depth)
+        if seen[t] or depth > 7 or budget <= 0 then return end
+        seen[t] = true
+        if t == _G.ForeverSTUwaveDB or t == _G.ForeverSTUwaveExport or t == _G.ForeverSTUwaveErrorLog then return end
+        for k, v in pairs(t) do
+            budget = budget - 1
+            if budget <= 0 then return end
+            if type(v) == "table" then
+                local key = type(k) == "string" and k or ("[" .. tostring(k) .. "]")
+                if IsWidget(v) then
+                    if v.HasScript then addFrame(v, path .. "." .. key) end
+                elseif getmetatable(v) == nil or type(getmetatable(v)) == "table" then
+                    walk(v, path .. "." .. key, depth + 1)
+                end
+            end
+        end
+    end
+    walk(FS, "FS", 0)
+    return found, order
+end
+
+SLASH_FSALLOC1 = "/fsalloc"
+SlashCmdList["FSALLOC"] = function()
+    local tag = "|cff22e0ffForever STUwave|r: "
+    if sampling then print(tag .. "a sample is already running.") return end
+    if not (C_Timer and C_Timer.After and UpdateAddOnMemoryUsage and GetAddOnMemoryUsage) then
+        print(tag .. "sampling APIs unavailable on this client.")
+        return
+    end
+    local found, order = CollectFrames()
+    local kb, calls, wrapped, originals = {}, {}, {}, {}
+    local count = collectgarbage
+    for _, f in ipairs(order) do
+        for _, script in ipairs({ "OnUpdate", "OnEvent" }) do
+            local okHas, has = pcall(f.HasScript, f, script)
+            local orig = okHas and has and f:GetScript(script)
+            if type(orig) == "function" then
+                local label = found[f] .. ":" .. script
+                kb[label], calls[label] = 0, 0
+                local w = function(...)
+                    local before = count("count")
+                    orig(...)
+                    kb[label] = kb[label] + (count("count") - before)
+                    calls[label] = calls[label] + 1
+                end
+                if pcall(f.SetScript, f, script, w) then
+                    wrapped[#wrapped + 1] = { f = f, script = script, w = w, orig = orig }
+                end
+            end
+        end
+    end
+    sampling = true
+    collectgarbage("collect")
+    collectgarbage("stop")
+    UpdateAddOnMemoryUsage()
+    local fsStart, heapStart = GetAddOnMemoryUsage(addonName) or 0, collectgarbage("count")
+    print(tag .. ("sampling %d scripts on %d frames for %ds..."):format(#wrapped, #order, SAMPLE_SECONDS))
+    C_Timer.After(SAMPLE_SECONDS, function()
+        local ok, err = pcall(function()
+            UpdateAddOnMemoryUsage()
+            local fsGrew = (GetAddOnMemoryUsage(addonName) or 0) - fsStart
+            local heapGrew = collectgarbage("count") - heapStart
+            for _, r in ipairs(wrapped) do
+                if r.f:GetScript(r.script) == r.w then r.f:SetScript(r.script, r.orig) end
+            end
+            local rows, attributed = {}, 0
+            for label, v in pairs(kb) do
+                attributed = attributed + v
+                if v > 0 then rows[#rows + 1] = { label = label, kb = v, calls = calls[label] } end
+            end
+            table.sort(rows, function(a, b) return a.kb > b.kb end)
+            print(tag .. ("ours %.0fK in %ds (%.1fK/s), whole UI %.0fK; in wrapped scripts %.0fK, other %.0fK")
+                :format(fsGrew, SAMPLE_SECONDS, fsGrew / SAMPLE_SECONDS, heapGrew, attributed, fsGrew - attributed))
+            local saved = {
+                at = date("%Y-%m-%d %H:%M:%S"), seconds = SAMPLE_SECONDS, ours = fsGrew, heap = heapGrew,
+                attributed = attributed, scripts = #wrapped, frames = #order, top = {},
+            }
+            for i = 1, math.min(#rows, 25) do
+                local r = rows[i]
+                if i <= 8 then print(("  %.1fK/s  %s  (%d calls)"):format(r.kb / SAMPLE_SECONDS, r.label, r.calls)) end
+                saved.top[i] = { label = r.label, kb = r.kb, calls = r.calls }
+            end
+            if type(ForeverSTUwaveDB) == "table" then ForeverSTUwaveDB.allocSample = saved end
+        end)
+        collectgarbage("restart")
+        sampling = false
+        if not ok then print(tag .. "sample failed: " .. tostring(err)) end
+    end)
+end
+
+-------------------------------------------------------------------------------
 -- Secure-snippet check
 -------------------------------------------------------------------------------
 
