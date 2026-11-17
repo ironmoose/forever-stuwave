@@ -332,6 +332,19 @@ case("pvp role check: its own panel skin with a queue band, border and heading h
 """)
 
 case("invite ticket: a pink panel with an invite band, background, border and divider held, amber name, enter and leave keys", f"""
+    function CreateFont(name)
+        local f = {{ name = name }}
+        function f:SetFont() end
+        function f:SetTextColor(r, g, b, a) self.color = {{ r, g, b, a }} end
+        function f:SetShadowColor() end
+        return f
+    end
+    for _, b in ipairs({{ PVPReadyDialog.enterButton, PVPReadyDialog.leaveButton }}) do
+        b.fontObjects = {{}}
+        function b:SetNormalFontObject(o) self.fontObjects.normal = o end
+        function b:SetHighlightFontObject(o) self.fontObjects.highlight = o end
+        function b:SetDisabledFontObject(o) self.fontObjects.disabled = o end
+    end
     {OPEN_INVITE}
     local w = PVPReadyDialog
     local S = FS.GroupPopupSkin.state
@@ -343,7 +356,21 @@ case("invite ticket: a pink panel with an invite band, background, border and di
     assert(w.instanceInfo.underline.alpha == 0, 'underline kept')
     local n = w.instanceInfo.name
     assert(n.fontPath ~= 'stock.ttf' and n.textColor[1] > 0.9 and n.textColor[2] > 0.6 and n.textColor[3] < 0.5, 'name not amber mono')
-    assert(w.label.fontPath ~= 'stock.ttf' and w.roleLabel.fontPath ~= 'stock.ttf', 'texts not mono')
+    assert(w.roleLabel.fontPath ~= 'stock.ttf', 'texts not mono')
+    assert(w.label.alpha == 0, 'the stock heading (on the band rule) is held')
+    local head = S.inviteHead
+    assert(head and head.fontPath ~= 'stock.ttf' and head:GetText() == 'Your battleground is ready', 'heading drawn again in mono')
+    local hp = head.points[1]
+    assert(hp.point == 'TOP' and hp.rel == w and hp.y < -15, 'the heading sits below the band, not on its rule: ' .. tostring(hp.y))
+    w.label:SetText('Your arena is ready')
+    assert(head:GetText() == 'Your arena is ready', 'the heading follows the stock text')
+    for _, b in ipairs({{ w.enterButton, w.leaveButton }}) do
+        FS.GroupPopupSkin.ClearFonts(b) -- the skin ran at load, before these stubs; ClaimDefaultKey calls the same function
+        local fo = b.fontObjects
+        assert(fo.normal and fo.normal == fo.highlight and fo.normal == fo.disabled, 'one cleared font in every state')
+        local a = fo.normal.GetTextColor and select(4, fo.normal:GetTextColor()) or (fo.normal.color and fo.normal.color[4])
+        assert(a == nil or a == 0, 'the cleared font is transparent: ' .. tostring(a))
+    end
     local e, l = S.keys[w.enterButton], S.keys[w.leaveButton]
     assert(e and e.color[3] > 0.9 and e.color[1] < 0.3, 'enter not cyan')
     assert(l and l.color[1] > 0.9 and l.color[2] < 0.4, 'leave not pink')

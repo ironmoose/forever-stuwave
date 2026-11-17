@@ -98,6 +98,28 @@ local function Band(frame, title, accent)
     return S.bands[frame]
 end
 
+-- Every font object of `btn` points at one fully transparent font, so the stock label stays invisible whatever state the engine
+-- puts the button in (it swaps the label's font object on hover, press and disable, and a hover showed the stock text through ours).
+local clearFont
+local function ClearFonts(btn)
+    if not clearFont then
+        if type(CreateFont) == "function" then
+            local ok, f = pcall(CreateFont, "ForeverSTUwaveKeyClearFont")
+            if ok and f then
+                pcall(f.SetFont, f, Theme.FONT_MONO, 11, "")
+                pcall(f.SetTextColor, f, 0, 0, 0, 0)
+                pcall(f.SetShadowColor, f, 0, 0, 0, 0)
+                clearFont = f
+            end
+        end
+    end
+    if not clearFont then return end
+    for _, m in ipairs({ "SetNormalFontObject", "SetHighlightFontObject", "SetDisabledFontObject" }) do
+        if type(btn[m]) == "function" then pcall(btn[m], btn, clearFont) end
+    end
+end
+P.ClearFonts = ClearFonts
+
 -- The default text button skin must already be on `btn` so the panel sweep leaves it alone (it skips a button that has one): take
 -- it when it is there, ask for it when it is not, then hold its pieces; ours are drawn over the held stock art.
 local function ClaimDefaultKey(btn)
@@ -109,10 +131,12 @@ local function ClaimDefaultKey(btn)
         HeldArt.Hold(p.ring)
         HeldArt.Hold(p.halo)
         if p.fs then Kit.HoldFrame(p.fs) end
+        p.fs = nil -- the default skin recolours its label on every state change; ours is drawn over a cleared one
     else
         HeldArt.HoldButton(btn)
         if type(btn.GetFontString) == "function" then Kit.HoldFrame(Try(btn.GetFontString, btn)) end
     end
+    ClearFonts(btn)
 end
 
 -------------------------------------------------------------------------------
@@ -227,6 +251,7 @@ end
 
 local PANEL = { fillColor = Theme.COLOR_BG }
 local INVITE_BAND = 12 -- units
+local INVITE_HEAD_GAP = 7 -- units between the band's rule and the top of the heading
 
 local function PanelSkin(accent, title, bandHeight) return { fillColor = PANEL.fillColor, accent = accent, title = title, bandHeight = bandHeight } end
 
@@ -301,7 +326,18 @@ local function SkinInvite(win)
         G.Mono(info.name, win, 16, C.amber)
         G.Mono(info.statusText, win, 11, C.muted)
     end
-    G.Mono(win.label, win, 10, C.muted)
+    -- the stock heading sits 15 units under the top edge, on the band's rule: it is held and drawn again under the band
+    local label = win.label
+    if type(label) == "table" then
+        Kit.HoldFrame(label)
+        local head = Kit.Label(win, Plain(Try(label.GetText, label)) or "", 10, C.muted)
+        head:SetPoint("TOP", win, "TOP", 0, -(Theme.PanelBandInset() + INVITE_BAND + INVITE_HEAD_GAP))
+        Kit.HookFunc(label, "SetText", function(_, text)
+            text = Plain(text)
+            head:SetText(type(text) == "string" and text or "")
+        end)
+        S.inviteHead = head
+    end
     G.Mono(win.roleDescription, win, 9, C.muted)
     G.Mono(win.roleLabel, win, 12, C.text)
     SkinKey(win.enterButton, C.cyan)
