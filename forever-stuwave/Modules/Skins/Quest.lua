@@ -383,6 +383,11 @@ end
 
 -- One reward, required or choice button: the stock name plate and quality border held (the icon and the stock count stay), a card
 -- behind it, a slot on its icon, the name in mono, the dim and the lock-on brackets of a pick on a frame above the lot.
+local function CardFonts(button)
+    Mono(button.Name, button, 12, C.text)
+    Mono(button.Count, button, 11, C.text)
+end
+
 local function SkinItemCard(button)
     if type(button) ~= "table" or S.cards[button] or type(button.CreateTexture) ~= "function" then return end
     for _, f in ipairs({ "NameFrame", "IconBorder", "IconOverlay", "IconOverlay2" }) do HeldArt.Hold(button[f]) end
@@ -402,8 +407,7 @@ local function SkinItemCard(button)
     S.cards[button] = card
     local icon = IconOf(button)
     if icon and Q.CardSlot(button, icon) then SeatCard(button) end
-    Mono(button.Name, button, 12, C.text)
-    Mono(button.Count, button, 11, C.text)
+    CardFonts(button)
     card.state = Kit.Track(button, PaintCard)
     Kit.HookScript(button, "OnClick", function()
         for _, b in ipairs(S.choices) do PaintCard(b) end
@@ -441,6 +445,9 @@ local function SkinRewardButtons()
         SeatRequiredQuality(b)
     end
     for _, b in ipairs(S.choices) do PaintCard(b) end
+    -- the name and count are sized again on every display: the reward frame is shared with the quest log, so a card skinned
+    -- while it sat under another window kept a font sized for that window's scale (live 2026-11-16: names at two thirds size)
+    for b in pairs(S.cards) do CardFonts(b) end
     -- a slot decorated after combat ended, or laid out again by the layer, is fitted to its icon
     for _, slot in pairs(S.slots) do
         FitSlot(slot)

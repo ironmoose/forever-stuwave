@@ -783,6 +783,21 @@ case("quest rewards: the picked choice lights pink, the other choices dim, a rew
     assert(not S.cards[c2].scrim.shown and not S.cards[c1].scrim.shown, 'the pick outlived the page')
 """)
 
+case("quest rewards: the name and count are sized again on every display, so a card skinned under another window's scale is right here", f"""
+    {OPEN}
+    local b = QuestInfoRewardsFrame.RewardButtons[1]
+    local before = b.Name.size
+    local H = FS.FrameHelpers
+    local real = H.PixelsPerUnit
+    H.PixelsPerUnit = function(frame) return real(frame) * (frame == b and 1.5 or 1) end
+    QuestInfo_Display()
+    local scaled = b.Name.size
+    H.PixelsPerUnit = real
+    assert(math.abs(scaled - before / 1.5) < 0.01, 'name not sized for the new scale: ' .. tostring(before) .. ' -> ' .. tostring(scaled))
+    QuestInfo_Display()
+    assert(math.abs(b.Name.size - before) < 0.01 and math.abs(b.Count.size - before * 11 / 12) < 0.01, 'name and count back to size')
+""")
+
 case("quest rewards: a card lights cyan under the hand and returns", f"""
     {OPEN}
     local S = FS.QuestSkin.state
