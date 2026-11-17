@@ -8,10 +8,10 @@ FS.GunsightAreas is a FAKE for the registration cases and the REAL file for the 
 
   * registration: one "class" spec for SHAMAN with build, seat, onShow and onHide, and nothing else registered;
   * every geometry number against the mockup: the pole x and width, the block count, pitch and height, the ground, the re-drop zone,
-    the head, the eyes, the labels, the locked mold text, the element colours and the block opacities;
+    the head, the eyes, the labels, the element colours and the block opacities;
   * the looks: blocks (ceil(remaining / duration * 8) lit, the last one amber, the head sunk on top of them, the time under the ground,
     a "~" for an estimate), the bar for a totem up with no number (a StatusBar driven by SetTimerDuration, the head anchored to its
-    fill, "?"), DROP (dashed amber head, plus sign), locked (level and name), FAR (ghost pole, dashed amber head, FAR);
+    fill, "?"), DROP (dashed amber head, plus sign), locked (nothing drawn), FAR (ghost pole, dashed amber head, FAR);
   * secrets: in combat every client answer is secret and no arithmetic touches one (any throw inside a pcall'd paint is logged and fails
     the case);
   * the OnUpdate runs only while the module is shown and a totem is up, allocates nothing on a steady tick, and stops on hide; onShow
@@ -86,7 +86,6 @@ def mockup_numbers() -> dict:
     ground = _m(r"line\(x0,gy,(\d+),gy,C\.violet,\.(\d+),([\d.]+)\)", mod_fn, "ground")
     ins = _m(r"ins=hero\?(\d+):(\d+)", pole_fn, "ins")
     mold = _m(r"y=\"'\+\(gy-NB\*BP\)\+'\" width=\"'\+\(w-2\*ins\)\+'\" height=\"'\+\(NB\*BP-(\d+)\)\+'\" fill=\"'\+c\+'\" fill-opacity=\"\.(\d+)\" stroke=\"'\+C\.violet\+'\" stroke-opacity=\"\.(\d+)\" stroke-dasharray=\"(\d) (\d)\"", pole_fn, "mold")
-    locked = _m(r"stroke-opacity=\"\.(\d+)\" stroke-dasharray=\"2 3\"/>';\s*o\+=txt\(cx,gy-NB\*BP/2-2,'L'\+s\.lv,(\d+),C\.muted,\{a:'middle',op:\.(\d+)\}\);\s*o\+=txt\(cx,gy-NB\*BP/2\+(\d+),EL\[k\]\.nm\.charAt\(0\)\+EL\[k\]\.nm\.slice\(1\)\.toLowerCase\(\),(\d+),C\.muted,\{a:'middle',op:\.(\d+)\}\)", pole_fn, "locked")
     ops = _m(r"op=s\.st==='far'\?\.(\d+):\(s\.st==='est'\?\.(\d+):\.(\d+)\)", pole_fn, "opacity")
     blockline = _m(r"rect\(x\+ins\+(\d+),by\+(\d+),w-2\*ins-(\d+),(\d+),'#0a0416',\.(\d+)\)", pole_fn, "block line")
     headpos = _m(r"var ty=gy-lit\*BP-(\d+),mode=", pole_fn, "head top")
@@ -111,8 +110,6 @@ def mockup_numbers() -> dict:
         "INS_HERO": int(ins.group(1)), "INS": int(ins.group(2)),
         "MOLD_LESS": int(mold.group(1)), "MOLD_FILL_A": float("0." + mold.group(2)), "MOLD_A": float("0." + mold.group(3)),
         "MOLD_DASH": [int(mold.group(4)), int(mold.group(5))],
-        "MOLD_LOCKED_A": float("0." + locked.group(1)), "LV_SIZE": int(locked.group(2)), "LV_A": float("0." + locked.group(3)),
-        "NM_DY": int(locked.group(4)), "NM_SIZE": int(locked.group(5)), "NM_A": float("0." + locked.group(6)),
         "OP_FAR": float("0." + ops.group(1)), "OP_EST": float("0." + ops.group(2)), "OP_UP": float("0." + ops.group(3)),
         "LINE": [int(blockline.group(i)) for i in (1, 2, 3, 4)],
         "HEAD_TOP": int(headpos.group(1)),
@@ -356,7 +353,7 @@ near(c.ZONE_W, MU.X1 - MU.X0, "zone width"); near(c.ZONE_A, MU.ZONE_A, "zone alp
 check(c.ZONE_DASH[1] == MU.ZONE_DASH[1] and c.ZONE_DASH[2] == MU.ZONE_DASH[2], "zone dash")
 near(c.GROUND_A, MU.GROUND_A, "ground alpha"); near(c.GROUND_TH, MU.GROUND_TH, "ground thickness")
 check(c.MOLD_H == MU.NB * MU.BP - MU.MOLD_LESS, "mold height")
-near(c.MOLD_A, MU.MOLD_A, "mold stroke alpha"); near(c.MOLD_LOCKED_A, MU.MOLD_LOCKED_A, "locked mold alpha"); near(c.MOLD_FILL_A, MU.MOLD_FILL_A, "mold fill alpha")
+near(c.MOLD_A, MU.MOLD_A, "mold stroke alpha"); near(c.MOLD_FILL_A, MU.MOLD_FILL_A, "mold fill alpha")
 near(c.OP_UP, MU.OP_UP, "block alpha"); near(c.OP_EST, MU.OP_EST, "estimate alpha"); near(c.OP_FAR, MU.OP_FAR, "ghost alpha")
 check(c.HEAD_H == MU.HEAD_H and c.HEAD_CUT == MU.HEAD_CUT, "head size and cut")
 near(c.HEAD_MIX, MU.HEAD_MIX, "head mix"); near(c.HEAD_DOWN_MIX, MU.HEAD_DOWN_MIX, "down head mix"); near(c.CROWN_FAR_MIX, MU.FAR_MIX, "far crown mix")
@@ -367,9 +364,6 @@ check(c.EYE.hero.off == MU.EYE.hero[1] and c.EYE.hero.w == MU.EYE.hero[2] and c.
 check(c.EYE.narrow.off == MU.EYE.narrow[1] and c.EYE.narrow.w == MU.EYE.narrow[2] and c.EYE.narrow.off2 == MU.EYE.narrow[3], "narrow eyes")
 check(c.LABEL_SIZE == MU.LABEL and c.LABEL_HERO == MU.LABEL_HERO and c.LABEL_Y == MU.LABEL_Y, "labels")
 check(c.PLUS_BASE == MU.PLUS_BASE and c.PLUS_SIZE == MU.PLUS_SIZE, "plus sign")
-check(c.LV_SIZE == MU.LV_SIZE and c.NM_SIZE == MU.NM_SIZE, "locked text sizes"); near(c.LV_A, MU.LV_A, "level alpha"); near(c.NM_A, MU.NM_A, "name alpha")
-check(c.NM_Y - c.LV_Y == MU.NM_DY + 2, "the name sits " .. MU.NM_DY .. " below the mold centre, the level 2 above it")
-check(c.LV_Y == -(MU.NB * MU.BP / 2 + 2), "level baseline")
 for i, el in ipairs(ELEMENT) do
     local def = c.POLES[i]
     check(def.key == el, "pole order Fire, Earth, Water, Air")
@@ -425,25 +419,22 @@ end
 noDegrade()
 """)
 
-case("a_locked_element_shows_an_empty_mold_with_its_level_and_name")(r"""
+case("a_locked_element_is_not_drawn")(r"""
 boot({ level = 14 })
 local spec, host = mount("lower")
 local pFire, pEarth, water, air = parts()[1], parts()[2], parts()[3], parts()[4]
 for _, p in ipairs({ pFire, pEarth }) do check(p.label.text == "DROP", "open elements wait for a drop") end
 for _, p in ipairs({ water, air }) do
-    check(not isVisible(p.head) and lit(p) == 0 and not isVisible(p.label), "a locked pole has no head, no blocks, no label")
-    check(not isVisible(p.moldFill), "no fill: a dotted empty mold")
-    check(isVisible(p.moldLine) and isVisible(p.lv) and isVisible(p.nm), "the mold, the level and the name show")
-    colorIs(p.moldLine, rgbOf("#a855f7"), MU.MOLD_LOCKED_A, "locked mold")
+    check(not isVisible(p.head) and lit(p) == 0 and not isVisible(p.label) and not isVisible(p.bar), "a locked pole has no head, no blocks, no label")
+    check(not isVisible(p.moldFill) and not isVisible(p.moldLine), "and no mold: nothing is drawn")
+    check(p.lv == nil and p.nm == nil, "no level or name text")
 end
-check(water.lv.text == "L20" and air.lv.text == "L30", "levels")
-check(water.nm.text == "Water" and air.nm.text == "Air", "names")
-textColorIs(water.lv, MUTED, MU.LV_A, "level"); textColorIs(water.nm, MUTED, MU.NM_A, "name")
+check(isVisible(pFire.moldLine), "an open pole keeps its mold")
 colorIs(pFire.moldLine, rgbOf("#a855f7"), MU.MOLD_A, "open mold")
 -- learning the level opens them
 LEVEL = 30
 fire("PLAYER_LEVEL_UP")
-check(water.label.text == "DROP" and not isVisible(water.lv), "level 20 and 30 poles open when the level reaches them")
+check(water.label.text == "DROP" and isVisible(water.moldLine), "level 20 and 30 poles open when the level reaches them")
 noDegrade()
 """)
 

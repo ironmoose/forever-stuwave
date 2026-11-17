@@ -959,6 +959,21 @@ local function PaintTraps(v, now)
     local T = P.trap
     local calm = v.mode == "calm"
     local learned = Data.TrapKey() ~= nil
+    -- not learned = not drawn: no trap, no slots, no divider until a trap is known
+    On(T.divider, learned)
+    if not learned then
+        for _, t in ipairs({ T.open, T.glow, T.dark, T.white, T.lit, T.dim, T.label }) do On(t, false) end
+        for _, Sl in pairs(T.slots) do
+            for _, t in ipairs({ Sl.iconX, Sl.iconO, Sl.iconOff, Sl.border, Sl.inner, Sl.fill, Sl.hi, Sl.shade, Sl.flash, Sl.label }) do
+                On(t, false)
+            end
+            Sl.n = -1
+        end
+        RefillTrap(T.lit, false)
+        return false
+    end
+    On(T.label, true)
+    for _, Sl in pairs(T.slots) do On(Sl.border, true); On(Sl.inner, true) end
     local cooling = Data.TrapCooling()
     local castAt = Data.TrapCastAt()
     local since = castAt and (now - castAt) or nil
@@ -972,7 +987,7 @@ local function PaintTraps(v, now)
     On(T.dark, shut and not snapping)
     On(T.white, shut and snapping)
     RefillTrap(T.lit, shut and not snapping and cooling == true)
-    On(T.dim, calm or not learned)
+    On(T.dim, calm)
     local text, col = "", K.mintHi
     if since ~= nil and since < C.SET_LABEL then text, col = "SET", K.white
     elseif ready and not calm then text = "READY" end

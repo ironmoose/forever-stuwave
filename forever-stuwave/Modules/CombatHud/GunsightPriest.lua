@@ -12,7 +12,7 @@
 --     (15 s), dim teal while the 4 s cooldown runs, ice cyan when clear. Empty and clear: a still GHOST out of combat (the off
 --     state mockup, 2026-11-10, option C: a faint wash the ground shows through, thin rings for the band and the boss, rivet
 --     dots, a solid thin rim, the rune in ice cyan), an amber dashed pulse with a glow in combat ("shield them"). Not learned:
---     a dotted rim and L6. The label under it is the absorb left (AbbreviateNumbers) or the Weakened Soul time in violet.
+--     nothing is drawn (not learned = not drawn). The label under it is the absorb left (AbbreviateNumbers) or the Weakened Soul time in violet.
 --   * THE RIGHT SIDE, one of three looks, chosen by the setting "Right side shows" (PriestRight.lua: Auto, Spirit Tap + Inner
 --     Fire, Prayer of Mending, Off; a change waits for the end of a fight):
 --       - MEDALLIONS (the default while leveling): two round medallions, the shield's art language, 35 px wide rings on one
@@ -21,7 +21,7 @@
 --       - PRAYER OF MENDING: 5 beads on an arc round a 2x heart (lit = heals left), a 5 seat party strip (seat 1 is the
 --         player, then party1-4; class colour strip, a "you" tick), the holder's seat framed gold with a small heart, a spark
 --         when a plain read sees it jump, the 30 s jump timer bar and its label, the heart shaded from the top while the 10 s
---         cooldown runs, L40 before it is learned. The seats also carry the player's OTHER shields: frost light filling the
+--         cooldown runs, nothing before it is learned. The seats also carry the player's OTHER shields: frost light filling the
 --         seat from the bottom (that member's absorb, engine drawn) and a violet line draining along its top (their Weakened
 --         Soul from our cast).
 --       - OFF: nothing on the right.
@@ -35,8 +35,8 @@
 --
 -- THE MEDALLIONS (the same idea for a buff: the engine knows, Lua does not). Two layers on each medallion:
 --   * BASE (ours, plain regions, always drawn, writable in combat): the calm look (the ghost wash and the dim glyph), or for Inner
---     Fire the amber nudge (the dark body, amber dashes, the amber glyph and halo, breathing) while the reminder is on, or the
---     locked look (a dotted rim and a dotted glyph: Spirit Tap not talented, Inner Fire not learned, with L12 beside it).
+--     Fire the amber nudge (the dark body, amber dashes, the amber glyph and halo, breathing) while the reminder is on, or
+--     nothing at all while it is locked (Spirit Tap not talented, Inner Fire not learned).
 --   * COVER (the lit look, children of an ENGINE aura slot): the dark body, the lit rim, the glyph in full colour, a breathing
 --     halo (Spirit Tap also a breathing glow ring), and the engine's number. The slot comes from one AuraContainer per medallion
 --     (template CustomAuraContainerTemplate, unit "player", an AddAuraSlot on HELPFUL with candidateFilters.includeSpellIDs: the
@@ -453,7 +453,7 @@ local function BuildMending()
     local mf = Frame(mod, 1)
     P.mf = mf
     local HX, HY = pm.cx - 7, pm.cy - 6
-    P.chain, P.beads, P.lockDots = {}, {}, {}
+    P.chain, P.beads = {}, {}
     for i = 1, 4 do
         local x1, y1 = BeadPos(i)
         local x2, y2 = BeadPos(i + 1)
@@ -466,12 +466,6 @@ local function BuildMending()
         local t = Tex(mf, "ARTWORK", 1, MEDIA .. "priest_mending.tga", 7, 7)
         Place(t, x - 3, y - 3)
         P.beads[i] = t
-        for d = 1, 2 do
-            local dot = Tex(mf, "ARTWORK", 1, FLAT, 1, 1)
-            Tint(dot, K.muted, 0.4)
-            Place(dot, x, y + (d == 1 and -1 or 1))
-            P.lockDots[#P.lockDots + 1] = dot
-        end
     end
     P.heartGlow = Tex(mf, "BACKGROUND", 0, MEDIA .. "priest_mending.tga", 18, 15)
     MendCell(P.heartGlow, MCELL.heartGlow, 18, 15)
@@ -590,18 +584,6 @@ local function BuildMedallions()
         m.halo = MT("ARTWORK", 3)
         m.glyph = MT("ARTWORK", 4)
         for _, t in ipairs({ m.glow, m.face, m.rim, m.rimIn, m.halo, m.glyph }) do On(t, false) end
-        if def.key == "fire" then
-            local lock = rf:CreateFontString(nil, "OVERLAY")
-            lock.cur = { 1, 1, 1, 1 }
-            lock:SetJustifyH("CENTER")
-            Seat(function()
-                FS.Theme.ApplyMono(lock, ui(C.NUM_SIZE), lock.cur)
-                lock:ClearAllPoints()
-                lock:SetPoint("CENTER", numAnc, "CENTER", 0, 0)
-            end)
-            lock:SetText("")
-            m.lock = lock
-        end
         P.meds[i] = m
     end
     -- the pull now cue: an amber glow ring over Spirit Tap's cover (a plain frame above the container)
@@ -681,12 +663,10 @@ local function PaintShield(now, combat)
     if not Data.ShieldKnown() then
         On(P.halo, false); On(P.body, false); On(P.stateLine, false)
         On(P.bar, false); On(P.gate, false); On(P.top, false)
-        ShieldCell(P.stateRim, CELL.rimDash)
-        On(P.stateRim, true); Tint(P.stateRim, K.muted, 0.4)
-        On(P.stateRune, true); Tint(P.stateRune, K.muted, 0.22)
+        On(P.stateRim, false); On(P.stateRune, false)
         ShowShards(nil)
         P.ShakeTo(0)
-        Label(P.wsLabel, "L6", K.muted)
+        Label(P.wsLabel, "")
         return false
     end
     On(P.body, true); On(P.bar, true); On(P.gate, true); On(P.top, true)
@@ -820,11 +800,8 @@ end
 local function PaintMending(now, combat)
     local m = Data.Mending()
     local locked = not m.known
-    On(P.heart, true)
-    for i = 1, #P.lockDots do On(P.lockDots[i], locked) end
+    On(P.heart, not locked)
     if locked then
-        MendCell(P.heart, MCELL.heartLocked, 14, 12)
-        Alpha(P.heart, 1)
         On(P.heartGlow, false); On(P.cdBar, false)
         for i = 1, 4 do On(P.chain[i], false) end
         for i = 1, 5 do On(P.beads[i], false) end
@@ -834,7 +811,7 @@ local function PaintMending(now, combat)
             s.fsMine = false
         end
         On(P.you, false); On(P.sparkGlow, false); On(P.sparkCore, false); On(P.timerBg, false); On(P.timerFill, false)
-        Label(P.pomLabel, "L40", K.muted)
+        Label(P.pomLabel, "")
         return false
     end
     local out = m.out and true or false
@@ -938,9 +915,7 @@ end
 local function PaintMedBase(m, look, b)
     local def, face, glow, rim, rimIn, halo, glyph = m.def, m.face, m.glow, m.rim, m.rimIn, m.halo, m.glyph
     if look == "locked" then
-        On(face, false); On(glow, false); On(rimIn, false); On(halo, false)
-        MedCell(rim, MEDCELL.dash); On(rim, true); Tint(rim, K.muted, 0.4)
-        MedCell(glyph, MEDCELL[def.dots]); On(glyph, true); Tint(glyph, K.white, 1); Alpha(glyph, 1)
+        On(face, false); On(glow, false); On(rim, false); On(rimIn, false); On(halo, false); On(glyph, false)
     elseif look == "nudge" then
         MedCell(face, MEDCELL.body); On(face, true); Tint(face, K.white, 1)
         On(glow, false); On(rimIn, false)
@@ -982,7 +957,6 @@ local function PaintMedallions(now)
         else look = "calm" end
         PaintMedBase(m, look, b)
         if look == "nudge" then moving = true end
-        if m.lock then Label(m.lock, look == "locked" and ("L" .. Right.DEFS.fire.level) or "", K.muted) end
     end
     local cue = Right.Cue(now)
     On(P.cueGlow, cue)

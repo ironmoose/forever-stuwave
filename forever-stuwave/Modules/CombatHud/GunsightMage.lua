@@ -16,7 +16,7 @@
 --   * THE WARD (right, centred at 121, 31): Ice Barrier (a clear ice oval; the light inside is the absorb left, filling from the
 --     bottom, a pink ring draining for the 1 minute damage buff, the oval refilling during its cooldown, amber when it may be
 --     cast again in combat) or, without it, Mana Shield (a gaseous oval of arcane mist whose dense part is the absorb). Neither
---     learned: a dotted oval and L20. The label under it is the absorb left (AbbreviateNumbers) or the buff time in pink.
+--     learned: nothing is drawn (not learned = not drawn). The label under it is the absorb left (AbbreviateNumbers) or the buff time in pink.
 --
 -- HOW "THERE IS LIGHT IN IT" IS DRAWN WITHOUT READING A SECRET. The absorb can never be compared, so everything that only shows
 -- while the ward holds light (the lit chrome, the lit ring, the glyphs, the number) sits in one plain frame whose ALPHA is the
@@ -705,9 +705,6 @@ local function BuildWard()
         f:EnableMouse(false)
         return f
     end
-    -- the locked look
-    W.locked = Spr(wf, "BACKGROUND", 0, A.ward, WCELL.manaLocked, wc.x, wc.y, wf)
-
     -- the Ice Barrier, bottom to top: buff ring, dark shell and its empty looks, the cooldown refill, then (under the absorb
     -- gate) the cover and lit chrome, the light, the flash
     local ice = Sub(1)
@@ -787,7 +784,6 @@ local function BuildWard()
     local sf = Sub(8)
     for i = 1, 10 do W.shards[i] = { big = Flat(sf, "OVERLAY", 3, 2, 2, wf), dot = Flat(sf, "OVERLAY", 4, 1, 1, wf) } end
     W.buffLabel = Text(mod, wc.x, C.LABEL_Y)
-    W.lockLabel = Text(mod, wc.x, C.LABEL_Y)
 end
 
 -------------------------------------------------------------------------------
@@ -888,9 +884,9 @@ local function PaintFrost(now, combat)
     local flashing = since ~= nil and since < C.NOVA_FLASH
     local moving = cooling or frozen or (since ~= nil and since < C.NOVA_BURST)
 
-    -- the flake: bright when ready, dark and refilling while the cooldown runs; dim when Frost Nova is not learned
+    -- the flake: bright when ready, dark and refilling while the cooldown runs; not drawn when Frost Nova is not learned
+    On(F.flake, novaKnown)
     CellOf(F.flake, A.frost, ready and FCELL.flakeReady or FCELL.flakeOff)
-    Alpha(F.flake, novaKnown and 1 or 0.45)
     local b = Beat(now, 2.4)
     On(F.glow, ready and combat)
     if ready and combat then Alpha(F.glow, Stepped((0.10 + 0.08 * b) / 0.18)) end
@@ -941,7 +937,7 @@ local function PaintFrost(now, combat)
     end
 
     -- the crust: the Frozen window from the player's own Nova, draining; a faint frame when idle
-    On(F.crustIdle, not frozen)
+    On(F.crustIdle, not frozen and novaKnown)
     On(F.crustDim, frozen)
     On(F.haze, frozen)
     if frozen then
@@ -1358,19 +1354,15 @@ local function PaintWard(now, combat)
     local kind = Data.WardKind()
     local ward = Data.Ward()
     local up = ward.up and true or false
-    On(W.locked, kind == nil)
     On(W.ice, kind == "barrier")
     On(W.mana, kind == "mana")
     if kind == nil then
         On(W.iceGate, false); On(W.manaGate, false)
         On(W.buffLabel, false)
-        On(W.lockLabel, true)
-        Label(W.lockLabel, "L20", K.muted)
         P.ShakeTo(0)
         ShowShards(nil)
         return false
     end
-    On(W.lockLabel, false)
     On(W.iceGate, kind == "barrier")
     On(W.manaGate, kind == "mana")
     local cooling = kind == "barrier" and Data.Cooling("icebarrier") == true

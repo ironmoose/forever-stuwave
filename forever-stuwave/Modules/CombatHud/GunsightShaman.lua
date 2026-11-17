@@ -17,7 +17,8 @@
 --           StatusBar:SetTimerDuration drains in place of the blocks, the head rides its top, the time reads "?". Needs the client to
 --           take the remaining time direction; without it the bar stays full (the pole is still marked up).
 --   down    nothing stands in an element that is open: a hollow amber dashed head and a plus sign, DROP under the ground.
---   locked  the element is not open yet (Earth 4, Fire 10, Water 20, Air 30): a dotted empty mold with its level and name.
+--   locked  the element is not open yet (Earth 4, Fire 10, Water 20, Air 30): nothing is drawn, the slot stays empty (not learned =
+--           not drawn).
 --   far     a totem you walked away from (ShamanTotems sets it from the drop position): a ghost pole, a dashed amber head, FAR.
 --
 -- The shock tracker (the rune disc and its bolt, right of the poles) and the Fire Nova ring are GunsightShamanShocks.lua's (FS.GunsightShamanShocks: Build(frame) ->
@@ -67,7 +68,7 @@ local C = {
     ZONE_A = 0.11, ZONE_LINE_A = 0.55,        -- the band fill, and the dashed line above it
     ZONE_DASH = { 4, 3 },                     -- line(.., gy - BP - 1, .., amber, .55, 1, '4 3')
     GROUND_TH = 1.4, GROUND_A = 0.75,         -- line(x0, gy, 1408, gy, violet, .75, 1.4)
-    MOLD_A = 0.22, MOLD_LOCKED_A = 0.28,      -- the mold's dashed stroke (violet .22), and the locked one (.28)
+    MOLD_A = 0.22,                            -- the mold's dashed stroke (violet .22)
     MOLD_FILL_A = 0.05,                       -- the mold's fill: the element colour .05
     HEAD_H = 9, HEAD_MIX = 0.42,              -- ch(hx, hy, w, 9, 2), mix(bg, c, .42)
     HEAD_DOWN_MIX = 0.12,                     -- the DROP head: mix(bg, amber, .12)
@@ -79,8 +80,6 @@ local C = {
     OP_UP = 0.95, OP_EST = 0.72, OP_FAR = 0.42,   -- block opacity: a read, an estimate (the cast ledger), a ghost
     LABEL_Y = 19, LABEL_SIZE = 12, LABEL_HERO = 15,   -- txt(cx, gy + 19, lab, hero ? 15 : 12, white, middle)
     PLUS_BASE = 8, PLUS_SIZE = 10,            -- txt(cx, hy + 8, '+', 10, amber, middle)
-    LV_Y = -26, LV_SIZE = 11, LV_A = 0.8,     -- txt(cx, gy - NB * BP / 2 - 2, 'L' + lv, 11, muted, .8)
-    NM_Y = -13, NM_SIZE = 9, NM_A = 0.55,     -- txt(cx, gy - NB * BP / 2 + 11, name, 9, muted, .55)
     TICK = 0.1,                               -- seconds between OnUpdate passes
     -- the baked art (tools/assets/generate_totem_pole.py): TEX_SCALE texels per image px, PAD px of margin on a stroked piece
     TEX_SCALE = 4, PAD = 1,
@@ -354,15 +353,9 @@ local function BuildPole(slot, def)
     end
     Seat(p.seatHead)
 
-    -- the label under the ground, and the locked pole's level and name
+    -- the label under the ground
     local size = def.hero and C.LABEL_HERO or C.LABEL_SIZE
     p.label = Text(mod, "", size, p.cx, C.GY + C.LABEL_Y)
-    p.lv = Text(mod, "L" .. def.level, C.LV_SIZE, p.cx, C.GY + C.LV_Y)
-    p.nm = Text(mod, def.name, C.NM_SIZE, p.cx, C.GY + C.NM_Y)
-    TextColor(p.lv, K.muted, C.LV_A)
-    TextColor(p.nm, K.muted, C.NM_A)
-    p.lv:Hide()
-    p.nm:Hide()
     return p
 end
 
@@ -504,9 +497,7 @@ local function PaintPole(p, now)
         v.mode = mode
         local locked = mode == "locked"
         p.moldFill:SetShown(not locked)
-        Tint(p.moldLine, K.violet, locked and C.MOLD_LOCKED_A or C.MOLD_A)
-        p.lv:SetShown(locked)
-        p.nm:SetShown(locked)
+        p.moldLine:SetShown(not locked)
         p.bar:SetShown(mode == "bar")
         if mode ~= "blocks" then PaintBlocks(p, 0, false, 1) end
     end

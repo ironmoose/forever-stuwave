@@ -13,7 +13,7 @@
 --   * DEMORALIZING SHOUT (right, grim violet, smaller tiles, orbiting the other way, the same beard in violet): the time always wears a
 --     "~" (timed from the player's own cast, the target's debuff cannot be read in combat). On a cast it GROWLS: the angry eyes glow
 --     pink, teeth clench, the helm shudders, the beard whips like the roar's, the runes are sucked in and slam back out past the ring, and a dotted ring of
---     dread ripples out. Not learned yet: a dotted ring and L14.
+--     dread ripples out. Not learned yet: nothing is drawn (not learned = not drawn).
 --
 -- UNITS. The art is drawn on a sprite grid: one sprite px is C.SPX image px (the mockup's canvas is 150 x 86 sprite px). Every
 -- position is rounded to a whole sprite px before it is seated, as the mockup's canvas does. The helm frames and rune tiles are
@@ -87,7 +87,7 @@ local C = {
     },
     RINGS = {
         battle = { cx = 42, r = 27, tw = 7, th = 9, atlas = "warrior_runes_big", spin = 1 },
-        demo = { cx = 112, r = 24, tw = 5, th = 7, atlas = "warrior_runes_small", spin = -1, levelText = "L14" },
+        demo = { cx = 112, r = 24, tw = 5, th = 7, atlas = "warrior_runes_small", spin = -1 },
     },
     COLORS = {
         track = Hex("#a855f7"), pink = Hex("#ff8098"), amber = Hex("#ffb648"), violet = Hex("#e09cff"),
@@ -461,8 +461,13 @@ local function PaintRing(p, now)
         local rr = d.r * gk
         local x = floor(d.cx + cos(a) * rr - d.tw / 2 + 0.5)
         local y = floor(C.CY + sin(a) * rr - d.th / 2 + 0.5)
+        local t = p.runes[i]
+        if t.fsVis ~= not locked then
+            t.fsVis = not locked
+            if locked then t:Hide() else t:Show() end
+        end
         local row
-        if locked then row = rows.locked
+        if locked then row = rows.gone
         elseif n == 0 then row = nudge and rows.nudge or rows.gone
         elseif i > lit then row = rows.off
         elseif n == 1 and not sweep then row = rows.amber
@@ -571,9 +576,7 @@ local function PaintRing(p, now)
     end
 
     -- the label
-    if locked then
-        Label(p, d.levelText, K.muted)
-    elseif n == 0 then
+    if locked or n == 0 then
         Label(p, "", K.violet)                         -- gone: no label, the cold helm and the dashed ring say it
     else
         local est = key == "demo" or st.source == "cast"

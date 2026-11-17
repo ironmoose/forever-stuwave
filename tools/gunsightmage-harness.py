@@ -9,7 +9,7 @@ the Fire Blast comet under it, and the ward (Ice Barrier, else Mana Shield). The
   * secrets: the absorb only ever reaches StatusBar:SetMinMaxValues / SetValue, SetAlpha (the light's gate) and
     AbbreviateNumbers -> SetFormattedText; any compare, arithmetic or concat on it throws (a throw in a paint is logged and fails
     the case); no aura is read under combat lockdown; SetCooldown is only ever fed plain numbers;
-  * the ward: Ice Barrier over Mana Shield, the locked L20 look, the own cast stamping the 60 s ledger, the pink buff ring, the
+  * the ward: Ice Barrier over Mana Shield, nothing drawn when neither is learned, the own cast stamping the 60 s ledger, the pink buff ring, the
     mark caught from the absorb ping, the hit flash and shake, the break shards, the amber nudge in combat only;
   * Frost Nova: the cooldown refill is the engine's timer, the Frozen window drains with a "~" label;
   * Fingers of Frost: the glow event, the Frostbolt-then-aura window, spending casts, the plain aura read correcting it,
@@ -320,15 +320,15 @@ case("the_absorb_reaches_only_the_engine_setters", """
 case("ice_barrier_wins_over_mana_shield_and_mana_shield_alone_takes_its_place", """
     Build()
     local W = Parts().ward
-    check(D.WardKind() == "barrier" and Shown(W.ice) and not Shown(W.mana) and not Shown(W.locked), "both known: Ice Barrier")
+    check(D.WardKind() == "barrier" and Shown(W.ice) and not Shown(W.mana), "both known: Ice Barrier")
     Forget("icebarrier"); fire("SPELLS_CHANGED")
     check(D.WardKind() == "mana" and Shown(W.mana) and not Shown(W.ice), "Mana Shield alone")
     check(IsSecretValue(W.mistBar.value) and IsSecretValue(W.manaGate.alpha) and W.iceGate.alpha == 0, "the mist is fed, the ice is shut")
     check(W.iceBar.value == 0, "and the empty bar is empty")
     check(W.manaLabel.secretFed, "its number")
     Forget("manashield"); fire("SPELLS_CHANGED")
-    check(D.WardKind() == nil and Shown(W.locked) and W.lockLabel.text == "L20", "neither: the dotted oval and L20")
-    check(not Shown(W.ice) and not Shown(W.mana))
+    check(D.WardKind() == nil and W.locked == nil and W.lockLabel == nil, "neither: no placeholder is built")
+    check(not Shown(W.ice) and not Shown(W.mana) and not Shown(W.buffLabel), "and nothing is drawn")
     NoLog()
 """)
 
@@ -417,6 +417,18 @@ case("mana_shield_breathes_through_its_vapour_and_core", """
     check(Shown(W.manaTop) and Shown(W.core) and Shown(W.glyphLit[1]), "core and glyphs sit under the gate")
     local m = Distinct(function() return W.core.alpha end, 30, 0.1)
     check(m >= 4, "the core pulses: " .. m)
+    NoLog()
+""")
+
+case("a_frost_nova_not_learned_is_not_drawn", """
+    Forget("nova")
+    Build()
+    local F = Parts().frost
+    Tick(0.05)
+    check(not Shown(F.flake) and not Shown(F.crustIdle) and not Shown(F.tip) and not Shown(F.glow), "no flake, no crust frame")
+    __known[CAST.nova] = true; fire("SPELLS_CHANGED")
+    Tick(0.05)
+    check(Shown(F.flake) and Shown(F.crustIdle), "learning it draws them")
     NoLog()
 """)
 

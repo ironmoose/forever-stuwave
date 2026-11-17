@@ -698,12 +698,16 @@ case("out_of_combat_the_trap_piece_is_dim_and_a_cast_still_snaps_and_settles", "
     NoLog()
 """)
 
-case("with_no_trap_learned_the_piece_is_dim_and_says_nothing", """
+case("with_no_trap_learned_the_piece_is_not_drawn", """
     Forget("immolation"); Forget("freezing"); Forget("explosive"); Forget("frost")
     Fight()
     local t = Parts().trap
     Tick(0.1)
-    check(D.TrapKey() == nil and Shown(t.dim) and t.label.text == "" and not Shown(t.glow))
+    check(D.TrapKey() == nil and not Shown(t.open) and not Shown(t.dim) and not Shown(t.glow) and not Shown(t.divider), "no trap")
+    for _, k in ipairs({ "fire", "frost" }) do
+        local Sl = t.slots[k]
+        check(not Shown(Sl.iconOff) and not Shown(Sl.border) and not Shown(Sl.inner), "no " .. k .. " slot")
+    end
     NoLog()
 """)
 

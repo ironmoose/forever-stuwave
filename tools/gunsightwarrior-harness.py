@@ -6,10 +6,10 @@ Demoralizing Shout ring, each a helm in the middle and 8 orbiting rune tiles. Th
 
   * the data: an out of combat aura read is the truth, a cast in combat stamps the ledger (shown with "~"), Demoralizing Shout
     is always the ledger, a secret spell id is ignored, a shout runs out on Tick;
-  * the rune count ceil(remaining / duration * 8), the amber last rune, the dark ones, the gone and locked looks;
+  * the rune count ceil(remaining / duration * 8), the amber last rune, the dark ones, the gone look, a shout not learned hidden;
   * the helm frame for each state: the roar's beard whip on a Battle Shout cast, one still frame while it breathes, growl on a Demoralizing Shout cast, cold
     when gone, hidden while Demoralizing Shout is not learned;
-  * the labels (3m, ~2m, SHOUT, L14, ~30s, amber on the last rune);
+  * the labels (3m, ~2m, SHOUT, ~30s, amber on the last rune);
   * onHide stops the ticker and the subscription, onShow brings both back;
   * the baked textures exist and the atlas frame order matches the generator;
   * the strike window lane (design mockup "Warrior Overpower Cue", 2026-11-12, variant A without the stance chip) and its data,
@@ -330,12 +330,18 @@ case("a_battle_shout_cast_roars_then_breathes", """
     assert(n == 2 and sawPuff, "the helm breathes: it lifts and puffs")
 """)
 
-case("demoralizing_shout_not_learned_is_a_locked_ring", """
+case("demoralizing_shout_not_learned_is_not_drawn", """
     Build()
     Tick(0.05)
-    assert(Rows("demo") == "55555555", Rows("demo"))
+    for i = 1, 8 do assert(Ring("demo").runes[i].shown == false, "rune " .. i .. " hidden") end
     assert(Ring("demo").helm.shown == false)
-    assert(Ring("demo").label.text == "L14")
+    assert(Ring("demo").label.text == "")
+    assert(not Ring("demo").halo.shown, "no nudge for a shout not learned")
+    __known[11556] = true
+    Build()
+    Tick(0.05)
+    for i = 1, 8 do assert(Ring("demo").runes[i].shown ~= false, "rune " .. i .. " shows once learned") end
+    assert(Ring("demo").helm.shown)
 """)
 
 case("a_demoralizing_shout_cast_growls_and_reads_as_an_estimate", """

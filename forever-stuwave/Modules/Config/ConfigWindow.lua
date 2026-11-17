@@ -1682,7 +1682,7 @@ local CLASS_MODULE_HELP = {
         .. "(Decimation) with a 10 s bar, SUMMON when your demon is gone, TAP when your mana cannot pay the next Shadow Bolt, "
         .. "DRAIN under three shards. Each prompt has a switch below.",
     SHAMAN = "Four totem poles: Fire, Earth, Water, Air. A pole's blocks sink as its totem runs out, the last block amber. DROP "
-        .. "means nothing stands, FAR that you left its range, a dotted pole that it is not learned yet. Click a pole to drop "
+        .. "means nothing stands, FAR that you left its range. A totem element you have not learned yet is not shown. Click a pole to drop "
         .. "that totem.\n\nRight: the shock cooldown (RDY when ready), and under it Fire Nova while a Fire totem stands.",
     WARRIOR = "Two shout helms. The big ring is Battle Shout: eight runes orbit and go out as it runs down, the last one "
         .. "amber. The small one is Demoralizing Shout. Click a helm to cast that shout.\n\nThe bar under them lights when "

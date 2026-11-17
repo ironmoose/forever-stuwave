@@ -15,14 +15,14 @@ right slot", 2026-11-10, variant A) two round medallions for Spirit Tap and Inne
     break (shards);
   * the rims and rune: violet Weakened Soul (a Cooldown fed plain numbers), the cooldown rim, the amber nudge in combat, calm
     and still out of combat (the GHOST of the off state mockup, option C: only here the ghost cells, every other look keeps the
-    dark shield and the dashed rim), the dotted L6 lock;
-  * Prayer of Mending: L40 lock, a cast lights 5 beads on the cast target's seat with a "~" timer, a plain read sets the holder
+    dark shield and the dashed rim), nothing drawn before it is learned;
+  * Prayer of Mending: nothing before it is learned, a cast lights 5 beads on the cast target's seat with a "~" timer, a plain read sets the holder
     and heals left, a plain holder change sparks a jump, the cooldown shade is the engine's timer;
   * the party strip: our own shield on a member fills its seat and draws its Weakened Soul line;
   * onHide stops the ticker and the subscription, onShow brings them back; the ticker stops when nothing moves;
   * the right side (PriestRight.lua): the setting "Right side shows" (Auto, Spirit Tap + Inner Fire, Prayer of Mending, Off), Auto's
     group switch (a raid or a dungeon with Mending learned), a change in combat waiting for the end of the fight;
-  * the medallions: the locked, calm, nudge and plain lit BASE looks, the engine COVER (an AuraContainer per medallion with one
+  * the medallions: the hidden (locked), calm, nudge and plain lit BASE looks, the engine COVER (an AuraContainer per medallion with one
     aura slot filtered by the spell's ids, the cover regions anchored to our anchor and the engine's number through
     SetDurationText / SetApplicationCount), the proof that gates it (placed on the anchor, unreadable, a misplaced slot put back,
     a failed build retried once and given up after three passes, a new rank id rebuilding it at most three times), no write to a
@@ -524,10 +524,8 @@ case("the_ghost_is_only_the_calm_empty_shield_not_learned_is_as_before", """
     __level = 5
     D.Refresh()
     Tick(0.05)
-    check(p.wsLabel.text == "L6", tostring(p.wsLabel.text))
-    check(p.stateRim.fsCell == M.CELL.rimDash and Shown(p.stateRim) and p.stateRim.color[4] == 0.4 and p.stateRim.color[1] < 0.7,
-        "not learned: the dotted rim in muted violet at 0.4, never the ghost's")
-    check(p.stateRune.color[4] == 0.22, "not learned: the faint rune")
+    check(p.wsLabel.text == "", tostring(p.wsLabel.text))
+    check(not Shown(p.stateRim) and not Shown(p.stateRune) and not Shown(p.body), "unlearned mid session: the shield goes")
     NoLog()
 """)
 
@@ -541,17 +539,17 @@ case("the_cooldown_rim_shows_while_the_shield_cools", """
     NoLog()
 """)
 
-case("not_learned_is_the_dotted_rim_and_l6", """
+case("not_learned_is_not_drawn", """
     __known = {}
     __level = 5
     SetTarget("friend")
     Build()
     Tick(0.05)
     local p = Parts()
-    check(p.wsLabel.text == "L6", tostring(p.wsLabel.text))
-    check(not Shown(p.body) and not Shown(p.bar) and not Shown(p.gate), "only the dotted rim and the rune")
-    check(Shown(p.stateRim) and p.stateRim.color[4] == 0.4)
-    check(Parts().pomLabel.text == "L40", "and Mending is locked too")
+    check(p.wsLabel.text == "", tostring(p.wsLabel.text))
+    check(not Shown(p.body) and not Shown(p.bar) and not Shown(p.gate) and not Shown(p.halo), "no shield")
+    check(not Shown(p.stateRim) and not Shown(p.stateRune) and not Shown(p.top), "no placeholder rim or rune")
+    check(Parts().pomLabel.text == "" and not Shown(Parts().heart), "and Mending is not drawn either")
     NoLog()
 """)
 
@@ -624,7 +622,8 @@ case("mending_locked_cooling_and_nudging", """
     Build()
     Tick(0.05)
     local p = Parts()
-    check(p.pomLabel.text == "L40" and p.heart.fsCell == M.MCELL.heartLocked, "locked")
+    check(p.pomLabel.text == "" and not Shown(p.heart) and p.lockDots == nil, "locked: nothing drawn")
+    for i = 1, 5 do check(not Shown(p.beads[i]), "no bead " .. i) end
     check(not Shown(p.seats[1].bg), "no strip while locked (the mockup)")
     __known[401859] = true
     D.Refresh()
@@ -723,23 +722,21 @@ case("a_change_in_combat_waits_for_the_end_of_the_fight", """
     NoLog()
 """)
 
-case("not_talented_and_not_learned_are_the_locked_looks", """
+case("not_talented_and_not_learned_are_not_drawn", """
     SetCfg(RIGHTSIDE, "spirit")
     SetTarget("friend")
     Build()
     local sp, fi = Med("spirit"), Med("fire")
     check(not R.Known("spirit") and not R.Known("fire"), "neither is known")
     for _, m in ipairs({ sp, fi }) do
-        check(Shown(m.rim) and m.rim.fsCell == M.MEDCELL.dash and m.rim.color[4] == 0.4 and m.rim.color[1] < 0.7, "the dotted rim, muted")
+        check(not Shown(m.rim) and not Shown(m.glyph), "no rim, no glyph")
         check(not Shown(m.face) and not Shown(m.halo) and not Shown(m.glow) and not Shown(m.rimIn), "nothing lit")
     end
-    check(sp.glyph.fsCell == M.MEDCELL.skullDots and fi.glyph.fsCell == M.MEDCELL.shieldDots, "the glyphs are dotted")
-    check(fi.lock.text == "L12" and sp.lock == nil, "Inner Fire shows its level, Spirit Tap (a talent) shows none")
+    check(fi.lock == nil and sp.lock == nil, "no level label")
     check(#__containers == 0, "no container for a spell that is not known")
     check(not Ticking(), "locked: still")
     Unlock()
-    check(R.Known("spirit") and R.Known("fire") and fi.lock.text == "", "learned: the level label goes")
-    check(sp.glyph.fsCell ~= M.MEDCELL.skullDots and fi.glyph.fsCell ~= M.MEDCELL.shieldDots, "and the dots with it")
+    check(R.Known("spirit") and R.Known("fire") and Shown(sp.glyph) and Shown(fi.glyph), "learned: the medallions draw")
     NoLog()
 """)
 
