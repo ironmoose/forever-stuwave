@@ -466,9 +466,12 @@ function MkContainer(name, nButtons, combined, bag)
     ALL_CONTAINERS[#ALL_CONTAINERS + 1] = c
     c.infos = {}
     c.MoneyFrame = MkMoneyFrame(c)
+    -- a generated frame: Blizzard's SetBagSize ran. GetBagSize fills a nil size itself, like BaseContainerFrameMixin
+    c.size = nButtons
+    c.GetBagSize = function(self) if self.size == nil then self.size = #self.Items end return self.size or 0 end
     c.EnumerateValidItems = function(self)
         local i = 0
-        return function() i = i + 1; local b = self.Items[i]; if b then return i, b end end
+        return function() i = i + 1; if i <= self:GetBagSize() then local b = self.Items[i]; if b then return i, b end end end
     end
     c.UpdateItems = function(self)
         for i, b in self:EnumerateValidItems() do if b.SetItemButtonTexture then BlizzardPaint(b, self.infos[i]) end end
@@ -1584,6 +1587,14 @@ def check_bag_highlight() -> None:
     check("hover.a_reused_button_lights_for_the_new_bag", lit(w, "c1") == "2", lit(w, "c1"))
     w.run("c2.Items[1]._bagID = 2; c1.Items[2]._bagID = 1; FS.BagHighlight.Clear()")
 
+    # a container frame never generated (size nil, e.g. the individual frames while the combined window is used): the
+    # hover and skin passes visit nothing and leave size unwritten. Filling it from addon code taints the frame's size,
+    # and the stock item click then blocks UseContainerItem (live 2026-11-18).
+    w.run("ug = MkContainer('ContainerFrame6', 3, false, 4); ug:UpdateItems(); ug.size = nil; "
+          "FS.BagHighlight.Set(4); FS.BagHighlight.Clear()")
+    check("hover.ungenerated_frame_size_stays_unwritten", w.ev("rawget(ug, 'size') == nil and ug.Items[1].fsBagHighlight == nil"),
+          str(w.ev("tostring(rawget(ug, 'size'))")))
+
     # the bank is not a bag-bar bag
     w.run("FS.BagHighlight.Set(0); FS.BagHighlight.Set(1)")
     check("hover.bank_slots_never_light", w.ev("bank.pool[1].fsBagHighlight == nil and bank.pool[2].fsBagHighlight == nil"))
@@ -1602,7 +1613,7 @@ def check_bag_highlight() -> None:
 
     # one container that throws does not stop the others, and is logged once however often it is hovered
     w = World()
-    w.run("c1:UpdateItems(); c2:UpdateItems(); c1.EnumerateValidItems = function() error('boom') end; __clearSwallowed()")
+    w.run("c1:UpdateItems(); c2:UpdateItems(); c1.Items = setmetatable({}, { __index = function() error('boom') end }); __clearSwallowed()")
     for _ in range(3):
         w.run("FS.BagHighlight.Set(2)")
     check("hover.a_throwing_container_does_not_skip_the_others", lit(w, "c2") == "1,2", lit(w, "c2"))

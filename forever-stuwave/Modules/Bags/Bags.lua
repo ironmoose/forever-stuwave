@@ -629,28 +629,25 @@ local function SkinItemButton(button, isBagSlot)
 end
 
 -- Calls fn(itemButton) for every currently-valid item button of a container or
--- the combined-bag frame.
--- `EnumerateValidItems` (BaseContainerFrameMixin, confirmed via
--- Blizzard_UIPanels_Game/ContainerFrame.lua: returns `index, itemButton` for
--- slots 1..GetBagSize(), reading `container.Items[index]`) is shared by
--- ContainerFrameMixin and ContainerFrameCombinedBagsMixin -- both descend
--- from BaseContainerFrameMixin via CreateFromMixins in the same file, and
--- ContainerFrameCombinedBagsMixin itself calls `self:EnumerateValidItems()`
--- (SetItemsMatchingBagHighlighted), so one function covers both containers
--- and the combined-bag frame. Not itself a widget, so not in the 16001 dump;
--- `container.Items` (the same field the enumerator reads) is the fallback
--- for a client where the method itself is missing.
+-- the combined-bag frame: container.Items[1 .. size], the slots Blizzard's own
+-- EnumerateValidItems walks.
+--
+-- Never call EnumerateValidItems (or GetBagSize) from here. GetBagSize fills
+-- `self.size` itself when it is nil (a container frame never generated, or the
+-- individual frames while the combined window is in use), so from addon code
+-- that write lands under OUR taint. The stock item click reads the frame's
+-- size, so a later right click on a bag item became ADDON_ACTION_FORBIDDEN
+-- UseContainerItem (live 2026-11-18: the block-time sweep found
+-- ContainerFrame1-6.size written by forever-stuwave). Reading the field is
+-- harmless; a nil size means no valid slots yet, so nothing to visit.
 local function EachContainerItem(container, fn)
-    if not container then return end
-
-    if type(container.EnumerateValidItems) == "function" then
-        for _, itemButton in container:EnumerateValidItems() do
-            fn(itemButton)
-        end
-    elseif type(container.Items) == "table" then
-        for _, itemButton in ipairs(container.Items) do
-            fn(itemButton)
-        end
+    if type(container) ~= "table" or type(container.Items) ~= "table" then return end
+    local size = rawget(container, "size")
+    if type(size) ~= "number" then return end
+    for i = 1, size do
+        local itemButton = container.Items[i]
+        if not itemButton then return end
+        fn(itemButton)
     end
 end
 
@@ -743,7 +740,7 @@ local function SyncContainerHighlight(container)
     EachContainerItem(container, function(itemButton) SyncItemHighlight(itemButton, shown) end)
 end
 
--- One container that throws (a broken EnumerateValidItems) must not skip the others; logged once.
+-- One container that throws must not skip the others; logged once.
 local syncFailureLogged = false
 local function SafeSyncContainer(container)
     local ok, err = pcall(SyncContainerHighlight, container)
