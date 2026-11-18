@@ -47,6 +47,8 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     "loc_tick": (64, 64),
     # generate_combo_pips.py: the nameplate combo pip, rest and lit (white mask) diamonds and its soft glow.
     "combo_pips": {"combo_pip_rest": (16, 16), "combo_pip_lit": (16, 16), "combo_pip_glow": (32, 32)},
+    # generate_skillup_chips.py: the profession skill up chips, one to three chevrons, one white mask atlas tinted in Lua.
+    "skillup_chips": (64, 32),
     # generate_queue_eye.py: our own group finder eye, lid (cyan) and pupil (pink), tinted in Lua.
     "queue_eye": {"queue_eye_lid": (64, 64), "queue_eye_pupil": (64, 64)},
     # generate_damage_meter_cells.py: the damage meter ladder's gap tile, one leaning pip and its gap.

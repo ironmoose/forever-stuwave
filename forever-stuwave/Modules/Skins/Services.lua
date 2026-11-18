@@ -357,46 +357,31 @@ end
 
 -- The skill up mark: the stock arrow (a texture, re-atlased by every row init) held, a chip of ours in its place on the right edge of
 -- the mark frame, so the stock count (a number left of the arrow) keeps its place. It shows and hides with that frame, and takes
--- its tier from the atlas the stock code last gave the arrow. Its chevrons are drawn in 1 px wide, 2 px tall steps (a smooth
--- diagonal) with a 2 px gap between them: the 2 px cell chevrons of the fold marks touch only at their corners, and stacked
--- three high they read as a checkerboard.
-local CHIP_W, CHIP_PAD, CHIP_PITCH = 15, 2, 4
-local STEP_W, STEP_H = 9, 6   -- one chip chevron: STEP_W columns, apex at the top, each column 1 x 2 px
-
-local function NewStepChevron(host)
-    local cells = {}
-    for i = 1, STEP_W do cells[i] = Kit.Rect(host, 0, 0, 1, 2, C.cyan, 1, "OVERLAY", 7) end
-    return cells
-end
-
--- Seats a chip chevron with its box's top left cy px down from the middle of `ref` (and centred across it).
-local function SeatStepChevron(cells, ref, cy, host)
-    local apex = (STEP_W - 1) / 2
-    for i, cell in ipairs(cells) do
-        local x = i - 1
-        Kit.Place(cell, ref, x - apex - 0.5, cy + math.abs(x - apex), 1, 2, "TOPLEFT", "CENTER", host)
-    end
-end
+-- its tier from the atlas the stock code last gave the arrow. The chip is ONE baked texture (tools/assets/generate_skillup_chips.py:
+-- rim, dark face and one to three chevrons of 1 x 2 px steps, a white mask tinted by the tier) drawn at one texel per physical
+-- px. It was a box plus up to 27 one px rectangles, and on a row half a pixel off the grid each snapped on its own: steps came
+-- out 0 or 2 px wide and the chevrons broke into a checkerboard. One quad snaps as a unit.
+local CHIP_TEX = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\skillup_chips.tga"
+local CHIP_ATLAS_W, CHIP_ATLAS_H, CHIP_SLOT, CHIP_W = 64, 32, 16, 11
+local CHIP_H = { 9, 13, 17 }   -- one, two, three chevrons (fits the 19 px inside of a recipe card)
 
 local function BuildChip(ups)
-    local chip = { cells = {} }
-    chip.ref = ups:CreateTexture(nil, "BACKGROUND", nil, -8)
-    Kit.Place(chip.ref, ups, -1, 0, CHIP_W, 10, "RIGHT", "RIGHT")
-    chip.box = Char.Box(ups, "OVERLAY", chip.ref)
-    for i = 1, 3 do chip.cells[i] = NewStepChevron(ups) end
+    local chip = {}
+    chip.tex = ups:CreateTexture(nil, "OVERLAY", nil, 7)
+    chip.tex:SetTexture(CHIP_TEX, "CLAMP", "CLAMP", "NEAREST")
+    Kit.Snap(chip.tex)
+    Kit.Place(chip.tex, ups, -1, 0, CHIP_W, CHIP_H[3], "RIGHT", "RIGHT")
     return chip
 end
 
 local function PaintChip(ups, chip, atlas)
     local tier = TierOf(atlas)
-    local color = tier.color
-    local glyphH = STEP_H + CHIP_PITCH * (tier.n - 1)
-    Kit.Move(chip.ref, -1, 0, CHIP_W, glyphH + 2 * CHIP_PAD)
-    Char.PaintBox(chip.box, C.ink, 1, color, 1, 1)
-    for i = 1, 3 do
-        PaintCells(chip.cells[i], color, i <= tier.n)
-        if i <= tier.n then SeatStepChevron(chip.cells[i], chip.ref, CHIP_PITCH * (i - 1) - glyphH / 2, ups) end
-    end
+    local n, color, h = tier.n, tier.color, CHIP_H[tier.n]
+    chip.n = n
+    local x0 = CHIP_SLOT * (n - 1)
+    chip.tex:SetTexCoord(x0 / CHIP_ATLAS_W, (x0 + CHIP_W) / CHIP_ATLAS_W, 0, h / CHIP_ATLAS_H)
+    chip.tex:SetVertexColor(color[1], color[2], color[3], 1)
+    Kit.Move(chip.tex, -1, 0, CHIP_W, h)
 end
 
 local function SkinSkillUps(row)

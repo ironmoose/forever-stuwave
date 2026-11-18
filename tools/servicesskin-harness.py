@@ -26,6 +26,7 @@ function Obj:GetPoint(i)
 end
 function Obj:GetSize() return self:GetWidth(), self:GetHeight() end
 function Obj:IsMouseOver() return false end
+function Obj:SetTexCoord(l, r, t, b) self.texcoord = { l, r, t, b } end
 Enum = { FlightPathState = { Reachable = 0, Current = 1, Unreachable = 2 } }
 
 local function money(parent, name, x, y)
@@ -536,56 +537,49 @@ case("professions: category rows hold every stock piece, draw their own fold che
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
-case("professions: skill up marks hold the stock arrow and draw a chip with one to three chevrons in the tier colour", """
+case("professions: skill up marks hold the stock arrow and draw one baked chip with one to three chevrons in the tier colour", """
     Fire('PLAYER_ENTERING_WORLD'); ProfessionsFrame:Show(); FlushTimers()
     local S = FS.ServicesSkin.state
     local rows = ProfessionsFrame.CraftingPage.RecipeList.ScrollBox.rows
-    local function shown(ups)
-        local chip, out = S.skillUps[ups], {}
-        for i = 1, 3 do
-            local n = 0
-            for _, c in ipairs(chip.cells[i]) do if c:IsShown() then n = n + 1 end end
-            out[i] = n
-        end
-        return out
-    end
-    local function hue(ups) return S.skillUps[ups].cells[1][1].color end
+    local function tex(ups) return S.skillUps[ups].tex end
+    -- the chip is one texture: which chip of the atlas (by its left texcoord, 16 texels a chip in a 64 wide atlas) and its size
+    local function count(ups) return math.floor(tex(ups).texcoord[1] * 64 / 16 + 0.5) + 1 end
+    local function size(ups) local l, t, r, b = tex(ups):Rect(); return (r - l) * PPU, (b - t) * PPU end
     local low, med, high = rows[2].SkillUps, rows[3].SkillUps, rows[4].SkillUps
     for _, u in ipairs({ low, med, high }) do
         assert(S.skillUps[u], 'no chip')
         assert(u.Icon.alpha == 0, 'stock arrow kept')
+        assert(tex(u).path and tex(u).path:find('skillup_chips', 1, true), 'the chip is not the baked texture')
     end
-    local a, b, c = shown(low), shown(med), shown(high)
-    assert(a[1] == 9 and a[2] == 0 and a[3] == 0, 'easy is not one chevron')
-    assert(b[1] == 9 and b[2] == 9 and b[3] == 0, 'medium is not two chevrons')
-    assert(c[1] == 9 and c[2] == 9 and c[3] == 9, 'optimal is not three chevrons')
-    -- the chevrons stack with a gap: no cell of one touches a cell of the next
-    local hc = S.skillUps[high].cells
-    for i = 1, 8 do
-        local _, _, _, b1 = hc[1][i]:Rect()
-        local _, t2 = hc[2][i]:Rect()
-        assert((t2 - b1) * PPU >= 1.99, string.format('chevrons touch in column %d (%.2f px apart)', i, (t2 - b1) * PPU))
+    assert(count(low) == 1 and count(med) == 2 and count(high) == 3, 'chevron counts are not 1, 2, 3')
+    -- the crop matches the size: 11 px wide, 9 / 13 / 17 px tall, one texel per physical px
+    for u, h in pairs({ [low] = 9, [med] = 13, [high] = 17 }) do
+        local w, hh = size(u)
+        assert(math.abs(w - 11) < 0.01 and math.abs(hh - h) < 0.01, string.format('chip is %.2f x %.2f, want 11 x %d', w, hh, h))
+        local c = tex(u).texcoord
+        assert(math.abs((c[2] - c[1]) * 64 - 11) < 0.001 and math.abs(c[4] * 32 - h) < 0.001, 'the crop does not match the size')
     end
-    local g, y, o = hue(low), hue(med), hue(high)
+    local g, y, o = tex(low).vertex, tex(med).vertex, tex(high).vertex
     assert(g[2] > g[1] and g[2] > 0.8, 'easy not green')
     assert(y[1] > 0.9 and y[2] > 0.75 and y[3] < 0.4, 'medium not yellow')
     assert(o[1] > 0.9 and o[2] > 0.45 and o[2] < 0.65 and o[3] < 0.4, 'optimal not orange')
-    assert(S.skillUps[high].box.edges[1].color[1] > 0.9, 'the chip edge is not the tier colour')
-    assert(S.skillUps[high].box.fill.color[1] < 0.5, 'the chip face is not dark')
     -- the chip sits inside the stock arrow's footprint, right edge on the right edge of the stock frame
-    local _, _, cr = S.skillUps[high].ref:Rect()
+    local _, _, cr = tex(high):Rect()
     local _, _, ur = high:Rect()
     assert(cr <= ur + 0.01, 'the chip pokes out of the mark frame')
+    -- the tallest chip stays inside its recipe card with a px to spare
+    local _, ct, _, cb = tex(high):Rect()
+    local _, rt, _, rb = rows[4]:Rect()
+    assert((ct - rt) * PPU >= 1 and (rb - cb) * PPU >= 1, string.format('the chip touches the card edge (%.2f / %.2f px)', (ct - rt) * PPU, (rb - cb) * PPU))
     assert(high.Text.fontPath ~= 'stock.ttf', 'the skill up count is not mono')
     -- a row with no skill up has its mark frame hidden, so the chip is hidden with it
     assert(not rows[5].SkillUps.shown and S.skillUps[rows[5].SkillUps], 'a recipe without skill ups shows a chip')
     -- the stock code swaps the atlas when a recipe is re-initialised: the chip re-tiers
     low.Icon:SetAtlas('Professions-Icon-Skill-High')
-    local d = shown(low)
-    assert(d[1] == 9 and d[2] == 9 and d[3] == 9, 'the chip did not follow the atlas')
-    assert(hue(low)[1] > 0.9, 'the chip did not take the new tier colour')
+    assert(count(low) == 3 and tex(low).vertex[1] > 0.9, 'the chip did not follow the atlas')
+    assert(math.abs(select(2, size(low)) - 17) < 0.01, 'the chip did not take the new height')
     low.Icon:SetAtlas('Professions-Icon-Skill-Low')
-    assert(shown(low)[2] == 0, 'the chip did not go back')
+    assert(count(low) == 1, 'the chip did not go back')
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
