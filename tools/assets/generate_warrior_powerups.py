@@ -1,37 +1,71 @@
 #!/usr/bin/env python3
-"""Bake the Warrior power-up alerts: Overpower (the bearded axe), Revenge (the laughing skull), Victory Rush (the war cry bust).
+"""Bake the Warrior power-up alerts (v2): Overpower (the bearded double axe chopping into a rotating 16 rune Elder Futhark circle),
+Revenge (the cackling Viking skull on a round shield, little round shields flanking the title), Victory Rush (crossed flaming
+bearded axes on a red sunburst, a clang, a green heal).
 
-The source is the design mockup "Warrior power-up alerts" (2026-11-13), drawn on a 150 x 96 sprite grid with a canvas API:
-rects, Bresenham lines, scanline polygons, discs, pixel rings, a 5 x 7 bitmap title font and a last 1 px scanline pass. This file is
-a line for line port of that drawing code. It plays every frame the alert can show at 30 Hz (the mockup's own clock) into a
-DISPLAY LIST: the ordered objects of the frame (each letter, the axe, the crack, a spark, the skull's jaw, ...) as sprites. An
-object is cut to its own bounding box, the scanline pass is baked into it for the absolute rows it lands on, and identical
-sprites are shared between frames. The module (WarriorPowerUps.lua) only replays the lists: no art is drawn at runtime.
+The source is the design mockup "Gunsight Warrior: proc alerts v2" (2026-11-17, kept beside the art as
+warrior_powerups_art/mockup-v2-2026-11-17.html), drawn on a 150 x 96 sprite grid with a canvas API: rects, Bresenham lines, discs,
+pixel rings, a 5 x 7 bitmap title font, the generated pixel art (skull_px, axe_clean54, vr_circle, vr_axeL, vr_axeR,
+the vr_flame pixel list; all in warrior_powerups_art/) drawn with an 8 way ink outline and a CSS filter, and a last 1 px scanline
+pass. This file is a port of the mockup's LAST definitions of drawOver, drawRev, drawVic and their helpers. It plays every frame the
+alert can show at 30 Hz (the mockup's own clock) into a DISPLAY LIST: the ordered objects of the frame (each letter, the axe, a ring,
+a spark, the skull's jaw, ...) as sprites. An object is cut to its own bounding boxes, the scanline pass is baked into it for the
+absolute rows it lands on, and identical sprites are shared between frames. The module (WarriorPowerUps.lua) only replays the lists:
+no art is drawn at runtime.
 
 Each spell has five SEQUENCES (frame counts at 30 Hz; the first frame of every sequence is a snapshot, the rest are deltas):
 
     enter   the entrance, played once from the open of the window
     held    the idle loop while the window is open (Overpower: the whole 3.5 s before the amber part, no loop needed;
-            Revenge: its 1.8 s cackle cycle; Victory Rush: a 4 s loop, see RETUNE)
+            Revenge: its 1.8 s cackle cycle; Victory Rush: its 2.4 s clang cycle, see RETUNE)
     amber   the same loop in amber, for the last 1.5 s (Overpower: the real last 1.5 s of its 5 s window)
     cast    the exit when the player casts the spell (0.6 s)
     exp     the exit when the window runs out unused (0.7 s)
 
 The drain bar is NOT baked whole: its frame and tick mark are display list objects, but its fill is three 1 texel sprites
-(FILL_SLOTS) that the module stretches to the width the real remaining time gives.
+(FILL_KEYS) that the module stretches to the width the real remaining time gives.
 
-RETUNE. Revenge's HA bits were cyan on every third beat; the cackle has four beats, so the cycle only repeated every 5.4 s. They are
-cyan on the first beat of each cackle now. Victory Rush's idle animation is built from toggles with periods 0.4, 0.5, 0.667, 1.0, 2.0, 2.2 s and two sines, which only
-repeat after 22 s. The loop is 4 s, so the 2.2 s war cry cycle became 2.0 s and the two sines got whole periods (3.14 and 4.71
-rad/s for 3 and 5). Everything else is the mockup's number. Overpower is exact.
+The art that moves independently of the rest is cut into its own object (every letter, every rune of the circle, the pulse that runs
+round a ring, the light wedge on the sunburst, each axe's flames, every spark), and an object that repeats is painted once (`sig`).
+A sparse object (a ring, a disc of glow) is cut into up to PIECES_RING tight boxes so its empty middle costs no atlas.
+
+RETUNE. The module needs seamless loops, so every periodic term of Revenge's and Victory Rush's idle animation repeats exactly in
+its loop (the bake checks this: frame f + loop must draw the same list as frame f). Where the mockup's period does not divide the
+loop it was moved to the nearest whole number of periods; TUNE below holds each number next to the mockup's. Overpower is not
+looped (its 5 s window plays straight through) and is exact.
+
+  Revenge (1.8 s loop):
+    * the HA bits were cyan on every third beat; a cackle has four beats, so they are cyan on the first beat of each cackle.
+    * the shield cracks pulse with sin(e * 5): now sin(e * 3.49), one period per loop.
+  Victory Rush (2.4 s loop):
+    * the heal plus signs drift 0.45 cycles/s (2.22 s): now 1 / 2.4. Their sideways wobble sin(e * 3 + i): now 2.62 rad/s.
+    * the sunburst's light wedge turned 1.6 rad/s: now 2.62 rad/s, one turn per clang.
+    * the title glow toggled every 1/3 s (3.6 toggles per loop): now every 0.3 s.
+    * the clang's spark angles carried the clang's index (a = i * 2.4 + ci, so each clang turned the fan): the repeating clangs
+      use ci = 1; the first (big) clang keeps its own fan.
+    * the flames are a 1.2 s loop inside the 2.4 s loop (two passes, half the atlas): the tip flicker hashes 13 steps/s -> 13.33
+      (amber 20 -> 20), the flame tip licks 9.1 -> 9.17 steps/s (amber 14 -> 14.17), the colour wave sin(e * 11.7) -> sin(e * 10.47)
+      (amber 18 -> 15.71), and the hash input is the step number modulo the steps in a pass.
+    * the glow disc toggle (every 0.4 s) and the clang and heal pulse period (2.4 s) already divide the loop.
+
+DEVIATIONS from the canvas. The sunburst's light wedge is a canvas path fill (antialiased); the bake covers it with a 16 x 16
+supersample of the same polygon, so a few edge pixels differ by up to 6 of 255 levels (7 of the 585 baked frames). A CSS filter
+(brightness(0) for the outline, grayscale(1) brightness(b) for the dimmed frames) is computed in float and rounded once, not by the
+browser's own pipeline, so a dimmed pixel can differ by a level. The wedge is its own object, a translucent overlay on the plain
+sunburst (a source-atop fill is a plain over blend on the sunburst's opaque pixels, so the pixels are the same), and Overpower's
+white ring pulse is an overlay of only the ring pixels that differ from the plain ring. The v1 page passed ringPx its arguments in the
+wrong order so its rings never drew; the v2 calls are fixed and the rings now draw. A canvas ignores a negative globalAlpha, so a
+faded out glow() stays at full strength until the exit ends; Painter.mul keeps that. The port was checked against the mockup's own
+drawers run in headless Chrome for every baked frame (colour within 4 levels, the wedge pixels above).
 
     python3 tools/assets/generate_warrior_powerups.py     (FS_ASSET_OUTPUT_DIR overrides the texture directory,
-                                                           FS_ART_LUA_OUTPUT the manifest path)
-Needs numpy. Deterministic: the same source writes the same bytes.
+                                                           FS_ART_LUA_OUTPUT the manifest path, FS_WARRIOR_ART_DIR the art folder)
+Needs numpy and Pillow. Deterministic: the same source writes the same bytes.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -48,8 +82,37 @@ AMBER = 1.5
 PAD = 1
 ATLAS_MAX = 2048
 INK = (7, 3, 14)
+ART_DIR = os.environ.get("FS_WARRIOR_ART_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "warrior_powerups_art")
+TAU = math.pi * 2
 
 K = {"cy": "#22e0ff", "pk": "#ff2e97", "am": "#ffb648", "rg": "#ff3b5c", "ink": "#07030e", "vi": "#a855f7", "wh": "#f3fbff", "gr": "#46e08a"}
+
+# The retuned periodic terms (see RETUNE). MOCKUP_TUNE holds the mockup's own numbers; a replay of the approved mockup in a browser
+# sets them to compare the port pixel for pixel. flame: steps (or rad) per second for the tip hash, the lick hash and the colour
+# wave, and the steps in one pass (None = the mockup's unbounded hash input).
+FLAME_PASS = 1.2
+TUNE = dict(
+    rv_crack=TAU / 1.8,
+    rv_ha_beat=True,
+    vc_shine=TAU / 2.4,
+    vc_plus_drift=1 / 2.4,
+    vc_plus_wobble=TAU / 2.4,
+    vc_glow_beat=0.3,
+    vc_spark_ci=True,
+    flame_hot=dict(tip=16 / FLAME_PASS, lick=11 / FLAME_PASS, wave=2 * TAU / FLAME_PASS, mod=(16, 11)),
+    flame_amber=dict(tip=24 / FLAME_PASS, lick=17 / FLAME_PASS, wave=3 * TAU / FLAME_PASS, mod=(24, 17)),
+)
+MOCKUP_TUNE = dict(
+    rv_crack=5.0,
+    rv_ha_beat=False,
+    vc_shine=1.6,
+    vc_plus_drift=0.45,
+    vc_plus_wobble=3.0,
+    vc_glow_beat=1 / 3,
+    vc_spark_ci=False,
+    flame_hot=dict(tip=13.0, lick=13 * 0.7, wave=13 * 0.9, mod=None),
+    flame_amber=dict(tip=20.0, lick=20 * 0.7, wave=20 * 0.9, mod=None),
+)
 
 
 def jround(v):
@@ -76,10 +139,38 @@ def col(c):
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)), float(m.group(4)))
 
 
+_IMG = {}
+
+
+def art(name):
+    """A committed art PNG as an 8 bit RGBA array (rows, columns, 4)."""
+    if name not in _IMG:
+        from PIL import Image
+        _IMG[name] = np.asarray(Image.open(os.path.join(ART_DIR, name + ".png")).convert("RGBA")).copy()
+    return _IMG[name]
+
+
+def flame_pixels():
+    with open(os.path.join(ART_DIR, "vr_flame.json"), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def css_filter(rgb, filt):
+    """The CSS filters the mockup uses on a float RGB array (0..255): 'ink' = brightness(0), ('gray', b) = grayscale(1) brightness(b)."""
+    rgb = np.asarray(rgb, np.float32)
+    if filt is None:
+        return rgb
+    if filt == "ink":
+        return np.zeros_like(rgb)
+    gray = rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
+    return np.repeat(np.minimum(255.0, gray * filt[1])[..., None], 3, axis=-1)
+
+
 # ------------------------------------------------------------------------------------------------------------------------
-# The canvas. One object at a time is painted into a transparent 150 x 96 float buffer (premultiplied), then cut to its box.
+# The canvas. One object at a time is painted into a transparent 150 x 96 float buffer (premultiplied), then cut to its boxes.
 # ------------------------------------------------------------------------------------------------------------------------
 GAP_MIN, SAVE_MIN, PIECES_MAX = 3, 160, 8
+PIECES_RING, PIECES_DISC, ANY_SAVE = 16, 8, 40
 
 
 def _tight(mask, x0, y0, x1, y1):
@@ -129,6 +220,48 @@ def split_boxes(mask):
     return boxes
 
 
+def best_cut(sub):
+    """(area of the two tight boxes, axis, position) of the straight cut through a tight box that leaves the least area; None for a line."""
+    best = None
+    for axis in (0, 1):
+        m = sub if axis == 0 else sub.T
+        h, w = m.shape
+        if h < 2:
+            continue
+        rows = m.any(axis=1)
+        first = np.where(rows, m.argmax(axis=1), w)
+        last = np.where(rows, w - 1 - m[:, ::-1].argmax(axis=1), -1)
+        idx = np.arange(h)
+        top_end = np.maximum.accumulate(np.where(rows, idx, -1))
+        bot_start = np.minimum.accumulate(np.where(rows, idx, h)[::-1])[::-1]
+        pmin, pmax = np.minimum.accumulate(first), np.maximum.accumulate(last)
+        smin, smax = np.minimum.accumulate(first[::-1])[::-1], np.maximum.accumulate(last[::-1])[::-1]
+        r = np.arange(1, h)
+        cost = (top_end[r - 1] + 1) * (pmax[r - 1] - pmin[r - 1] + 1) + (h - bot_start[r]) * (smax[r] - smin[r] + 1)
+        j = int(cost.argmin())
+        if best is None or cost[j] < best[0]:
+            best = (int(cost[j]), axis, int(r[j]))
+    return best
+
+
+def split_any(mask, limit):
+    """Cuts a sparse object (a ring) into up to `limit` tight boxes by the straight cut that saves the most area, through its pixels."""
+    boxes = [_tight(mask, 0, 0, GW, GH)]
+    while len(boxes) < limit:
+        gain, at, cut = 0, None, None
+        for n, (x0, y0, x1, y1) in enumerate(boxes):
+            c = best_cut(mask[y0:y1, x0:x1])
+            if c is not None and (x1 - x0) * (y1 - y0) - c[0] > gain:
+                gain, at, cut = (x1 - x0) * (y1 - y0) - c[0], n, c
+        if at is None or gain < ANY_SAVE:
+            break
+        x0, y0, x1, y1 = boxes[at]
+        _, axis, pos = cut
+        parts = [(x0, y0, x1, y0 + pos), (x0, y0 + pos, x1, y1)] if axis == 0 else [(x0, y0, x0 + pos, y1), (x0 + pos, y0, x1, y1)]
+        boxes[at:at + 1] = [_tight(mask, *q) for q in parts]
+    return boxes
+
+
 class Painter:
     def __init__(self):
         self.sprites = []            # id - 1 -> (w, h, rgba bytes)
@@ -137,22 +270,33 @@ class Painter:
         self.items = []
         self.alpha = 1.0
         self.tx = self.ty = 0
+        self.clip = None             # (x0, y0, x1, y1): a canvas clip() rect
+        self.filt = None             # the canvas filter that fillRect gets
         self.cur = None
         self.key = None
         self.sig = None
         self.hit = None
+        self.pieces = None
+        self.flat = None             # a replay of the mockup: every object composited, not cut (the browser comparison)
+        self.fill_w = None           # ... with the drain fill at its real width
+        self.memo_on = True
 
     def reset(self):
         self.items = []
         self.alpha = 1.0
         self.tx = self.ty = 0
+        self.clip = None
+        self.filt = None
 
     # --- object framing -----------------------------------------------------------------------------------------------
-    def begin(self, key, sig=None):
+    def begin(self, key, sig=None, pieces=None):
         """Start an object. Returns False when `sig` was baked before (nothing to paint)."""
-        self.key, self.sig = key, sig
-        if sig is not None and sig in self.memo:
-            self.hit = self.memo[sig]
+        self.key, self.pieces = key, pieces
+        # a painted object depends on its key (the same sig can mean different art for another key), the state it is drawn under
+        # (alpha, translate, clip, filter) and what its sig names; the sprite boxes it cuts hold absolute positions
+        self.sig = None if sig is None else (key, sig, self.alpha, self.tx, self.ty, self.clip, self.filt)
+        if self.sig is not None and self.memo_on and self.sig in self.memo:
+            self.hit = self.memo[self.sig]
             self.cur = None
             return False
         self.hit = None
@@ -161,8 +305,10 @@ class Painter:
 
     def end(self):
         if self.hit is None:
+            if self.flat is not None:
+                self.flat[...] = self.cur + self.flat * (1 - self.cur[..., 3:4])
             self.hit = self._cut()
-            if self.sig is not None:
+            if self.sig is not None and self.memo_on:
                 self.memo[self.sig] = self.hit
         for n, (sid, x0, y0) in enumerate(self.hit):
             self.items.append((f"{self.key}~{n}", sid, x0, y0))
@@ -179,15 +325,21 @@ class Painter:
             self.by_bytes[k] = sid
         return sid
 
+    def straight(self, cur=None):
+        """The buffer as 8 bit straight RGBA (premultiplied float in), before the scanline pass."""
+        cur = self.cur if cur is None else cur
+        a8 = np.rint(cur[..., 3] * 255).astype(np.int32)
+        a = cur[..., 3:4]
+        rgb = np.where(a > 1e-9, cur[..., :3] / np.maximum(a, 1e-9), 0.0)
+        return rgb, a8
+
     def _cut(self):
         """The object as 8 bit straight RGBA with the scanline baked in, cut into the boxes that hold its pixels:
-        a sparse object (a letter whose halves flew apart, a crack spreading) becomes several small sprites."""
-        a8 = np.rint(self.cur[..., 3] * 255).astype(np.int32)
+        a sparse object (a letter whose halves flew apart, a ring) becomes several small sprites."""
+        rgb, a8 = self.straight()
         mask = a8 > 0
         if not mask.any():
             return ()
-        a = self.cur[..., 3:4]
-        rgb = np.where(a > 1e-9, self.cur[..., :3] / np.maximum(a, 1e-9), 0.0)
         odd = (np.arange(GH) % 2) == 1
         rgb[odd] = rgb[odd] * 0.8 + np.array(INK, np.float32) / 255 * 0.2
         full = np.zeros((GH, GW, 4), np.uint8)
@@ -195,11 +347,19 @@ class Painter:
         full[..., 3] = np.clip(a8, 0, 255).astype(np.uint8)
         full[~mask] = 0
         out = []
-        for x0, y0, x1, y1 in split_boxes(mask):
+        boxes = split_boxes(mask) if self.pieces is None else split_any(mask, self.pieces)
+        for x0, y0, x1, y1 in boxes:
             out.append((self._sprite(full[y0:y1, x0:x1]), x0, y0))
         return tuple(out)
 
     # --- primitives (the mockup's names) --------------------------------------------------------------------------------
+    def _box(self, x0, y0, x1, y1):
+        x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, GW), min(y1, GH)
+        if self.clip is not None:
+            cx0, cy0, cx1, cy1 = self.clip
+            x0, y0, x1, y1 = max(x0, cx0), max(y0, cy0), min(x1, cx1), min(y1, cy1)
+        return x0, y0, x1, y1
+
     def rect(self, x, y, w, h, c):
         if w < 0:
             x, w = x + w, -w
@@ -207,13 +367,15 @@ class Painter:
             y, h = y + h, -h
         x += self.tx
         y += self.ty
-        x0, y0, x1, y1 = max(x, 0), max(y, 0), min(x + w, GW), min(y + h, GH)
+        x0, y0, x1, y1 = self._box(x, y, x + w, y + h)
         if x1 <= x0 or y1 <= y0:
             return
         r, g, b, ca = c
         a = ca * self.alpha
         if a <= 0:
             return
+        if self.filt is not None:
+            r, g, b = (float(v) for v in css_filter(np.array([r, g, b]), self.filt))
         reg = self.cur[y0:y1, x0:x1]
         if a >= 1:
             reg[...] = (r / 255, g / 255, b / 255, 1.0)
@@ -247,37 +409,45 @@ class Painter:
                 err += dx
                 y0 += sy
 
-    def poly(self, pts, c):
-        cc = col(c)
-        ys = [p[1] for p in pts]
-        y0, y1, n = int(math.floor(min(ys))), int(math.ceil(max(ys))), len(pts)
-        for y in range(y0, y1):
-            yy = y + 0.5
-            xs = []
-            for i in range(n):
-                a, b = pts[i], pts[(i + 1) % n]
-                if (a[1] <= yy < b[1]) or (b[1] <= yy < a[1]):
-                    xs.append(a[0] + (yy - a[1]) / (b[1] - a[1]) * (b[0] - a[0]))
-            xs.sort()
-            for k in range(0, len(xs) - 1, 2):
-                xa, xb = jround(xs[k]), jround(xs[k + 1])
-                if xb > xa:
-                    self.rect(xa, y, xb - xa, 1, cc)
-
     def disc(self, cx, cy, r, c):
         cc = col(c)
         for dy in range(-r, r + 1):
             w = int(math.floor(math.sqrt(r * r - dy * dy)))
             self.rect(jround(cx) - w, jround(cy) + dy, w * 2 + 1, 1, cc)
 
-    def arc(self, cx, cy, r, c):
+    def ring_px(self, cx, cy, r, c, th):
+        """ringPx: n points round the circle, each pixel once (the mockup's `seen` set). The v1 page passed (th, c) in the wrong order so
+        its rings never drew; the v2 calls are fixed and the rings draw."""
         cc = col(c)
-        step = max(2, int(math.floor(360 / (r * 3)))) if r else 1e9
-        a = -172
-        while a <= -8:
-            an = a * math.pi / 180
-            self.rect(jround(cx + math.cos(an) * r), jround(cy + math.sin(an) * r * 0.9), 2, 2, cc)
-            a += step
+        n = max(24, jround(r * 8))
+        seen = set()
+        for i in range(n):
+            a = i / n * TAU
+            x, y = jround(cx + math.cos(a) * r), jround(cy + math.sin(a) * r)
+            if (x, y) in seen:
+                continue
+            seen.add((x, y))
+            self.rect(x, y, th, th, cc)
+
+    def sprite(self, im, sx, sy, sw, sh, dx, dy, filt=None):
+        """drawImage(im, sx, sy, sw, sh, dx, dy, sw, sh) at an integer offset: nearest, source over, globalAlpha, the canvas filter."""
+        dx += self.tx
+        dy += self.ty
+        x0, y0, x1, y1 = self._box(dx, dy, dx + sw, dy + sh)
+        if x1 <= x0 or y1 <= y0:
+            return
+        src = im[sy:sy + sh, sx:sx + sw][y0 - dy:y1 - dy, x0 - dx:x1 - dx].astype(np.float32)
+        a = src[..., 3:4] / 255 * self.alpha
+        rgb = css_filter(src[..., :3], filt) / 255
+        reg = self.cur[y0:y1, x0:x1]
+        reg[..., :3] = rgb * a + reg[..., :3] * (1 - a)
+        reg[..., 3:4] = a + reg[..., 3:4] * (1 - a)
+
+    def sprite_ink(self, im, sx, sy, sw, sh, dx, dy, filt=None):
+        """spriteInk: the image's 8 way black outline, then the image (with the canvas filter)."""
+        for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 1), (-1, -1), (1, -1), (-1, 1)):
+            self.sprite(im, sx, sy, sw, sh, dx + ox, dy + oy, "ink")
+        self.sprite(im, sx, sy, sw, sh, dx, dy, filt)
 
     def mul(self, a):
         """globalAlpha *= a. A canvas ignores an alpha outside 0..1, so a faded out q4() (negative) leaves the alpha as it was."""
@@ -290,6 +460,29 @@ class Painter:
         self.mul(a)
         fn()
         self.alpha = old
+
+
+def obj(p, key, fn, sig=None, pieces=None):
+    """Paint one object with `fn` (the common case: paint, then end)."""
+    if p.begin(key, sig, pieces):
+        fn()
+    p.end()
+
+
+def obj_diff(p, key, paint, paint_base, sig=None, pieces=None):
+    """An object that holds only the pixels `paint` changes from `paint_base`: drawn over the plain object it gives `paint` exactly
+    (opaque pixels only, so the over blend is a replace)."""
+    if p.begin(key, sig, pieces):
+        assert p.alpha == 1.0, "a diff overlay needs opaque pixels"
+        paint()
+        truth = p.cur
+        p.cur = np.zeros_like(truth)
+        paint_base()
+        base = p.cur
+        diff = (np.abs(truth - base) > 1e-6).any(axis=2)
+        assert (truth[..., 3][diff] == 1.0).all(), "a diff overlay needs opaque pixels"
+        p.cur = np.where(diff[..., None], truth, 0).astype(np.float32)
+    p.end()
 
 
 # ------------------------------------------------------------------------------------------------------------------------
@@ -383,24 +576,47 @@ def word(p, tag, txt, y, fn):
 
 
 RUNE_T = ["..X..", ".XXX.", "X.X.X", "..X..", "..X..", "..X..", "..X.."]
-RUNE_A = ["X.X.X", ".XXX.", "..X..", "..X..", "..X..", "..X..", "..X.."]
 
 
 def rune(p, key, x, y, rows, c):
-    p.begin(key)
-    for j, r in enumerate(rows):
-        for i in range(5):
-            if r[i] == "X":
-                p.P(x + i - 1, y + j - 1, 3, 3, K["ink"])
-    for j, r in enumerate(rows):
-        for i in range(5):
-            if r[i] == "X":
-                p.P(x + i, y + j, 1, 1, c)
+    p.begin(key, (key, x, y, c, p.alpha, p.tx, p.ty))
+    if p.cur is not None:
+        for j, r in enumerate(rows):
+            for i in range(5):
+                if r[i] == "X":
+                    p.P(x + i - 1, y + j - 1, 3, 3, K["ink"])
+        for j, r in enumerate(rows):
+            for i in range(5):
+                if r[i] == "X":
+                    p.P(x + i, y + j, 1, 1, c)
     p.end()
 
 
+def tiny(p, txt, x, y, c):
+    ox = x
+    for ch in txt:
+        r = FONT[ch]
+        for j, row in enumerate(r):
+            for i in range(5):
+                if row[i] == "X":
+                    p.P(ox + i - 1, y + j - 1, 3, 3, K["ink"])
+        for j, row in enumerate(r):
+            for i in range(5):
+                if row[i] == "X":
+                    p.P(ox + i, y + j, 1, 1, c)
+        ox += 6
+
+
+def plus(p, x, y, c):
+    p.P(x - 1, y - 2, 3, 5, K["ink"])
+    p.P(x - 2, y - 1, 5, 3, K["ink"])
+    p.P(x, y - 1, 1, 3, c)
+    p.P(x - 1, y, 3, 1, c)
+    p.P(x, y, 1, 1, K["wh"])
+
+
 # ------------------------------------------------------------------------------------------------------------------------
-# The drain bar: its frame and tick are objects, its fill is three stretched 1 texel slots (FILL_SLOTS).
+# The drain bar: its frame and tick are objects, its fill is three stretched 1 texel slots (FILL_KEYS).
 # ------------------------------------------------------------------------------------------------------------------------
 BAR_W, BAR_Y = 100, 85
 FILL_KEYS = ("bar.fill1~0", "bar.fill2~0", "bar.fill3~0")
@@ -427,7 +643,7 @@ def drain(p, win, open_, am, exp):
         for key, y, c in zip(FILL_KEYS, (BAR_Y + 1, BAR_Y + 2, BAR_Y + 3), (hi, body, body)):
             key = key[:-2]
             if p.begin(key, (key, am, p.alpha)):
-                p.P(x0 + 1, y, 1, 1, c)
+                p.P(x0 + 1, y, p.fill_w or 1, 1, c)          # fill_w only in a replay of the mockup (the real width is the module's)
             p.end()
     if p.begin("bar.mark", ("bar.mark", win, p.alpha)):
         p.P(x0 + 1 + jround(AMBER / win * (BAR_W - 2)), BAR_Y - 1, 1, 7, K["am"])
@@ -435,86 +651,86 @@ def drain(p, win, open_, am, exp):
 
 
 # ------------------------------------------------------------------------------------------------------------------------
-# OVERPOWER: bearded axe
+# OVERPOWER: the double axe in front of a rune circle
 # ------------------------------------------------------------------------------------------------------------------------
-SWP = {"l": "#f3fbff", "m": "#7fc8e8", "d": "#2a6a8a"}
-SWA = {"l": "#fff3d0", "m": "#ffb648", "d": "#8a5410"}
-SWD = {"l": "#9d93c4", "m": "#6c5a9a", "d": "#3a2c5c"}
-OFF8 = [(-1, 0), (1, 0), (0, -1), (0, 1), (1, 1), (-1, -1), (-1, 1), (1, -1)]
+IMP = 0.16                           # the axe bites at this time
+AX = dict(W=54, H=54, X=MX - 27, Y=2)
+AX_EDGE = [[37, 3], [38, 3], [38, 4], [39, 4], [38, 5], [39, 5], [39, 6], [40, 6], [39, 7], [40, 7], [39, 8], [40, 8], [40, 9], [41, 9],
+           [40, 10], [41, 10], [40, 11], [41, 11], [40, 12], [41, 12], [39, 13], [40, 13], [41, 13], [39, 14], [40, 14], [39, 15], [40, 15],
+           [39, 16], [40, 16], [38, 17], [39, 17], [36, 18], [37, 18], [38, 18], [39, 18], [36, 19], [37, 19], [38, 19], [36, 20], [37, 20],
+           [13, 11], [13, 12], [13, 13], [13, 14], [14, 14], [14, 15], [14, 16], [15, 16], [15, 17], [16, 17], [16, 18], [17, 18], [17, 19]]
+AX_SIDES = [sorted((q for q in AX_EDGE if q[0] > 27), key=lambda q: q[1]), sorted((q for q in AX_EDGE if q[0] < 27), key=lambda q: q[1])]
+RC = (MX, 30, 29)
+# Elder Futhark, 5 x 5: fehu, uruz, thurisaz, ansuz, raidho, kenaz, gebo, wunjo, hagalaz, naudiz, isa, jera, tiwaz, sowilo, algiz, othala
+FUTH = [["X.X..", "XX.X.", "X.X..", "X....", "X...."], ["XXX..", "X..X.", "X..X.", "X..X.", "X..X."], ["X....", "XX...", "X.X..", "XX...", "X...."],
+        ["X.X..", "XX.X.", "X.X..", "X....", "X...."], ["XX...", "X.X..", "XX...", "X.X..", "X..X."], ["..X..", ".X...", "X....", ".X...", "..X.."],
+        ["X...X", ".X.X.", "..X..", ".X.X.", "X...X"], ["XX...", "X.X..", "XX...", "X....", "X...."], ["X..X.", "X..X.", "XXXX.", "X..X.", "X..X."],
+        [".X...", "XXX..", ".X...", ".X...", ".X..."], [".X...", ".X...", ".X...", ".X...", ".X..."], ["..X..", ".X.X.", "X...X", ".X.X.", "..X.."],
+        ["..X..", ".XXX.", "X.X.X", "..X..", "..X.."], [".X...", "X....", ".X...", "..X..", ".X..."], ["X.X.X", ".XXX.", "..X..", "..X..", "..X.."],
+        [".XXX.", "X...X", ".XXX.", "X...X", "X...X"]]
 
 
-def axe(p, hx, hy, pal, alpha):
-    def T(t, s):
-        return [hx - t + s, hy + t + s]
-
-    def M(a):
-        return [T(t, s) for t, s in a]
-
-    haft = M([[-3, -2], [-3, 2], [28, 2], [28, -2]])
-    head = M([[10, 2], [12, 8], [14, 14], [18, 18], [24, 19], [30, 16], [27, 9], [27, 2]])
-    shade = M([[11, 2], [13, 6], [17, 9], [26, 9], [27, 2]])
-    edge = M([[12, 8], [14, 14], [18, 18], [24, 19], [30, 16]])
-    lite = M([[-3, -0.7], [-3, 0.7], [28, 0.7], [28, -0.7]])
-    old = p.alpha
-    p.mul(alpha)
-    for ox, oy in OFF8:
-        p.poly([[x + ox, y + oy] for x, y in haft], K["ink"])
-        p.poly([[x + ox, y + oy] for x, y in head], K["ink"])
-    p.poly(haft, "#6e1430")
-    p.poly(lite, "#a3203f")
-    for t in (5, 6, 17, 18):
-        p.poly(M([[t, -2], [t, 2], [t + 1, 2], [t + 1, -2]]), "#6c5a9a" if pal["m"] == SWD["m"] else K["am"])
-    p.disc(hx + 4, hy - 4, 2, K["ink"])
-    p.disc(hx + 4, hy - 4, 1, K["am"])
-    p.poly(head, pal["m"])
-    p.poly(shade, pal["d"])
-    for i in range(len(edge) - 1):
-        p.line(edge[i][0], edge[i][1], edge[i + 1][0], edge[i + 1][1], pal["l"], 1)
-    for i in range(4):
-        p.P(head[4][0] + 2 - i, head[4][1] - 6 + i * 0, 1, 1, pal["l"])
-    p.line(edge[1][0] - 6, edge[1][1] - 3, edge[2][0] - 9, edge[2][1] - 2, pal["l"], 1)
-    p.alpha = old
+def near_pulse(a, pulse, width):
+    return pulse is not None and abs(((a - pulse) % TAU + math.pi * 3) % TAU - math.pi) < width
 
 
-def _crack_rays():
-    rays = []
-    for r in range(9):
-        pts = [[0.0, 0.0]]
-        a, x, y = r * math.pi * 2 / 9 + 0.3, 0.0, 0.0
-        for k in range(5):
-            a += (((r * 7 + k * 3) % 5) - 2) * 0.2
-            ln = 6 + ((r + k) % 3) * 2.5
-            x += math.cos(a) * ln
-            y += math.sin(a) * ln * 0.85
-            pts.append([x, y])
-        rays.append(pts)
-    return rays
+def ring_points(rr, trace):
+    """The points of one ring of the rune circle, traced round from the top: (x, y, angle)."""
+    cx, cy, _ = RC
+    n = jround(rr * 7)
+    pts = []
+    for i in range(n):
+        a = i / n * TAU
+        if a > trace * TAU:
+            break
+        pts.append((cx + jround(math.sin(a) * rr), cy - jround(math.cos(a) * rr), a))
+    return pts
 
 
-CRACK = _crack_rays()
+def rune_circle(p, trace, lit, rot, pulse, colr, dkr, dim, burst):
+    """runeCircle: two rings traced round from the top (the pulse is a white overlay on the plain ring), spokes and a star behind
+    the axe, 16 runes between the rings (each one object, so a step round the circle only moves it)."""
+    cx, cy, r = RC
+    if dim:
+        colr, dkr = "#4a3e72", "#241a36"
+    for rr, th, key in ((r, 2, "op.ringO"), (r - 9, 1, "op.ringI")):
+        pts = ring_points(rr, trace)
+        near = [near_pulse(a, pulse, 0.35) for _, _, a in pts]
 
+        def paint(use, pts=pts, near=near, th=th):
+            for (x, y, _), nr in zip(pts, near):
+                p.P(x - 1, y - 1, th + 2, th + 2, K["ink"])
+                p.P(x, y, th, th, K["wh"] if (use and nr) else colr)
+        obj(p, key, lambda paint=paint: paint(False), (key, len(pts), colr, p.alpha, p.tx, p.ty), PIECES_RING)
+        if any(near):
+            obj_diff(p, key + "p", lambda paint=paint: paint(True), lambda paint=paint: paint(False),
+                     (key, "p", tuple(near), len(pts), colr, p.tx, p.ty), PIECES_RING)
+    if trace >= 1:
+        def spokes():
+            for i in range(8):
+                a = i * math.pi / 4 + math.pi / 8
+                p.line(cx + math.sin(a) * 6, cy - math.cos(a) * 6, cx + math.sin(a) * (r - 11), cy - math.cos(a) * (r - 11), dkr, 1)
+            for i in range(4):
+                a = i * math.pi / 2
+                p.line(cx + math.sin(a) * 8, cy - math.cos(a) * 8, cx + math.sin(a + math.pi / 2) * 8, cy - math.cos(a + math.pi / 2) * 8, dkr, 1)
+        obj(p, "op.spokes", spokes, ("spokes", dkr, p.alpha, p.tx, p.ty))
+    for i in range(16):
+        slot = (i + rot) % 16
+        a = slot / 16 * TAU
+        rr = r - 4.5 + burst * (1 + (i % 3) * 0.4)
+        x, y = jround(cx + math.sin(a) * rr - 2), jround(cy - math.cos(a) * rr - 2)
+        c = dkr if i >= lit else K["wh"] if near_pulse(a, pulse, 0.4) else colr
 
-def crack(p, cx, cy, prog, spread, c1, c2):
-    n = int(math.floor(prog * 5 + 0.001))
-    for pts in CRACK:
-        for k in range(n):
-            a, b = pts[k], pts[k + 1]
-            mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-            d = math.hypot(mx, my) or 1
-            ox, oy = mx / d * spread, my / d * spread
-            p.glow(0.5, lambda: p.line(cx + a[0] + ox, cy + a[1] + oy + 1, cx + b[0] + ox, cy + b[1] + oy + 1, c2, 3))
-            p.line(cx + a[0] + ox, cy + a[1] + oy, cx + b[0] + ox, cy + b[1] + oy, c1, 1)
-
-
-def obj(p, key, fn, sig=None):
-    """Paint one object with `fn` (the common case: paint, then end)."""
-    if p.begin(key, sig):
-        fn()
-    p.end()
+        def paint(i=i, x=x, y=y, c=c):
+            for j, row in enumerate(FUTH[i]):
+                for k in range(5):
+                    if row[k] == "X":
+                        p.P(x + k, y + j, 1, 1, c)
+        obj(p, f"op.f{i}", paint, (f"op.f{i}", x, y, c, p.alpha, p.tx, p.ty))
 
 
 def draw_over(p, st):
-    e, out, ot, rem = st["e"], st["out"], st["ot"], st["rem"]
+    e, out, ot = st["e"], st["out"], st["ot"]
     win = 5
     am = st["am"] and not out
     fade = 1.0
@@ -523,61 +739,35 @@ def draw_over(p, st):
     if fade <= 0:
         return
     p.alpha = fade
-    if not out and 0.12 <= e < 0.27:
-        k = int(math.floor((e - 0.12) / 0.03))
+    if not out and IMP <= e < IMP + 0.15:
+        k = int(math.floor((e - IMP) / 0.025))
         p.tx = [3, -3, 2, -2, 1, -1][k] if k < 6 else 0
         p.ty = [-2, 2, -1, 1, 0, 0][k] if k < 6 else 0
-    CX, CY, HX, HY = MX - 9, 40, MX + 14, 8
-    later = None
     hot = K["am"] if am else K["rg"]
-    pal = SWD if out == "exp" else SWA if am else SWP
-    if not out and e < 0.14:
-        pp = clamp(e / 0.12)
-        a = 60 * (1 - pp * pp)
-        for i in range(5):
-            o = (i - 2) * 9
-            u = -a
-
-            def streak():
-                p.alpha = fade * 0.6
-                p.line(CX + o + u + 18, CY + o - u - 18, CX + o + u, CY + o - u, K["cy"] if i % 2 else K["wh"], 1)
-                p.alpha = fade
-            obj(p, f"op.streak{i}", streak)
-        for n, (lag, al) in enumerate([(16, .18), (10, .3), (5, .5)]):
-            obj(p, f"op.ghost{n}", lambda lag=lag, al=al: axe(p, HX + a + lag, HY - a - lag, pal, al))
-        obj(p, "op.swordIn", lambda: axe(p, HX + a, HY - a, pal, 1))
-    else:
-        off, al = 0, 1
-        if out == "cast":
-            off = -jround(ot * ot * 400)
-            al = q4(1 - clamp(ot / 0.25))
-
-        def later():
-            if al > 0:
-                obj(p, "op.sword", lambda: axe(p, HX + off, HY - off, pal, al))
-            if not out and e > 0.5:
-                k = int(math.floor((e % 1.4) / 0.2))
-                if k < 5:
-                    T = [[12, 8], [14, 14], [18, 18], [24, 19], [30, 16]][k]
-                    x, y = HX - T[0] + T[1], HY + T[0] + T[1]
-
-                    def glint():
-                        p.P(x - 2, y, 5, 1, K["wh"])
-                        p.P(x, y - 2, 1, 5, K["wh"])
-                    obj(p, "op.glint", glint)
-    if not out and e >= 0.12:
-        k = e - 0.12
+    CX, CY = RC[0], RC[1] + 2
+    colr = K["am"] if am else K["cy"]
+    dk = "#5a3a10" if am else "#16505e"
+    # the rune circle draws itself, the runes light one by one, then it turns a step at a time and a pulse runs round it
+    trace = 1.0 if out else clamp(e / 0.16)
+    lit = max(0, 16 - int(math.floor(ot / 0.03))) if out == "exp" else 16 if out else int(math.floor(clamp((e - 0.12) / 0.3) * 16))
+    rot = int(math.floor(max(0, e - 0.6) / 0.35))
+    pulse = (e * 2.6) % TAU if (not out and e > 0.6) else None
+    burst = jround(ot * 80) if out == "cast" else 0
+    rc_a = q4(1 - clamp(ot / 0.4)) if out == "cast" else 1
+    p.glow(rc_a, lambda: rune_circle(p, trace, lit, rot, pulse, colr, dk, out == "exp" and ot > 0.08, burst))
+    # the bite lights the circle: a flash, a white ring snaps round it once, a pink ring and sparks fly out, embers rise
+    if not out and e >= IMP:
+        k = e - IMP
         if k < 0.12:
-            obj(p, "op.flash", lambda: p.disc(CX, CY, jround(20 * (1 - k / 0.12)), f"rgba(255,240,235,{q4(1 - k / 0.12)})"))
+            obj(p, "op.flash", lambda: p.disc(CX, CY, jround(22 * (1 - k / 0.12)), f"rgba(255,240,235,{q4(1 - k / 0.12)})"), None, PIECES_DISC)
         if k < 0.2:
-            def xmark():
-                p.glow(q4(1 - k / 0.2), lambda: (p.line(CX - 16, CY - 16, CX + 16, CY + 16, K["wh"], 1),
-                                                 p.line(CX + 16, CY - 16, CX - 16, CY + 16, K["cy"], 1)))
-            obj(p, "op.xmark", xmark)
-        pulse = (0.5 if int(math.floor(e * 3)) % 2 else 1) if e > 0.4 else 1
-        obj(p, "op.crack", lambda: p.glow(pulse, lambda: crack(p, CX, CY, clamp(k / 0.18), 0, K["wh"], hot)))
+            def snap():
+                p.ring_px(RC[0], RC[1], RC[2] + 1, K["wh"], 2)
+                p.ring_px(RC[0], RC[1], RC[2] - 9, K["wh"], 1)
+            obj(p, "op.snap", lambda: p.glow(q4(1 - k / 0.2), snap), None, PIECES_RING)
         if k < 0.5:
-            for i in range(14):
+            obj(p, "op.ring", lambda: p.glow(q4(1 - k / 0.5), lambda: p.ring_px(CX, CY, jround(k / 0.5 * 60 / 2) * 2, K["pk"], 2)), None, PIECES_RING)
+            for i in range(16):
                 a = i * 2.4
                 v = 34 + (i * 7) % 26
                 x = CX + math.cos(a) * v * k * 2
@@ -587,22 +777,67 @@ def draw_over(p, st):
         if e > 0.5:
             for i in range(7):
                 ph = (e * 0.8 + i * 0.14) % 1
-                x = CX - 22 + (i * 13) % 44 + jround(math.sin(e * 4 + i) * 2)
-                obj(p, f"op.ember{i}", lambda i=i, ph=ph, x=x: p.glow(q4(1 - ph), lambda: p.P(x, CY + 10 - ph * 34, 1 + (i % 2), 1 + (i % 2), K["am"] if i % 2 else hot)))
-    if later:
-        later()
+                x = CX - 24 + (i * 13) % 48 + jround(math.sin(e * 4 + i) * 2)
+                obj(p, f"op.ember{i}", lambda i=i, ph=ph, x=x: p.glow(q4(1 - ph), lambda: p.P(x, CY + 18 - ph * 40, 1 + (i % 2), 1 + (i % 2), K["am"] if i % 2 else hot)))
+    # the axe: chops straight down from above in ghost frames, bites, then holds; a glint walks each blade edge
+    im = art("axe_clean54")
+    W, H = AX["W"], AX["H"]
+    if not out and e < IMP:
+        pp = clamp(e / IMP)
+        dy = jround(-70 * (1 - pp * pp))
+        if pp > 0.35:
+            for i in range(6):
+                obj(p, f"op.line{i}", lambda i=i: p.glow(0.6, lambda: p.line(AX["X"] + 12 + i * 6, AX["Y"] + dy - 30 + i * 3, AX["X"] + 12 + i * 6, AX["Y"] + dy + 4,
+                                                                                 K["cy"] if i % 2 else K["wh"], 1)))
+        for n, (lag, al) in enumerate(((-18, .18), (-11, .3), (-5, .5))):
+            obj(p, f"op.ghost{n}", lambda lag=lag, al=al: p.glow(al, lambda: p.sprite_ink(im, 0, 0, W, H, AX["X"], AX["Y"] + dy + lag)))
+        obj(p, "op.axeIn", lambda: p.sprite_ink(im, 0, 0, W, H, AX["X"], AX["Y"] + dy))
+    else:
+        off, al, filt = 0, 1, None
+        if out == "cast":
+            off = -jround(ot * ot * 420)
+            al = q4(1 - clamp(ot / 0.25))
+        if out == "exp" and ot > 0.08:
+            filt = ("gray", 0.6)
+        bounce = 1 if (not out and IMP <= e < IMP + 0.06) else 0
+        if al > 0:
+            def held():
+                obj(p, "op.axe", lambda: p.sprite_ink(im, 0, 0, W, H, AX["X"], AX["Y"] + off + bounce, filt),
+                    ("axe", off + bounce, filt, p.alpha, p.tx, p.ty))
+                if not filt:
+                    if am:
+                        obj(p, "op.edge", lambda: [p.P(AX["X"] + x, AX["Y"] + off + bounce + y, 1, 1, K["am"]) for x, y in AX_EDGE],
+                            ("edge", off + bounce, p.alpha, p.tx, p.ty))
+                    if not out and e > 0.5:
+                        k = int(math.floor((e % 1.4) / 0.05))
+                        for n, lst in enumerate(AX_SIDES):
+                            if k < len(lst):
+                                x, y = lst[k]
+
+                                def glint(x=x, y=y):
+                                    p.P(AX["X"] + x - 1, AX["Y"] + y, 3, 1, K["wh"])
+                                    p.P(AX["X"] + x, AX["Y"] + y - 1, 1, 3, K["wh"])
+                                obj(p, f"op.glint{n}", glint, ("glint", x, y, p.alpha, p.tx, p.ty))
+            p.glow(al, held)
     if out == "cast":
         if ot < 0.08:
-            obj(p, "op.cflash", lambda: p.disc(CX, CY, 34, "rgba(255,46,151,.35)"))
-        obj(p, "op.cx", lambda: p.glow(q4(1 - ot / 0.3), lambda: (p.line(CX - 20, CY - 20, CX + 20, CY + 20, K["pk"], 3),
-                                                              p.line(CX + 20, CY - 20, CX - 20, CY + 20, K["wh"], 1))))
-        obj(p, "op.ccrack", lambda: p.glow(q4(1 - ot / 0.5), lambda: crack(p, CX, CY, 1, jround(ot * 110), K["pk"], K["vi"])))
-    if out == "exp":
-        obj(p, "op.xcrack", lambda: crack(p, CX, CY, 1, 0, "#8a7ab8", "#4a3e72"))
+            obj(p, "op.cflash", lambda: p.disc(CX, CY, 36, "rgba(255,46,151,.35)"), ("cflash", p.alpha), PIECES_DISC)
+        # the circle flares: a white and cyan shock ring rolls out with the flying runes; the axe leaves a streak as it rips up
+        def shock():
+            r = RC[2] + jround(ot * 90)
+            p.ring_px(RC[0], RC[1], r, K["wh"], 2)
+            p.ring_px(RC[0], RC[1], max(4, r - 6), K["cy"], 1)
+        obj(p, "op.shock", lambda: p.glow(q4(1 - ot / 0.4), shock), None, PIECES_RING)
+        if ot < 0.25:
+            ay = AX["Y"] - jround(ot * ot * 400)
+            for i in range(5):
+                obj(p, f"op.streak{i}", lambda i=i: p.glow(q4(0.8 * (1 - ot / 0.25)), lambda: p.line(AX["X"] + 15 + i * 6, ay + 50, AX["X"] + 15 + i * 6,
+                                                                                                    ay + 64 + jround(ot * 160) + (i % 2) * 6, K["cy"] if i % 2 else K["wh"], 1)))
+    # the word: slashed in diagonally, shakes, glints, splits on cast
     base = PAL["dim"] if out == "exp" else (PAL["rageAflash"] if int(math.floor(e * 4)) % 2 else PAL["rageA"]) if am else PAL["rage"]
 
     def fn(i, ch, x, y, lw):
-        d = 0.2 + 0.03 * i
+        d = 0.24 + 0.03 * i
         pr = clamp((e - d) / 0.12)
         if not out and e < d:
             return None
@@ -636,7 +871,7 @@ def draw_over(p, st):
     if not out:
         lay, lw_ = layout("OVERPOWER")
         for i, (ch, lx, lw) in enumerate(lay):
-            d = 0.2 + 0.03 * i
+            d = 0.24 + 0.03 * i
             pr = (e - d) / 0.12
             if 0.55 < pr < 1.1:
                 xl = jround(MX - lw_ / 2) + lx
@@ -649,109 +884,120 @@ def draw_over(p, st):
 
 
 # ------------------------------------------------------------------------------------------------------------------------
-# REVENGE: laughing horned skull
+# REVENGE: the cackling Viking skull on a round shield
 # ------------------------------------------------------------------------------------------------------------------------
-CRAN = ["....XXXXXXXX....", "..XXXXXXXXXXXX..", ".XXXXXXXXXXXXXX.", ".XXXXXXXXXXXXXX.", "XXXXXXXXXXXXXXXX", "XXKKKKXXXXKKKKXX",
-        "XKKEEKKXXKKEEKKX", "XKKEEKKXXKKEEKKX", "XXKKKKXXXXKKKKXX", "XXXXXXKKKKXXXXXX", ".XXXXXXKKXXXXXX.", "..XSXSXSXSXSXS.."]
-JAWR = ["..XSXSXSXSXSXS..", "..XXXXXXXXXXXX..", "...XXXXXXXXXX...", "....XXXXXXXX...."]
+SK = dict(W=56, H=56, X=MX - 28, Y=2, CUT=39, JX0=19, JX1=37, MX0=23, MX1=33)       # jaw block columns and mouth columns
+SK_EYES = [[20, 23], [22, 23], [23, 23], [24, 23], [21, 24], [24, 24], [25, 24], [23, 25], [26, 25], [31, 23], [32, 23], [33, 23], [34, 23],
+           [35, 23], [31, 24], [33, 24], [34, 24], [32, 25]]
+SHC = dict(x=MX, y=31, r=29)
+PLANK = ["#3a2148", "#2c1838", "#43264f", "#2c1838", "#3a2148", "#2c1838", "#43264f", "#2c1838", "#3a2148", "#2c1838", "#43264f", "#2c1838", "#3a2148"]
+CRACKS = [[[-26, -6], [-20, -3], [-17, -9], [-12, -8]], [[25, -11], [20, -6], [22, -1], [17, 3]], [[-23, 13], [-18, 10], [-15, 16]],
+          [[22, 15], [17, 11], [14, 17], [10, 15]]]
+MINI_SH = ["..XXX..", ".XOOOX.", "XOOWOOX", "XOWBWOX", "XOOWOOX", ".XOOOX.", "..XXX.."]
 
 
-def bone_part(p, key, rows, x, y, eye, dark, flat_from):
-    def at(i, j):
-        return rows[j][i] if 0 <= j < len(rows) and 0 <= i < len(rows[j]) else "."
+def shield_half(p, half, cx, cy, r, s, rim, dim):
+    """One half of the round shield (the mockup's shield() paints the left half, then the right): planks, a pink and cyan painted
+    split, an iron rim with a highlight and rivets."""
+    hx = cx + half * s
+    for y in range(-r, r + 1):
+        w = int(math.floor(math.sqrt(r * r - y * y)))
+        for x in (range(-w, 1) if half < 0 else range(1, w + 1)):
+            d = math.hypot(x, y)
+            if d > r - 1.2:
+                c = K["ink"]
+            elif d > r - 3.2:
+                c = "#4a3e72" if dim else rim
+            elif d > r - 4.2:
+                c = "#2a2040" if dim else "#4a4e60"
+            else:
+                c = "#241a36" if dim else PLANK[int(math.floor((x + r) / 4)) % len(PLANK)]
+                if not dim and int(math.floor((x + r) / 4)) != int(math.floor((x + r + 1) / 4)):
+                    c = "#1a0e24"
+                a = math.atan2(y, x)
+                if not dim and r - 9 < d < r - 6 and math.sin(a * 2) > 0.3:
+                    c = "#7a1f52" if math.cos(a) > 0 else "#1f5a6a"
+            p.P(hx + x, cy + y, 1, 1, c)
+    if not dim:
+        for i in range(10):
+            a = (200 + i * 6) * math.pi / 180
+            if (half < 0) == (math.cos(a) <= 0):
+                p.P(hx + jround(math.cos(a) * (r - 2)), cy + jround(math.sin(a) * (r - 2)), 1, 1, "#e8f0ff")
+    for i in range(12):
+        a = i * math.pi / 6 + 0.26
+        if (math.cos(a) < 0) != (half < 0):
+            continue
+        p.P(hx + jround(math.cos(a) * (r - 2)), cy + jround(math.sin(a) * (r - 2)), 1, 1, "#6c5a9a" if dim else "#f3fbff")
 
+
+def shield(p, cx, cy, r, split, rim, crack_a, crack_c, dim):
+    for half, key in ((-1, "rv.shL"), (1, "rv.shR")):
+        obj(p, key, lambda half=half: shield_half(p, half, cx, cy, r, split, rim, dim), (key, cx, cy, split, rim, dim, p.alpha, p.tx, p.ty), PIECES_DISC)
+    if crack_a > 0 and not dim:
+        def cracks():
+            for c in CRACKS:
+                for i in range(len(c) - 1):
+                    p.line(cx + c[i][0], cy + c[i][1], cx + c[i + 1][0], cy + c[i + 1][1], crack_c, 1)
+        obj(p, "rv.crack", lambda: p.glow(crack_a, cracks), ("crack", cx, cy, crack_a, crack_c, p.alpha, p.tx, p.ty))
+
+
+def skull_v2(p, d, t, eye, filt, sa, clip):
+    """skullV2 inside glow(sa): the outline once for the whole shape (jaw at its dropped place), the mouth behind the jaw, the cranium,
+    the braids, the jaw and beard, then the eyes in the beat's colour."""
+    im = art("skull_px")
+    x, y = SK["X"], SK["Y"] - t
+    W, H, CUT, JX0, JX1, MX0, MX1 = SK["W"], SK["H"], SK["CUT"], SK["JX0"], SK["JX1"], SK["MX0"], SK["MX1"]
+    old, old_clip = p.alpha, p.clip
+    p.mul(sa)
+    if clip:
+        p.clip = (0, 0, GW, SHC["y"] + SHC["r"] - 2)
+
+    def body():
+        for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 1), (-1, -1), (1, -1), (-1, 1)):
+            p.sprite(im, 0, 0, W, CUT, x + ox, y + oy, "ink")
+            p.sprite(im, 0, CUT, JX0, H - CUT, x + ox, y + CUT + oy, "ink")
+            p.sprite(im, JX1, CUT, W - JX1, H - CUT, x + JX1 + ox, y + CUT + oy, "ink")
+            p.sprite(im, JX0, CUT, JX1 - JX0, H - CUT, x + JX0 + ox, y + CUT + d + oy, "ink")
+        p.filt = filt
+        if d > 0:
+            p.P(x + MX0, y + CUT - 1, MX1 - MX0, d + 2, "#12030a")
+            if d >= 3:
+                p.P(x + MX0 + 3, y + CUT + d - 1, MX1 - MX0 - 6, 1, K["pk"])
+        p.sprite(im, 0, 0, W, CUT, x, y, filt)
+        p.sprite(im, 0, CUT, JX0, H - CUT, x, y + CUT, filt)
+        p.sprite(im, JX1, CUT, W - JX1, H - CUT, x + JX1, y + CUT, filt)
+        if d > 0:
+            p.P(x + MX0, y + CUT, MX1 - MX0, d, "#12030a")
+        p.sprite(im, JX0, CUT, JX1 - JX0, H - CUT, x + JX0, y + CUT + d, filt)
+        p.filt = None
+    obj(p, "rv.sk", body, ("sk", d, t, filt, p.alpha, bool(clip), p.tx, p.ty), PIECES_DISC)
+
+    def eyes():
+        for ex, ey in SK_EYES:
+            p.P(x + ex, y + ey, 1, 1, eye)
+    if eye:
+        obj(p, "rv.eyes", eyes, ("eyes", t, eye, bool(clip), p.alpha, p.tx, p.ty))
+    p.alpha, p.clip = old, old_clip
+
+
+def mini_shield(p, key, x, y, c, dim):
     def paint():
-        for j in range(len(rows)):
-            for i in range(16):
-                if at(i, j) != ".":
-                    p.P(x + i * 2 - 1, y + j * 2 - 1, 4, 4, K["ink"])
-        for j in range(len(rows)):
-            for i in range(16):
-                c = at(i, j)
-                if c == ".":
+        for j, r in enumerate(MINI_SH):
+            for i in range(7):
+                if r[i] != ".":
+                    p.P(x + i - 1, y + j - 1, 3, 3, K["ink"])
+        for j, r in enumerate(MINI_SH):
+            for i in range(7):
+                ch = r[i]
+                if ch == ".":
                     continue
-                if j >= flat_from:
-                    cc = "#9b8964" if c == "S" else "#eadfc4"
-                elif c == "K":
-                    cc = "#12030a"
-                elif c == "E":
-                    cc = "#12030a" if dark else eye
-                else:
-                    cc = "#fff6e0" if at(i, j - 1) == "." else "#9b8964" if (at(i + 1, j) == "." or at(i, j + 1) == ".") else "#eadfc4"
-                p.P(x + i * 2, y + j * 2, 2, 2, cc)
-    obj(p, key, paint, (key, x, y, eye, dark, p.alpha, p.tx, p.ty))
-
-
-def horn_helm(p, key, x, y, dim):
-    def paint():
-        cap = [[x - 1, y + 9], [x, y + 2], [x + 7, y - 2], [x + 25, y - 2], [x + 32, y + 2], [x + 33, y + 9]]
-        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            p.poly([[a + dx, b + dy] for a, b in cap], K["ink"])
-        p.poly(cap, "#3a2c5c" if dim else "#6c5a9a")
-        p.P(x + 4, y - 1, 22, 1, "#6c5a9a" if dim else "#a898d0")
-        p.P(x - 1, y + 6, 34, 3, K["ink"])
-        p.P(x, y + 7, 32, 1, "#4a3e72" if dim else "#8a7ab8")
-        for rx in (4, 15, 26):
-            p.P(x + rx, y + 7, 2, 1, K["am"])
-        p.P(x + 15, y + 9, 2, 5, "#4a3e72" if dim else "#8a7ab8")
-        for d in (-1, 1):
-            bx = x if d < 0 else x + 32
-            pts = [[bx, y + 5], [bx + d * 5, y], [bx + d * 7, y - 6], [bx + d * 5, y - 12]]
-            for i in range(3):
-                p.line(pts[i][0] - 2, pts[i][1] - 2, pts[i + 1][0] - 2, pts[i + 1][1] - 2, K["ink"], 5)
-            for i in range(3):
-                p.line(pts[i][0] - 1, pts[i][1] - 1, pts[i + 1][0] - 1, pts[i + 1][1] - 1,
-                       (("#9b8964" if dim else K["am"]) if i == 2 else "#eadfc4"), 3)
-    obj(p, key, paint, (key, x, y, dim, p.alpha, p.tx, p.ty))
-
-
-def laugh_skull(p, x, sy, eye, d, t, dark, alpha):
-    old = p.alpha
-    p.mul(alpha)
-    cy = sy - t
-    jy = cy + 24 + d
-    if d > 0:
-        def mouth():
-            p.P(x + 5, cy + 23, 22, d + 3, "#12030a")
-            if d >= 4:
-                p.P(x + 11, jy - 2, 10, 2, K["pk"])
-        obj(p, "rv.sk.mouth", mouth)
-
-    def fangbg():
-        for bx in (x + 10, x + 22):
-            for j in range(8):
-                p.P(bx - 2, jy + 8 + j, 5, 1, K["ink"])
-    obj(p, "rv.sk.fangbg", fangbg, ("fangbg", x, jy, p.alpha, p.tx, p.ty))
-    bone_part(p, "rv.sk.jaw", JAWR, x, jy, eye, dark, 1)
-
-    def fangs():
-        for bx in (x + 10, x + 22):
-            for j in range(8):
-                p.P(bx - 1 + (((j >> 1) + (1 if d > 0 else 0)) % 2), jy + 8 + j, 3, 1, "#ff6a2a" if j % 2 else "#9e3412")
-            p.P(bx - 1, jy + 16, 3, 1, K["am"])
-    obj(p, "rv.sk.fangs", fangs, ("fangs", x, jy, d > 0, p.alpha, p.tx, p.ty))
-    bone_part(p, "rv.sk.cran", CRAN, x, cy, eye, dark, 11)
-    horn_helm(p, "rv.sk.helm", x, cy, dark)
-    p.alpha = old
-
-
-def tiny(p, txt, x, y, c):
-    ox = x
-    for ch in txt:
-        r = FONT[ch]
-        for j, row in enumerate(r):
-            for i in range(5):
-                if row[i] == "X":
-                    p.P(ox + i - 1, y + j - 1, 3, 3, K["ink"])
-        for j, row in enumerate(r):
-            for i in range(5):
-                if row[i] == "X":
-                    p.P(ox + i, y + j, 1, 1, c)
-        ox += 6
+                p.P(x + i, y + j, 1, 1, ("#4a3e72" if dim else "#c6cede") if ch == "X" else ("#4a3e72" if dim else K["wh"]) if ch == "B"
+                    else ("#2a2040" if dim else "#8a93a8") if ch == "W" else c)
+    obj(p, key, paint, (key, x, y, c, dim, p.alpha, p.tx, p.ty))
 
 
 def draw_rev(p, st):
-    e, out, ot, rem = st["e"], st["out"], st["ot"], st["rem"]
+    e, out, ot = st["e"], st["out"], st["ot"]
     win = 5
     am = st["am"] and not out
     fade = 1.0
@@ -761,10 +1007,11 @@ def draw_rev(p, st):
         return
     p.alpha = fade
     CX = MX
-    beats = [0.1, 0.27, 0.44]
+    # cackle beats: three on the entrance, then a burst of four every 1.8 s
+    beats = [0.3, 0.47, 0.64]
     for k in range(14):
         for m in range(4):
-            beats.append(0.8 + 1.8 * k + 0.17 * m)
+            beats.append(1.0 + 1.8 * k + 0.17 * m)
     bi = -1
     for i, b in enumerate(beats):
         if b <= e:
@@ -773,27 +1020,49 @@ def draw_rev(p, st):
     laugh = (not out) and age < 0.17
     d = t = 0
     if laugh:
-        d = 6 if age < 0.05 else 3 if age < 0.11 else 0
-        t = 3 if d == 6 else 1 if d == 3 else 0
+        d = 4 if age < 0.05 else 2 if age < 0.11 else 0
+        t = 2 if d == 4 else 1 if d == 2 else 0
     elif out == "cast":
-        d = 6 if ot < 0.18 else 3 if ot < 0.26 else 0
-        t = 3 if d == 6 else 1 if d == 3 else 0
+        d = 5 if ot < 0.18 else 2 if ot < 0.26 else 0
+        t = 3 if d == 5 else 1 if d == 2 else 0
     elif out == "exp":
-        d = 3 if ot < 0.1 else 2 if ot < 0.2 else 0
+        d = 1 if ot < 0.1 else 0
     dark = out == "exp" and ot > 0.1
-    eye = K["ink"] if dark else K["wh"] if (out == "cast" and ot < 0.1) else K["am"] if am else (K["pk"] if bi % 2 else K["cy"])
-    sy = 14
-    if not out and e < 0.1:
-        sy = 14 + jround((1 - ease_out(clamp(e / 0.1))) * 16)
-        obj(p, "rv.sdisc", lambda: p.disc(CX, 32, jround(26 * (1 - e / 0.1)), "rgba(255,46,151,.35)"))
-    if d >= 3:
+    odd_beat = bi >= 0 and bi % 2 == 1
+    eye = K["ink"] if dark else K["wh"] if (out == "cast" and ot < 0.1) else K["am"] if am else (K["pk"] if odd_beat else K["cy"])
+    # entrance: the shield slams in from the left in three steps and rings, then the skull rises from behind it
+    shx = 0
+    if not out and e < 0.12:
+        k = int(math.floor(e / 0.03))
+        shx = [-44, -24, -9, -3][k] if k < 4 else 0
+    sky = 0
+    if not out and e < 0.12:
+        sky = 99
+    elif not out and e < 0.24:
+        sky = jround((1 - ease_out(clamp((e - 0.12) / 0.12))) * 18)
+    split = jround((ot - 0.08) * 90) if (out == "cast" and ot > 0.08) else 0
+    sh_a = q4(1 - clamp((ot - 0.1) / 0.35)) if out == "cast" else 1
+    rim = K["am"] if am else ("#f3fbff" if (laugh and age < 0.06) else "#8a93a8")
+    crack_a = (1 if laugh else 0.5 + 0.25 * math.sin(e * TUNE["rv_crack"])) if e > 0.24 else 0
+    p.glow(sh_a, lambda: shield(p, SHC["x"] + shx, SHC["y"], SHC["r"], split, rim, q4(crack_a), K["am"] if am else K["pk"], dark))
+    if not out and 0.09 <= e < 0.2:
+        k = e - 0.09
+        ra = q4(1 - k / 0.11)
+        obj(p, "rv.snap", lambda: p.glow(ra, lambda: p.ring_px(SHC["x"], SHC["y"], SHC["r"] + 2 + jround(k * 60), K["wh"], 1)), None, PIECES_RING)
+        for i in range(10):
+            a = math.pi * (0.7 + i * 0.06)
+            r = SHC["r"] + k * 90
+            obj(p, f"rv.spk{i}", lambda i=i, a=a, r=r: p.glow(ra, lambda: p.P(SHC["x"] + math.cos(a) * r, SHC["y"] + math.sin(a) * r, 2, 2, K["am"] if i % 2 else K["wh"])))
+    # laugh lines and HA bits
+    MY = SK["Y"] + SK["CUT"]
+    if d >= 2 and not dark:
         for n, sd in enumerate((-1, 1)):
             c = K["cy"] if bi % 2 else K["pk"]
 
             def lines(sd=sd, c=c):
-                p.line(CX + sd * 23, sy + 7, CX + sd * 28, sy + 4, c, 1)
-                p.line(CX + sd * 25, sy + 15, CX + sd * 31, sy + 15, c, 1)
-                p.line(CX + sd * 23, sy + 23, CX + sd * 28, sy + 26, c, 1)
+                p.line(CX + sd * 28, MY - 14, CX + sd * 34, MY - 18, c, 1)
+                p.line(CX + sd * 30, MY - 6, CX + sd * 37, MY - 6, c, 1)
+                p.line(CX + sd * 28, MY + 2, CX + sd * 34, MY + 6, c, 1)
             obj(p, f"rv.laugh{n}", lines)
     if not out:
         rank = 0
@@ -802,26 +1071,36 @@ def draw_rev(p, st):
             if a < 0 or a >= 0.4:
                 continue
             sd = 1 if i % 2 else -1
-            c = K["cy"] if ((i == 0) if i < 3 else (i - 3) % 4 == 0) else K["pk"]            # RETUNE: i % 3 == 0 in the mockup
-            obj(p, f"rv.ha{rank}", lambda a=a, sd=sd, c=c: p.glow(q4(1 - a / 0.4), lambda: tiny(p, "HA", jround(CX + sd * (22 + a * 60) - 5), jround(36 - a * 45), c)))
+            cyan = ((i == 0) if i < 3 else (i - 3) % 4 == 0) if TUNE["rv_ha_beat"] else i % 3 == 0       # RETUNE: i % 3 == 0 in the mockup
+            c = K["cy"] if cyan else K["pk"]
+            obj(p, f"rv.ha{rank}", lambda a=a, sd=sd, c=c: p.glow(q4(1 - a / 0.4), lambda: tiny(p, "HA", jround(CX + sd * (26 + a * 60) - 5), jround(MY - 4 - a * 45), c)))
             rank += 1
     if out == "cast":
         if ot < 0.08:
-            obj(p, "rv.cdisc", lambda: p.disc(CX, 32, 34, "rgba(255,240,250,.4)"))
+            obj(p, "rv.cdisc", lambda: p.disc(CX, SHC["y"], 36, "rgba(255,240,250,.4)"), ("cdisc", p.alpha), PIECES_DISC)
+
+        def rings():
+            r = jround(ot / 0.4 * 64 / 2) * 2
+            p.ring_px(CX, SHC["y"], r, K["pk"], 3)
+            p.ring_px(CX, SHC["y"], r - 4, K["cy"], 1)
+        obj(p, "rv.cring", lambda: p.glow(q4(1 - ot / 0.4), rings), None, PIECES_RING)
         for i in range(8):
             a = i * math.pi / 4
-            r = 14 + jround(ot * 140)
-            obj(p, f"rv.cha{i}", lambda i=i, a=a, r=r: p.glow(q4(1 - ot / 0.45), lambda: tiny(p, "HA", jround(CX + math.cos(a) * r - 5), jround(34 + math.sin(a) * r * 0.8 - 3), K["cy"] if i % 2 else K["pk"])))
+            r = 18 + jround(ot * 140)
+            obj(p, f"rv.cha{i}", lambda i=i, a=a, r=r: p.glow(q4(1 - ot / 0.45), lambda: tiny(p, "HA", jround(CX + math.cos(a) * r - 5), jround(SHC["y"] + math.sin(a) * r * 0.8 - 3), K["cy"] if i % 2 else K["pk"])))
     sa = 1
     if out == "cast":
         sa = q4(1 - clamp((ot - 0.2) / 0.25))
-    if sa > 0:
-        laugh_skull(p, CX - 16, sy, eye, d, t, dark, sa)
+    if sky < 99 and sa > 0:
+        skull_v2(p, d, t - sky, eye, ("gray", 0.55) if dark else None, sa, sky > 0)
+    if not out and 0.12 <= e < 0.16:
+        obj(p, "rv.sdisc", lambda: p.disc(CX, SHC["y"], jround(30 * (1 - (e - 0.12) / 0.04)), "rgba(255,46,151,.35)"), None, PIECES_DISC)
+    # title: bounces in from the mouth, then hops in time with each cackle
     base = PAL["dim"] if out == "exp" else PAL["vioA"] if am else PAL["vio"]
     COLS = {5: [0, 1, 2, 3, 4], 3: [0, 2, 4], 1: [2]}
 
     def fn(i, ch, x, y, lw):
-        dl = 0.22 + 0.05 * i
+        dl = 0.42 + 0.05 * i
         wd, px, py, al = 5, x, y, 1
         if not out:
             if e < dl:
@@ -830,7 +1109,7 @@ def draw_rev(p, st):
             if pr < 1:
                 sx = CX - 5
                 px = jround(sx + (x - sx) * ease_out(pr))
-                py = jround(44 + (y - 44) * pr - abs(math.sin(pr * math.pi * 2.5)) * (1 - pr) * 16)
+                py = jround(MY + (y - MY) * pr - abs(math.sin(pr * math.pi * 2.5)) * (1 - pr) * 16)
                 wd = [5, 3, 1, 3][int(math.floor(pr * 12)) % 4]
             elif laugh:
                 py = y - ((bi + i) % 2)
@@ -848,228 +1127,281 @@ def draw_rev(p, st):
         sh = (5 - wd) * SC / 2
         return {"x": px + jround(sh), "y": py, "pal": base, "cols": COLS[wd]}
     x0, w = word(p, "rv", "REVENGE", WY, fn)
-    if e >= 0.4 and (not out or out == "exp"):
-        rune(p, "rv.runeL", x0 - 11, WY + 4, RUNE_A, K["am"] if am else K["cy"])
-        rune(p, "rv.runeR", x0 + w + 7, WY + 4, RUNE_A, K["am"] if am else K["cy"])
-    if e >= 0.4:
-        drain(p, win, clamp(1 - ot / 0.1) if out == "cast" else clamp((e - 0.4) / 0.15), out == "exp" or st["am"], out == "exp")
+    # little round shields flank the word (its own mark), hopping with each cackle
+    if e >= 0.6 and (not out or out == "exp"):
+        hop = 1 if (laugh and age < 0.08) else 0
+        fc = "#4a3e72" if dark else K["am"] if am else (K["pk"] if bi % 2 else K["cy"])
+        mini_shield(p, "rv.msL", x0 - 12, WY + 3 - hop, fc, dark)
+        mini_shield(p, "rv.msR", x0 + w + 5, WY + 3 - (hop if (bi + 1) % 2 else 0), fc, dark)
+    if e >= 0.6:
+        drain(p, win, clamp(1 - ot / 0.1) if out == "cast" else clamp((e - 0.6) / 0.15), out == "exp" or st["am"], out == "exp")
 
 
 # ------------------------------------------------------------------------------------------------------------------------
-# VICTORY RUSH: war cry bust
+# VICTORY RUSH: crossed bearded axes on the red sunburst
 # ------------------------------------------------------------------------------------------------------------------------
-def outlined(p, pts, c):
-    for ox, oy in OFF8:
-        p.poly([[x + ox, y + oy] for x, y in pts], K["ink"])
-    p.poly(pts, c)
+VR = dict(S=60, X=MX - 30, Y=0, CX=MX, CY=34)
+FLAME_HOT = ["#fff6c8", "#ffe066", "#ffb02e", "#ff7a1f", "#f0381a", "#a8141a"]
+FLAME_AM = ["#ffffff", "#fff0c8", "#ffd27a", "#ffb648", "#e08a2a", "#8a5010"]
+_FLAMES = {}
 
 
-def big_line(p, x0, y0, x1, y1, c, th, ink):
-    h = th // 2
-    if ink:
-        p.line(x0 - h - 1, y0 - h - 1, x1 - h - 1, y1 - h - 1, K["ink"], th + 2)
-    p.line(x0 - h, y0 - h, x1 - h, y1 - h, c, th)
+def vhash(a, b):
+    h = math.sin(a * 12.9898 + b * 78.233) * 43758.5453
+    return h - math.floor(h)
 
 
-def plus(p, x, y, c):
-    p.P(x - 1, y - 2, 3, 5, K["ink"])
-    p.P(x - 2, y - 1, 5, 3, K["ink"])
-    p.P(x, y - 1, 1, 3, c)
-    p.P(x - 1, y, 3, 1, c)
-    p.P(x, y, 1, 1, K["wh"])
+def flame_data():
+    if not _FLAMES:
+        fl = flame_pixels()
+        top = {}
+        for s in ("L", "R"):
+            for x, y, *_ in fl[s]:
+                top[s + str(x)] = min(top.get(s + str(x), 99), y)
+        _FLAMES.update(px=fl, top=top)
+    return _FLAMES
 
 
-def bust(p, CX, oy, mh, puff, eye, lower, dim, sway):
-    def Y(v):
-        return jround(v + oy)
+def vr_flames(p, key, s, dx, dy, e, lvl, am, die):
+    """vrFlames: lvl 0..1 = how much of the flame has lit (from the bottom); die 0..1 = burnt out from the top. One object per axe."""
+    fd = flame_data()
+    pts = fd["px"][s]
+    ymin, ymax = min(q[1] for q in pts), max(q[1] for q in pts)
+    cut = ymax - (ymax - ymin + 1) * lvl
+    cut_d = ymin + (ymax - ymin + 1) * die
+    pal = FLAME_AM if am else FLAME_HOT
+    rt = TUNE["flame_amber" if am else "flame_hot"]
+    n_tip = int(math.floor(e * rt["tip"]))
+    n_lick = int(math.floor(e * rt["lick"]))
+    if rt["mod"]:
+        n_tip, n_lick = n_tip % rt["mod"][0], n_lick % rt["mod"][1]
+    vis = []
+    for x, y, r, g, b in pts:
+        if y < cut or y < cut_d:
+            continue
+        if y == fd["top"][s + str(x)] and vhash(x, n_tip) < 0.35:
+            continue
+        lum = (r * 0.3 + g * 0.59 + b * 0.11) / 255
+        base = 1 if lum > 0.8 else 2 if lum > 0.62 else 3 if lum > 0.45 else 4
+        w = math.sin(e * rt["wave"] + y * 0.9 + x * 1.7)
+        vis.append((x, y, pal[max(0, min(5, base + (-1 if w > 0.55 else 1 if w < -0.6 else 0)))]))
+    if not die:
+        for k, y0 in fd["top"].items():
+            if k[0] != s:
+                continue
+            x = int(k[1:])
+            if y0 < cut:
+                continue
+            h = vhash(x, n_lick)
+            if h > 0.8:
+                vis.append((x, y0 - 1, pal[1]))
+            if h > 0.93:
+                vis.append((x, y0 - 2, pal[0]))
 
-    def B(pts):
-        return [[x, Y(y)] for x, y in pts]
-    fy = 30 + lower * 18
-    el = [CX + 25, 44 + lower * 8]
-    top = fy - 24
+    def paint():
+        for x, y, _ in vis:
+            p.P(dx + x - 1, dy + y - 1, 3, 3, K["ink"])
+        for x, y, c in vis:
+            p.P(dx + x, dy + y, 1, 1, c)
+    obj(p, key, paint, (key, tuple(vis), dx, dy, p.alpha, p.tx, p.ty))
 
-    def arm():
-        big_line(p, CX + 20, Y(52), el[0], Y(el[1]), "#a3203f", 6, True)
-        big_line(p, el[0], Y(el[1]), CX + 28, Y(fy), "#e8a87c", 5, True)
-        p.P(CX + 25, Y(fy + 4), 6, 2, K["am"])
-        p.P(CX + 26, Y(top) - 1, 4, 34, K["ink"])
-        p.P(CX + 27, Y(top), 2, 32, "#6e1430")
-        outlined(p, B([[CX + 28, top], [CX + 37, top - 3], [CX + 39, top + 5], [CX + 35, top + 12], [CX + 28, top + 10]]), "#6c5a9a" if dim else "#7fc8e8")
-        p.poly(B([[CX + 29, top + 1], [CX + 34, top], [CX + 30, top + 6]]), "#f3fbff")
-        p.P(CX + 28, Y(top - 5), 1, 5, K["ink"])
-        p.P(CX + 28, Y(top - 4), 1, 4, "#a898d0")
-        p.disc(CX + 28, Y(fy), 4, K["ink"])
-        p.disc(CX + 28, Y(fy), 3, "#e8a87c")
-        p.P(CX + 27, Y(fy - 2), 2, 1, "#ffd0a0")
-    obj(p, "vc.arm", arm, ("arm", CX, oy, round(lower, 6), dim, p.alpha, p.tx, p.ty))
 
-    def torso():
-        outlined(p, B([[CX - 28, 59], [CX - 24, 50], [CX - 13, 46], [CX + 13, 46], [CX + 24, 50], [CX + 28, 59]]), "#a3203f")
-        p.P(CX - 13, Y(46), 26, 2, "#ff3b5c")
-        for i in range(-12, 12, 3):
-            p.P(CX + i, Y(45), 3, 3, "#9b8964" if ((i + 12) // 3) % 2 else "#eadfc4")
-    obj(p, "vc.torso", torso, ("torso", CX, oy, p.alpha, p.tx, p.ty))
-    sw, bp = int(sway), puff
+def wedge_cover(shine):
+    """Coverage (60 x 60, 0..1) of the sweeping wedge: moveTo(30, 30), lineTo(30 + cos a * 44, 30 + sin a * 44) for a = shine - 0.28 + k * 0.07."""
+    pts = [(30.0, 30.0)] + [(30 + math.cos(shine - 0.28 + k * 0.07) * 44, 30 + math.sin(shine - 0.28 + k * 0.07) * 44) for k in range(9)]
+    ss = 16
+    cov = np.zeros((60, 60), np.float32)
+    xs = [q[0] for q in pts]
+    ys = [q[1] for q in pts]
+    x0, x1 = max(0, int(math.floor(min(xs)))), min(60, int(math.ceil(max(xs))))
+    y0, y1 = max(0, int(math.floor(min(ys)))), min(60, int(math.ceil(max(ys))))
+    if x1 <= x0 or y1 <= y0:
+        return cov
+    gx = x0 + (np.arange((x1 - x0) * ss) + 0.5) / ss
+    gy = y0 + (np.arange((y1 - y0) * ss) + 0.5) / ss
+    X, Y = np.meshgrid(gx, gy)
+    area = sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts)))
+    inside = np.ones(X.shape, bool)
+    for i in range(len(pts)):
+        a, b = pts[i], pts[(i + 1) % len(pts)]
+        cross = (b[0] - a[0]) * (Y - a[1]) - (b[1] - a[1]) * (X - a[0])
+        inside &= (cross >= 0) if area > 0 else (cross <= 0)
+    cov[y0:y1, x0:x1] = inside.reshape(y1 - y0, ss, x1 - x0, ss).mean(axis=(1, 3))
+    return cov
 
-    def beard():
-        outlined(p, B([[CX - 13 - bp, 38], [CX - 16 - bp, 46], [CX - 10 - bp + sw, 56], [CX + sw, 59], [CX + 10 + bp + sw, 56], [CX + 16 + bp, 46], [CX + 13 + bp, 38]]), "#ff6a2a")
-        for bx in (-7, 0, 7):
-            for j in range(12):
-                p.P(CX + bx + sw - 1 + (1 if ((j >> 1) % 2) else 0), Y(45 + j), 2, 1, "#ffb04a" if j % 2 else "#9e3412")
-        p.poly(B([[CX - 16 - bp, 46], [CX - 13 - bp, 38], [CX - 12, 44], [CX - 11, 54]]), "#9e3412")
-        p.P(CX + sw - 1, Y(58), 3, 1, K["am"])
-    obj(p, "vc.beard", beard, ("beard", CX, oy, bp, sw, p.alpha, p.tx, p.ty))
 
-    def face1():
-        outlined(p, B([[CX - 12, 27], [CX - 12, 36], [CX - 9, 42], [CX + 9, 42], [CX + 12, 36], [CX + 12, 27]]), "#e8a87c")
-        p.poly(B([[CX + 7, 28], [CX + 12, 28], [CX + 12, 36], [CX + 9, 42], [CX + 6, 42]]), "#b8704a")
-        p.P(CX - 11, Y(28), 4, 2, "#ffd0a0")
-        p.P(CX - 9, Y(31), 5, 2, "#fff6e0")
-        p.P(CX + 4, Y(31), 5, 2, "#fff6e0")
-    obj(p, "vc.face1", face1, ("face1", CX, oy, p.alpha, p.tx, p.ty))
+def vr_circle_canvas(iris, dim):
+    """The offscreen 60 x 60 canvas of vrCircle without the wedge: the circle, dimmed, then the iris mask (destination-in)."""
+    out = art("vr_circle").astype(np.float32)
+    if dim:
+        on = (out[..., 3:4] > 0)
+        out[..., :3] = np.where(on, out[..., :3] * 0.25 + np.array([40, 30, 60], np.float32) * 0.75, out[..., :3])
+    if iris is not None:
+        mask = np.zeros((60, 60), np.float32)
+        r = max(0, iris)
+        for dy in range(-r, r + 1):
+            w = int(math.floor(math.sqrt(r * r - dy * dy)))
+            if 0 <= 31 + dy < 60:
+                mask[31 + dy, max(0, 30 - w):min(60, 30 + w + 1)] = 1
+        out[..., 3] *= mask
+    return np.rint(out).astype(np.uint8)
 
-    def pupils():
-        p.P(CX - 7, Y(31), 2, 2, eye)
-        p.P(CX + 5, Y(31), 2, 2, eye)
-    obj(p, "vc.pupils", pupils, ("pupils", CX, oy, eye, p.alpha, p.tx, p.ty))
 
-    def face2():
-        p.line(CX - 10, Y(28), CX - 3, Y(30), K["ink"], 2)
-        p.line(CX + 10, Y(28), CX + 3, Y(30), K["ink"], 2)
-        p.P(CX - 1, Y(33), 2, 3, "#b8704a")
-    obj(p, "vc.face2", face2, ("face2", CX, oy, p.alpha, p.tx, p.ty))
-
-    def mouth():
-        p.P(CX - 7, Y(36), 14, mh + 2, K["ink"])
-        p.P(CX - 6, Y(37), 12, mh, "#12030a")
-        p.P(CX - 5, Y(37), 10, 2, "#fff6e0")
-        if mh >= 8:
-            p.P(CX - 4, Y(37 + mh - 2), 8, 2, "#fff6e0")
-        if mh >= 6:
-            p.P(CX - 3, Y(37 + mh - 4), 6, 2, "#ff3b5c")
-    obj(p, "vc.mouth", mouth, ("mouth", CX, oy, mh, p.alpha, p.tx, p.ty))
-
-    def helm():
-        outlined(p, B([[CX - 13, 27], [CX - 14, 19], [CX - 9, 13], [CX + 9, 13], [CX + 14, 19], [CX + 13, 27]]), "#3a2c5c" if dim else "#6c5a9a")
-        p.P(CX - 8, Y(14), 16, 1, "#6c5a9a" if dim else "#a898d0")
-        p.P(CX - 13, Y(24), 26, 3, K["ink"])
-        p.P(CX - 12, Y(25), 24, 1, "#4a3e72" if dim else "#8a7ab8")
-        for rx in (-9, -1, 7):
-            p.P(CX + rx, Y(25), 2, 1, K["am"])
-        p.P(CX - 1, Y(27), 2, 8, "#8a7ab8")
-        for sd in (-1, 1):
-            bx = CX + sd * 13
-            pts = [[bx, Y(20)], [bx + sd * 5, Y(15)], [bx + sd * 7, Y(9)], [bx + sd * 5, Y(4)]]
-            for i in range(3):
-                p.line(pts[i][0] - 2, pts[i][1] - 2, pts[i + 1][0] - 2, pts[i + 1][1] - 2, K["ink"], 5)
-            for i in range(3):
-                p.line(pts[i][0] - 1, pts[i][1] - 1, pts[i + 1][0] - 1, pts[i + 1][1] - 1, K["am"] if i == 2 else "#eadfc4", 3)
-    obj(p, "vc.helm", helm, ("helm", CX, oy, dim, p.alpha, p.tx, p.ty))
+def vr_shine_image(shine, am):
+    """The wedge as a translucent overlay on the circle's opaque pixels (a source-atop fill = an over blend there)."""
+    cov = wedge_cover(shine)
+    r, g, b, aa = (255, 200, 120, .38) if am else (255, 170, 150, .32)
+    img = np.zeros((60, 60, 4), np.uint8)
+    img[..., 0], img[..., 1], img[..., 2] = r, g, b
+    on = art("vr_circle")[..., 3] > 0
+    img[..., 3] = np.where(on, np.rint(cov * aa * 255), 0).astype(np.uint8)
+    return img
 
 
 def draw_vic(p, st):
-    e, out, ot, rem = st["e"], st["out"], st["ot"], st["rem"]
+    e, out, ot = st["e"], st["out"], st["ot"]
     win = 20
     am = st["am"] and not out
     fade = 1.0
     if out == "exp":
-        fade = q4(1 - ot / 0.6)
+        fade = q4(1 - clamp((ot - 0.25) / 0.45))
     if fade <= 0:
         return
     p.alpha = fade
-    CX = MX - 8
+    CX, CY = VR["CX"], VR["CY"]
     heal = K["am"] if am else K["gr"]
-    yt = -1
-    if not out:
-        if 0.15 <= e < 0.6:
-            yt = e - 0.15
-        elif e >= 0.9:
-            w = (e - 0.9) % 2.0                                  # RETUNE: 2.2 in the mockup
-            if w < 0.7:
-                yt = w
-    yelling = yt >= 0 or (out == "cast" and ot < 0.25)
-    mh = (11 if (out == "cast" or (0.1 < yt < 0.5)) else 8) if yelling else (3 if int(math.floor(e * 4)) % 2 else 4)
-    if out == "exp":
-        mh = 5 if ot < 0.15 else 3 if ot < 0.3 else 2
-    lower = 0.0
-    if not out and e < 0.3:
-        lower = clamp(1 - (e - 0.12) / 0.18)
-    if out == "exp":
-        lower = clamp(ot / 0.4)
+    HIT = 0.16                                      # the axes clang together here
+    # clangs: the axes kick apart a step and slam back every 2.4 s while the window is open
+    clangs = [HIT] + [1.2 + 2.4 * k for k in range(9)]
+    ci = -1
+    for i, c in enumerate(clangs):
+        if c <= e:
+            ci = i
+    cage = e - clangs[ci] if ci >= 0 else 9
+    # shake on each clang (big on the first)
+    if not out and cage < 0.12:
+        k = int(math.floor(cage / 0.025))
+        big = ci == 0
+        sx_, sy_ = ([3, -3, 2, -2, 1], [-2, 2, -1, 1, 0]) if big else ([1, -1, 1, 0, 0], [0, 1, 0, 0, 0])
+        p.tx = sx_[k] if k < 5 else 0
+        p.ty = sy_[k] if k < 5 else 0
+    # green heal glow behind everything, breathing
+    if e >= 0.2 and not (out == "cast" and ot > 0.2) and not (out == "exp" and ot > 0.1):
+        pu = 0.08 if int(math.floor(e * 2.5)) % 2 else 0.13
+        obj(p, "vc.glow", lambda: p.glow(pu, lambda: p.disc(CX, CY - 3, 36, heal)), ("glow", pu, heal, p.alpha, p.tx, p.ty), PIECES_DISC)
+    # the sunburst: irises open, then a light wedge sweeps round it
+    iris = None if out else (jround(ease_out(e / 0.12) * 34) if e < 0.12 else None)
+    c_a = q4(1 - clamp(ot / 0.35)) if out == "cast" else 1
+    dim = out == "exp" and ot > 0.1
+
+    def circle():
+        obj(p, "vc.circle", lambda: p.sprite_ink(vr_circle_canvas(iris, dim), 0, 0, 60, 60, VR["X"], VR["Y"], ("gray", 0.7) if dim else None),
+            ("circle", iris, dim, p.alpha, p.tx, p.ty))
+        if not out and e > 0.5:
+            shine = (e * TUNE["vc_shine"]) % TAU
+            obj(p, "vc.shine", lambda: p.sprite(vr_shine_image(shine, am), 0, 0, 60, 60, VR["X"], VR["Y"]), ("shine", jround(shine * 1e9), am, p.alpha, p.tx, p.ty), PIECES_DISC)
+    p.glow(c_a, circle)
+    if not out and e < 0.12:
+        obj(p, "vc.iris", lambda: p.glow(0.9, lambda: p.ring_px(VR["X"] + 30, VR["Y"] + 31, jround(ease_out(e / 0.12) * 34), K["wh"], 1)), None, PIECES_RING)
+    # the axes: slide in from the sides in steps with ghost frames, clang into the X
+    sx = 0
+    if not out and e < HIT:
+        k = int(math.floor(e / HIT * 6))
+        sx = [-60, -44, -30, -18, -9, -3][k] if k < 6 else 0
+    if not out and e >= HIT and cage < 0.1 and ci > 0:
+        sx = -2 if cage < 0.04 else -1 if cage < 0.07 else 0
+    lx, rx, ly, ry, al, filt = sx, -sx, 0, 0, 1, None
     if out == "cast":
-        lower = -0.25
-    oy = 0
-    if not out and e < 0.14:
-        oy = jround((1 - ease_out(clamp(e / 0.14))) * 40)
-    elif not out and e > 0.4:
-        oy = 1 if int(math.floor(e * 2)) % 2 else 0
-    if yelling and not out:
-        oy -= 1
+        k = ot * ot * 500
+        lx, rx = -jround(k), jround(k)
+        ly = ry = -jround(k * 0.75)
+        al = q4(1 - clamp(ot / 0.3))
     if out == "exp":
-        oy += min(2, int(math.floor(ot / 0.15)))
-    puff = 2 if yelling else 0
-    sway = (1 if int(math.floor(e * 30)) % 2 else -1) if yelling else 0
-    eye = K["ink"] if (out == "exp" and ot > 0.1) else K["am"] if am else (K["gr"] if int(math.floor(e * 3)) % 2 else "#d8ffe8")
-    if e >= 0.08 and not (out == "cast" and ot > 0.3):
-        k = 1 if out else clamp((e - 0.08) / 0.2)
-        alt = math.pi / 12 if int(math.floor(e * 5)) % 2 else 0
-        ro = 16 + jround(36 * k)
+        gy = min(3, int(math.floor(ot / 0.1)))
+        ly = ry = gy
+        if ot > 0.1:
+            filt = ("gray", 0.6)
+    lit = 1 if out == "exp" else clamp((e - HIT) / 0.22)
+    die = clamp(ot / 0.3) if out == "exp" else 0
+    imL, imR = art("vr_axeL"), art("vr_axeR")
+    if not out and e < HIT and e > 0.03:
+        for n, (lag, ga) in enumerate(((14, .2), (8, .35))):
+            def ghost(lag=lag):
+                p.sprite_ink(imL, 0, 0, 60, 60, VR["X"] + lx - lag, VR["Y"])
+                p.sprite_ink(imR, 0, 0, 60, 60, VR["X"] + rx + lag, VR["Y"])
+            obj(p, f"vc.ghost{n}", lambda ghost=ghost, ga=ga: p.glow(ga, ghost))
+    if out == "cast" and ot < 0.3:
+        for i in range(4):
+            o = i * 5 - 8
 
-        def rays():
-            for r in range(12):
-                a = r * math.pi / 6 + alt
-                ri = 16
-                p.glow(0.1 if out == "exp" else 0.2, lambda a=a: p.poly([[CX + math.cos(a) * ro, 32 + math.sin(a) * ro],
-                                                                       [CX + math.cos(a - 0.12) * ri, 32 + math.sin(a - 0.12) * ri],
-                                                                       [CX + math.cos(a + 0.12) * ri, 32 + math.sin(a + 0.12) * ri]], K["am"]))
-        obj(p, "vc.rays", rays)
-        pu = 0.7 if int(math.floor(e * 3)) % 2 else 1
-
-        def beams():
-            for w, a in ((44, .07), (30, .1), (14, .14)):
-                p.glow(a * pu * 4, lambda w=w: p.P(CX - w / 2, 4, w, 56, heal))
-        obj(p, "vc.beams", beams)
-    if yt >= 0:
-        for n, dly in enumerate((0, 0.18)):
-            s = yt - dly
-            if 0 <= s < 0.45:
-                r = jround((10 + s * 105) / 2) * 2
-                obj(p, f"vc.arc{n}", lambda s=s, r=r: p.glow(q4(1 - s / 0.45), lambda: (p.arc(CX, 40, r, heal), p.arc(CX, 40, r - 3, "#d8ffe8"))))
+            def streak(o=o, i=i):
+                p.line(CX - 6 + o + lx * 0.5, CY - 14 + ly * 0.5, CX - 20 + o + lx, CY - 28 + ly, K["wh"] if i % 2 else heal, 1)
+                p.line(CX + 6 - o + rx * 0.5, CY - 14 + ry * 0.5, CX + 20 - o + rx, CY - 28 + ry, K["wh"] if i % 2 else heal, 1)
+            obj(p, f"vc.streak{i}", lambda streak=streak: p.glow(q4(0.6 * (1 - ot / 0.3)), streak))
+    if al > 0:
+        def axes():
+            # right axe first: the left one lies over it where the hafts cross
+            obj(p, "vc.axeR", lambda: p.sprite_ink(imR, 0, 0, 60, 60, VR["X"] + rx, VR["Y"] + ry, filt), ("axeR", rx, ry, filt, p.alpha, p.tx, p.ty))
+            obj(p, "vc.axeL", lambda: p.sprite_ink(imL, 0, 0, 60, 60, VR["X"] + lx, VR["Y"] + ly, filt), ("axeL", lx, ly, filt, p.alpha, p.tx, p.ty))
+            if lit > 0 and die < 1:
+                vr_flames(p, "vc.flameR", "R", VR["X"] + rx, VR["Y"] + ry, e + ot, lit, am, die)
+                vr_flames(p, "vc.flameL", "L", VR["X"] + lx, VR["Y"] + ly, e + ot + 0.37, lit, am, die)
+        p.glow(al, axes)
+    # smoke when the flames die
+    if out == "exp" and ot < 0.6:
+        for i in range(10):
+            s = -1 if i < 5 else 1
+            ph = clamp(ot / 0.6)
+            x = CX + s * (20 + (i % 5) * 3) + jround(math.sin(ot * 8 + i) * 2)
+            y = VR["Y"] + 14 - (i % 5) - ph * 22
+            obj(p, f"vc.smoke{i}", lambda i=i, x=x, y=y, ph=ph: p.glow(q4(0.6 * (1 - ph)), lambda: p.P(x, y, 2, 2, "#6a6280" if i % 2 else "#8a83a0")))
+    # the clang: white flash, sparks and a ring where the hafts meet
+    if not out and ci >= 0 and cage < 0.4:
+        big = ci == 0
+        k = cage
+        if k < 0.08:
+            obj(p, "vc.cflash", lambda: p.disc(CX, CY, jround((14 if big else 7) * (1 - k / 0.08)), "rgba(255,250,235," + str(q4(1 - k / 0.08)) + ")"), None, PIECES_DISC)
+        if big and k < 0.4:
+            obj(p, "vc.cring", lambda: p.glow(q4(1 - k / 0.4), lambda: p.ring_px(CX, CY, jround(k / 0.4 * 56 / 2) * 2, K["pk"], 2)), None, PIECES_RING)
+        for i in range(14 if big else 7):
+            a = i * 2.4 + (ci if (big or not TUNE["vc_spark_ci"]) else 1)                      # RETUNE: + ci in the mockup
+            v = (40 if big else 26) + (i * 7) % 18
+            x = CX + math.cos(a) * v * k * 1.6
+            y = CY + math.sin(a) * v * k * 1.6 + 90 * k * k
+            if k < 0.35:
+                c = K["wh"] if i % 3 == 0 else K["am"] if i % 3 == 1 else "#ffd060"
+                obj(p, f"vc.spark{i}", lambda x=x, y=y, c=c: p.glow(q4(1 - k / 0.35), lambda: p.P(x, y, 2, 2, c)))
+    # heal: plus signs drift up around the circle; a green pulse rolls out every 2.4 s
+    if not out and e >= 0.3:
+        for i in range(9):
+            ph = (e * TUNE["vc_plus_drift"] + i * 0.111) % 1
+            px = CX - 42 + (i * 19) % 84 + jround(math.sin(e * TUNE["vc_plus_wobble"] + i) * 2)
+            if abs(px - CX) < 20:
+                continue
+            obj(p, f"vc.plus{i}", lambda i=i, ph=ph, px=px: p.glow(q4(1 - ph * ph), lambda: plus(p, px, 60 - ph * 50, "#d8ffe8" if i % 3 == 0 else heal)))
+    if not out and e >= 1.2:
+        k = (e - 1.2) % 2.4
+        if k < 0.5:
+            obj(p, "vc.pulse", lambda: p.glow(q4(0.8 * (1 - k / 0.5)), lambda: p.ring_px(CX, CY - 3, 30 + jround(k * 36), heal, 1)), None, PIECES_RING)
     if out == "cast":
         if ot < 0.1:
-            obj(p, "vc.cdisc", lambda: p.disc(CX, 34, 34, "rgba(216,255,232,.4)"))
+            obj(p, "vc.cdisc", lambda: p.disc(CX, CY - 2, 34, "rgba(216,255,232,.4)"), ("cdisc", p.alpha), PIECES_DISC)
+
+        def rings():
+            r = jround(ot / 0.45 * 70 / 2) * 2
+            p.ring_px(CX, CY - 2, r, K["gr"], 3)
+            p.ring_px(CX, CY - 2, max(2, r - 4), K["wh"], 1)
+        obj(p, "vc.cring2", lambda: p.glow(q4(1 - ot / 0.45), rings), None, PIECES_RING)
         for i in range(12):
             a = i * math.pi / 6
             dd = jround(ot * 130)
-            obj(p, f"vc.cplus{i}", lambda i=i, a=a, dd=dd: p.glow(q4(1 - ot / 0.5), lambda: plus(p, CX + math.cos(a) * (14 + dd), 36 + math.sin(a) * (14 + dd) * 0.8, K["gr"] if i % 2 else "#d8ffe8")))
-    ba = 1
-    if out == "cast":
-        ba = q4(1 - clamp((ot - 0.25) / 0.3))
-    if ba > 0:
-        old = p.alpha
-        p.mul(ba)
-        bust(p, CX, oy, mh, puff, eye, lower, out == "exp" and ot > 0.1, sway)
-        p.alpha = old
-    if 0 <= yt < 0.5:
-        for i in range(9):
-            a = (-170 + i * 20) * math.pi / 180
-            r0 = 26 + yt * 40 + ((i * 7) % 5)
-            r1 = r0 + 7
-            if abs(a + math.pi * 0.17) < 0.3:
-                continue
-            obj(p, f"vc.shl{i}", lambda i=i, a=a, r0=r0, r1=r1: p.glow(q4(1 - yt / 0.5), lambda: p.line(CX + math.cos(a) * r0, 36 + math.sin(a) * r0 * 0.9, CX + math.cos(a) * r1, 36 + math.sin(a) * r1 * 0.9, K["wh"] if i % 2 else heal, 1)))
-    if not out and e >= 0.2:
-        for i in range(10):
-            ph = (e * 0.5 + i * 0.1) % 1
-            px = CX - 44 + (i * 17) % 88 + jround(math.sin(e * math.pi + i) * 2)        # RETUNE: sin(e * 3 + i)
-            if abs(px - CX) < 16:
-                continue
-            obj(p, f"vc.plus{i}", lambda i=i, ph=ph, px=px: p.glow(q4(1 - ph * ph), lambda: plus(p, px, 58 - ph * 46, "#d8ffe8" if i % 3 == 0 else heal)))
+            obj(p, f"vc.cplus{i}", lambda i=i, a=a, dd=dd: p.glow(q4(1 - ot / 0.5), lambda: plus(p, CX + math.cos(a) * (14 + dd), CY - 2 + math.sin(a) * (14 + dd) * 0.8, K["gr"] if i % 2 else "#d8ffe8")))
+    # title: rises in (the approved v1 title), hops on each clang
     base = PAL["dim"] if out == "exp" else PAL["helA"] if am else PAL["hel"]
     W = layout("VICTORY RUSH")[1]
     if not out and e > 0.45:
-        obj(p, "vc.tglow", lambda: p.glow(0.1 if int(math.floor(e * 3)) % 2 else 0.16, lambda: p.P(MX - W / 2 - 6, WY - 4, W + 12, 22, heal)))
+        obj(p, "vc.tglow", lambda: p.glow(0.1 if int(math.floor(e / TUNE["vc_glow_beat"])) % 2 else 0.16, lambda: p.P(MX - W / 2 - 6, WY - 4, W + 12, 22, heal)),
+            ("tglow", int(math.floor(e / TUNE["vc_glow_beat"])) % 2, heal, p.alpha, p.tx, p.ty), PIECES_DISC)
 
     def fn(i, ch, x, y, lw):
         d = 0.2 + 0.035 * i
@@ -1084,12 +1416,11 @@ def draw_vic(p, st):
                 if k < 0.1:
                     py = y - [3, 2, 1, 0][int(math.floor(k / 0.025))]
                     flash = True
-                elif e > 0.5 and math.sin(e * (math.pi * 1.5) - i * 0.6) > 0.55:        # RETUNE: sin(e * 5 - i * 0.6)
-                    py = y - 1
-                if yt >= 0 and e > 0.5:
-                    kk = yt - i * 0.015
-                    if 0 <= kk < 0.2:
-                        py = y - [2, 3, 2, 1][int(math.floor(kk / 0.05))]
+                elif ci > 0 and cage < 0.12:
+                    kk = cage - i * 0.008
+                    if kk >= 0:
+                        n = int(math.floor(kk / 0.03))
+                        py = y - [2, 1, 1, 0][n] if n < 4 else y
         elif out == "cast":
             k = max(0, ot - i * 0.02)
             px = jround(x + k * k * 900)
@@ -1111,35 +1442,36 @@ def draw_vic(p, st):
 # ------------------------------------------------------------------------------------------------------------------------
 # Sequences
 # ------------------------------------------------------------------------------------------------------------------------
-# (win, castAt, drawer, enter frames, held (start, frames), amber (start, frames))
+# (win, castAt, drawer, enter frames, held (start, frames), amber (start, frames), loops)
 SPELLS = {
-    "overpower": dict(tag="op", win=5.0, cast_at=3.0, draw=draw_over, enter=15, held=(15, 90), amber=(105, 45)),
-    "revenge": dict(tag="rv", win=5.0, cast_at=3.0, draw=draw_rev, enter=26, held=(26, 54), amber=(26, 54)),
-    "victoryrush": dict(tag="vc", win=20.0, cast_at=8.0, draw=draw_vic, enter=27, held=(27, 120), amber=(27, 120)),
+    "overpower": dict(tag="op", win=5.0, cast_at=3.0, draw=draw_over, enter=15, held=(15, 90), amber=(105, 45), loop=False),
+    "revenge": dict(tag="rv", win=5.0, cast_at=3.0, draw=draw_rev, enter=33, held=(33, 54), amber=(33, 54), loop=True),
+    "victoryrush": dict(tag="vc", win=20.0, cast_at=8.0, draw=draw_vic, enter=27, held=(27, 72), amber=(27, 72), loop=True),
 }
 ORDER = ("overpower", "revenge", "victoryrush")
 CAST_FRAMES, EXP_FRAMES = 19, 22        # the exits: 0.6 s and 0.7 s at 30 Hz, both ends included
 
 
+def live_state(sp, f, am):
+    e = f / DT + EPS
+    return {"e": e, "out": None, "ot": 0.0, "rem": sp["win"] - e, "am": am}
+
+
+def leave_state(sp, kind, j):
+    ot = j / DT + EPS
+    at = sp["cast_at"] if kind == "cast" else sp["win"]
+    return {"e": at + ot, "out": kind, "ot": ot, "rem": sp["win"] - sp["cast_at"] if kind == "cast" else 0.0, "am": False}
+
+
 def states(sp):
-    win = sp["win"]
-
-    def live(f, am):
-        e = f / DT + EPS
-        return {"e": e, "out": None, "ot": 0.0, "rem": win - e, "am": am}
-
-    def leave(kind, j):
-        ot = j / DT + EPS
-        at = sp["cast_at"] if kind == "cast" else win
-        return {"e": at + ot, "out": kind, "ot": ot, "rem": win - sp["cast_at"] if kind == "cast" else 0.0, "am": False}
     h0, hn = sp["held"]
     a0, an = sp["amber"]
     return {
-        "enter": [live(f, False) for f in range(sp["enter"])],
-        "held": [live(f, False) for f in range(h0, h0 + hn)],
-        "amber": [live(f, True) for f in range(a0, a0 + an)],
-        "cast": [leave("cast", j) for j in range(CAST_FRAMES)],
-        "exp": [leave("exp", j) for j in range(EXP_FRAMES)],
+        "enter": [live_state(sp, f, False) for f in range(sp["enter"])],
+        "held": [live_state(sp, f, False) for f in range(h0, h0 + hn)],
+        "amber": [live_state(sp, f, True) for f in range(a0, a0 + an)],
+        "cast": [leave_state(sp, "cast", j) for j in range(CAST_FRAMES)],
+        "exp": [leave_state(sp, "exp", j) for j in range(EXP_FRAMES)],
     }
 
 
@@ -1173,20 +1505,30 @@ def slot_order(frames):
     return out
 
 
-def bake():
+def draw_frame(p, sp, st):
+    p.reset()
+    sp["draw"](p, st)
+    return list(p.items)
+
+
+def check_loops(p, sp, name, built):
+    """A loop is seamless when frame f + loop draws the same list as frame f (every periodic term repeats exactly)."""
+    for seq in ("held", "amber"):
+        start, n = sp[seq]
+        for k in range(n):
+            nxt = draw_frame(p, sp, live_state(sp, start + k + n, seq == "amber"))
+            assert nxt == built[seq][k], f"{name} {seq} does not loop: frame {start + k} differs from frame {start + k + n}"
+
+
+def bake(check=True):
     p = Painter()
     data = {}
     for name in ORDER:
         sp = SPELLS[name]
         seqs = states(sp)
-        built = {}
-        for s in SEQS:
-            fl = []
-            for st in seqs[s]:
-                p.reset()
-                sp["draw"](p, st)
-                fl.append(list(p.items))
-            built[s] = fl
+        built = {s: [draw_frame(p, sp, st) for st in seqs[s]] for s in SEQS}
+        if sp["loop"] and check:
+            check_loops(p, sp, name, built)
         order = slot_order([fr for s in SEQS for fr in built[s]])
         slot = {k: i + 1 for i, k in enumerate(order)}
         fill = [slot.get(k) for k in FILL_KEYS]
@@ -1336,7 +1678,7 @@ def main():
     atlases = pack(p.sprites)
     verify(p, atlases, data)
     total = sum(w * h for w, h, _ in p.sprites)
-    print(f"{len(p.sprites)} sprites, {total} px, {len(atlases)} atlas(es)")
+    print(f"{len(p.sprites)} sprites, {total} px, {len(atlases)} atlas(es): " + ", ".join(f"{w}x{h}" for w, h, _ in atlases))
     for name in ORDER:
         d = data[name]
         print(f"  {name}: {d['slots']} slots, " + ", ".join(f"{s} {len(d['seqs'][s])}f/{sum(len(f) for f in d['seqs'][s]) // 4} deltas" for s in SEQS))

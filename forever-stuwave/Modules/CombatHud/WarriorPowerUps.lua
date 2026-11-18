@@ -1,10 +1,10 @@
--- Forever STUwave: the Warrior power-up alerts (design mockup "Warrior power-up alerts", 2026-11-13).
+-- Forever STUwave: the Warrior power-up alerts (design mockup "Gunsight Warrior: proc alerts v2", 2026-11-17).
 --
 -- WHAT IT IS. When a reactive Warrior spell lights up (Overpower after a dodge, Revenge after a block or parry, Victory Rush after
 -- a kill) a big pixel alert plays above the character, between the rails, with a drain bar under its title:
---   * OVERPOWER: a bearded axe chops in, the crack bursts, the rune cut title slides together.
---   * REVENGE: a laughing horned skull, its jaw drops on each cackle, the letters hop with it.
---   * VICTORY RUSH: a warrior bust shouting with a raised axe, shout rings, heal pluses, the title bumps on the cry.
+--   * OVERPOWER: a bearded double axe chops into a rotating rune circle (16 Elder Futhark runes), the rune cut title slides together.
+--   * REVENGE: a cackling Viking skull on a round shield, its jaw drops on each cackle, little round shields flank the title.
+--   * VICTORY RUSH: crossed flaming bearded axes on a red sunburst, a clang, a green heal, the title bumps on each clang.
 -- The drain bar runs the window's length (the real remaining time) and turns amber for the last 1.5 s. A cast of the spell plays the
 -- cast exit (0.6 s), a window that runs out unused plays the expiry exit (0.7 s). Only one alert shows at a time: the shown window
 -- with the least time left. No knotwork under the titles.
@@ -15,7 +15,7 @@
 -- the rest are deltas, so a tick touches only the slots that changed. Slots are back to front; slot n lives on child frame
 -- ceil(n / 64) at draw layer and sublevel (n - 1) % 64, so the whole stack keeps the baked order. The drain bar's fill is three
 -- baked one texel slots (the spell's `fill`) that this file stretches to the width the remaining time gives. Overpower is exact;
--- Revenge and Victory Rush have loops (see the generator's RETUNE note).
+-- Revenge (1.8 s) and Victory Rush (2.4 s) loop seamlessly, their periods retuned to whole loops (see the generator's RETUNE note).
 --
 -- DATA. FS.WarriorWindows (WarriorWindows.lua): Subscribe, Get, Remaining, Shown, Tick, ORDER. Nothing is detected here. A window
 -- that is open but held back (Victory Rush above 90 percent health) is not shown, so no alert; this file then polls Windows.Tick
@@ -25,7 +25,7 @@
 -- FRAME. A plain frame on UIParent (never a secure one, so Show and Hide are legal in combat), seated by FS.Layout as
 -- `warriorpowerup` (movable in /fsedit, which shows the Overpower held frame as a static preview). One OnUpdate on a driver frame,
 -- only while an alert plays (30 Hz) or a held back window waits (POLL); nothing allocates per tick.
--- UNVERIFIED in game: the NEAREST filter, the layering of 86 textures, the position over the character, every window event.
+-- UNVERIFIED in game: the NEAREST filter, the layering of 182 textures, the position over the character, every window event.
 
 local _, FS = ...
 

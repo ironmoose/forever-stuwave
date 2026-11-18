@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Runs the real WarriorPowerUps.lua (with the real WarriorWindows.lua and the generated art manifest) headless against a mock client.
 
-The Warrior power-up alerts (design mockup "Warrior power-up alerts", 2026-11-13) are baked frame lists replayed by the module.
+The Warrior power-up alerts (design mockup "Gunsight Warrior: proc alerts v2", 2026-11-17: the Overpower double axe and rune
+circle, the Revenge Viking skull on a shield, the Victory Rush crossed flaming axes) are baked frame lists replayed by the module.
 These checks pin:
 
   * flows per spell: a window opens and the alert plays enter, then held; the last 1.5 s play amber; a cast plays the cast exit;
@@ -18,8 +19,8 @@ These checks pin:
 
     python3 tools/warriorpowerups-harness.py [--png debug/warrior-powerups]
 
-`--png PREFIX` also writes PREFIX-<spell>.png: the entrance, held, amber, cast and expiry frames of each spell (2 px per sprite
-px, over the dark ground), for a look next to the mockup. Exit 0 = every check passed.
+`--png PREFIX` also writes PREFIX-<spell>.png: the mockup's own strip frames of each spell (entrance, held, amber, cast and expiry;
+2 px per sprite px, over the dark ground), for a look next to the mockup. Exit 0 = every check passed.
 """
 
 from __future__ import annotations
@@ -257,7 +258,7 @@ case("revenge_and_victory_rush_hold_their_loop_phase_into_amber", """
     assert(s == "held", s)
     assert(Run(10, function() local _, s2 = State() return s2 == "amber" end))
     local _, s2, i2 = State()
-    assert(s2 == "amber" and i2 >= 1 and i2 <= 120, tostring(i2))
+    assert(s2 == "amber" and i2 >= 1 and i2 <= 72, tostring(i2))          -- the 2.4 s loop is 72 frames
     TickFor(0.2)
     local _, s3 = State()
     assert(s3 == "amber")
@@ -457,10 +458,10 @@ case("a_tick_allocates_nothing", """
     Win.Tick = function() end                 -- the window ledger is not under test here and allocates in its poll
     __hp = 40
     Glow("victoryrush", true)
-    TickFor(5)                                -- one pass round the 4 s held loop warms every slot (the mock grows a field on a first seat)
+    TickFor(5)                                -- two passes round the 2.4 s held loop warm every slot (the mock grows a field on a first seat)
     collectgarbage("collect"); collectgarbage("stop")
     local a = collectgarbage("count")
-    for _ = 1, 240 do Tick(1 / 30) end        -- two more passes round the loop, then the 18.5 s mark is not yet reached
+    for _ = 1, 240 do Tick(1 / 30) end        -- three more passes round the loop, then the 18.5 s mark is not yet reached
     local b = collectgarbage("count")
     collectgarbage("restart")
     local _, s = State()
@@ -491,7 +492,7 @@ case("textures_are_filtered_nearest_and_sized_in_ui_units", """
     TickFor(0.5)
     local n = 0
     for _, row in ipairs(Dump()) do
-        assert(row.tex:find("warrior_powerups_1%.tga$"), row.tex)
+        assert(row.tex:find("warrior_powerups_%d+%.tga$"), row.tex)
         assert(row.w > 0 and row.h > 0 and row.l < row.r and row.t < row.b)
         assert(math.abs(row.w / 2.5 - math.floor(row.w / 2.5 + 0.5)) < 1e-6 or row.h == 2.5)
         n = n + 1
@@ -636,20 +637,24 @@ def actual_image(rows, atlases):
     import numpy as np
     canvas = np.zeros((GH, GW, 3)) + BG
     for row in rows:
-        aw, ah = atlases[0].shape[1], atlases[0].shape[0]
+        n = int(re.search(r"warrior_powerups_(\d+)\.tga$", row["tex"]).group(1))
+        atlas = atlases[n - 1]
+        aw, ah = atlas.shape[1], atlas.shape[0]
         tx, ty = round(row["l"] * aw), round(row["t"] * ah)
         w, h = round((row["r"] - row["l"]) * aw), round((row["b"] - row["t"]) * ah)
-        sprite = (1, tx, ty, w, h)
+        sprite = (n, tx, ty, w, h)
         x, y = round(row["x"] / SPX), round(row["y"] / SPX)
         wide = round(row["w"] / SPX) if w == 1 else None
-        blit(canvas, atlases[0], sprite, x, y, wide)
+        blit(canvas, atlas, sprite, x, y, wide)
     return canvas
 
 
 SAMPLE_HELD = 7
 
 
-def sampled(seq: str, idx: int, total: int) -> bool:
+def sampled(name: str, seq: str, idx: int, total: int) -> bool:
+    if (seq, idx) in SHEET_WANT.get(name, ()):
+        return True
     return idx <= 3 or idx == total or idx % SAMPLE_HELD == 0 if seq in ("held", "amber") else True
 
 
@@ -677,9 +682,9 @@ def replay_checks(keep: dict | None = None) -> list[str]:
                 k, seq, idx, _ = state()
                 if k is not None and (seq, idx) not in seen and seq is not None:
                     seen.add((seq, idx))
-                    if sampled(str(seq), int(idx), len(spell["seqs"][str(seq)])):
+                    if sampled(name, str(seq), int(idx), len(spell["seqs"][str(seq)])):
                         rows = dump()
-                        rows = [{key: rows[i][key] for key in ("l", "r", "t", "b", "w", "h", "x", "y")} for i in range(1, len(rows) + 1)]
+                        rows = [{key: rows[i][key] for key in ("l", "r", "t", "b", "w", "h", "x", "y", "tex")} for i in range(1, len(rows) + 1)]
                         want = expected_image(sprites, spell, atlases, str(seq), int(idx), 98)
                         got = actual_image(rows, atlases)
                         d = np.abs(want - got).max(axis=2)
@@ -698,21 +703,35 @@ def replay_checks(keep: dict | None = None) -> list[str]:
     return errs
 
 
-SHEET = {"enter": (3, 9), "held": (34,), "amber": (12,), "cast": (3, 7, 12), "exp": (4, 9, 14)}
+# The strip frames of the mockup (seq, 1-based frame in the sequence, caption): entrance, impact or cackle, held, amber, the exits.
+SHEET = {
+    "overpower": [("enter", 3, "entrance 0.08 s"), ("enter", 7, "impact 0.20 s"), ("enter", 13, "entrance 0.40 s"), ("held", 34, "held 1.6 s"),
+                  ("held", 76, "held 3.0 s"), ("amber", 19, "amber 4.1 s"), ("cast", 5, "cast exit 0.13 s"), ("cast", 13, "cast exit 0.40 s"),
+                  ("exp", 10, "expiry exit 0.30 s"), ("exp", 19, "expiry exit 0.60 s")],
+    "revenge": [("enter", 3, "shield 0.06 s"), ("enter", 6, "rising 0.17 s"), ("enter", 10, "cackle 0.30 s"), ("enter", 30, "title 0.97 s"),
+                ("held", 16, "held 1.6 s"), ("held", 52, "cackle 2.8 s"), ("amber", 16, "amber 1.6 s"), ("cast", 5, "cast exit 0.13 s"),
+                ("exp", 4, "expiry exit 0.10 s"), ("exp", 10, "expiry exit 0.30 s")],
+    "victoryrush": [("enter", 3, "iris 0.07 s"), ("enter", 5, "axes in 0.13 s"), ("enter", 6, "clang 0.17 s"), ("enter", 10, "flames 0.30 s"),
+                    ("held", 10, "clang 1.2 s"), ("held", 40, "held 2.2 s"), ("amber", 40, "amber 2.2 s"), ("cast", 5, "cast exit 0.13 s"),
+                    ("exp", 4, "expiry exit 0.10 s"), ("exp", 12, "expiry exit 0.37 s")],
+}
+SHEET_WANT = {name: {(seq, idx) for seq, idx, _ in frames} for name, frames in SHEET.items()}
 
 
 def png(prefix: str) -> None:
-    """One sheet per spell: the entrance, held, amber, cast and expiry frames at 2 px per sprite px."""
+    """One sheet per spell: the SHEET frames at 2 px per sprite px."""
     from PIL import Image, ImageDraw
     keep: dict = {}
     replay_checks(keep)
     for name in ("overpower", "revenge", "victoryrush"):
-        frames = [(seq, idx) for seq, idxs in SHEET.items() for idx in idxs]
+        frames = [(seq, idx) for seq, idx, _ in SHEET[name]]
+        captions = {(seq, idx): cap for seq, idx, cap in SHEET[name]}
         cols = 5
         rows = (len(frames) + cols - 1) // cols
         sheet = Image.new("RGB", (cols * 300, rows * 210), (30, 20, 50))
         draw = ImageDraw.Draw(sheet)
         for n, (seq, idx) in enumerate(frames):
+            cap = captions[(seq, idx)]
             img = keep.get((name, seq, idx))
             if img is None:
                 near = [k for k in keep if k[0] == name and k[1] == seq]
@@ -720,11 +739,11 @@ def png(prefix: str) -> None:
                     continue
                 pick = min(near, key=lambda k: abs(k[2] - idx))
                 img = keep[pick]
-                idx = pick[2]
+                cap += f" (frame {pick[2]})"
             tile = Image.fromarray(img.round().clip(0, 255).astype("uint8")).resize((300, 192), Image.NEAREST)
             x, y = (n % cols) * 300, (n // cols) * 210
             sheet.paste(tile, (x, y + 16))
-            draw.text((x + 4, y + 2), f"{seq} frame {idx}", fill=(200, 190, 230))
+            draw.text((x + 4, y + 2), cap, fill=(200, 190, 230))
         out = f"{prefix}-{name}.png"
         sheet.save(out)
         print("wrote", out)

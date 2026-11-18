@@ -203,8 +203,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "warrior_helm": (256, 256), "warrior_runes_big": (256, 256), "warrior_runes_small": (256, 256),
         "warrior_helm_glow": (64, 64),
     },
-    # generate_warrior_powerups.py: the Warrior power-up alerts' one atlas (every baked sprite of the three alerts and the
+    # generate_warrior_powerups.py: the Warrior power-up alerts' one atlas (every baked sprite of the three v2 alerts and the
     # drain bar, 1 texel per sprite px); it also writes the sprite manifest WarriorPowerUpArt.lua, which is not a .tga.
+    # It loads its pixel art from warrior_powerups_art/ (FS_WARRIOR_ART_DIR, set by _run_generator).
     "warrior_powerups": {"warrior_powerups_1": (2048, 512)},
     # generate_paladin_seal.py: the Paladin Gunsight module's wax seals, emblems and pixel digits, the war hammer's baked
     # swing and rise frames (cold, filled, tint mask, outline), and the slam effects (column, rays, shocks, runes, cracks).
@@ -407,7 +408,9 @@ def _run_generator(generator_path: Path, work_dir: Path) -> None:
     result = subprocess.run(
         [sys.executable, script_copy.name],
         cwd=work_dir,
-        env={**os.environ, "FS_ASSET_OUTPUT_DIR": str(work_dir), "FS_ASSET_INPUT_DIR": str(MEDIA_DIR)},
+        env={**os.environ, "FS_ASSET_OUTPUT_DIR": str(work_dir), "FS_ASSET_INPUT_DIR": str(MEDIA_DIR),
+             # the Warrior power-up generator loads its generated pixel art (the copy has no art folder beside it)
+             "FS_WARRIOR_ART_DIR": str(GENERATOR_DIR / "warrior_powerups_art")},
         capture_output=True,
         text=True,
         timeout=120,
