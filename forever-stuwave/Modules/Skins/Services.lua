@@ -365,13 +365,26 @@ local CHIP_TEX = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\skillup_c
 local CHIP_ATLAS_W, CHIP_ATLAS_H, CHIP_SLOT, CHIP_W = 64, 32, 16, 11
 local CHIP_H = { 9, 13, 17 }   -- one, two, three chevrons (fits the 19 px inside of a recipe card)
 
-local function BuildChip(ups)
-    local chip = {}
+local function BuildChip(ups, row)
+    local chip = { row = row }
     chip.tex = ups:CreateTexture(nil, "OVERLAY", nil, 7)
     chip.tex:SetTexture(CHIP_TEX, "CLAMP", "CLAMP", "NEAREST")
     Kit.Snap(chip.tex)
     Kit.Place(chip.tex, ups, -1, 0, CHIP_W, CHIP_H[3], "RIGHT", "RIGHT")
     return chip
+end
+
+-- The chip is centred on the RECIPE ROW, not on the stock mark frame: that frame sits about 2 px above the row's middle, which put
+-- the tallest chip's top on the card's edge (live, 2026-11-18). Across, its right edge stays 1 px inside the mark frame's.
+local function SeatChip(ups, chip, h)
+    local row = chip.row
+    local ur, rr = Plain(Try(ups.GetRight, ups)), type(row) == "table" and Plain(Try(row.GetRight, row)) or nil
+    if type(ur) == "number" and type(rr) == "number" then
+        local dx = math.floor((ur - rr) * Kit.Ppu(row) + 0.5) - 1
+        Kit.Place(chip.tex, row, dx, 0, CHIP_W, h, "RIGHT", "RIGHT", ups)
+    else
+        Kit.Place(chip.tex, ups, -1, 0, CHIP_W, h, "RIGHT", "RIGHT")
+    end
 end
 
 local function PaintChip(ups, chip, atlas)
@@ -381,7 +394,7 @@ local function PaintChip(ups, chip, atlas)
     local x0 = CHIP_SLOT * (n - 1)
     chip.tex:SetTexCoord(x0 / CHIP_ATLAS_W, (x0 + CHIP_W) / CHIP_ATLAS_W, 0, h / CHIP_ATLAS_H)
     chip.tex:SetVertexColor(color[1], color[2], color[3], 1)
-    Kit.Move(chip.tex, -1, 0, CHIP_W, h)
+    SeatChip(ups, chip, h)
 end
 
 local function SkinSkillUps(row)
@@ -389,7 +402,7 @@ local function SkinSkillUps(row)
     if not ups or S.skillUps[ups] or type(ups.CreateTexture) ~= "function" then return end
     local icon = Region(ups, "Icon")
     HeldArt.Hold(icon)
-    local chip = BuildChip(ups)
+    local chip = BuildChip(ups, row)
     S.skillUps[ups] = chip
     PaintChip(ups, chip, AtlasOf(icon))
     Kit.HookFunc(icon, "SetAtlas", function(_, atlas) PaintChip(ups, chip, atlas) end)
@@ -554,7 +567,7 @@ local function SkinRecipeRow(row)
         PaintRecipe(row)
     elseif row.Count then
         HoldTextures(row)
-        S.recipes[row] = NewRow(row, -1, false)
+        S.recipes[row] = NewRow(row, 0, false)   -- the full row height (was 1 inset top and bottom): room for the skill up chip
         S.recipes[row].state = Kit.Track(row, PaintRecipe)
         if type(row.SelectedOverlay) == "table" then Watch(row.SelectedOverlay, function() PaintRecipe(row) end) end
         Step("prof.ups", SkinSkillUps, row)

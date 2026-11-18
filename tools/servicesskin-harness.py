@@ -213,7 +213,8 @@ function BuildBlizzard()
         return c
     end
     local function skillUps(row, atlas, count)
-        local u = blz("Button", nil, row, 26, 15, "LEFT", -9, 0)
+        -- live (2026-11-18) the stock mark frame sits about 2 px above the middle of its row
+        local u = blz("Button", nil, row, 26, 15, "LEFT", -9, 2)
         u.Icon = stock(atex(u, nil, "OVERLAY", atlas, 15, 12), 0.3, 0.9, 0.3)
         u.Icon.points[1] = { point = "RIGHT", rel = u, relPoint = "RIGHT", x = 0, y = -1 }
         u.Text = fstring(u, nil, count or "", 12, { 1, 1, 1, 1 })
@@ -571,6 +572,12 @@ case("professions: skill up marks hold the stock arrow and draw one baked chip w
     local _, ct, _, cb = tex(high):Rect()
     local _, rt, _, rb = rows[4]:Rect()
     assert((ct - rt) * PPU >= 1 and (rb - cb) * PPU >= 1, string.format('the chip touches the card edge (%.2f / %.2f px)', (ct - rt) * PPU, (rb - cb) * PPU))
+    -- centred on the row, not on the (higher) stock mark frame
+    for _, i in ipairs({ 2, 3, 4 }) do
+        local _, t1, _, b1 = tex(rows[i].SkillUps):Rect()
+        local _, t2, _, b2 = rows[i]:Rect()
+        assert(math.abs((t1 + b1) - (t2 + b2)) * PPU / 2 <= 0.51, string.format('row %d chip is off the row middle by %.2f px', i, ((t1 + b1) - (t2 + b2)) * PPU / 2))
+    end
     assert(high.Text.fontPath ~= 'stock.ttf', 'the skill up count is not mono')
     -- a row with no skill up has its mark frame hidden, so the chip is hidden with it
     assert(not rows[5].SkillUps.shown and S.skillUps[rows[5].SkillUps], 'a recipe without skill ups shows a chip')

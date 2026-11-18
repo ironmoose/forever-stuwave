@@ -108,6 +108,7 @@ function Reset()
 end
 function Secret() return { __secret = true } end
 function Obj:GetLeft() local l = self:Rect(); return l end
+function Obj:GetRight() local _, _, r = self:Rect(); return r end
 
 function Obj:SetDesaturated(v) self.desat = v and true or false end"""
 
