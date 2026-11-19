@@ -682,6 +682,28 @@ SlashCmdList.FSTAINTSCAN = function()
     print("|cff22e0ffForever STUwave|r: taint scan " .. (ok and ("saved, " .. tostring(n) .. " entries") or "failed"))
 end
 
+-- Bag settings tracer (2026-11-18): the scan found ContainerFrameSettingsManager.isUsingCombinedBags written under this
+-- addon's taint; the bag and bank code read it, which taints the bank open and then the bag click. Only
+-- SetUsingCombinedBags writes it, so a post-hook keeps the stack of every call made while the field turned insecure.
+do
+    local mgr = _G.ContainerFrameSettingsManager
+    if type(mgr) == "table" and type(mgr.SetUsingCombinedBags) == "function" and type(hooksecurefunc) == "function" then
+        pcall(hooksecurefunc, mgr, "SetUsingCombinedBags", function()
+            if type(issecurevariable) ~= "function" then return end
+            local ok, secure, by = pcall(issecurevariable, mgr, "isUsingCombinedBags")
+            if not ok then return end
+            local okStack, stack = pcall(debugstack, 2, 60, 20)
+            if not okStack or type(stack) ~= "string" or Secret(stack) then stack = "(stack unavailable)" end
+            ForeverSTUwaveDB = ForeverSTUwaveDB or {}
+            local list = ForeverSTUwaveDB.combinedBagsTrace or {}
+            ForeverSTUwaveDB.combinedBagsTrace = list
+            list[#list + 1] = { secure = secure and true or false, by = tostring(by), stack = stack,
+                when = (type(date) == "function" and date("%Y-%m-%d %H:%M:%S")) or "?" }
+            while #list > 8 do table.remove(list, 1) end
+        end)
+    end
+end
+
 local bankTraceFrame = CreateFrame("Frame")
 bankTraceFrame:RegisterEvent("PLAYER_LOGIN")
 bankTraceFrame:SetScript("OnEvent", function(self)
