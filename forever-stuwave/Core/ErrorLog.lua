@@ -466,12 +466,14 @@ end)
 -- stock bag frames and their item buttons for fields an addon wrote and keep the newest sweep on the
 -- entry as `taint` ("ContainerFrame1.Items[3].foo=addon; ..."). Diagnostic only: bounded, pcall'd,
 -- runs only on that one block, reads no secret.
-local TAINT_SWEEP_MAX = 40
+-- Keys starting "fs" are this addon's own markers on stock frames (fsBagSkin, fsSweepHook ...): written by us on purpose and
+-- never read by Blizzard code, so they are left out; they used to fill the whole cap and hide the field that mattered.
+local TAINT_SWEEP_MAX = 120
 local function SweepTable(out, label, t)
     if type(t) ~= "table" then return end
     for k in pairs(t) do
         if #out >= TAINT_SWEEP_MAX then return end
-        if type(k) == "string" then
+        if type(k) == "string" and k:sub(1, 2) ~= "fs" then
             local ok, secure, by = pcall(issecurevariable, t, k)
             if ok and secure == false then out[#out + 1] = label .. "." .. k .. "=" .. tostring(by) end
         end
@@ -611,6 +613,7 @@ local function TraceBankField(method, field)
         method = method, by = tostring(by), when = (type(date) == "function" and date("%Y-%m-%d %H:%M:%S")) or "?",
         combat = (type(InCombatLockdown) == "function" and InCombatLockdown()) and true or false, stack = stack,
     }
+    pcall(FS.TaintScan, "bank " .. field .. " insecure after " .. tostring(method))
 end
 local function InstallBankTracer()
     local panel = _G.BankPanel
@@ -631,6 +634,54 @@ local function InstallBankTracer()
     end
     return true
 end
+-- A wide taint scan (/fstaintscan, and once at the first insecure bank field): every string key an addon wrote, outside our fs
+-- markers, on the tables the bank open and bag click chains read: the bank frames and their mixins, the interaction manager,
+-- the panel manager's tables and the bag frames, two levels deep, plus the globals those chains call. Kept in
+-- ForeverSTUwaveDB.taintScan (saved on /reload). Diagnostic only, bounded, pcall'd.
+local SCAN_ROOTS = { "BankFrame", "BankPanel", "AccountBankPanel", "BankFrameMixin", "BankPanelMixin", "BankPanelTabMixin",
+    "BankPanelItemButtonMixin", "BankPanelSystemMixin", "PlayerInteractionFrameManager", "PlayerInteractionFrameManagerMixin",
+    "UIPanelWindows", "UIParent", "ContainerFrameCombinedBags", "ContainerFrame1", "ContainerFrameSettingsManager",
+    "ContainerFrameMixin", "BaseContainerFrameMixin", "ContainerFrameItemButtonMixin", "ItemButtonMixin", "EventRegistry" }
+local SCAN_GLOBALS = { "ShowUIPanel", "HideUIPanel", "SetUIPanel", "CloseSpecialWindows", "CloseAllWindows", "CloseWindows",
+    "UpdateUIPanelPositions", "GetUIPanel", "OpenAllBags", "CloseAllBags", "ToggleAllBags", "OpenBag", "CloseBag",
+    "ContainerFrameItemButton_OnClick", "ContainerFrame_GenerateFrame", "IsBagOpen", "BankFrame_Open", "ToggleBackpack",
+    "OpenBackpack", "UISpecialFrames", "BankFrame", "BankPanel" }
+function FS.TaintScan(reason)
+    if type(issecurevariable) ~= "function" then return "(issecurevariable unavailable)" end
+    local out, seen = {}, {}
+    local function Walk(label, t, depth)
+        if type(t) ~= "table" or seen[t] or #out >= TAINT_SWEEP_MAX then return end
+        seen[t] = true
+        SweepTable(out, label, t)
+        if depth <= 0 then return end
+        for k, v in pairs(t) do
+            if #out >= TAINT_SWEEP_MAX then return end
+            if type(k) == "string" and k:sub(1, 2) ~= "fs" and k ~= "__index" and type(v) == "table" then
+                Walk(label .. "." .. k, v, depth - 1)
+            end
+        end
+    end
+    for _, name in ipairs(SCAN_ROOTS) do pcall(Walk, name, _G[name], name == "UIParent" and 0 or 2) end
+    for _, g in ipairs(SCAN_GLOBALS) do
+        local ok, secure, by = pcall(issecurevariable, g)
+        if ok and secure == false then out[#out + 1] = "_G." .. g .. "=" .. tostring(by) end
+    end
+    local text = #out == 0 and "(nothing insecure)" or table.concat(out, "; ")
+    if type(ForeverSTUwaveDB) == "table" then
+        ForeverSTUwaveDB.taintScan = ForeverSTUwaveDB.taintScan or {}
+        local list = ForeverSTUwaveDB.taintScan
+        list[#list + 1] = { why = tostring(reason or "manual"), when = (type(date) == "function" and date("%Y-%m-%d %H:%M:%S")) or "?",
+            n = #out, scan = text }
+        while #list > 6 do table.remove(list, 1) end
+    end
+    return text, #out
+end
+SLASH_FSTAINTSCAN1 = "/fstaintscan"
+SlashCmdList.FSTAINTSCAN = function()
+    local ok, _, n = pcall(FS.TaintScan, "manual")
+    print("|cff22e0ffForever STUwave|r: taint scan " .. (ok and ("saved, " .. tostring(n) .. " entries") or "failed"))
+end
+
 local bankTraceFrame = CreateFrame("Frame")
 bankTraceFrame:RegisterEvent("PLAYER_LOGIN")
 bankTraceFrame:SetScript("OnEvent", function(self)
