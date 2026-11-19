@@ -82,6 +82,14 @@ def mockup_numbers() -> tuple[float, float]:
     return float(lean.group(1)), float(gap.group(1))
 
 
+def deck_bag_gap() -> float:
+    """Deck.BAG_GAP, read from Deck.lua."""
+    m = re.search(r"Deck\.BAG_GAP\s*=\s*([\d.]+)", (ADDON / "Modules" / "ActionBars" / "Deck.lua").read_text(encoding="utf-8"))
+    if not m:
+        sys.exit("Deck.lua: BAG_GAP not found")
+    return float(m.group(1))
+
+
 def tga_lean_frac(path: Path) -> float:
     """How far the top edge starts right of the bottom edge, as a fraction of the width."""
     d = path.read_bytes()
@@ -659,7 +667,7 @@ function h_divider()
 end
 function h_deckConst()
     local d = FS.Deck
-    return { lean = d.LEAN_FRAC, gap = d.KEY_GAP, keyW = d.KEY_W, pad = d.PAD, divider = d.DIVIDER_W, bagW = d.BAG_W,
+    return { lean = d.LEAN_FRAC, gap = d.KEY_GAP, keyW = d.KEY_W, pad = d.PAD, padLeft = d.PAD_LEFT, dividerAt = d.DIVIDER_AT, divider = d.DIVIDER_W, bagW = d.BAG_W,
         microMax = d.MICRO_W_MAX, getMicro = type(d.GetMicroWidth) == "function" and d.GetMicroWidth() or -1,
         hasSet = type(d.SetMicroWidth) == "function" }
 end
@@ -1645,7 +1653,7 @@ def py(v):
 def consts(w: World | None = None) -> dict:
     """Deck.lua's exported numbers; a missing one reads -1 so the check fails instead of the run."""
     c = py((w or World(1)).call("h_deckConst"))
-    return {"lean": -1, "gap": -1, "keyW": -1, "pad": -1, "divider": -1, "bagW": -1, "microMax": -1, "getMicro": -1, "hasSet": False, **c}
+    return {"lean": -1, "gap": -1, "keyW": -1, "pad": -1, "padLeft": -1, "dividerAt": -1, "divider": -1, "bagW": -1, "microMax": -1, "getMicro": -1, "hasSet": False, **c}
 
 
 def deck_state(w: World) -> dict:
@@ -1658,7 +1666,7 @@ def check_deck(lean: float, gap: float) -> None:
     natural12 = c["keyW"] + 11 * (c["keyW"] * (1 - lean) + gap)
     check("deck.micro_max_is_the_12_key_row_rounded_up", c["microMax"] == math.ceil(natural12 - 1e-9) and 0 <= c["microMax"] - natural12 < 1,
           f"max {c['microMax']} natural {natural12:.3f}")
-    max_w = 2 * c["pad"] + c["microMax"] + c["divider"] + c["bagW"]
+    max_w = c["padLeft"] + c["pad"] + c["microMax"] + c["divider"] + c["bagW"]
     check("deck.layout_w_is_the_max_of_the_parts_sum", layout_deck_w() == max_w, f"Layout.lua says {layout_deck_w()}, parts sum {max_w}")
 
     w = World(12, 1.0, layout_cfg=False).login()
@@ -1734,7 +1742,7 @@ def check_fit() -> None:
             ks = seated(w)
             check("fit.micro_slot_is_RowWidth_of_the_shown_keys" + tag, near(st["mw"], need * scale), f"slot {st['mw']} want {need * scale:.3f}")
             check("fit.chassis_is_the_sum_of_its_parts" + tag,
-                  near(st["cw"], (2 * c["pad"] + need + c["divider"] + c["bagW"]) * scale), f"{st['cw']}")
+                  near(st["cw"], (c["padLeft"] + c["pad"] + need + c["divider"] + c["bagW"]) * scale), f"{st['cw']}")
             left = ks[0]["x"] - ks[0]["w"] / 2
             right = ks[-1]["x"] + ks[-1]["w"] / 2
             check("fit.keys_fill_the_slot_flush_no_empty_run" + tag,
@@ -1754,9 +1762,9 @@ def check_fit() -> None:
             div = py(w.call("h_divider"))
             check("fit.divider_sits_between_the_slots" + tag,
                   div["found"] and div["p"]["relPoint"] == "RIGHT"
-                  and near(div["p"]["x"], -(c["pad"] + c["bagW"] + c["divider"] / 2) * scale), f"{div}")
+                  and near(div["p"]["x"], -(c["pad"] + c["bagW"] + c["dividerAt"]) * scale), f"{div}")
             check("fit.left_pad_is_the_pad" + tag,
-                  near(st["cw"] - abs(mp["x"]) - st["mw"], c["pad"] * scale), f"{st['cw'] - abs(mp['x']) - st['mw']}")
+                  near(st["cw"] - abs(mp["x"]) - st["mw"], c["padLeft"] * scale), f"{st['cw'] - abs(mp['x']) - st['mw']}")
             check("fit.no_degrade_logs" + tag, w.logs() == "", w.logs())
             if scale == 1.0:
                 right_edge = (cp["x"], bp["x"], mp["x"])
@@ -1827,7 +1835,7 @@ def check_combat_deck() -> None:
     right = ks[-1]["x"] + ks[-1]["w"] / 2
     check("combat.after_combat_the_deck_width_matches_the_keys",
           len(ks) == 10 and near(st["mw"], need * 0.64) and near(left, -st["mw"] / 2) and near(right, st["mw"] / 2)
-          and near(st["cw"], (2 * c["pad"] + need + c["divider"] + c["bagW"]) * 0.64), f"slot {st['mw']} keys {left:.3f}..{right:.3f} chassis {st['cw']}")
+          and near(st["cw"], (c["padLeft"] + c["pad"] + need + c["divider"] + c["bagW"]) * 0.64), f"slot {st['mw']} keys {left:.3f}..{right:.3f} chassis {st['cw']}")
     check("combat.no_degrade_logs", w.logs() == "", w.logs())
 
 
@@ -1891,7 +1899,7 @@ def check_forbidden_store(lean: float, gap: float) -> None:
 
 def check_constants(lean: float, gap: float) -> None:
     c = dict(World(1).g.h_deckConst().items())
-    check("constants.deck_gap_matches_mockup", c["gap"] == gap, f"{c['gap']} vs mockup {gap}")
+    check("constants.micro_key_gap_is_the_bag_gap", c["gap"] == gap, f"{c['gap']} vs bag gap {gap}")
     check("constants.deck_lean_matches_mockup", c.get("lean") == lean, f"{c.get('lean')} vs mockup {lean}")
     tga = tga_lean_frac(CELL_SLANT)
     check("constants.lean_matches_cell_slant_tga", abs(tga - lean) <= 1 / 32, f"tga {tga:.4f} vs {lean}")
@@ -1994,7 +2002,10 @@ def check_microstyle() -> None:
 
 
 def main() -> int:
-    lean, gap = mockup_numbers()
+    lean, _ = mockup_numbers()
+    # The key gap was the mockup's 3 until the deck was evened out (2026-11-19): now it is the bag keys' gap, so every key in
+    # the deck is spaced alike.
+    gap = deck_bag_gap()
     check_constants(lean, gap)
     check_layout(lean, gap)
     check_overlay()

@@ -83,8 +83,8 @@ FS.Layout = FS.Layout or {
     -- missing). w is the MAX width, not the live one: the micro slot follows the
     -- number of SHOWN micro keys (MicroBars.lua tells Deck.lua), so the deck
     -- shrinks leftward from this and never grows past it. w must equal the sum
-    -- of the max parts Deck.lua builds from (12 + 314 + 28 + 206 + 12 = 572;
-    -- the 314 is the nested 12 key micro row, see Deck.lua);
+    -- of the max parts Deck.lua builds from (2 + 325 + 23 + 206 + 8 = 564;
+    -- the 325 is the nested 12 key micro row, see Deck.lua);
     -- `python3 addons/microbars-harness.py` checks it. No point/x/y on purpose,
     -- so FS.Layout.Apply would do nothing with it. rightMargin 92 puts the
     -- deck's right edge at 1188 of the 1280 half-width, where the old bag block
@@ -94,7 +94,7 @@ FS.Layout = FS.Layout or {
     -- edge, and the deck with it. The action stack ends at y -629 (x to 537),
     -- professions at y -555, so the only neighbour is the action stack, 8
     -- design px clear above it.
-    deck        = { w = 572, h = 38, rightMargin = 92 },
+    deck        = { w = 564, h = 38, rightMargin = 92 },
     xpbar       = { point = "CENTER", relPoint = "CENTER", x = 0,     y = -683, w = 1000, h = 16  },
     -- x is DELIBERATELY left of the planner's export (802 / 842), and re-porting
     -- it "back" is a regression, not a fix -- that was tried on 2026-09-22 and

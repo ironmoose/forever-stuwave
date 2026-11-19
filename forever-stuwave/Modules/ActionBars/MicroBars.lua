@@ -48,7 +48,7 @@ local TEX_DOT = MEDIA .. "glow_round.tga"
 local ART_DIR = MEDIA .. "glyphart_"
 
 -- Design px defaults, replaced at Apply by FS.Deck's own numbers when present.
-local KEY_W, KEY_H, KEY_GAP = 34, 26, 3
+local KEY_W, KEY_H, KEY_GAP = 34, 26, 4
 -- cell_slant.tga's lean as a fraction of the key width (11 of its 32 px, the
 -- generator's SLANT 0.34); the keys nest by this much.
 local LEAN_FRAC = 0.34

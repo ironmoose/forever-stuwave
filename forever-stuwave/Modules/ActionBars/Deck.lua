@@ -12,15 +12,15 @@
 -- time, the same split PetFrame.lua uses for its castSlot/barSlot/statusSlot.
 --
 -- Contract, exported on FS.Deck (design px, multiplied by FS.Layout.Scale()):
---   frame      the chassis, 2 * PAD + microSlot + DIVIDER_W + bagSlot wide, 38 high
+--   frame      the chassis, PAD_LEFT + microSlot + DIVIDER_W + bagSlot + PAD wide, 38 high
 --   microSlot  as wide as the SHOWN keys need, 26 high. MicroBars.lua works the
 --              width out (RowWidth of the shown count: nested leaning keys of
---              KEY_W x KEY_H at pitch KEY_W * (1 - LEAN_FRAC) + KEY_GAP = 25.44)
+--              KEY_W x KEY_H at pitch KEY_W * (1 - LEAN_FRAC) + KEY_GAP = 26.44)
 --              and calls FS.Deck.SetMicroWidth(w) from its reseat path, so the
---              keys fill the slot with no empty run. MICRO_W_MAX (314, the 12 key
+--              keys fill the slot with no empty run. MICRO_W_MAX (325, the 12 key
 --              row rounded up) is the ceiling; more keys than that shrink inside it.
 --   bagSlot    206 x 26   (7 slots of BAG_SIZE with BAG_GAP between)
--- plus the constants KEY_*, BAG_*, PAD, DIVIDER_W, MICRO_W_MAX and
+-- plus the constants KEY_*, BAG_*, PAD, PAD_LEFT, SPACE, DIVIDER_W, DIVIDER_AT, MICRO_W_MAX and
 -- Deck.GetMicroWidth().
 --
 -- Everything is seated from the RIGHT edge (bag slot, divider, micro slot), so a
@@ -53,7 +53,7 @@ local Deck = FS.Deck
 
 Deck.KEY_W = 34
 Deck.KEY_H = 26
-Deck.KEY_GAP = 3      -- the mockup's XP CELL_GAP, measured between the leaning edges
+Deck.KEY_GAP = 4      -- measured between the leaning edges; the same as BAG_GAP so every key in the deck is spaced alike
 Deck.LEAN_FRAC = 0.34 -- cell_slant.tga's lean as a fraction of the width (generate_cell_slant.py SLANT)
 Deck.BAG_SIZE = 26
 Deck.BAG_GAP = 4
@@ -62,22 +62,34 @@ local MICRO_COUNT = 12
 local BAG_COUNT = 7
 -- The micro keys NEST: each one overlaps its neighbour's box by the lean, so the
 -- pitch is the key width minus the lean, plus the gap (control-deck mockup:
--- PITCH = (KW - LEAN) + 3). MicroBars.lua lays the keys out with the same
+-- PITCH = (KW - LEAN) + KEY_GAP). MicroBars.lua lays the keys out with the same
 -- formula (its Pitch/RowWidth) from the same KEY_W, KEY_GAP and LEAN_FRAC.
--- 34 + 11 * 25.44 = 313.84, rounded UP to a whole design px for the MAX slot.
+-- 34 + 11 * 26.44 = 324.84, rounded UP to a whole design px for the MAX slot.
 local MICRO_PITCH = Deck.KEY_W * (1 - Deck.LEAN_FRAC) + Deck.KEY_GAP
-local MICRO_W_MAX = math.ceil(Deck.KEY_W + (MICRO_COUNT - 1) * MICRO_PITCH - 1e-9) -- 314
+local MICRO_W_MAX = math.ceil(Deck.KEY_W + (MICRO_COUNT - 1) * MICRO_PITCH - 1e-9) -- 325
 local BAG_W = BAG_COUNT * Deck.BAG_SIZE + (BAG_COUNT - 1) * Deck.BAG_GAP           -- 206
 local SLOT_H = 26
 
-local PAD = 12            -- chassis edge to slot, both sides
-local DIVIDER_W = 28      -- between the two slots
+-- Spacing. The deck reads evenly when every space between a group and what is beside it (a chassis edge or the // mark) is the
+-- same SPACE, measured at mid height. A micro key leans, so at mid height its edge sits LEAN / 2 inside its box: the left pad and
+-- the micro side of the divider give that back, the right pad and the bag side do not. The // ink is 18 of the mark's 32 texels.
+local SPACE = 8
+local LEAN_HALF = Deck.KEY_W * Deck.LEAN_FRAC / 2                   -- 5.78
+local DIVIDER_ICON = 22
+local DIVIDER_INK = DIVIDER_ICON * 18 / 32                          -- 12.375
+local PAD = SPACE                                                   -- chassis right edge to the bag slot
+local PAD_LEFT = math.floor(SPACE - LEAN_HALF + 0.5)                -- 2: chassis left edge to the micro slot
+local DIVIDER_W = math.floor(2 * SPACE + DIVIDER_INK - LEAN_HALF + 0.5) -- 23: between the two slots
+local DIVIDER_AT = SPACE + DIVIDER_INK / 2                          -- the mark's centre, from the bag slot's left edge
 local DECK_CFG = FS.Layout.deck or {}
 local DECK_H = DECK_CFG.h or 38
 
 Deck.MICRO_W_MAX = MICRO_W_MAX
 Deck.BAG_W = BAG_W
 Deck.PAD = PAD
+Deck.PAD_LEFT = PAD_LEFT
+Deck.SPACE = SPACE
+Deck.DIVIDER_AT = DIVIDER_AT
 Deck.DIVIDER_W = DIVIDER_W
 
 -- The micro slot's CURRENT width (design px). Starts at the max so a consumer
@@ -89,18 +101,16 @@ local microW = MICRO_W_MAX
 -- moves only the left edge.
 local BAG_RIGHT = PAD
 local MICRO_RIGHT = PAD + BAG_W + DIVIDER_W
-local DIVIDER_RIGHT = PAD + BAG_W + DIVIDER_W / 2
+local DIVIDER_RIGHT = PAD + BAG_W + DIVIDER_AT
 
 local function DeckWidth()
-    return PAD + microW + DIVIDER_W + BAG_W + PAD
+    return PAD_LEFT + microW + DIVIDER_W + BAG_W + PAD
 end
 
 -- Distance from the screen's right edge to the chassis' right edge. 92 puts the
 -- right edge where the old bag block ended (CENTER 1073 + 230 / 2 = 1188 of a
 -- 1280 half-width) and is well clear of the 24px minimum.
 local RIGHT_MARGIN = DECK_CFG.rightMargin or 92
-
-local DIVIDER_ICON = 22
 
 -- Frame levels, all in the HIGH strata the XP and data bars use. Nothing in
 -- XPBar.lua sets a frame level, so its frames sit at a handful of levels above
