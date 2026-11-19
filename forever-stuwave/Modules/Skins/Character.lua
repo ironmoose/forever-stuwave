@@ -841,6 +841,29 @@ local function SkinToggle()
     local gw, gh = 18, 14
     s.glyph = Cells(btn, gw, gh, { { 0, 0, gw, 2 }, { 0, gh - 2, gw, 2 }, { 0, 0, 2, gh }, { gw - 2, 0, 2, gh }, { gw - 7, 2, 2, gh - 4 } })
     PaintSquare(btn)
+    -- the stock key has no tooltip here: say what it does
+    Kit.HookScript(btn, "OnEnter", function(self)
+        local tip, right = _G.GameTooltip, _G.CharacterFrameRightPaneHost
+        if not tip then return end
+        tip:SetOwner(self, "ANCHOR_BOTTOM")
+        local open = right and Try(right.IsShown, right) == true
+        tip:SetText(open and "Hide the side panel" or "Show the side panel")
+        tip:Show()
+    end)
+    Kit.HookScript(btn, "OnLeave", function() if _G.GameTooltip then _G.GameTooltip:Hide() end end)
+end
+
+-- The pane toggle sits in the header band, left of the close key, on every page (stock, it hangs over the top of the left pane,
+-- which on the statistics page, its list spanning both panes, left it floating over the list). A plain button; out of combat.
+function Char.SeatToggle()
+    local btn, win, close = _G.CharacterFrameRightPaneToggleButton, _G.CharacterFrame, _G.CharacterFrameCloseButton
+    if not (btn and win and S.headPx) or InCombat() then return end
+    local wr = Plain(Try(win.GetRight, win))
+    local cl = close and Plain(Try(close.GetLeft, close))
+    if type(wr) ~= "number" then return end
+    local dx = (type(cl) == "number" and wr - cl or Kit.U(win, 30)) + Kit.U(win, 8)
+    btn:ClearAllPoints()
+    btn:SetPoint("RIGHT", win, "TOPRIGHT", -dx, -Kit.U(win, S.headPx / 2))
 end
 
 -------------------------------------------------------------------------------
@@ -1339,7 +1362,8 @@ local function BuildHeader(win)
     local gap = TopGapUnits(win)
     local headPx = math.max(24, math.ceil(gap * Kit.Ppu(win)))
     S.headPx = headPx
-    local band = Span(win, win, 1, headPx - 1, C.band, 1, "ARTWORK", 0)
+    -- under the window's border slice (BORDER 0), as the footer band is, so the border runs unbroken past the header
+    local band = Span(win, win, 1, headPx - 1, C.band, 1, "BORDER", -2)
     local k = headPx >= 36 and 2 or 1
     local gx, gy = 12, math.floor((headPx - 16 * k) / 2)
     local title = Kit.Label(win, "stuwave://character", headPx >= 36 and 16 or 13, C.muted, "OVERLAY")
@@ -1425,6 +1449,33 @@ function Char.FitRightPane()
     divider:SetShown(not wide)
 end
 
+-- A page's detail pane (reputation, skills, pvp, currency) seated the same way on every page: inside the right pane from the header
+-- band down to the footer, `margin` px in from every side (stock, each hung at its own height, the title flush under the header on
+-- some). Returns true when seated. A plain frame, not a secure one; out of combat.
+G.DETAIL_MARGIN = 10
+function Char.SeatDetailFrame(detail, margin)
+    local host, win = _G.CharacterFrameRightPaneHost, _G.CharacterFrame
+    if type(detail) ~= "table" or type(host) ~= "table" or type(win) ~= "table" or InCombat() then return false end
+    local m = Kit.U(win, margin or G.DETAIL_MARGIN)
+    local wt, ht = Plain(Try(win.GetTop, win)), Plain(Try(host.GetTop, host))
+    local wb, hb = Plain(Try(win.GetBottom, win)), Plain(Try(host.GetBottom, host))
+    if not (type(wt) == "number" and type(ht) == "number" and type(wb) == "number" and type(hb) == "number") then return false end
+    local top = Kit.U(win, S.headPx or 24) + m - (wt - ht)
+    local bottom = Kit.U(win, G.FOOT_H) + m - (hb - wb)
+    detail:ClearAllPoints()
+    detail:SetPoint("TOPLEFT", host, "TOPLEFT", m, -top)
+    detail:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -m, bottom)
+    return true
+end
+
+local function DetailOf(name)
+    local page = _G[name]
+    if type(page) ~= "table" then return nil end
+    if name == "SkillsFrame" then return page.SkillDetailFrame end
+    if name == "TokenFrame" then return page.DetailFrame or _G.TokenDetailFrame end
+    if name == "PVPRankFrame" then return page.DetailFrame end
+end
+
 -- The pages with a scroll list (reputation, skills, statistics, currency): the list and its bar end LIST_GAP px above the footer
 -- rule (stock, they run on into the footer the window gained, the last row drawn over it). The statistics list also spans both
 -- panes. Offsets are read once from the stock layout, then the list is anchored from them; plain frames, not secure ones.
@@ -1466,7 +1517,12 @@ function Char.FitPages()
         local page = _G[name]
         if page and Try(page.IsShown, page) == true then Char.FitList(page, wide) end
     end
+    for _, name in ipairs({ "SkillsFrame", "TokenFrame", "PVPRankFrame" }) do
+        local page = _G[name]
+        if page and Try(page.IsShown, page) == true then Char.SeatDetailFrame(DetailOf(name)) end
+    end
     Char.FitRightPane()
+    Char.SeatToggle()
 end
 
 -- The pvp page's rank emblem (MainInfoFrame.RankProgressBarDisplay, a Cooldown whose swipe is the rank progress): the stock glow and
@@ -1708,7 +1764,8 @@ function Char.LayoutInfo()
     local top, left = n(win, "GetTop"), n(win, "GetLeft")
     if type(top) ~= "number" or type(left) ~= "number" then return end
     local ppu = Kit.Ppu(win)
-    local hpx = G.CHIP_H + 4
+    -- the row hugs the header (the level chip moved to the footer), leaving air between the name and the model well under it
+    local hpx = 16
     local cy = S.headPx + 2 + hpx / 2
     local right = n(_G.CharacterFrameRightPaneToggleButton, "GetLeft")
     local wpx = type(right) == "number" and math.floor((right - left) * ppu - 8) or 380

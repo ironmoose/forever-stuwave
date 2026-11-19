@@ -372,17 +372,7 @@ function Rep.SeatDetail(detail)
     local host, win = _G.CharacterFrameRightPaneHost, _G.CharacterFrame
     if type(detail) ~= "table" or type(host) ~= "table" or type(win) ~= "table" or InCombatLockdown() then return end
     local cs = FS.CharacterSkin
-    local headPx = cs and cs.state and cs.state.headPx or 24
-    local footPx = cs and cs.GEOM and cs.GEOM.FOOT_H or 28
-    local m = Kit.U(win, Rep.DETAIL_MARGIN)
-    local wt, ht, wb, hb = win:GetTop(), host:GetTop(), win:GetBottom(), host:GetBottom()
-    if not (wt and ht and wb and hb) then return end
-    -- from the header rule down to the footer rule, the margin inside both, the pane's own width
-    local top = Kit.U(win, headPx) + m - (wt - ht)
-    local bottom = Kit.U(win, footPx) + m - (hb - wb)
-    detail:ClearAllPoints()
-    detail:SetPoint("TOPLEFT", host, "TOPLEFT", m, -top)
-    detail:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -m, bottom)
+    if not (cs and cs.SeatDetailFrame and cs.SeatDetailFrame(detail, Rep.DETAIL_MARGIN)) then return end
     local pad = Kit.U(win, Rep.DETAIL_PAD)
     PadChild(detail.Description, pad)
     -- only a box hung from the panel or its footer moves; one hung from the box above follows it
@@ -401,7 +391,7 @@ local function SkinPane()
         detail.fsRepSkin = true
         if detail.Border then Kit.HoldFrame(detail.Border) end
         HeldArt.Hold(detail.Divider)
-        Theme.AddPanelChrome(detail, { fillColor = C.panel, accent = C.violet, glowAlpha = 0.3 })
+        -- no box of its own: the right pane reads the same on every page (skills, pvp and currency draw none)
         Restyle(detail.Title, detail, 14, C.cyan)
         if FS.CharacterSkin and FS.CharacterSkin.SkinDetail then pcall(FS.CharacterSkin.SkinDetail, detail) end
         if PanelSkins.SweepControls then pcall(PanelSkins.SweepControls, detail) end
