@@ -21,6 +21,9 @@
 -- row puts it (at the right end of the row); the name and our cells sit to its left, so the layout of the row moved left of the
 -- icon compared with the first version of this page.
 --
+-- Icon hover: the stock row shows no tooltip on this client, so a hover box over the icon plate (mouse motion only; clicks still
+-- reach the row) shows the currency's tooltip.
+--
 -- Left out on purpose (the mockup draws them, but they are computed, animated or invented, not a skin of a stock part): a
 -- "spend this" call-out text, a transfer chip, the gain and spend history, and any total across currencies.
 
@@ -108,6 +111,48 @@ local function IconLeft(row, icon)
     return x
 end
 
+-- The currency's tooltip, from its element data: by id, else by list index, else its list link, else just its name.
+function Cur.ShowTip(owner, row)
+    local tip = _G.GameTooltip
+    if not tip then return end
+    local d = row.elementData
+    if type(d) ~= "table" and type(row.GetElementData) == "function" then d = Try(row.GetElementData, row) end
+    if type(d) ~= "table" then return end
+    tip:SetOwner(owner, "ANCHOR_RIGHT")
+    local id, index = Number(d.currencyID), Number(d.currencyIndex)
+    local ok = false
+    if id and type(tip.SetCurrencyByID) == "function" then ok = pcall(tip.SetCurrencyByID, tip, id) end
+    if not ok and index and type(tip.SetCurrencyToken) == "function" then ok = pcall(tip.SetCurrencyToken, tip, index) end
+    local CI = _G.C_CurrencyInfo
+    if not ok and index and type(CI) == "table" and type(CI.GetCurrencyListLink) == "function" then
+        local link = Try(CI.GetCurrencyListLink, index)
+        if type(Plain(link)) == "string" then ok = pcall(tip.SetHyperlink, tip, link) end
+    end
+    if not ok then
+        local name = Plain(d.name)
+        if type(name) ~= "string" then tip:Hide(); return end
+        tip:SetText(name)
+    end
+    tip:Show()
+end
+
+-- A hover box over the icon plate: mouse motion only, so a click still lands on the row (selection, the options popup).
+local function IconHover(row, p)
+    if p.hover or type(p.plate) ~= "table" then return end
+    local h = CreateFrame("Frame", nil, row)
+    h:SetAllPoints(p.plate.fill)
+    h:SetFrameLevel((row:GetFrameLevel() or 0) + 4)
+    if type(h.SetMouseMotionEnabled) == "function" and type(h.SetMouseClickEnabled) == "function" then
+        h:SetMouseMotionEnabled(true)
+        h:SetMouseClickEnabled(false)
+    else
+        h:EnableMouse(true)
+    end
+    h:SetScript("OnEnter", function(self) Cur.ShowTip(self, row) end)
+    h:SetScript("OnLeave", function() if _G.GameTooltip then _G.GameTooltip:Hide() end end)
+    p.hover = h
+end
+
 -- A cut plate on the icon, ICON_PAD px out of it on every side, anchored to the icon itself (it follows the stock layout). The
 -- edge is the state: cyan under the cap, amber at it, dim at zero, violet when the currency has no cap. The stock icon stays.
 local function PaintIconPlate(row, p, state)
@@ -125,6 +170,7 @@ local function PaintIconPlate(row, p, state)
     end
     local edge = (state == "capped" and C.amber) or (state == "empty" and C.dim) or (state == "ok" and C.cyan) or C.violet
     Kit.PaintPlate(p.plate, C.ink, 0.9, edge, state and 1 or 0.6, 1)
+    IconHover(row, p)
 end
 
 local function Mirror(p)
@@ -205,7 +251,14 @@ local function SkinEntry(row)
     if not p.mirrored then
         p.mirrored = true
         Kit.HookFunc(content.Count, "SetText", function() Mirror(p) end)
+        -- also hidden (its text still reads): live, the held alpha came back to 1 after the tabs were switched a few times,
+        -- with no SetAlpha call to answer, and the stock count drew over ours
+        local count = content.Count
+        local function hide() if count:IsShown() then count:Hide() end end
+        Kit.HookFunc(count, "Show", hide)
+        Kit.HookFunc(count, "SetShown", hide)
     end
+    if content.Count:IsShown() then content.Count:Hide() end
     Restyle(content.Name, row, 12, C.text)
     local hl = content.BackgroundHighlight
     if type(hl) == "table" and type(hl.GetRegions) == "function" then

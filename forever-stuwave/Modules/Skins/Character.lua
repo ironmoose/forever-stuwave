@@ -20,12 +20,12 @@
 --     navigation text mono, and every item button seated as a square slot (buttons are made lazily and are met when shown);
 --   * the stock level band, pane backgrounds, brown stat rows, gold category headers, model buttons, sidebar tabs and the right
 --     pane toggle are held or restyled in place with every stock script and tooltip kept;
---   * a shared footer line under both panes (the window is made one footer taller) with chips for item level, average wear and
+--   * a shared footer line under both panes (the window is made one footer taller) with chips for the level (filled amber), item level, average wear and
 --     worn pieces, and the repair bill on the right, each read from a plain API value and left out when the client will not give one;
---   * an info row under the header in place of the stock level line: the name, race and class in mono and an amber "lvl" chip;
+--   * an info row under the header in place of the stock level line: the full name (with surname), race and class in mono;
 --   * the model well: a cut panel between the slot columns behind the 3D model;
 --   * the popout keys of the gear set mode as slim cut keys with a chevron pointing away from the slot, the ammo slot as a slot;
---   * the stats pane as the mockup draws it (left caps category titles with a rule, lowercase labels, banded rows), the gear set
+--   * the stats pane as the mockup draws it (left caps category titles, lowercase labels, banded rows), the gear set
 --     and title lists as cards, their Equip / Save / New Set keys as STUwave text keys, the set picker as the guild bank's picker;
 --   * the other pages' rows, value bars, detail panes, check box labels, collapse keys and the pvp rank emblem (shared helpers).
 --
@@ -59,7 +59,10 @@ local C = {
 -- FOOT_H: the footer band is 28 px under the window's last 29 (band and its rule). The stock weapon row hangs 30.8 units from the
 -- window's bottom edge (about 37 px at 1.2) and the slot columns from its top, so at 40 px the rule ran through the weapons; at 28
 -- the weapon row and the lowest side slots clear the rule by about the same 7 px, and the 20 px chips keep 4 px above and below.
-local G = { FOOT_H = 28, CHIP_H = 20, CHIP_GAP = 8, SIDE = 14, WEAR_W = 2, WEAR_INSET = 4, WEAR_PAD = 6, HALO = 3 }
+-- LIST_GAP: px between a page's scroll list (and its bar) and the footer rule. LIST_RIGHT: the statistics list's bar from the
+-- window's right edge, the list spanning both panes there (the right pane is empty on that page).
+local G = { FOOT_H = 28, CHIP_H = 20, CHIP_GAP = 8, SIDE = 14, WEAR_W = 2, WEAR_INSET = 4, WEAR_PAD = 6, HALO = 3, LIST_GAP = 8,
+    LIST_RIGHT = 14 }
 Char.GEOM = G
 
 local function Weak() return setmetatable({}, { __mode = "k" }) end
@@ -1026,7 +1029,8 @@ local function StatRow(row)
             tw = type(tw) == "number" and tw or 0
             rule:SetPoint("LEFT", row, "LEFT", Kit.U(row, STAT.INSET + STAT.RULE_GAP) + tw, 0)
             rule:SetPoint("RIGHT", row, "RIGHT", -Kit.U(row, STAT.INSET), 0)
-            rule:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.55)
+            -- no rule after the title (the horizontal rules read as clutter): the caps title alone heads the group
+            rule:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0)
         else
             rule:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
             rule:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
@@ -1174,19 +1178,21 @@ local function BuildHeader(win)
     local headPx = math.max(24, math.ceil(gap * Kit.Ppu(win)))
     S.headPx = headPx
     local band = Span(win, win, 1, headPx - 1, C.band, 1, "ARTWORK", 0)
-    local rule = Span(win, win, headPx, 1, C.violet, 1, "ARTWORK", 1)
     local k = headPx >= 36 and 2 or 1
     local glyph = Glyph(win, 12, math.floor((headPx - 16 * k) / 2), k, C.cyan)
     local title = Kit.Label(win, "stuwave://character", headPx >= 36 and 16 or 13, C.muted, "OVERLAY")
     Kit.Place(title, win, 12 + 14 * k + 10, math.floor(headPx / 2), nil, nil, "LEFT", "TOPLEFT")
     title:SetJustifyH("LEFT")
-    S.header = { title = title, band = { band, rule }, glyph = glyph }
+    S.header = { title = title, band = { band }, glyph = glyph }
 
     Kit.HoldFrame(_G.CharacterFrameTitleText)
     HeldArt.Hold(_G.CharacterFramePortrait)
     if Theme.SkinCloseButton then pcall(Theme.SkinCloseButton, win) end
     for _, page in ipairs(PAGES) do
-        Kit.HookScript(_G[page.frame], "OnShow", function() Char.RefreshHeader(); Char.RefreshChips(); Char.RefreshLevel() end)
+        Kit.HookScript(_G[page.frame], "OnShow", function()
+            Char.RefreshHeader(); Char.RefreshChips(); Char.RefreshLevel()
+            Kit.Later(function() pcall(Char.FitPages) end)
+        end)
     end
     Char.RefreshHeader()
 end
@@ -1222,19 +1228,83 @@ local function SkinPanes()
         HeldArt.Hold(_G.CharacterFrameRightPaneHostStoneBg)
         if not S.rightUnder and right.CreateTexture then
             S.rightUnder = right:CreateTexture(nil, "BACKGROUND", nil, -6)
-            S.rightUnder:SetAllPoints(right)
             S.rightUnder:SetColorTexture(C.ink[1], C.ink[2], C.ink[3], 0.55)
             S.rightDivider = right:CreateTexture(nil, "BORDER", nil, 2)
             S.rightDivider:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 1)
-            S.rightDivider:SetPoint("TOPLEFT", right, "TOPLEFT", 0, 0)
-            S.rightDivider:SetPoint("BOTTOMLEFT", right, "BOTTOMLEFT", 0, 0)
-            S.rightDivider:SetWidth(Kit.U(right, 1))
-        elseif S.rightDivider then
-            S.rightDivider:SetWidth(Kit.U(right, 1))
         end
+        Char.FitRightPane()
     end
     local scene = _G.CharacterModelScene
     if scene then HeldArt.Hold(scene.BackgroundOverlay) end
+end
+
+-- The right pane's fill and divider stop at the footer rule (the pane runs to the window's bottom edge, so anchored to it they
+-- ran through the footer), and stand down on the statistics page, whose list spans both panes.
+function Char.FitRightPane()
+    local right, win = _G.CharacterFrameRightPaneHost, _G.CharacterFrame
+    local under, divider = S.rightUnder, S.rightDivider
+    if not (right and win and under and divider) then return end
+    local wb, hb = Plain(Try(win.GetBottom, win)), Plain(Try(right.GetBottom, right))
+    local wt, ht = Plain(Try(win.GetTop, win)), Plain(Try(right.GetTop, right))
+    local off, top = 0, 0
+    if type(wb) == "number" and type(hb) == "number" then off = math.max(0, Kit.U(win, G.FOOT_H) - (hb - wb)) end
+    -- the pane starts inside the header band: its fill there read as a dark bar across the header's foot
+    if type(wt) == "number" and type(ht) == "number" then top = math.max(0, Kit.U(win, S.headPx or 24) - (wt - ht)) end
+    under:ClearAllPoints()
+    under:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -top)
+    under:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", 0, off)
+    divider:ClearAllPoints()
+    divider:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -top)
+    divider:SetPoint("BOTTOMLEFT", right, "BOTTOMLEFT", 0, off)
+    divider:SetWidth(Kit.U(right, 1))
+    local stats = _G.StatisticsFrame
+    local wide = stats and Try(stats.IsShown, stats) == true
+    under:SetShown(not wide)
+    divider:SetShown(not wide)
+end
+
+-- The pages with a scroll list (reputation, skills, statistics, currency): the list and its bar end LIST_GAP px above the footer
+-- rule (stock, they run on into the footer the window gained, the last row drawn over it). The statistics list also spans both
+-- panes. Offsets are read once from the stock layout, then the list is anchored from them; plain frames, not secure ones.
+local LIST_PAGES = { ReputationFrame = false, SkillsFrame = false, StatisticsFrame = true, TokenFrame = false }
+S.fits = Weak()
+
+function Char.FitList(page, wide)
+    local win = _G.CharacterFrame
+    local box, bar = type(page) == "table" and page.ScrollBox, type(page) == "table" and page.ScrollBar
+    if not (win and type(box) == "table" and type(bar) == "table") then return end
+    local rec = S.fits[box]
+    if not rec then
+        local pl, pt = Plain(Try(page.GetLeft, page)), Plain(Try(page.GetTop, page))
+        local bl, bt, br, bw = Plain(Try(box.GetLeft, box)), Plain(Try(box.GetTop, box)), Plain(Try(box.GetRight, box)),
+            Plain(Try(box.GetWidth, box))
+        local sl, st, sw = Plain(Try(bar.GetLeft, bar)), Plain(Try(bar.GetTop, bar)), Plain(Try(bar.GetWidth, bar))
+        for _, v in ipairs({ pl, pt, bl, bt, br, bw, sl, st, sw }) do if type(v) ~= "number" then return end end
+        rec = { dx = bl - pl, dy = bt - pt, w = bw, gap = sl - br, bdy = st - bt, bw = sw }
+        S.fits[box] = rec
+    end
+    local pt, pl, wb, wr = Plain(Try(page.GetTop, page)), Plain(Try(page.GetLeft, page)), Plain(Try(win.GetBottom, win)),
+        Plain(Try(win.GetRight, win))
+    if not (type(pt) == "number" and type(pl) == "number" and type(wb) == "number" and type(wr) == "number") then return end
+    local floor = wb + Kit.U(win, G.FOOT_H + G.LIST_GAP)
+    local h = pt + rec.dy - floor
+    local w = rec.w
+    if wide then w = wr - Kit.U(win, G.LIST_RIGHT) - rec.bw - rec.gap - (pl + rec.dx) end
+    if h < 40 or w < 40 then return end
+    box:ClearAllPoints()
+    box:SetPoint("TOPLEFT", page, "TOPLEFT", rec.dx, rec.dy)
+    box:SetSize(w, h)
+    bar:ClearAllPoints()
+    bar:SetPoint("TOPLEFT", box, "TOPRIGHT", rec.gap, rec.bdy)
+    bar:SetSize(rec.bw, math.max(8, h + rec.bdy))
+end
+
+function Char.FitPages()
+    for name, wide in pairs(LIST_PAGES) do
+        local page = _G[name]
+        if page and Try(page.IsShown, page) == true then Char.FitList(page, wide) end
+    end
+    Char.FitRightPane()
 end
 
 -- The pvp page's rank emblem (MainInfoFrame.RankProgressBarDisplay, a Cooldown whose swipe is the rank progress): the stock glow and
@@ -1339,10 +1409,16 @@ end
 
 local function BuildFooter(win)
     S.footer = {
-        band = Span(win, win, 0, G.FOOT_H, C.band, 1, "ARTWORK", 0, true),
-        rule = Span(win, win, G.FOOT_H, 1, C.violet, 1, "ARTWORK", 1, true),
+        -- under the window's border slice (BORDER 0), so the border still closes the window round the footer
+        band = Span(win, win, 0, G.FOOT_H, C.band, 1, "BORDER", -2, true),
     }
-    S.chips = { ilvl = Chip(win, C.amber), wear = Chip(win, C.cyan), repair = Chip(win, C.muted) }
+    S.chips = { level = Chip(win, C.amber), ilvl = Chip(win, C.amber), wear = Chip(win, C.cyan), repair = Chip(win, C.muted) }
+    -- the level chip is filled amber with dark type, so it reads first
+    local lvl = S.chips.level
+    Kit.PaintPlate(lvl.plate, C.amber, 1, C.amber, 1, 1)
+    lvl.label:SetTextColor(C.ink[1], C.ink[2], C.ink[3], 1)
+    PinColor(lvl.label, C.ink)
+    S.level = lvl
     -- the durability chip lists every piece's durability on hover, lowest first
     local wear = S.chips.wear.frame
     -- above the model scene (live: CharacterModelScene reaches down over the footer and takes the mouse there)
@@ -1394,6 +1470,8 @@ function Char.RefreshChips()
             c.frame:Hide()
         end
     end
+    local info = Char.InfoText()
+    put(chips.level, info and info.level)
     put(chips.ilvl, ilvl and ("ilvl " .. ilvl))
     if pct then
         -- the chip takes the wear colour of the average
@@ -1427,7 +1505,8 @@ end
 function Char.InfoText()
     local level = Plain(Try(_G.UnitLevel, "player"))
     if type(level) ~= "number" then return nil end
-    local name = PlainString(Try(_G.UnitName, "player"))
+    -- GetUnitName(unit, true) carries the surname (UnitName gives the first name only on this client)
+    local name = PlainString(Try(_G.GetUnitName, "player", true)) or PlainString(Try(_G.UnitName, "player"))
     local race = PlainString(Try(_G.UnitRace, "player"))
     local class = PlainString(Try(_G.UnitClass, "player"))
     local sub = {}
@@ -1448,17 +1527,13 @@ function Char.RefreshLevel()
     Kit.HoldFrame(_G.CharacterLevelText)
     row.name:SetText(info.name)
     row.sub:SetText(info.sub)
-    -- the level chip sits right after the name, filled amber with dark type, where the eye lands first
-    local w = math.floor(#info.level * 12 * 0.5615 + 16 + 0.5)
-    local c = row.chip
-    c.label:SetText(info.level)
+    -- the race and class follow the name; the level is the first chip of the footer
     local nw = Plain(Try(row.name.GetUnboundedStringWidth or row.name.GetStringWidth, row.name))
     local k = Kit.Ppu(_G.CharacterFrame)
     local x = INFO.PAD + (type(nw) == "number" and math.floor(nw * k + 0.5) or 0) + INFO.GAP
-    Kit.Place(c.frame, row.frame, x, 0, w, G.CHIP_H, "LEFT", "LEFT", _G.CharacterFrame)
-    c.plate.w = w
     row.sub:ClearAllPoints()
-    Kit.Place(row.sub, row.frame, x + w + INFO.GAP, 0, nil, nil, "LEFT", "LEFT", _G.CharacterFrame)
+    Kit.Place(row.sub, row.frame, x, 0, nil, nil, "LEFT", "LEFT", _G.CharacterFrame)
+    Char.RefreshChips()
     row.frame:Show()
 end
 
@@ -1491,11 +1566,6 @@ local function BuildLevel(win)
     row.name:SetJustifyH("LEFT")
     row.sub = Kit.Label(row.frame, "", INFO.SUB_PX, C.muted, "OVERLAY")
     row.sub:SetJustifyH("LEFT")
-    row.chip = Chip(win, C.amber, row.frame)
-    Kit.PaintPlate(row.chip.plate, C.amber, 1, C.amber, 1, 1)
-    row.chip.label:SetTextColor(C.ink[1], C.ink[2], C.ink[3], 1)
-    PinColor(row.chip.label, C.ink)
-    S.level = row.chip
     local line = _G.CharacterLevelText
     if type(line) == "table" then
         for _, m in ipairs({ "SetFormattedText", "SetText" }) do Kit.HookFunc(line, m, Char.RefreshLevel) end
@@ -1586,6 +1656,7 @@ local function Relayout()
     Step("infoLayout", Char.LayoutInfo)
     local win = _G.CharacterFrame
     if win and S.done then ExtendWindow(win) end
+    Step("fitPages", Char.FitPages)
 end
 
 local function Refresh()
@@ -1633,6 +1704,8 @@ local function Build()
     Step("levelChip", BuildLevel, win)
     Step("well", BuildWell)
     Kit.HookScript(win, "OnShow", function() Kit.Later(function() Relayout(); Refresh() end) end)
+    -- the window gains its footer after the stock layout and the right pane folds away with its toggle: lists follow
+    Kit.HookScript(win, "OnSizeChanged", function() Kit.Later(function() Step("fitPages", Char.FitPages) end) end)
     Kit.HookFunc(win, "SetHeight", function() if not S.extending then Kit.Later(function() ExtendWindow(win) end) end end)
     Kit.HookFunc(win, "SetSize", function() if not S.extending then Kit.Later(function() ExtendWindow(win) end) end end)
     Kit.OnReseat(function() Relayout(); Refresh() end)

@@ -261,9 +261,10 @@ case("model buttons, sidebar tabs and the pane toggle are restyled in place", f"
     assert(tg.scripts.OnClick, 'toggle click lost')
 """)
 
-case("info row: the stock level line is held; name, race and class and an amber lvl chip sit in the strip under the header", f"""
+case("info row: the stock level line is held; the full name, race and class sit under the header; the amber lvl chip leads the footer", f"""
     UnitLevel = function() return 6 end
     UnitName = function() return 'Father' end
+    GetUnitName = function() return 'Father Stu' end
     UnitRace = function() return 'Tauren' end
     UnitClass = function() return 'Druid', 'DRUID' end
     {OPEN}
@@ -271,19 +272,21 @@ case("info row: the stock level line is held; name, race and class and an amber 
     local row = S.info
     assert(row and row.frame.shown ~= false, 'no info row')
     assert(PaperDollLevelInfo.alpha == 0 and CharacterLevelText.alpha == 0, 'the stock level line is still drawn')
-    assert(row.name.text == 'father' and row.sub.text == 'tauren druid', 'info text: ' .. tostring(row.name.text) .. ' / ' .. tostring(row.sub.text))
-    assert(row.chip.label.text == 'lvl 6', 'chip text: ' .. tostring(row.chip.label.text))
-    assert(row.chip.label.textColor[1] < 0.2, 'chip text not dark on the amber fill')
+    assert(row.name.text == 'father stu' and row.sub.text == 'tauren druid', 'info text: ' .. tostring(row.name.text) .. ' / ' .. tostring(row.sub.text))
+    assert(row.chip == nil, 'a level chip is still in the info row')
+    local chip = S.chips.level
+    assert(chip and chip.label.text == 'lvl 6', 'chip text: ' .. tostring(chip and chip.label.text))
+    assert(chip.label.textColor[1] < 0.2, 'chip text not dark on the amber fill')
     assert(row.frame:GetParent() == PaperDollFrame, 'the row must go with the paper doll page')
-    -- the chip sits under the header rule, inside the strip, and clear of the pane toggle
-    local cl, ct, cr, cb = Px(row.chip.frame, CharacterFrame)
-    assert(ct >= S.headPx, string.format('the chip reaches into the header band (%.1f < %d)', ct, S.headPx))
-    local gl = Px(CharacterFrameRightPaneToggleButton, CharacterFrame)
-    assert(gl - cr >= 8, string.format('the chip runs into the pane toggle (%.1f px between)', gl - cr))
     local nl, nt, nr = Px(row.name, CharacterFrame)
-    assert(cl - nr >= 8, 'the chip crowds the name')
     local sl = Px(row.sub, CharacterFrame)
-    assert(sl - cr >= 8, 'race and class do not follow the chip')
+    assert(sl - nr >= 8, 'race and class do not follow the name')
+    -- the level chip is the footer's first chip, left of the item level chip
+    local cl, ct, cr = Px(chip.frame, CharacterFrame)
+    local il = Px(S.chips.ilvl.frame, CharacterFrame)
+    local _, bt = Px(S.footer.band, CharacterFrame)
+    assert(ct >= bt, 'the level chip is not in the footer')
+    if S.chips.ilvl.frame.shown ~= false then assert(il - cr >= 4, 'the level chip does not lead the footer') end
     UnitLevel = function() return Secret() end
     FS.CharacterSkin.RefreshLevel()
     assert(not row.frame.shown, 'a secret level is shown')
@@ -303,10 +306,11 @@ case("pane toggle: the glyph is centred on its key at the live scale, not hung f
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
-case("footer: the weapon row and the lowest side slots clear the footer's top rule by about the same margin", f"""
+case("footer: the weapon row and the lowest side slots clear the footer band by about the same margin", f"""
     {OPEN}
     local S = FS.CharacterSkin.state
-    local _, rt = Px(S.footer.rule, CharacterFrame)
+    assert(S.footer.rule == nil, 'the footer has a rule again')
+    local _, rt = Px(S.footer.band, CharacterFrame)
     local function gap(name)
         local _, _, _, b = Px(_G['Character' .. name .. 'Slot'], CharacterFrame)
         return rt - b
