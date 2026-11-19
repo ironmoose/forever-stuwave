@@ -177,7 +177,13 @@ function Switch.HookLate()
     end
     local Chat = FS.Chat
     if not hookedChat and type(Chat) == "table" and type(Chat.ApplyWindowState) == "function" then
-        hookedChat = pcall(hooksecurefunc, Chat, "ApplyWindowState", function() Notify("chat", ChatOpen()) end)
+        local wasOpen = ChatOpen()
+        hookedChat = pcall(hooksecurefunc, Chat, "ApplyWindowState", function()
+            local open = ChatOpen()
+            Notify("chat", open)
+            if wasOpen and not open and ConsoleKeys.ChatMinimiseHint then pcall(ConsoleKeys.ChatMinimiseHint) end
+            wasOpen = open
+        end)
     end
 end
 
@@ -465,7 +471,7 @@ end
 -- Tooltip (Deck skin comes from Tooltip.lua; the lines are the mockup's name and description)
 -------------------------------------------------------------------------------
 
-local function ShowTip(k)
+local function ShowTip(k, hint)
     local ok, err = pcall(function()
         local on = Switch.IsOn(k.key)
         local s = Scale()
@@ -485,6 +491,7 @@ local function ShowTip(k)
         local name, desc = ConsoleKeys.Label(k.key, Profile())
         GameTooltip:AddDoubleLine(name, on and "ON" or "OFF", 1, 1, 1, sc[1], sc[2], sc[3])
         GameTooltip:AddLine(desc, MUTED[1], MUTED[2], MUTED[3], true)
+        if hint then GameTooltip:AddLine(hint, COLORS.amber[1], COLORS.amber[2], COLORS.amber[3], true) end
         GameTooltip:Show()
     end)
     if not ok then Degrade("tooltip", err) end
@@ -492,6 +499,30 @@ end
 
 local function HideTip(k)
     if GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner() == k.btn then GameTooltip:Hide() end
+end
+
+-- The first HINT_TIMES times the chat is minimised into its key, the key's tooltip opens on its own for HINT_SECONDS with a
+-- line saying where the chat went (a minimised chat draws nothing while its key is on screen). Counted per account in
+-- ForeverSTUwaveDB.chatMinimiseHints; a click on the key or the mouse leaving it closes the tip as usual.
+local HINT_TIMES, HINT_SECONDS = 3, 6
+local HINT_TEXT = "Chat minimised here. Click to restore."
+local hintGen = 0
+function ConsoleKeys.ChatMinimiseHint()
+    local k = byPiece and byPiece.chat
+    if not (k and k.shown and k.btn and k.btn:IsVisible()) then return end
+    local db = ForeverSTUwaveDB
+    if type(db) ~= "table" then return end
+    local n = tonumber(db.chatMinimiseHints) or 0
+    if n >= HINT_TIMES then return end
+    db.chatMinimiseHints = n + 1
+    ShowTip(k, HINT_TEXT)
+    hintGen = hintGen + 1
+    local gen = hintGen
+    if C_Timer and C_Timer.After then
+        C_Timer.After(HINT_SECONDS, function()
+            if gen == hintGen and not k.btn:IsMouseOver() then HideTip(k) end
+        end)
+    end
 end
 
 -------------------------------------------------------------------------------
