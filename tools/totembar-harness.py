@@ -1342,6 +1342,9 @@ def check_bindings_xml_declares_the_totem_commands_after_the_seals():
 def check_binding_labels_exist_for_every_class():
     for klass in ("SHAMAN", "PALADIN", "WARRIOR"):
         lua = boot(klass=klass)
+        assert g(lua)["BINDING_NAME_CLICK FSTotemButton1:LeftButton"] is None, "label set before VARIABLES_LOADED"
+        lua.execute("__fire_event('VARIABLES_LOADED')")
+        lua.execute("for _, fn in ipairs(__timers or {}) do fn() end")
         for i, label in enumerate(LABELS, 1):
             text = g(lua)[f"BINDING_NAME_CLICK FSTotemButton{i}:LeftButton"]
             assert text == label, f"{klass}: label {i} is {text!r}, want {label!r}"

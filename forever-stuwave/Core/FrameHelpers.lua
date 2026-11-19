@@ -13,6 +13,31 @@
 -- (SeatButtonCooldown with the violet cooldown fill, SeatButtonText, AttachQuickKeybind).
 
 local _, FS = ...
+
+-- Key binding labels (BINDING_HEADER_* / BINDING_NAME_* globals), set late on purpose. At VARIABLES_LOADED the client's
+-- key binding settings read the label of every binding in one EventRegistry dispatch, and reading a global an addon wrote
+-- leaves the rest of that dispatch tainted. The bag settings callback runs in the same dispatch, so the combined bags flag
+-- (ContainerFrameSettingsManager.isUsingCombinedBags) was stored under our taint; the bank reads it when it opens and a
+-- right click on a bag item after a bank visit was then blocked (ADDON_ACTION_FORBIDDEN UseContainerItem, live
+-- 2026-11-18). Labels set once that dispatch is over leave it clean; the binding rows read the label when drawn, so they
+-- still show it (only the settings search misses our names).
+do
+    local pending, ready = {}, false
+    function FS.BindingLabel(key, text)
+        if ready then _G[key] = text else pending[key] = text end
+    end
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("VARIABLES_LOADED")
+    local function Flush()
+        ready = true
+        for k, v in pairs(pending) do _G[k] = v end
+        pending = {}
+    end
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        if type(C_Timer) == "table" and type(C_Timer.After) == "function" then C_Timer.After(0, Flush) else Flush() end
+    end)
+end
 FS.FrameHelpers = FS.FrameHelpers or {}
 local Helpers = FS.FrameHelpers
 local Theme = FS.Theme

@@ -195,7 +195,7 @@ local TB = {
 -- Binding labels for the commands Bindings.xml names; the client reads these globals for the key binding
 -- screen, and for every class. BINDING_HEADER_FOREVERSTUWAVE is SealBar's.
 for i, def in ipairs(TB.BUTTONS) do
-    _G["BINDING_NAME_CLICK FSTotemButton" .. i .. ":LeftButton"] = def.label
+    FS.BindingLabel("BINDING_NAME_CLICK FSTotemButton" .. i .. ":LeftButton", def.label)
 end
 
 local IsSecret = FS.IsSecret
@@ -1661,7 +1661,7 @@ function TotemBar.AddCell(def)
     def.cell = true
     TB.cells[#TB.cells + 1] = def
     TB.BUTTONS[#TB.BUTTONS + 1] = def
-    _G["BINDING_NAME_CLICK FSTotemButton" .. #TB.BUTTONS .. ":LeftButton"] = def.label
+    FS.BindingLabel("BINDING_NAME_CLICK FSTotemButton" .. #TB.BUTTONS .. ":LeftButton", def.label)
     return true
 end
 

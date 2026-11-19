@@ -1250,6 +1250,9 @@ def check_bindings_xml_declares_the_two_buff_tab_commands_after_the_totems():
 def check_binding_labels_exist_for_every_class():
     for klass in ("SHAMAN", "PALADIN", "WARRIOR"):
         lua = boot(klass=klass)
+        assert g(lua)["BINDING_NAME_CLICK FSBuffTabButton1:LeftButton"] is None, "label set before VARIABLES_LOADED"
+        fire(lua, "VARIABLES_LOADED")
+        lua.execute("for _, fn in ipairs(__timers or {}) do fn() end")
         for i, label in ((1, "Weapon imbue"), (2, "Lightning Shield")):
             text = g(lua)[f"BINDING_NAME_CLICK FSBuffTabButton{i}:LeftButton"]
             assert text == label, f"{klass}: label {i} is {text!r}, want {label!r}"
