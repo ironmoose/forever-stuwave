@@ -49,6 +49,7 @@ local MOVABLE = {
     { id = "pcast",        label = "Player cast bar" },
     { id = "objectives",   label = "Objectives" },
     { id = "warriorpowerup", label = "Warrior power-up alerts" },
+    { id = "druidclearcasting", label = "Clearcasting alert" },
 }
 
 -- The ids of the raid layouts: only the previewed size's handle is ever up.

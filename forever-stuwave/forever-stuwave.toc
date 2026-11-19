@@ -156,6 +156,8 @@ Modules/CombatHud/GunsightRogue.lua
 Modules/CombatHud/DruidArt.lua
 Modules/CombatHud/DruidState.lua
 Modules/CombatHud/GunsightDruid.lua
+Modules/CombatHud/DruidClearcastingArt.lua
+Modules/CombatHud/DruidClearcasting.lua
 Modules/CombatHud/GunsightWarlock.lua
 Modules/Nameplates/NameplateCombo.lua
 Modules/Compat/Questie.lua

@@ -1677,6 +1677,14 @@ local function WarriorGroup(page)
     end
 end
 
+-- The Druid Clearcasting alert (DruidClearcasting.lua): one switch. A Druid's page only.
+local function DruidGroup(page)
+    local CC = FS.DruidClearcasting
+    if not (CC and CC.SETTING and CC.Applies and CC.Applies()) then return end
+    UI.Header(page, "Druid alerts", "The big alert above your character when Clearcasting makes your next spell or ability free.")
+    UI.Toggle(page, { label = CC.SETTING.label, key = CC.SETTING.key, tip = CC.SETTING.tip })
+end
+
 -- What the player's own class module shows, as the ? tip of a header (one per class; only the player's class is listed).
 local CLASS_MODULE_HELP = {
     ROGUE = "The dagger fan. Each dagger is a combo point; at five the fan turns gold and FINISH shows. The digit on the ring is "
@@ -1753,6 +1761,7 @@ if FS.Gunsight and FS.Gunsight.PIECES then
         ClassModuleHelpGroup(page)
         PriestGroup(page)
         WarriorGroup(page)
+        DruidGroup(page)
         WarlockGroup(page)
         UI.Header(page, "Pieces")
         local known, n = {}, 0

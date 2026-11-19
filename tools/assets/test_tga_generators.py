@@ -42,7 +42,7 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # generate_druid_gunsight.py: the Druid class module's atlas, claw gash fills, energy and rage fills and three cooldown chips.
     "druid_gunsight": {"druid_gunsight": (512, 512), "druid_slash_lit": (32, 64), "druid_slash_flare": (32, 64),
                        "druid_energy_fill": (256, 16), "druid_rage_fill": (256, 32), "druid_chip_sp": (32, 32),
-                       "druid_chip_pb": (32, 32), "druid_chip_sm": (32, 32)},
+                       "druid_chip_pb": (32, 32), "druid_chip_sm": (32, 32), "druid_thorns": (512, 512)},
     # generate_loc_tick.py: one glowing tick of the loss of control ring, rotated in Lua.
     "loc_tick": (64, 64),
     # generate_combo_pips.py: the nameplate combo pip, rest and lit (white mask) diamonds and its soft glow.
@@ -209,6 +209,10 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # drain bar, 1 texel per sprite px); it also writes the sprite manifest WarriorPowerUpArt.lua, which is not a .tga.
     # It loads its pixel art from warrior_powerups_art/ (FS_WARRIOR_ART_DIR, set by _run_generator).
     "warrior_powerups": {"warrior_powerups_1": (2048, 512)},
+    # generate_druid_clearcasting.py: the Druid Clearcasting alert's one atlas (the three forms' baked sprites and the drain bar,
+    # 1 texel per sprite px); it also writes DruidClearcastingArt.lua. It imports the Warrior generator's bake machinery
+    # (FS_ASSETS_DIR) and loads its head frames from druid_cc_art/ (FS_DRUID_CC_ART_DIR), both set by _run_generator.
+    "druid_clearcasting": {"druid_clearcasting_1": (2048, 1024)},
     # generate_paladin_seal.py: the Paladin Gunsight module's wax seals, emblems and pixel digits, the war hammer's baked
     # swing and rise frames (cold, filled, tint mask, outline), and the slam effects (column, rays, shocks, runes, cracks).
     "paladin_seal": {"paladin_seal": (512, 512), "paladin_hammer": (1024, 1024), "paladin_fx": (1024, 512)},
@@ -412,7 +416,9 @@ def _run_generator(generator_path: Path, work_dir: Path) -> None:
         cwd=work_dir,
         env={**os.environ, "FS_ASSET_OUTPUT_DIR": str(work_dir), "FS_ASSET_INPUT_DIR": str(MEDIA_DIR),
              # the Warrior power-up generator loads its generated pixel art (the copy has no art folder beside it)
-             "FS_WARRIOR_ART_DIR": str(GENERATOR_DIR / "warrior_powerups_art")},
+             "FS_WARRIOR_ART_DIR": str(GENERATOR_DIR / "warrior_powerups_art"),
+             # the Druid Clearcasting generator imports the Warrior one and loads its head frames
+             "FS_ASSETS_DIR": str(GENERATOR_DIR), "FS_DRUID_CC_ART_DIR": str(GENERATOR_DIR / "druid_cc_art")},
         capture_output=True,
         text=True,
         timeout=120,
