@@ -273,7 +273,7 @@ case("info row: the stock level line is held; name, race and class and an amber 
     assert(PaperDollLevelInfo.alpha == 0 and CharacterLevelText.alpha == 0, 'the stock level line is still drawn')
     assert(row.name.text == 'father' and row.sub.text == 'tauren druid', 'info text: ' .. tostring(row.name.text) .. ' / ' .. tostring(row.sub.text))
     assert(row.chip.label.text == 'lvl 6', 'chip text: ' .. tostring(row.chip.label.text))
-    assert(row.chip.label.textColor[1] > 0.9 and row.chip.label.textColor[3] < 0.3, 'chip text not amber')
+    assert(row.chip.label.textColor[1] < 0.2, 'chip text not dark on the amber fill')
     assert(row.frame:GetParent() == PaperDollFrame, 'the row must go with the paper doll page')
     -- the chip sits under the header rule, inside the strip, and clear of the pane toggle
     local cl, ct, cr, cb = Px(row.chip.frame, CharacterFrame)
@@ -282,6 +282,8 @@ case("info row: the stock level line is held; name, race and class and an amber 
     assert(gl - cr >= 8, string.format('the chip runs into the pane toggle (%.1f px between)', gl - cr))
     local nl, nt, nr = Px(row.name, CharacterFrame)
     assert(cl - nr >= 8, 'the chip crowds the name')
+    local sl = Px(row.sub, CharacterFrame)
+    assert(sl - cr >= 8, 'race and class do not follow the chip')
     UnitLevel = function() return Secret() end
     FS.CharacterSkin.RefreshLevel()
     assert(not row.frame.shown, 'a secret level is shown')
@@ -407,7 +409,7 @@ case("slots: the stock pressed art and hover highlight are held, the slot layer 
 
 case("an empty slot's silhouette is tinted dim, a filled slot is left alone, and the tint follows a change of gear", f"""
     {OPEN}
-    local function dim(icon) return icon.vertex and icon.vertex[1] < 0.4 and icon.vertex[3] > 0.4 end
+    local function dim(icon) return icon.blend == 'ADD' and icon.vertex and icon.vertex[3] > 0.6 end
     assert(dim(CharacterRangedSlot.icon), 'empty ranged slot not dim')
     assert(not dim(CharacterHeadSlot.icon), 'filled slot tinted')
     GEAR[18] = {{ 2, 100, 100 }}
@@ -556,17 +558,21 @@ case("footer chips: one shared line, even spacing, the repair bill right aligned
     {OPEN}
     local c = FS.CharacterSkin.state.chips
     assert(c.ilvl.label.text == 'ilvl 14', c.ilvl.label.text)
-    assert(c.wear.label.text:find('^wear %d+%%$'), c.wear.label.text)
-    assert(c.worn.label.text == '5 worn', c.worn.label.text)
+    assert(c.wear.label.text:find('^durability %d+%%$'), c.wear.label.text)
+    assert(c.worn == nil, 'the worn count chip is gone')
     assert(c.repair.label.text == 'repair 2g 80s 0c', c.repair.label.text)
     local wl, wt, wr, wb = Px(CharacterFrame, CharacterFrame)
     local l1, t1, r1, b1 = Px(c.ilvl.frame, CharacterFrame)
     local l2, t2, r2, b2 = Px(c.wear.frame, CharacterFrame)
-    local l3, t3, r3, b3 = Px(c.worn.frame, CharacterFrame)
     local l4, t4, r4, b4 = Px(c.repair.frame, CharacterFrame)
-    assert(Near(t1, t2) and Near(t2, t3) and Near(t3, t4), 'chips are not on one line')
+    assert(Near(t1, t2) and Near(t2, t4), 'chips are not on one line')
     assert(Near(l1, 14), 'first chip x ' .. l1)
-    assert(Near(l2 - r1, l3 - r2), 'uneven gaps ' .. (l2 - r1) .. ' ' .. (l3 - r2))
+    assert(Near(l2 - r1, FS.CharacterSkin.GEOM.CHIP_GAP), 'gap ' .. (l2 - r1))
+    -- hovering the durability chip lists every piece, lowest first
+    local lines = FS.CharacterSkin.DurabilityLines()
+    assert(#lines >= 2, 'durability lines: ' .. #lines)
+    for i = 2, #lines do assert(lines[i - 1].frac <= lines[i].frac, 'durability not lowest first') end
+    assert(c.wear.frame.scripts and c.wear.frame.scripts.OnEnter, 'no hover on the durability chip')
     assert(Near(wr - r4, 14), 'repair right margin ' .. (wr - r4))
     -- the line is centred in the footer band
     local foot = FS.CharacterSkin.GEOM.FOOT_H

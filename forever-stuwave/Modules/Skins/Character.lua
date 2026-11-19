@@ -249,11 +249,15 @@ local function PaintEmpty(button)
     if not (w and icon and type(icon.SetVertexColor) == "function") then return end
     local ok, info = pcall(ReadSlot(w.unit), button)
     if not ok or type(info) ~= "table" then return end
+    -- An empty slot's stock art is a dark rounded square with a ghost glyph, smaller than our plate. Drawn additive its black adds
+    -- nothing, so the plate shows edge to edge and only the glyph is left, lifted to violet.
     if info.empty then
         w.tinted = true
-        pcall(icon.SetVertexColor, icon, C.dim[1], C.dim[2], C.dim[3], 1)
+        if icon.SetBlendMode then pcall(icon.SetBlendMode, icon, "ADD") end
+        pcall(icon.SetVertexColor, icon, C.violet[1], C.violet[2], C.violet[3], 1)
     elseif w.tinted then
         w.tinted = false
+        if icon.SetBlendMode then pcall(icon.SetBlendMode, icon, "BLEND") end
         pcall(icon.SetVertexColor, icon, 1, 1, 1, 1)
     end
 end
@@ -1187,7 +1191,9 @@ local function BuildHeader(win)
     Char.RefreshHeader()
 end
 
--- The stock strip under the header (it carries the level line): held, with our own band under it.
+-- The stock strip under the header (it carries the level line): held, with our own band under it in the header's colour, so the
+-- info row reads as the header's second line (no rule of its own: a second line under the header read as a stray, and a darker
+-- strip as a black bar).
 local function SkinTopStrip()
     local paper = _G.PaperDollFrame
     local host = paper and paper.TopBackgroundStripHost
@@ -1195,10 +1201,9 @@ local function SkinTopStrip()
         HeldArt.Hold(host.TopBackgroundStrip)
         HeldArt.Hold(host.TopBackgroundStripBottomEdge)
         if not S.stripUnder and host.CreateTexture then
-            S.stripUnder = Span(host, host, 0, 1, C.band, 1, "BACKGROUND", -5)
+            S.stripUnder = Span(host, host, 0, 1, C.band, 1, "ARTWORK", -8)
             S.stripUnder:ClearAllPoints()
             S.stripUnder:SetAllPoints(host)
-            S.stripRule = Span(host, host, 0, 1, C.dim, 1, "BORDER", 1, true)
         end
     end
     local level = _G.CharacterLevelText
@@ -1337,7 +1342,42 @@ local function BuildFooter(win)
         band = Span(win, win, 0, G.FOOT_H, C.band, 1, "ARTWORK", 0, true),
         rule = Span(win, win, G.FOOT_H, 1, C.violet, 1, "ARTWORK", 1, true),
     }
-    S.chips = { ilvl = Chip(win, C.amber), wear = Chip(win, C.cyan), worn = Chip(win, C.pink), repair = Chip(win, C.muted) }
+    S.chips = { ilvl = Chip(win, C.amber), wear = Chip(win, C.cyan), repair = Chip(win, C.muted) }
+    -- the durability chip lists every piece's durability on hover, lowest first
+    local wear = S.chips.wear.frame
+    -- above the model scene (live: CharacterModelScene reaches down over the footer and takes the mouse there)
+    local scene = _G.CharacterModelScene
+    local top = math.max(Plain(Try(win.GetFrameLevel, win)) or 0, scene and Plain(Try(scene.GetFrameLevel, scene)) or 0)
+    wear:SetFrameLevel(top + 10)
+    wear:EnableMouse(true)
+    wear:SetScript("OnEnter", function(self) Char.ShowDurabilityTip(self) end)
+    wear:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+end
+
+-- One line per equipped piece that has durability: the slot name and its percent in the wear colour, lowest first.
+function Char.DurabilityLines()
+    local out = {}
+    for _, name in ipairs(SLOT_NAMES) do
+        local frac = Char.WearOf(SLOT_ID[name])
+        if frac then
+            local label = _G[name:upper() .. "SLOT"]
+            out[#out + 1] = { name = type(label) == "string" and label or name, frac = frac, order = #out }
+        end
+    end
+    table.sort(out, function(a, b) if a.frac ~= b.frac then return a.frac < b.frac end return a.order < b.order end)
+    return out
+end
+
+function Char.ShowDurabilityTip(owner)
+    if not GameTooltip then return end
+    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    GameTooltip:ClearLines()
+    GameTooltip:AddLine("Durability", C.text[1], C.text[2], C.text[3])
+    for _, l in ipairs(Char.DurabilityLines()) do
+        local c = Char.WearColor(l.frac)
+        GameTooltip:AddDoubleLine(l.name, math.floor(l.frac * 100 + 0.5) .. "%", C.muted[1], C.muted[2], C.muted[3], c[1], c[2], c[3])
+    end
+    GameTooltip:Show()
 end
 
 function Char.RefreshChips()
@@ -1355,8 +1395,13 @@ function Char.RefreshChips()
         end
     end
     put(chips.ilvl, ilvl and ("ilvl " .. ilvl))
-    put(chips.wear, pct and ("wear " .. pct .. "%"))
-    put(chips.worn, worn and worn > 0 and (worn .. " worn"))
+    if pct then
+        -- the chip takes the wear colour of the average
+        local c = Char.WearColor(pct / 100)
+        Kit.PaintPlate(chips.wear.plate, C.ink, 1, c, 1, 1)
+        chips.wear.label:SetTextColor(c[1], c[2], c[3], 1)
+    end
+    put(chips.wear, pct and ("durability " .. pct .. "%"))
     if cost and cost > 0 then
         chips.repair.frame:Show()
         Seat(chips.repair, "repair " .. Char.CoinText(cost), 0, true)
@@ -1403,11 +1448,17 @@ function Char.RefreshLevel()
     Kit.HoldFrame(_G.CharacterLevelText)
     row.name:SetText(info.name)
     row.sub:SetText(info.sub)
+    -- the level chip sits right after the name, filled amber with dark type, where the eye lands first
     local w = math.floor(#info.level * 12 * 0.5615 + 16 + 0.5)
     local c = row.chip
     c.label:SetText(info.level)
-    Kit.Place(c.frame, row.frame, -INFO.PAD, 0, w, G.CHIP_H, "RIGHT", "RIGHT", _G.CharacterFrame)
+    local nw = Plain(Try(row.name.GetUnboundedStringWidth or row.name.GetStringWidth, row.name))
+    local k = Kit.Ppu(_G.CharacterFrame)
+    local x = INFO.PAD + (type(nw) == "number" and math.floor(nw * k + 0.5) or 0) + INFO.GAP
+    Kit.Place(c.frame, row.frame, x, 0, w, G.CHIP_H, "LEFT", "LEFT", _G.CharacterFrame)
     c.plate.w = w
+    row.sub:ClearAllPoints()
+    Kit.Place(row.sub, row.frame, x + w + INFO.GAP, 0, nil, nil, "LEFT", "LEFT", _G.CharacterFrame)
     row.frame:Show()
 end
 
@@ -1439,9 +1490,11 @@ local function BuildLevel(win)
     Kit.Place(row.name, row.frame, INFO.PAD, 0, nil, nil, "LEFT", "LEFT", win)
     row.name:SetJustifyH("LEFT")
     row.sub = Kit.Label(row.frame, "", INFO.SUB_PX, C.muted, "OVERLAY")
-    row.sub:SetPoint("BOTTOMLEFT", row.name, "BOTTOMRIGHT", Kit.U(win, INFO.GAP), 0)
     row.sub:SetJustifyH("LEFT")
     row.chip = Chip(win, C.amber, row.frame)
+    Kit.PaintPlate(row.chip.plate, C.amber, 1, C.amber, 1, 1)
+    row.chip.label:SetTextColor(C.ink[1], C.ink[2], C.ink[3], 1)
+    PinColor(row.chip.label, C.ink)
     S.level = row.chip
     local line = _G.CharacterLevelText
     if type(line) == "table" then
