@@ -378,10 +378,32 @@ local function ReadLock(slot)
     slot.locked = inv ~= nil and Call(IsInventoryItemLocked, inv) == true
 end
 
+-- Is bag `bagID` on screen, read from the bag windows themselves. Never the stock IsBagOpen: it walks
+-- ContainerFrameUtil_EnumerateContainerFrames, whose frame list is built lazily on the first call, so called from here it
+-- was built under our taint. Every later stock bag check read that list (IsAnyBagOpen in the combined bags setup at
+-- VARIABLES_LOADED stored ContainerFrameSettingsManager.isUsingCombinedBags tainted), the bank read the flag when it
+-- opened, and a right click on a bag item after a bank visit was blocked (ADDON_ACTION_FORBIDDEN UseContainerItem, live
+-- 2026-11-18). These are plain reads: IsShown, GetID and the combined window's own rule (bags 0 to NumBagSlots).
+local function Shown(frame)
+    return type(frame) == "table" and type(frame.IsShown) == "function" and Clean(pcall(frame.IsShown, frame)) == true
+end
+local function BagOpen(bagID)
+    local combined = _G.ContainerFrameCombinedBags
+    local inv = type(Constants) == "table" and Constants.InventoryConstants
+    local held = inv and inv.NumBagSlots or 4
+    if bagID >= 0 and bagID <= held and Shown(combined) then return true end
+    for i = 1, (tonumber(_G.NUM_CONTAINER_FRAMES) or 13) do
+        local frame = _G["ContainerFrame" .. i]
+        if Shown(frame) and type(frame.GetID) == "function" and Clean(pcall(frame.GetID, frame)) == bagID then return true end
+    end
+    return false
+end
+
+
 local function ReadOpen(slot)
     local bagID = slot.kind == "keyring" and KeyringBagID() or slot.bagID
     if bagID == nil then slot.open = false return end
-    slot.open = Call(IsBagOpen, bagID) == true
+    slot.open = BagOpen(bagID)
 end
 
 local function EachActive(fn)
@@ -938,4 +960,5 @@ FS.BagBar = {
     Structure = Structure,
     ApplySlotState = ApplySlotState,
     HideBlizzardBar = HideBlizzardBar,
+    BagOpen = BagOpen,
 }

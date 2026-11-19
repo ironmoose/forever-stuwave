@@ -759,6 +759,15 @@ def check_source() -> None:
         if pattern.search(code):
             hits.append(f"{n}: {line.strip()}")
     check("source.no_container_opening_call_in_BagBar_lua", not hits, f"{hits}")
+    # Stock bag queries that fill a lazy cache on their first call: from our code the cache is built under our taint and
+    # every later stock bag check reads it (live 2026-11-18: the combined bags flag, then the bank, then a blocked bag click).
+    lazy = re.compile(r"\b(IsBagOpen|IsAnyBagOpen|AreAllBagsOpen|ContainerFrameUtil_\w+|EnumerateValidItems|GetBagSize)\b")
+    hits = []
+    for n, line in enumerate(BAGBAR_LUA.read_text(encoding="utf-8").splitlines(), 1):
+        code = re.sub(r'"[^"]*"', '""', line.split("--", 1)[0])
+        if lazy.search(code):
+            hits.append(f"{n}: {line.strip()}")
+    check("source.no_lazy_cache_stock_bag_query_in_BagBar_lua", not hits, f"{hits}")
 
 
 def check_events() -> None:
