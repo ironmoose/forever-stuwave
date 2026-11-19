@@ -25,6 +25,7 @@ ROOT = HERE.parent
 ADDON = ROOT / "forever-stuwave"
 MODULE = (ADDON / "Modules/Skins/CharBackdrop.lua").read_text(encoding="utf-8")
 ARTLUA = (ADDON / "Modules/Skins/CharBgArt.lua").read_text(encoding="utf-8")
+TALENTART = (ADDON / "Modules/Skins/TalentBgArt.lua").read_text(encoding="utf-8")
 MEDIA = ADDON / "Media/Textures"
 BAKE = ROOT / "tools/assets/charbg/bake.mjs"
 
@@ -67,6 +68,8 @@ function Obj:Hide() self.shown = false end
 function Obj:CreateTexture(name, layer, inh, sub) local t = New("Texture", self); t.layer = layer; t.sub = sub; return t end
 function CreateFrame(kind, name, parent) local f = New("Frame", parent); LAST_FRAME = f; return f end
 ForeverSTUwaveDB = {}
+CLASS = "SHAMAN"
+function UnitClass() return "Shaman", CLASS end
 local store, defaults, watchers = {}, {}, {}
 FS = {
     Config = {
@@ -90,6 +93,8 @@ function Layout() FS.CharacterSkin.state.well = WELL; FS.CharacterSkin.OnWellLay
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute(MOCK)
 lua.globals().ART_SRC = ARTLUA
+lua.globals().TALENT_SRC = TALENTART
+lua.execute('assert(loadstring(TALENT_SRC, "@TalentBgArt.lua"))("forever-stuwave", FS)')
 lua.globals().MODULE_SRC = MODULE
 lua.execute('assert(loadstring(ART_SRC, "@CharBgArt.lua"))("forever-stuwave", FS)')
 lua.execute('assert(loadstring(MODULE_SRC, "@CharBackdrop.lua"))("forever-stuwave", FS)')
@@ -168,6 +173,63 @@ check("a bigger well scales up to cover", ev(f"{r}.scale") == 4, ev(f"{r}.scale"
 ex("WELL.wpx, WELL.hpx = nil, nil; Layout()")
 check("a well with no size draws nothing", ev(f"not {r}.tex.shown and D:GetScript('OnUpdate') == nil"))
 check("no degrade logged", ev("__logged == nil"))
+
+# ---- the top talent tree picks the scene ----
+ex("""
+WELL.wpx, WELL.hpx = 330, 490
+-- one trait tree; three trees of four columns each, 600 apart inside a tree and 1200 between trees
+RANKS = {}
+local cols = { 1000, 1600, 2200, 2800, 4000, 4600, 5200, 5800, 7000, 7600, 8200, 8800 }
+NODES = {}
+for i, x in ipairs(cols) do for row = 1, 3 do NODES[#NODES + 1] = { id = i * 10 + row, x = x } end end
+C_ClassTalents = { GetActiveConfigID = function() return 7 end }
+C_Traits = {
+    GetConfigInfo = function(cfg) return { treeIDs = { 1082 } } end,
+    GetTreeNodes = function(tree) local ids = {} for i, n in ipairs(NODES) do ids[i] = n.id end return ids end,
+    GetNodeInfo = function(cfg, id)
+        for _, n in ipairs(NODES) do if n.id == id then return { posX = n.x, activeRank = RANKS[id] or 0 } end end
+    end,
+}
+function Fire(e) LISTENER:GetScript("OnEvent")(LISTENER, e) end
+""")
+# the listener is the first frame the module made: find it by its OnEvent
+ex("""
+LISTENER = nil
+local i = 1
+while true do
+    local name, val = debug.getupvalue(FS.CharBackdrop.Seat, i)
+    if not name then break end
+    i = i + 1
+end
+""")
+lua.execute("""
+local mt = getmetatable(WELL.frame)
+""")
+ex("""
+-- the listener is created at load; re-create the lookup through SetScript records on every frame made since
+""")
+check("no points spent: aurora", (ex("Layout()") or True) and ev(f"{r}.file") == "charbg_aurora", ev(f"{r}.file"))
+ex("RANKS[51] = 5; RANKS[62] = 3; RANKS[13] = 2")      # tree 2: 8, tree 1: 2
+ex("Layout()")
+check("most points in tree 2: the enhancement scene", ev(f"{r}.file") == "talentbg_shaman_enhancement", ev(f"{r}.file"))
+check("tree points read 2 / 8 / 0", ev("table.concat(FS.CharBackdrop.TreePoints(), ',')") == "2,8,0", ev("table.concat(FS.CharBackdrop.TreePoints(), ',')"))
+# 320 x 480 inside: talent frames are 156 x 236, scale ceil(max(2.05, 2.03)) = 3; 106.67 x 160 texels, centred both ways
+l, rr, t, b = (ev(f"{r}.tex.tc[{k}]") for k in (1, 2, 3, 4))
+x0, y0 = (156 - 320 / 3) / 2, (236 - 160) / 2
+check("talent scene cropped centred both ways in its cell", abs(l * 1024 - (1 + x0)) < 1e-6 and abs(t * 1024 - (1 + y0)) < 1e-6
+      and abs(b * 1024 - (1 + y0 + 160)) < 1e-6, (l * 1024, t * 1024, b * 1024))
+ex("D:GetScript('OnUpdate')(D, 0.125 * 7)")
+check("talent cells use the talent pitch", abs(ev(f"{r}.tex.tc[1]") * 1024 - (158 + 1 + x0)) < 1e-6, ev(f"{r}.tex.tc[1]") * 1024)
+ex("RANKS[101] = 4; RANKS[102] = 4")                   # tree 3: 8, a tie with tree 2
+ex("Layout()")
+check("a tie goes to the leftmost tree", ev(f"{r}.file") == "talentbg_shaman_enhancement")
+ex("RANKS[103] = 1; Layout()")
+check("tree 3 ahead: restoration", ev(f"{r}.file") == "talentbg_shaman_restoration", ev(f"{r}.file"))
+ex("CLASS = 'MONK'; Layout()")
+check("a class with no sheets: aurora", ev(f"{r}.file") == "charbg_aurora")
+ex("CLASS = 'SHAMAN'; C_Traits = nil; Layout()")
+check("no trait system: aurora", ev(f"{r}.file") == "charbg_aurora")
+check("still no degrade logged", ev("__logged == nil"))
 
 print()
 if failures:

@@ -57,14 +57,14 @@ Modules/Tracker/QuestTimer.lua
 Modules/Skins/Panels.lua
 Modules/Skins/Mail.lua
 Modules/Skins/Character.lua
-Modules/Skins/CharBgArt.lua
-Modules/Skins/CharBackdrop.lua
 Modules/Skins/Reputation.lua
 Modules/Skins/Currency.lua
 Modules/Skins/Inspect.lua
 Modules/Skins/Talents.lua
 Modules/Skins/TalentBgArt.lua
 Modules/Skins/TalentBackdrops.lua
+Modules/Skins/CharBgArt.lua
+Modules/Skins/CharBackdrop.lua
 Modules/Skins/Commerce.lua
 Modules/Skins/Quest.lua
 Modules/Skins/Maps.lua
