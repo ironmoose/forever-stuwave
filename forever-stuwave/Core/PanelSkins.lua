@@ -811,7 +811,9 @@ local function TreeDump(rootName)
             extra = (" L=%s tex=%s atlas=%s a=%s"):format(tostring(layer), tostring(plain(tex)), tostring(plain(atlas)), tostring(plain(a)))
         elseif otype == "FontString" then
             local text = select(2, pcall(obj.GetText, obj))
-            extra = (" text=%s"):format(tostring(plain(text)))
+            local a = select(2, pcall(obj.GetAlpha, obj))
+            local ea = select(2, pcall(obj.GetEffectiveAlpha, obj))
+            extra = (" text=%s a=%s ea=%s"):format(tostring(plain(text)), tostring(plain(a)), tostring(plain(ea)))
         end
         lines[#lines + 1] = ("%s%s %s key=%s shown=%s %sx%s%s"):format(string.rep("  ", depth), tostring(otype),
             tostring(plain(name)), keyOf(parent, obj), tostring(plain(shown)),

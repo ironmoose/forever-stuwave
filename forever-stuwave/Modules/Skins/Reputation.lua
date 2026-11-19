@@ -72,8 +72,12 @@ function Rep.SegmentWidths(w)
     return out
 end
 
--- The progress through the current standing from the stock bar's own numbers: 0..1, nil when it cannot be read plainly.
+-- The progress through the current standing from the stock bar's own numbers: 0..1, nil when it cannot be read plainly. The 16001
+-- bar is a plain Frame (no min, max or value): its Fill is sized by the stock code to the progress across its FillArea, so the
+-- fraction is read from those two widths (FS.CharacterSkin.BarFraction does both).
 local function Progress(bar)
+    local Char = FS.CharacterSkin
+    if Char and Char.BarFraction then return Char.BarFraction(bar) end
     local lo, hi = Try(bar.GetMinMaxValues, bar)
     local v = Try(bar.GetValue, bar)
     lo, hi, v = Plain(lo), Plain(hi), Plain(v)
@@ -107,9 +111,10 @@ local function Parts(row, bar)
         p.fills[i] = Kit.Rect(bar, 0, 0, 1, G.SEG_H, LADDER[i], 1, "OVERLAY", 3)
     end
     p.bar = bar
-    -- the stock standing / progress text sits on the bar, where the ladder is: it is held and mirrored right of the name line
-    p.label = Kit.Label(row, "", 11, C.text, "OVERLAY")
-    Kit.Place(p.label, row, -12, 12, nil, nil, "RIGHT", "TOPRIGHT")
+    -- the stock standing / progress text sits on the bar, where the ladder is: it is held and mirrored in small muted mono just left
+    -- of the ladder, level with it (a label over the row's top right ran into the segments on the 30 unit 16001 rows)
+    p.label = Kit.Label(row, "", 11, C.muted, "OVERLAY")
+    Kit.Place(p.label, bar, -4, 0, nil, nil, "RIGHT", "LEFT", row)
     p.label:SetJustifyH("RIGHT")
     return p
 end
@@ -253,15 +258,21 @@ local function SkinEntry(row)
     local bar = content and content.ReputationBar
     if type(bar) ~= "table" then return false end
     for _, key in ipairs({ "Background", "LeftTexture", "RightTexture" }) do HeldArt.Hold(bar[key]) end
+    -- the 16001 bar: an unkeyed common-stat-bar-BG plate, a keyed Fill, a keyed Text
+    local Char = FS.CharacterSkin
+    if Char and Char.HoldStock then Char.HoldStock(bar, 0) end
     local texture = Try(bar.GetStatusBarTexture, bar)
+    if type(texture) ~= "table" then texture = bar.Fill end
     local p = Parts(row, bar)
     p.texture = texture
-    if type(bar.BarText) == "table" then
-        p.source = bar.BarText
-        Kit.HoldFrame(bar.BarText)
+    local text = bar.BarText or bar.Text
+    if type(text) == "table" then
+        p.source = text
+        Kit.HoldFrame(text)
         if not p.mirrored then
             p.mirrored = true
-            Kit.HookFunc(bar.BarText, "SetText", function() Mirror(p) end)
+            Kit.HookFunc(text, "SetText", function() Mirror(p) end)
+            if type(bar.Fill) == "table" then Kit.HookFunc(bar.Fill, "SetWidth", function() Rep.PaintRow(row) end) end
         end
         Mirror(p)
     end
@@ -278,8 +289,7 @@ local function SkinHeader(row)
     local Char = FS.CharacterSkin
     if Char and Char.HoldStock then
         Char.HoldStock(row, 3)
-        local icon = row.StateIcon
-        if type(icon) == "table" and icon.SetVertexColor then pcall(icon.SetVertexColor, icon, C.cyan[1], C.cyan[2], C.cyan[3], 1) end
+        if Char.TintStateIcon then Char.TintStateIcon(row.StateIcon) end
     end
     for _, key in ipairs({ "Left", "Middle", "Right", "HighlightLeft", "HighlightMiddle", "HighlightRight" }) do
         HeldArt.Hold(row[key])

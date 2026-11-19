@@ -21,7 +21,13 @@
 --   * the stock level band, pane backgrounds, brown stat rows, gold category headers, model buttons, sidebar tabs and the right
 --     pane toggle are held or restyled in place with every stock script and tooltip kept;
 --   * a shared footer line under both panes (the window is made one footer taller) with chips for item level, average wear and
---     worn pieces, and the repair bill on the right, each read from a plain API value and left out when the client will not give one.
+--     worn pieces, and the repair bill on the right, each read from a plain API value and left out when the client will not give one;
+--   * an info row under the header in place of the stock level line: the name, race and class in mono and an amber "lvl" chip;
+--   * the model well: a cut panel between the slot columns behind the 3D model;
+--   * the popout keys of the gear set mode as slim cut keys with a chevron pointing away from the slot, the ammo slot as a slot;
+--   * the stats pane as the mockup draws it (left caps category titles with a rule, lowercase labels, banded rows), the gear set
+--     and title lists as cards, their Equip / Save / New Set keys as STUwave text keys, the set picker as the guild bank's picker;
+--   * the other pages' rows, value bars, detail panes, check box labels, collapse keys and the pvp rank emblem (shared helpers).
 --
 -- Skin only. Slots are secure item buttons: nothing on them is moved, resized, reparented or attributed, and no field is written
 -- on them that UseContainerItem reads. Our regions, post-hooks and weak-keyed state only; the one resize is the window's own height
@@ -31,8 +37,7 @@
 --
 -- Left out on purpose (the mockup draws them, but they are computed, animated or invented, not a skin of a stock part): the
 -- durability model (the poles, the repair chip and hatching on the 3D model are not picked yet), wear brackets on the body and
--- the live trace from a hovered slot, stat change deltas after a gear swap, the title and gear set panes as rows, and the
--- tooltip changes.
+-- the live trace from a hovered slot, stat change deltas after a gear swap, and the tooltip changes.
 
 local _, FS = ...
 
@@ -58,9 +63,12 @@ local G = { FOOT_H = 28, CHIP_H = 20, CHIP_GAP = 8, SIDE = 14, WEAR_W = 2, WEAR_
 Char.GEOM = G
 
 local function Weak() return setmetatable({}, { __mode = "k" }) end
+-- Drawing helpers defined further down (the boxes and glyph cells), used by the page helpers above them.
+local LayoutBox, Box, PaintBox, ShownRegion, Cells, WatchShown
 local S = {
     done = false, slots = {}, chips = {}, decorated = Weak(), held = Weak(), watched = Weak(), details = Weak(), rules = Weak(),
-    boxes = Weak(), tabs = Weak(), squares = Weak(), spans = {},
+    boxes = Weak(), tabs = Weak(), squares = Weak(), spans = {}, popouts = Weak(), setRows = Weak(), statRows = Weak(), bands = Weak(),
+    vbars = Weak(), washes = Weak(), collapse = Weak(), detailHooks = Weak(),
 }
 Char.state = S
 
@@ -285,11 +293,30 @@ local function RefreshSlots()
     end
 end
 
+-- The ammo slot (inventory slot 0, a small 27 unit slot right of the ranged one) wears the same slot. Its stock frame art is three
+-- regions and a child: a 44 unit GearSlotSmall plate behind it, a 47 unit NormalTexture over it and an anonymous child carrying a
+-- GearSlot-Arrow that points left across the ranged slot. All are stock atlas art and held with the rest.
+local function SkinAmmo()
+    local ammo = _G.CharacterAmmoSlot
+    if type(ammo) ~= "table" then return end
+    Char.SkinSlot(ammo, 0, "player")
+    Char.HoldStock(ammo, 1)
+    for _, region in ipairs(Char.List(ammo, "GetRegions")) do
+        if Try(region.GetObjectType, region) == "Texture" and region ~= IconOf(ammo) then
+            local tex = Plain(Try(region.GetTexture, region))
+            -- the second NormalTexture (130841) is unkeyed, so the field sweep misses it
+            if tex == 130841 then HeldArt.Hold(region) end
+        end
+    end
+end
+
 local function SkinSlots()
     for _, name in ipairs(SLOT_NAMES) do
         local button = _G["Character" .. name .. "Slot"]
         if button then Char.SkinSlot(button, SLOT_ID[name], "player") end
     end
+    SkinAmmo()
+    Char.SkinPopouts()
 end
 
 
@@ -326,7 +353,7 @@ end
 -- The stock art of this window's pages is told by its atlas name: nothing here has a parentKey or a name to go by.
 local STOCK_ATLAS = {
     "^UI%-Character%-Info", "^common%-framedivider", "^common%-insideframe", "^common%-sidetab", "^common%-button%-list",
-    "^common%-button%-square", "^common%-stat%-bar%-BG",
+    "^common%-button%-square", "^common%-stat%-bar%-BG", "^charactercreate%-customize%-dropdown%-linemouseover",
 }
 -- Stock art that is information, not decoration: the plus and minus of a header, the honor badge and its reward ring.
 local KEEP_ATLAS = { "list%-minus", "list%-plus", "Honor%-Icon", "Honor%-Bar%-BG%-", "RewardRing" }
@@ -370,13 +397,153 @@ function Char.RestyleFonts(frame)
     end
 end
 
--- A row of one of the pages: its stock art held, its header glyph tinted, its texts in mono.
+-- A value bar of a page (a skill's SkillsBar, the detail pane's RankBar or StandingBar, a 160 x 29 unit StatusBar or plain Frame with
+-- a Fill and a FillArea): its stock art held, and a thin cyan line of ours along its foot, as long as the value is through its range
+-- (amber when full), under the stock text in mono. The fraction is the bar's own min, max and value when it has them, else the stock
+-- Fill's width over its FillArea's; nothing is drawn when neither reads plainly.
+local VB = { H = 3, INSET = 6, FOOT = 4 }
+
+local function BarFraction(bar)
+    local lo, hi = Try(bar.GetMinMaxValues, bar)
+    local v = Try(bar.GetValue, bar)
+    lo, hi, v = Plain(lo), Plain(hi), Plain(v)
+    if type(lo) == "number" and type(hi) == "number" and type(v) == "number" and hi > lo then
+        return math.max(0, math.min(1, (v - lo) / (hi - lo)))
+    end
+    local fill, area = bar.Fill, bar.FillArea
+    local fw = type(fill) == "table" and Plain(Try(fill.GetWidth, fill))
+    local aw = type(area) == "table" and Plain(Try(area.GetWidth, area))
+    if type(fw) == "number" and type(aw) == "number" and aw > 0 then return math.max(0, math.min(1, fw / aw)) end
+    return nil
+end
+Char.BarFraction = BarFraction
+
+function Char.PaintValueBar(bar)
+    local b = S.vbars[bar]
+    if not b then return end
+    local w, h = Kit.SizePx(bar)
+    local frac = BarFraction(bar)
+    if not w or not frac then
+        b.track:Hide(); b.fill:Hide()
+        return
+    end
+    local full = w - 2 * VB.INSET
+    local y = h - VB.FOOT - VB.H
+    Kit.Move(b.track, VB.INSET, y, full, VB.H)
+    local fw = math.floor(full * frac + 0.5)
+    local color = frac >= 1 and C.amber or C.cyan
+    b.fill:SetColorTexture(color[1], color[2], color[3], 1)
+    if fw > 0 then Kit.Move(b.fill, VB.INSET, y, fw, VB.H); b.fill:Show() else b.fill:Hide() end
+    b.track:Show()
+end
+
+function Char.SkinValueBar(bar)
+    if type(bar) ~= "table" or type(bar.CreateTexture) ~= "function" then return end
+    if S.vbars[bar] then Char.PaintValueBar(bar) return end
+    Char.HoldStock(bar, 1)
+    HeldArt.Hold(bar.Fill)
+    local tex = Try(bar.GetStatusBarTexture, bar)
+    if type(tex) == "table" then HeldArt.Hold(tex) end
+    local b = {
+        track = Kit.Rect(bar, 0, 0, 1, VB.H, C.dim, 0.7, "OVERLAY", 1),
+        fill = Kit.Rect(bar, 0, 0, 1, VB.H, C.cyan, 1, "OVERLAY", 2),
+    }
+    S.vbars[bar] = b
+    local text = bar.Text or bar.BarText
+    if type(text) == "table" and text.SetFont then Kit.RestyleLabel(text, bar, 11, C.text) end
+    for _, m in ipairs({ "SetValue", "SetMinMaxValues" }) do Kit.HookFunc(bar, m, function() Char.PaintValueBar(bar) end) end
+    if type(bar.Fill) == "table" then Kit.HookFunc(bar.Fill, "SetWidth", function() Char.PaintValueBar(bar) end) end
+    Kit.HookScript(bar, "OnSizeChanged", function() Char.PaintValueBar(bar) end)
+    Char.PaintValueBar(bar)
+end
+
+-- The hover and selected look of a page row. The stock row shows it through its BackgroundHighlight frame (grey line art, faded in
+-- and out by the frame's alpha and shown state); that art is held, so a violet wash and a stripe at the row's left edge follow the
+-- same frame's alpha and shown state instead.
+function Char.PaintWash(row)
+    local w = S.washes[row]
+    if not w then return end
+    local hl = w.hl
+    local a = (ShownRegion(hl) and Plain(Try(hl.GetAlpha, hl))) or 0
+    if type(a) ~= "number" or a < 0.05 then
+        w.wash:Hide(); w.stripe:Hide()
+        return
+    end
+    w.wash:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.22 * a)
+    w.stripe:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], a)
+    w.stripe:SetWidth(Kit.U(row, 3))
+    w.wash:Show(); w.stripe:Show()
+end
+
+function Char.SkinWash(row, hl)
+    if type(row) ~= "table" or type(hl) ~= "table" or S.washes[row] or type(row.CreateTexture) ~= "function" then return end
+    for _, region in ipairs(List(hl, "GetRegions")) do HeldArt.Hold(region) end
+    local w = { hl = hl }
+    w.wash = row:CreateTexture(nil, "BACKGROUND", nil, -6)
+    w.wash:SetAllPoints(row)
+    w.stripe = row:CreateTexture(nil, "BORDER", nil, 3)
+    w.stripe:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+    w.stripe:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+    S.washes[row] = w
+    for _, m in ipairs({ "SetAlpha", "Show", "Hide", "SetShown" }) do Kit.HookFunc(hl, m, function() Char.PaintWash(row) end) end
+    Kit.HookScript(row, "OnEnter", function() Char.PaintWash(row) end)
+    Kit.HookScript(row, "OnLeave", function() Char.PaintWash(row) end)
+    Char.PaintWash(row)
+end
+
+-- A header's collapse glyph (the stock list minus / plus, a green tinted atlas) in cyan: desaturated first, then tinted.
+function Char.TintStateIcon(icon)
+    if type(icon) ~= "table" or type(icon.SetVertexColor) ~= "function" then return end
+    if icon.SetDesaturated then pcall(icon.SetDesaturated, icon, true) end
+    pcall(icon.SetVertexColor, icon, C.cyan[1], C.cyan[2], C.cyan[3], 1)
+end
+
+-- The statistics page's category toggle (ToggleCollapseButton, a red campaign box): held, and a small key of ours in its place with a
+-- minus when the category is open and a plus when it is shut, read from the stock atlas (Campaign_HeaderIcon_Open / _Closed).
+local MINUS, PLUS = { { 0, 4, 10, 2 } }, { { 0, 4, 10, 2 }, { 4, 0, 2, 10 } }
+
+function Char.PaintCollapse(btn)
+    local k = S.collapse[btn]
+    if not k then return end
+    local nt = Try(btn.GetNormalTexture, btn)
+    local atlas = AtlasOf(nt) or ""
+    local open = not atlas:find("Closed")
+    local hover = k.state and k.state.hover
+    PaintBox(k.box, C.ink, 1, hover and C.cyan or C.dim, 1, 1)
+    for _, t in ipairs(k.minus) do t:SetShown(open) end
+    for _, t in ipairs(k.plus) do t:SetShown(not open) end
+end
+
+function Char.SkinCollapse(btn)
+    if type(btn) ~= "table" or S.collapse[btn] or type(btn.CreateTexture) ~= "function" then return end
+    HeldArt.HoldButton(btn)
+    local plate = CreateFrame("Frame", nil, btn)
+    Kit.Place(plate, btn, 0, 0, 16, 16, "CENTER", "CENTER", btn)
+    local k = { box = Box(plate, "OVERLAY"), minus = Cells(plate, 10, 10, MINUS), plus = Cells(plate, 10, 10, PLUS) }
+    S.collapse[btn] = k
+    k.state = Kit.Track(btn, Char.PaintCollapse)
+    for _, m in ipairs({ "SetNormalAtlas", "SetNormalTexture" }) do Kit.HookFunc(btn, m, function() Char.PaintCollapse(btn) end) end
+    local nt = Try(btn.GetNormalTexture, btn)
+    if type(nt) == "table" then Kit.HookFunc(nt, "SetAtlas", function() Char.PaintCollapse(btn) end) end
+    Char.PaintCollapse(btn)
+end
+
+-- A row of one of the pages: its stock art held, its header glyph tinted, its texts in mono (the 16001 entry rows keep their texts
+-- and bar on a Content child), its bar a value bar, its highlight a wash.
 function Char.PageRow(row)
     if type(row) ~= "table" then return end
     Char.HoldStock(row, 5)
-    local icon = row.StateIcon
-    if type(icon) == "table" and icon.SetVertexColor then pcall(icon.SetVertexColor, icon, C.cyan[1], C.cyan[2], C.cyan[3], 1) end
+    Char.TintStateIcon(row.StateIcon)
     Char.RestyleFonts(row)
+    local content = row.Content
+    if type(content) == "table" then
+        Char.RestyleFonts(content)
+        for _, key in ipairs({ "SkillsBar", "StatusBar", "ReputationBar" }) do
+            if type(content[key]) == "table" then Char.SkinValueBar(content[key]) end
+        end
+        if type(content.BackgroundHighlight) == "table" then Char.SkinWash(row, content.BackgroundHighlight) end
+    end
+    if type(row.ToggleCollapseButton) == "table" then Char.SkinCollapse(row.ToggleCollapseButton) end
 end
 
 -- Runs `fn(row)` on every row now and after every update of the ScrollBox `box`.
@@ -395,19 +562,62 @@ function Char.WatchRows(box, fn)
     run()
 end
 
--- A detail pane (the right hand pane of reputation, skills and pvp): chrome art held, texts and its bar in STUwave.
-function Char.SkinDetail(detail)
-    if type(detail) ~= "table" or S.details[detail] then return end
-    S.details[detail] = true
+-- A detail pane (the right hand pane of reputation, skills, pvp and currency): chrome art held, its title, subtitle, description,
+-- content rows (label and value) and check box labels in mono, its bar a value bar, an icon slot boxed. The pane's content rows and
+-- description text are made or refilled each time a row is selected, which always sets the title again, so the pane is met again
+-- after every SetText of its title as well as on show.
+local function DetailTexts(detail)
     Char.HoldStock(detail, 2)
     Char.RestyleFonts(detail)
-    for _, key in ipairs({ "StandingBar", "RankBar" }) do
-        local bar = detail[key]
-        if type(bar) == "table" and bar.CreateTexture then
-            local track = bar:CreateTexture(nil, "BACKGROUND", nil, -6)
-            track:SetAllPoints(bar)
-            track:SetColorTexture(C.ink[1], C.ink[2], C.ink[3], 0.9)
+    if type(detail.Title) == "table" then
+        Kit.RestyleLabel(detail.Title, detail, 13, C.cyan)
+        S.held[detail.Title] = nil
+        PinColor(detail.Title, C.cyan)
+    end
+    if type(detail.Subtitle) == "table" then Kit.RestyleLabel(detail.Subtitle, detail, 12, C.text) end
+    -- the description: Description.ScrollBox.ScrollTarget > one frame > FontString
+    local desc = detail.Description
+    local box = type(desc) == "table" and (desc.ScrollBox or desc)
+    local target = type(box) == "table" and box.ScrollTarget
+    for _, child in ipairs(List(target, "GetChildren")) do
+        for _, region in ipairs(List(child, "GetRegions")) do
+            if Try(region.GetObjectType, region) == "FontString" then Kit.RestyleLabel(region, detail, 12, C.text) end
         end
+    end
+    -- the content rows: label and value lines, a rewards title plate, an icon slot
+    for _, row in ipairs(List(detail.Content, "GetChildren")) do
+        Char.HoldStock(row, 1)
+        Char.RestyleFonts(row)
+        if type(row.IconSlot) == "table" and not S.details[row] and type(row.CreateTexture) == "function" then
+            S.details[row] = true
+            HeldArt.Hold(row.IconSlot)
+            local ring = Box(row, "BORDER", row.Icon or row.IconSlot)
+            PaintBox(ring, C.ink, 1, C.violet, 1, 1)
+        end
+    end
+    -- the check boxes' labels (At War, Move to Inactive, Show as Experience Bar, Unused, Show on Backpack)
+    for _, child in ipairs(List(detail, "GetChildren")) do
+        if Try(child.GetObjectType, child) == "CheckButton" then
+            local label = child.Label or child.Text or child.text
+            if type(label) == "table" and label.SetFont then
+                Kit.RestyleLabel(label, child, 12, C.text)
+                PinColor(label, C.text)
+            end
+        end
+    end
+    for _, key in ipairs({ "StandingBar", "RankBar" }) do
+        if type(detail[key]) == "table" then Char.SkinValueBar(detail[key]) end
+    end
+end
+
+function Char.SkinDetail(detail)
+    if type(detail) ~= "table" then return end
+    DetailTexts(detail)
+    if S.detailHooks[detail] then return end
+    S.detailHooks[detail] = true
+    Kit.HookScript(detail, "OnShow", function() Kit.Later(function() pcall(DetailTexts, detail) end) end)
+    if type(detail.Title) == "table" then
+        Kit.HookFunc(detail.Title, "SetText", function() Kit.Later(function() pcall(DetailTexts, detail) end) end)
     end
 end
 
@@ -415,7 +625,7 @@ end
 -- Boxes: a fill and a ring of rects that follows a stock widget's size
 -------------------------------------------------------------------------------
 
-local function LayoutBox(b)
+function LayoutBox(b)
     local u = Kit.U(b.host, b.px or 1)
     local e, h = b.edges, b.ref or b.host
     e[1]:ClearAllPoints(); e[1]:SetPoint("TOPLEFT", h, "TOPLEFT", 0, 0); e[1]:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0); e[1]:SetHeight(u)
@@ -425,7 +635,7 @@ local function LayoutBox(b)
 end
 
 -- `ref` (a frame or a texture) is what the box follows when it is not `host` itself; the textures are `host`'s.
-local function Box(host, edgeLayer, ref)
+function Box(host, edgeLayer, ref)
     local b = { host = host, ref = ref, edges = {}, px = 1 }
     b.fill = host:CreateTexture(nil, "BACKGROUND", nil, -7)
     b.fill:SetAllPoints(ref or host)
@@ -439,18 +649,18 @@ local function Box(host, edgeLayer, ref)
     return b
 end
 
-local function PaintBox(b, fill, fa, edge, ea, px)
+function PaintBox(b, fill, fa, edge, ea, px)
     b.fill:SetColorTexture(fill[1], fill[2], fill[3], fa or 1)
     for _, t in ipairs(b.edges) do t:SetColorTexture(edge[1], edge[2], edge[3], ea or 1) end
     if px and px ~= b.px then b.px = px; LayoutBox(b) end
 end
 
-local function ShownRegion(region)
+function ShownRegion(region)
     return type(region) == "table" and Try(region.IsShown, region) == true
 end
 
 -- Follows a texture region's shown state (the stock selected glow of a tab).
-local function WatchShown(region, fn)
+function WatchShown(region, fn)
     for _, m in ipairs({ "Show", "Hide", "SetShown" }) do Kit.HookFunc(region, m, fn) end
 end
 
@@ -530,7 +740,7 @@ end
 -- Cells of a glyph, {x, y, w, h} px each on a gw x gh px grid hung from the MIDDLE of `btn`: the grid's own middle is the button's, so
 -- the glyph is centred whatever size the stock button reported when it was skinned (the pixel scale is not settled yet when the
 -- skin is built, and an offset worked out from that size stays wrong). Even grids, so the middle falls between two pixels.
-local function Cells(btn, gw, gh, cells)
+function Cells(btn, gw, gh, cells)
     local out = {}
     local ox, oy = math.floor(gw / 2), math.floor(gh / 2)
     for _, c in ipairs(cells) do
@@ -627,6 +837,75 @@ local function SkinToggle()
 end
 
 -------------------------------------------------------------------------------
+-- Popout keys: the small buttons beside each slot that open the equipment flyout (shown in the gear set mode)
+-------------------------------------------------------------------------------
+
+-- The stock key is a 20 x 43 unit leather pull with a yellow arrow (UI-Character-Info-Button-PullSide). It is held and a slim cut
+-- key of ours drawn in its middle: an ink face, a dim edge (cyan on hover) and a chevron that points away from the slot it opens
+-- from, so the left column points right, the right column left and the weapon row up. Our regions on the stock key only.
+local POP = { LONG = 26, SHORT = 12 }
+local CHEVRON = {
+    right = { { 0, 0, 2, 2 }, { 2, 2, 2, 2 }, { 4, 4, 2, 2 }, { 2, 6, 2, 2 }, { 0, 8, 2, 2 } },
+    left = { { 4, 0, 2, 2 }, { 2, 2, 2, 2 }, { 0, 4, 2, 2 }, { 2, 6, 2, 2 }, { 4, 8, 2, 2 } },
+    up = { { 4, 0, 2, 2 }, { 2, 2, 2, 2 }, { 6, 2, 2, 2 }, { 0, 4, 2, 2 }, { 8, 4, 2, 2 } },
+}
+
+-- Which way a side key points: away from its slot, read from the two centres when painted (the slots are laid out after the skin is
+-- built, so a direction read at build time can be wrong).
+local function PopoutDir(p, btn)
+    if p.dir == "up" then return "up" end
+    local bx = Plain(Try(btn.GetCenter, btn))
+    local sx = p.slot and Plain(Try(p.slot.GetCenter, p.slot))
+    if type(bx) == "number" and type(sx) == "number" then return bx < sx and "left" or "right" end
+    return "right"
+end
+
+local function PaintPopout(btn)
+    local p = S.popouts[btn]
+    if not p then return end
+    local hover = p.state and (p.state.hover or p.state.pressed)
+    PaintBox(p.box, hover and C.band or C.ink, 1, hover and C.cyan or C.dim, 1, 1)
+    local g = hover and C.text or C.cyan
+    local dir = PopoutDir(p, btn)
+    for key, cells in pairs(p.glyphs) do
+        for _, t in ipairs(cells) do
+            t:SetColorTexture(g[1], g[2], g[3], 1)
+            t:SetShown(key == dir)
+        end
+    end
+end
+
+function Char.SkinPopout(btn, slot)
+    if type(btn) ~= "table" or S.popouts[btn] or type(btn.CreateTexture) ~= "function" then return end
+    HeldArt.HoldButton(btn)
+    Char.HoldStock(btn, 0)
+    local bw, bh = Plain(Try(btn.GetWidth, btn)), Plain(Try(btn.GetHeight, btn))
+    if type(bw) ~= "number" or type(bh) ~= "number" then return end
+    local side = bh > bw
+    local w, h = side and POP.SHORT or POP.LONG, side and POP.LONG or POP.SHORT
+    local plate = CreateFrame("Frame", nil, btn)
+    Kit.Place(plate, btn, 0, 0, w, h, "CENTER", "CENTER", btn)
+    local p = { box = Box(plate, "OVERLAY"), dir = side and "side" or "up", slot = slot, glyphs = {} }
+    if side then
+        p.glyphs.left = Cells(plate, 6, 10, CHEVRON.left)
+        p.glyphs.right = Cells(plate, 6, 10, CHEVRON.right)
+    else
+        p.glyphs.up = Cells(plate, 10, 6, CHEVRON.up)
+    end
+    S.popouts[btn] = p
+    p.state = Kit.Track(btn, PaintPopout)
+    PaintPopout(btn)
+end
+
+function Char.SkinPopouts()
+    for _, name in ipairs(SLOT_NAMES) do
+        local slot = _G["Character" .. name .. "Slot"]
+        local btn = slot and (slot.popoutButton or _G["Character" .. name .. "SlotPopoutButton"])
+        if btn then Char.SkinPopout(btn, slot) end
+    end
+end
+
+-------------------------------------------------------------------------------
 -- The equipment flyout (EquipmentFlyoutFrame)
 -------------------------------------------------------------------------------
 
@@ -682,23 +961,127 @@ end
 -- Stat rows
 -------------------------------------------------------------------------------
 
+-- Stat rows, from the mockup's stats pane: a category row's title sits at the left in small violet caps with a rule running from it to
+-- the row's right edge; a stat row reads "strength ... 78" with its label in lowercase mono and no colon, its value right aligned in
+-- the stock colour (green when buffed), and every other row carries a faint band (the stock row shows its Background on alternate
+-- rows; our band follows that). The title and label texts are rewritten by post-hooks on the stock SetText of those two font
+-- strings only (plain strings only), the title re-anchored to the row's left: the stats pane is not secure and nothing reads them back.
+local STAT = { TITLE_PX = 11, INSET = 6, RULE_GAP = 8 }
+
+local function Rewrite(fs, fn)
+    if type(fs) ~= "table" or S.statRows[fs] or type(hooksecurefunc) ~= "function" then return end
+    S.statRows[fs] = true
+    local busy = false
+    local function apply(self)
+        if busy then return end
+        local text = Plain(Try(self.GetText, self))
+        if type(text) ~= "string" then return end
+        local want = fn(text)
+        if want == text then return end
+        busy = true
+        pcall(self.SetText, self, want)
+        busy = false
+    end
+    pcall(hooksecurefunc, fs, "SetText", apply)
+    apply(fs)
+end
+
+local function TitleText(t) return t:upper() end
+local function LabelText(t)
+    local body = t:gsub(":%s*$", "")
+    if body:find("|c") then return body end
+    return body:lower()
+end
+
 local function StatRow(row)
     if type(row) ~= "table" then return end
     HeldArt.Hold(row.Background)
     Char.RestyleFonts(row)
     if not S.rules[row] and row.CreateTexture then
         local rule = row:CreateTexture(nil, "BORDER")
-        rule:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
-        rule:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
         S.rules[row] = rule
+        local band = row:CreateTexture(nil, "BACKGROUND", nil, -6)
+        band:SetAllPoints(row)
+        band:SetColorTexture(C.band[1], C.band[2], C.band[3], 0.8)
+        S.bands[row] = band
     end
     local rule = S.rules[row]
+    local title = type(row.Title) == "table" and row.Title or nil
     if rule then
-        local title = row.Title ~= nil
-        local color = title and C.violet or C.dim
-        rule:SetColorTexture(color[1], color[2], color[3], title and 0.9 or 0.4)
+        rule:ClearAllPoints()
+        if title then
+            Kit.RestyleLabel(title, row, STAT.TITLE_PX, C.violet)
+            S.held[title] = nil
+            PinColor(title, C.violet)
+            if title.SetJustifyH then pcall(title.SetJustifyH, title, "LEFT") end
+            pcall(title.ClearAllPoints, title)
+            pcall(title.SetPoint, title, "LEFT", row, "LEFT", Kit.U(row, STAT.INSET), 0)
+            Rewrite(title, TitleText)
+            -- from the text's own width: a title font string may be sized wider than its text
+            local tw = Plain(Try(title.GetStringWidth, title))
+            tw = type(tw) == "number" and tw or 0
+            rule:SetPoint("LEFT", row, "LEFT", Kit.U(row, STAT.INSET + STAT.RULE_GAP) + tw, 0)
+            rule:SetPoint("RIGHT", row, "RIGHT", -Kit.U(row, STAT.INSET), 0)
+            rule:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.55)
+        else
+            rule:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+            rule:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+            rule:SetColorTexture(C.dim[1], C.dim[2], C.dim[3], 0)
+            Rewrite(row.Label, LabelText)
+        end
         rule:SetHeight(Kit.U(row, 1))
     end
+    local band = S.bands and S.bands[row]
+    if band then band:SetShown(not title and ShownRegion(row.Background)) end
+end
+
+-- One row of the gear set or title list (pooled by its ScrollBox): stock art held, a card behind it, every text in mono. The
+-- selected or equipped state shows through the stock check and icon, which are kept.
+local function ListRow(row)
+    if type(row) ~= "table" or type(row.CreateTexture) ~= "function" then return end
+    if not S.setRows[row] then
+        Char.HoldStock(row, 2)
+        for _, key in ipairs({ "BgTop", "BgBottom", "BgMiddle", "HighlightBar", "SelectedBar", "Stripe", "Background" }) do
+            HeldArt.Hold(row[key])
+        end
+        local b = Box(row, "BORDER")
+        S.setRows[row] = b
+        S.setRowState = S.setRowState or Weak()
+        S.setRowState[row] = Kit.Track(row, function(r)
+            local st = S.setRowState[r]
+            PaintBox(S.setRows[r], C.ink, 0.9, st and st.hover and C.cyan or C.dim, 1, 1)
+        end)
+    end
+    PaintBox(S.setRows[row], C.ink, 0.9, C.dim, 1, 1)
+    for _, region in ipairs(List(row, "GetRegions")) do
+        if Try(region.GetObjectType, region) == "FontString" then
+            Kit.RestyleLabel(region, row, 12, C.text)
+        end
+    end
+end
+
+local function SkinSidePanes()
+    local paper = _G.PaperDollFrame
+    if not paper then return end
+    local equip, titles = paper.EquipmentManagerPane, paper.TitleManagerPane
+    for _, pane in ipairs({ equip, titles }) do
+        if type(pane) == "table" then
+            Char.HoldStock(pane, 1)
+            HeldArt.Hold(pane.Border)
+            if pane.ScrollBox then Char.WatchRows(pane.ScrollBox, ListRow) end
+        end
+    end
+    local skins = FS.ButtonSkins
+    if skins and skins.SkinTextButton then
+        local function text(btn, accent) if type(btn) == "table" then pcall(skins.SkinTextButton, btn, { accent = accent }) end end
+        text(_G.PaperDollFrameEquipSet or (equip and equip.EquipSet), "cyan")
+        text(_G.PaperDollFrameSaveSet or (equip and equip.SaveSet), "violet")
+        text(_G.PaperDollFrameNewSet or (equip and equip.NewSet), "cyan")
+    end
+    -- the set name and icon picker the New Set key opens (an IconSelectorPopupFrameTemplate, as the guild bank tab picker)
+    local pop = _G.GearManagerPopupFrame
+    local gb = FS.GuildBankSkin
+    if type(pop) == "table" and gb and gb.SkinIconPopup then pcall(gb.SkinIconPopup, pop) end
 end
 
 local function SkinStats()
@@ -711,11 +1094,7 @@ local function SkinStats()
             Char.WatchRows(pane.ScrollBox, StatRow)
         end
     end
-    local paper = _G.PaperDollFrame
-    if paper then
-        Char.HoldStock(paper.TitleManagerPane, 4)
-        Char.HoldStock(paper.EquipmentManagerPane, 4)
-    end
+    SkinSidePanes()
 end
 
 -------------------------------------------------------------------------------
@@ -853,6 +1232,36 @@ local function SkinPanes()
     if scene then HeldArt.Hold(scene.BackgroundOverlay) end
 end
 
+-- The pvp page's rank emblem (MainInfoFrame.RankProgressBarDisplay, a Cooldown whose swipe is the rank progress): the stock glow and
+-- the faction disc are held, the ring track under the swipe tinted dim violet, the faction badge kept, the swipe drawn pink; the next reward ring held, a
+-- cut box of ours in its place and its level number in amber mono.
+function Char.SkinRankEmblem(pvp)
+    local info = pvp and pvp.MainInfoFrame
+    local disp = type(info) == "table" and info.RankProgressBarDisplay
+    if type(disp) ~= "table" or S.details[disp] then return end
+    S.details[disp] = true
+    for _, region in ipairs(List(disp, "GetRegions")) do
+        if region == disp.Bar then
+            -- the ring track under the swipe stays, desaturated and dim violet, so the progress arc has a ring to run on
+            if region.SetDesaturated then pcall(region.SetDesaturated, region, true) end
+            pcall(region.SetVertexColor, region, C.dim[1], C.dim[2], C.dim[3], 1)
+        elseif region ~= disp.FactionBadge and Try(region.GetObjectType, region) == "Texture" then
+            HeldArt.Hold(region)
+        end
+    end
+    if type(disp.SetSwipeColor) == "function" then pcall(disp.SetSwipeColor, disp, C.pink[1], C.pink[2], C.pink[3], 0.9) end
+    local next = disp.NextRewardLevel
+    if type(next) == "table" and type(next.CreateTexture) == "function" then
+        HeldArt.Hold(next.RingBorder)
+        HeldArt.Hold(next.IconCover)
+        PaintBox(Box(next, "OVERLAY"), C.ink, 1, C.amber, 1, 1)
+        if type(next.LevelLabel) == "table" then
+            Kit.RestyleLabel(next.LevelLabel, next, 13, C.amber)
+            PinColor(next.LevelLabel, C.amber)
+        end
+    end
+end
+
 -- The pages that are not the paper doll: stock art held, detail panes and rows restyled, controls and scroll bars swept.
 local function SkinPages()
     local rep = _G.ReputationFrame
@@ -870,6 +1279,7 @@ local function SkinPages()
     if pvp then
         Char.HoldStock(pvp.MainInfoFrame, 3)
         Char.SkinDetail(pvp.DetailFrame)
+        Char.SkinRankEmblem(pvp)
         for _, key in ipairs({ "SeasonTimerField", "CurrentSeasonField", "CurrentRankField", "CurrentRankProgressField" }) do
             local fs = pvp[key] or (pvp.MainInfoFrame and pvp.MainInfoFrame[key])
             if type(fs) == "table" and fs.SetFont then Kit.RestyleLabel(fs, pvp, 12, C.text); PinColor(fs, C.text) end
@@ -881,7 +1291,10 @@ local function SkinPages()
         Char.WatchRows(stats.ScrollBox, Char.PageRow)
     end
     local token = _G.TokenFrame
-    if token then Char.HoldStock(token.ScrollBox, 2) end
+    if token then
+        Char.HoldStock(token.ScrollBox, 2)
+        Char.SkinDetail(token.DetailFrame or _G.TokenDetailFrame)
+    end
     for _, name in ipairs({ "ReputationFrame", "SkillsFrame", "PVPRankFrame", "StatisticsFrame", "TokenFrame" }) do
         local page = _G[name]
         if page then pcall(PanelSkins.SweepOnShow, page) end
@@ -954,36 +1367,128 @@ function Char.RefreshChips()
     if ShownPage() ~= 1 then for _, c in pairs(chips) do c.frame:Hide() end end
 end
 
--- The stock level line (CharacterLevelText, 28 units under the window's top edge) lands on the lower rule of our header band, so it
--- is held and its text is mirrored on an amber chip in the header band, LEVEL.GAP px right of the title, level with it. The chip is a
--- child of the paper doll page, so it goes with that page. The stock line is held only once its text has been read as a plain
--- string; a text the client will not give plainly hides the chip and leaves the stock line (restyled amber) where it was.
-local LEVEL = { GAP = 16, MAX_W = 230 }
+-- The info row (the band of the stock top strip, under the header): the stock level line ("Level 18 Warrior", centred, its class
+-- part in a class colour code) is held, frame and text, and the row reads as the mockup's well caption instead: the name in light
+-- mono at the left, the race and class in small muted lowercase after it, and an amber "lvl 18" chip at the right, left of the pane
+-- toggle. Every part is read from a plain API value (UnitName, UnitRace, UnitClass, UnitLevel); when the level is not a plain number
+-- the row is hidden and the stock line is left as it was (restyled amber). Children of the paper doll page, so they go with it.
+local INFO = { PAD = 14, GAP = 10, NAME_PX = 13, SUB_PX = 11 }
 
-local function Visible(text) return (text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
+local function PlainString(v)
+    v = Plain(v)
+    return type(v) == "string" and v ~= "" and v or nil
+end
+
+function Char.InfoText()
+    local level = Plain(Try(_G.UnitLevel, "player"))
+    if type(level) ~= "number" then return nil end
+    local name = PlainString(Try(_G.UnitName, "player"))
+    local race = PlainString(Try(_G.UnitRace, "player"))
+    local class = PlainString(Try(_G.UnitClass, "player"))
+    local sub = {}
+    if race then sub[#sub + 1] = race:lower() end
+    if class then sub[#sub + 1] = class:lower() end
+    return { name = name and name:lower() or "", sub = table.concat(sub, " "), level = "lvl " .. level }
+end
 
 function Char.RefreshLevel()
-    local c, head = S.level, S.header
-    local line = _G.CharacterLevelText
-    if not (c and head and type(line) == "table") then return end
-    local text = Plain(Try(line.GetText, line))
-    if type(text) ~= "string" or text == "" then c.frame:Hide() return end
-    Kit.HoldFrame(line)
-    local w = math.min(math.floor(#Visible(text) * 12 * 0.5615 + 16 + 0.5), LEVEL.MAX_W)
-    c.label:SetText(text)
-    if c.label.SetWordWrap then pcall(c.label.SetWordWrap, c.label, false) end
-    Kit.Place(c.frame, head.title, LEVEL.GAP, 0, w, G.CHIP_H, "LEFT", "RIGHT", _G.CharacterFrame)
-    Kit.Place(c.label, c.frame, 8, G.CHIP_H / 2, w - 16, G.CHIP_H, "LEFT", "TOPLEFT")
+    local row = S.info
+    if not row then return end
+    local info = Char.InfoText()
+    if not info then
+        row.frame:Hide()
+        return
+    end
+    Kit.HoldFrame(_G.PaperDollLevelInfo)
+    Kit.HoldFrame(_G.CharacterLevelText)
+    row.name:SetText(info.name)
+    row.sub:SetText(info.sub)
+    local w = math.floor(#info.level * 12 * 0.5615 + 16 + 0.5)
+    local c = row.chip
+    c.label:SetText(info.level)
+    Kit.Place(c.frame, row.frame, -INFO.PAD, 0, w, G.CHIP_H, "RIGHT", "RIGHT", _G.CharacterFrame)
     c.plate.w = w
-    c.frame:Show()
+    row.frame:Show()
+end
+
+-- The row sits just under the header rule (the stock level line hung lower, where the row ran into the model well); it runs from
+-- the window's left edge to the pane toggle. Worked out from the frames' own rects.
+function Char.LayoutInfo()
+    local row, win = S.info, _G.CharacterFrame
+    if not (row and win and S.headPx) then return end
+    local function n(f, m) return f and Plain(Try(f[m], f)) end
+    local top, left = n(win, "GetTop"), n(win, "GetLeft")
+    if type(top) ~= "number" or type(left) ~= "number" then return end
+    local ppu = Kit.Ppu(win)
+    local hpx = G.CHIP_H + 4
+    local cy = S.headPx + 2 + hpx / 2
+    local right = n(_G.CharacterFrameRightPaneToggleButton, "GetLeft")
+    local wpx = type(right) == "number" and math.floor((right - left) * ppu - 8) or 380
+    Kit.Place(row.frame, win, 0, math.floor(cy - hpx / 2 + 0.5), wpx, hpx, "TOPLEFT", "TOPLEFT", win)
 end
 
 local function BuildLevel(win)
-    local paper, line = _G.PaperDollFrame, _G.CharacterLevelText
-    if type(paper) ~= "table" or type(line) ~= "table" or not S.header then return end
-    S.level = Chip(win, C.amber, paper)
-    for _, m in ipairs({ "SetFormattedText", "SetText" }) do Kit.HookFunc(line, m, Char.RefreshLevel) end
+    local paper = _G.PaperDollFrame
+    local host = paper and paper.TopBackgroundStripHost
+    if type(paper) ~= "table" or type(host) ~= "table" then return end
+    local row = { frame = CreateFrame("Frame", nil, paper) }
+    row.frame:SetFrameLevel((paper:GetFrameLevel() or 0) + 5)
+    S.info = row
+    Char.LayoutInfo()
+    row.name = Kit.Label(row.frame, "", INFO.NAME_PX, C.text, "OVERLAY")
+    Kit.Place(row.name, row.frame, INFO.PAD, 0, nil, nil, "LEFT", "LEFT", win)
+    row.name:SetJustifyH("LEFT")
+    row.sub = Kit.Label(row.frame, "", INFO.SUB_PX, C.muted, "OVERLAY")
+    row.sub:SetPoint("BOTTOMLEFT", row.name, "BOTTOMRIGHT", Kit.U(win, INFO.GAP), 0)
+    row.sub:SetJustifyH("LEFT")
+    row.chip = Chip(win, C.amber, row.frame)
+    S.level = row.chip
+    local line = _G.CharacterLevelText
+    if type(line) == "table" then
+        for _, m in ipairs({ "SetFormattedText", "SetText" }) do Kit.HookFunc(line, m, Char.RefreshLevel) end
+    end
     Char.RefreshLevel()
+end
+
+-- The model well: a cut panel behind the 3D model, between the slot columns, from just above the model's zoom row down to just
+-- above the weapon row (the mockup's model box). Our own frame on the paper doll page, one level under the model scene so the
+-- model draws over it; laid out from the stock slots' own rects after every show and re-seat (they are never moved).
+local WELL = { GAP = 8, TOP = 6, CUT = 8 }
+Char.WELL = WELL
+
+function Char.LayoutWell()
+    local w = S.well
+    if not w then return end
+    local paper, head, hands, main = _G.PaperDollFrame, _G.CharacterHeadSlot, _G.CharacterHandsSlot, _G.CharacterMainHandSlot
+    local control = _G.CharacterModelScene and _G.CharacterModelScene.ControlFrame
+    if not (paper and head and hands and main) then return end
+    local function n(f, m) return Plain(Try(f[m], f)) end
+    local l, r, mt, ht = n(head, "GetRight"), n(hands, "GetLeft"), n(main, "GetTop"), n(head, "GetTop")
+    local ct = control and n(control, "GetTop")
+    if type(l) ~= "number" or type(r) ~= "number" or type(mt) ~= "number" or type(ht) ~= "number" then return end
+    local gap = Kit.U(paper, WELL.GAP)
+    local top = math.max(ht, type(ct) == "number" and ct or ht) + Kit.U(paper, WELL.TOP)
+    local width, height = (r - l) - 2 * gap, top - (mt + gap)
+    if width <= 0 or height <= 0 then return end
+    local ppu = Kit.Ppu(paper)
+    width, height = math.floor(width * ppu + 0.5) / ppu, math.floor(height * ppu + 0.5) / ppu
+    w.frame:ClearAllPoints()
+    w.frame:SetPoint("TOPLEFT", head, "TOPRIGHT", gap, top - ht)
+    w.frame:SetSize(width, height)
+    w.wpx, w.hpx = math.floor(width * ppu + 0.5), math.floor(height * ppu + 0.5)
+    if w.plate.ring2 then Kit.Move(w.plate.ring2, 1, 1, w.wpx - 2, w.hpx - 2) end
+    if Char.OnWellLayout then pcall(Char.OnWellLayout, w) end
+end
+
+local function BuildWell()
+    local paper, scene = _G.PaperDollFrame, _G.CharacterModelScene
+    if type(paper) ~= "table" or type(scene) ~= "table" then return end
+    local frame = CreateFrame("Frame", nil, paper)
+    frame:SetFrameLevel(math.max(0, (Plain(Try(scene.GetFrameLevel, scene)) or 1) - 1))
+    local w = { frame = frame, plate = Kit.Plate(frame, WELL.CUT, 100, 100) }
+    Kit.PaintPlate(w.plate, C.ink, 0.9, C.violet, 1, 1)
+    S.well = w
+    Char.LayoutWell()
 end
 
 -- The window is made one footer taller (outside combat); stock code that sets its height again is answered with the same.
@@ -1024,6 +1529,8 @@ local MODEL_ART = {
 local function Relayout()
     for _, rec in ipairs(S.spans) do rec.apply() end
     for b in pairs(S.boxes) do LayoutBox(b) end
+    Step("wellLayout", Char.LayoutWell)
+    Step("infoLayout", Char.LayoutInfo)
     local win = _G.CharacterFrame
     if win and S.done then ExtendWindow(win) end
 end
@@ -1071,6 +1578,7 @@ local function Build()
     Step("header", BuildHeader, win)
     Step("footer", BuildFooter, win)
     Step("levelChip", BuildLevel, win)
+    Step("well", BuildWell)
     Kit.HookScript(win, "OnShow", function() Kit.Later(function() Relayout(); Refresh() end) end)
     Kit.HookFunc(win, "SetHeight", function() if not S.extending then Kit.Later(function() ExtendWindow(win) end) end end)
     Kit.HookFunc(win, "SetSize", function() if not S.extending then Kit.Later(function() ExtendWindow(win) end) end end)

@@ -432,6 +432,8 @@ local function Build()
     Step("control", SkinControl)
 end
 Gb.Build = Build
+-- The icon and name picker is a shared template; the character window's gear set picker (GearManagerPopupFrame) uses it too.
+Gb.SkinIconPopup = SkinPopup
 
 PanelSkins.RegisterInspect("GuildBank", { { name = "GuildBankFrame", guard = "fsGuildBankSkin" },
     { name = "GuildBankPopupFrame", guard = "fsGuildBankPopupSkin" }, { name = "GuildControlUI", guard = "fsGuildControlSkin" } })

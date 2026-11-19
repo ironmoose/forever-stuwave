@@ -109,6 +109,9 @@ end
 function Secret() return { __secret = true } end
 function Obj:GetLeft() local l = self:Rect(); return l end
 function Obj:GetRight() local _, _, r = self:Rect(); return r end
+function Obj:GetTop() local _, t = self:Rect(); return -t end
+function Obj:GetBottom() local _, _, _, b = self:Rect(); return -b end
+function Obj:GetCenter() local l, t, r, b = self:Rect(); return (l + r) / 2, -(t + b) / 2 end
 
 function Obj:SetDesaturated(v) self.desat = v and true or false end"""
 

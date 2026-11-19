@@ -261,33 +261,30 @@ case("model buttons, sidebar tabs and the pane toggle are restyled in place", f"
     assert(tg.scripts.OnClick, 'toggle click lost')
 """)
 
-case("level line: the stock text is not left across the header rule, it is mirrored on an amber chip in the header band", f"""
+case("info row: the stock level line is held; name, race and class and an amber lvl chip sit in the strip under the header", f"""
+    UnitLevel = function() return 6 end
+    UnitName = function() return 'Father' end
+    UnitRace = function() return 'Tauren' end
+    UnitClass = function() return 'Druid', 'DRUID' end
     {OPEN}
     local S = FS.CharacterSkin.state
-    -- the stock line sits 28 units under the window's top edge, which is on the lower rule of the 45 px header band
-    local ll, lt, lr, lb = Px(CharacterLevelText, CharacterFrame)
-    if lt < S.headPx + 1 and lb > S.headPx then
-        assert(CharacterLevelText.alpha == 0, string.format('the stock level text (%.0f to %.0f px down) is drawn across the header rule at %d px', lt, lb, S.headPx))
-    end
-    local lv = S.level
-    assert(lv and lv.frame, 'no level chip')
-    assert(CharacterLevelText.alpha == 0, 'the stock line is kept next to its chip')
-    assert(lv.frame:GetParent() == PaperDollFrame, 'the chip must go with the paper doll page')
-    assert(lv.frame.shown ~= false and lv.label.text == 'Level 6 Druid', 'chip text: ' .. tostring(lv.label.text))
-    assert(lv.label.textColor[1] > 0.9 and lv.label.textColor[3] < 0.3, 'chip text not amber')
-    local cl, ct, cr, cb = Px(lv.frame, CharacterFrame)
-    assert(ct >= 4 and cb <= S.headPx - 4, string.format('the chip is not seated in the header band: %.1f to %.1f of %d', ct, cb, S.headPx))
-    local tl, tt, tr = Px(S.header.title, CharacterFrame)
-    assert(cl - tr >= 8, string.format('the chip crowds the title (%.1f px between)', cl - tr))
+    local row = S.info
+    assert(row and row.frame.shown ~= false, 'no info row')
+    assert(PaperDollLevelInfo.alpha == 0 and CharacterLevelText.alpha == 0, 'the stock level line is still drawn')
+    assert(row.name.text == 'father' and row.sub.text == 'tauren druid', 'info text: ' .. tostring(row.name.text) .. ' / ' .. tostring(row.sub.text))
+    assert(row.chip.label.text == 'lvl 6', 'chip text: ' .. tostring(row.chip.label.text))
+    assert(row.chip.label.textColor[1] > 0.9 and row.chip.label.textColor[3] < 0.3, 'chip text not amber')
+    assert(row.frame:GetParent() == PaperDollFrame, 'the row must go with the paper doll page')
+    -- the chip sits under the header rule, inside the strip, and clear of the pane toggle
+    local cl, ct, cr, cb = Px(row.chip.frame, CharacterFrame)
+    assert(ct >= S.headPx, string.format('the chip reaches into the header band (%.1f < %d)', ct, S.headPx))
     local gl = Px(CharacterFrameRightPaneToggleButton, CharacterFrame)
     assert(gl - cr >= 8, string.format('the chip runs into the pane toggle (%.1f px between)', gl - cr))
-    assert(Near((ct + cb) / 2, S.headPx / 2, 1.5), string.format('the chip is not level with the header band (%.1f vs %.1f)', (ct + cb) / 2, S.headPx / 2))
-    -- it follows the stock text, plain strings only
-    CharacterLevelText:SetFormattedText('Level %d %s', 7, 'Druid')
-    assert(lv.label.text == 'Level 7 Druid', 'the chip did not follow the stock text: ' .. tostring(lv.label.text))
-    CharacterLevelText.text = Secret()
+    local nl, nt, nr = Px(row.name, CharacterFrame)
+    assert(cl - nr >= 8, 'the chip crowds the name')
+    UnitLevel = function() return Secret() end
     FS.CharacterSkin.RefreshLevel()
-    assert(not lv.frame.shown, 'a secret text is shown')
+    assert(not row.frame.shown, 'a secret level is shown')
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
@@ -603,7 +600,13 @@ case("stat rows (the ScrollBox's recycled rows) keep their scripts, hold their a
     row.Label:SetTextColor(1, 0.82, 0, 1)
     assert(row.Label.textColor[1] < 0.8, 'the pinned label colour came back to gold')
     local cat = box.rows[1]
-    assert(cat.Background.alpha == 0 and cat.Title.textColor[2] > 0.8 and cat.Title.textColor[1] < 0.5, 'category not cyan')
+    local v = FS.Theme.COLOR_BORDER
+    assert(cat.Background.alpha == 0 and Near(cat.Title.textColor[1], v[1], 0.01) and Near(cat.Title.textColor[3], v[3], 0.01), 'category not violet')
+    assert(cat.Title.text == cat.Title.text:upper(), 'category title not in caps: ' .. tostring(cat.Title.text))
+    assert(cat.Title.justifyH == 'LEFT' or cat.Title.justify == 'LEFT', 'category title not left aligned')
+    assert(FS.CharacterSkin.state.rules[cat].shown ~= false, 'no rule after the category title')
+    row.Label:SetText('Strength:')
+    assert(row.Label.text == 'strength', 'stat label not lowercase without its colon: ' .. tostring(row.Label.text))
     assert(CharacterStatsPaneScrollBox.Border.alpha == 0 and CharacterStatsPaneScrollBox.ClassBackground.alpha == 0, 'pane art')
     -- a row the list builds later is restyled on its next update
     local f = BLZ.blz('Frame', nil, box.ScrollTarget, 193, 23)
