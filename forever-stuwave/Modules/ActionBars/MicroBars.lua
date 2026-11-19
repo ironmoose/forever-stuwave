@@ -98,6 +98,26 @@ local BAKED_PAD = (1 - BAKED_H / BAKED_W) / 2
 -- The glyph's draw sublevel (ARTWORK): the chain needs IconStyle.TOP_OFFSET + 1 above it for its overlays and the cover,
 -- all under the key's ring (ARTWORK 0); -8 is the lowest sublevel there is.
 local GLYPH_SUBLEVEL = -6
+-- The cover's shape, column by column: the first and last row of iconcover_key.tga (128 x 128) where the key's inside is (alpha
+-- at most 128), -1 for a column with no inside. Read from the shipped texture; tools/microbars-harness.py checks it still matches.
+-- The row ends draw their art in strips along these (StripEnds).
+local COVER_TEX = 128
+local SLANT_TOP = {
+    -1, -1, -1, -1, -1, -1, 117, 115, 112, 108, 106, 105, 102, 97, 95, 93, 91, 86, 83, 81, 80, 76, 72, 70, 69, 65, 61, 59, 57, 55, 50, 47,
+    46, 44, 40, 37, 35, 33, 29, 25, 23, 21, 18, 14, 12, 11, 9, 8, 7, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 8, -1, -1, -1, -1, -1, -1,
+}
+local SLANT_BOT = {
+    -1, -1, -1, -1, -1, -1, 119, 120, 120, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121,
+    121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121,
+    121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 121, 120, 119, 118, 116, 115, 113, 109, 106, 104, 102, 98, 94, 92, 90, 87, 83, 81,
+    80, 77, 72, 70, 68, 66, 62, 58, 57, 55, 51, 47, 46, 44, 41, 36, 34, 32, 30, 25, 22, 21, 19, 15, 12, 10, -1, -1, -1, -1, -1, -1,
+}
+-- The first column whose inside reaches the top row (6), and the first whose inside stops short of the bottom row (121): left of
+-- the one the top-left triangle is outside, right of the other the bottom-right one.
+local SLANT_LEFT_END, SLANT_RIGHT_START = 50, 79
+
 
 local function Round(v)
     return math.floor(v + 0.5)
@@ -484,11 +504,93 @@ local function GlyphView(spec, aspect, drawAspect)
 end
 
 -- Writes a runtime key's window to the glyph and to its ADD copy, which must show the same one (texture writes only).
+-- The keys at the two ends of the row. A key's art is an upright rectangle and the cover paints the plate colour over the two
+-- triangles outside the slant; between keys a neighbour sits over them, but at the row ends they showed as dark wedges on the
+-- deck (live 2026-11-19). On the first key the columns of the top-left triangle, on the last those of the bottom-right one, are
+-- drawn as one physical pixel wide strips of the art instead, each only as tall as the key's inside in that column, and the
+-- cover is cropped to the rest: the art is whole and the corner is empty. Under the stock micro style only (the gradient look's
+-- overlays are not stripped; those ends keep the cover). Our own textures on our overlay, so legal in combat.
+local function StripEnds(key)
+    local g = key.geo
+    if not g then return end
+    key.strips = key.strips or {}
+    local strips, used = key.strips, 0
+    local on = key.rowEnd ~= nil and key.spec.kind == "runtime" and Style() == "stock" and g.px ~= nil
+    key.stripStyle = Style()
+    local l, r, t, b = GlyphView(key.spec, key.aspect, key.drawAspect)
+    local function Place(tex, x0, y0, x1, y1)
+        tex:ClearAllPoints()
+        tex:SetPoint("TOPLEFT", key.ov, "TOPLEFT", x0, -y0)
+        tex:SetPoint("BOTTOMRIGHT", key.ov, "BOTTOMRIGHT", -(g.w - x1), g.h - y1)
+    end
+    local cl, cr = g.left, g.w - g.right          -- the cover's span
+    local gx0, gx1 = g.gl, g.w - g.gr               -- the art's span
+    local a0, a1 = gx0, gx1                         -- the part of the art drawn whole
+    local cu0, cu1 = 0, 1
+    if on then
+        local px, cw, ch = g.px, cl and (cr - cl), g.bottom - g.top
+        local function U(x) return l + (x - gx0) / (gx1 - gx0) * (r - l) end
+        local function V(y) return t + (y - g.top) / ch * (b - t) end
+        local function Snap(v) return Round(v / px) * px end
+        local function Strip(x)
+            local col = math.floor((x + px / 2 - g.left) / cw * COVER_TEX)
+            local top, low = SLANT_TOP[col + 1], SLANT_BOT[col + 1]
+            if not top or top < 0 then return end
+            local y0, y1 = Snap(g.top + top / COVER_TEX * ch), Snap(g.top + (low + 1) / COVER_TEX * ch)
+            local x0, x1 = math.max(x, gx0), math.min(x + px, gx1)
+            if x1 <= x0 or y1 <= y0 then return end
+            used = used + 1
+            local s = strips[used]
+            if not s then
+                s = Crisp(key.fx:CreateTexture(nil, "ARTWORK", nil, GLYPH_SUBLEVEL))
+                strips[used] = s
+            end
+            s:SetTexture(key.spec.file)
+            Place(s, x0, y0, x1, y1)
+            s:SetTexCoord(U(x0), U(x1), V(y0), V(y1))
+            s:Show()
+        end
+        if key.rowEnd == "first" or key.rowEnd == "both" then
+            local cut = Snap(g.left + SLANT_LEFT_END / COVER_TEX * cw)
+            for x = Snap(g.left), cut - px / 2, px do Strip(x) end
+            cu0, a0 = (cut - g.left) / cw, math.max(a0, cut)
+            cl = cut
+        end
+        if key.rowEnd == "last" or key.rowEnd == "both" then
+            local cut = Snap(g.left + SLANT_RIGHT_START / COVER_TEX * cw)
+            for x = cut, g.w - g.right - px / 2, px do Strip(x) end
+            cu1, a1 = (cut - g.left) / cw, math.min(a1, cut)
+            cr = cut
+        end
+        if a1 > a0 then
+            Place(key.glyph, a0, g.top, a1, g.bottom)
+            key.glyph:SetTexCoord(U(a0), U(a1), t, b)
+        end
+    else
+        Place(key.glyph, gx0, g.top, gx1, g.bottom)
+        key.glyph:SetTexCoord(l, r, t, b)
+    end
+    if key.cover then
+        key.cover:SetTexCoord(cu0, cu1, 0, 1)
+        Place(key.cover, cl, g.top, cr, g.bottom)
+    end
+    for i = used + 1, #strips do strips[i]:Hide() end
+    key.stripCount = used
+    if key.stripPaint then
+        local p = key.stripPaint
+        for i = 1, used do
+            Tint(strips[i], p[1], p[2])
+            strips[i]:SetDesaturated(p[3])
+        end
+    end
+end
+
 local function SetWindow(key)
     if key.spec.kind ~= "runtime" then return end
     local l, r, t, b = GlyphView(key.spec, key.aspect, key.drawAspect)
     key.glyph:SetTexCoord(l, r, t, b)
     if key.chain then key.chain.boost:SetTexCoord(l, r, t, b) end
+    StripEnds(key)
 end
 
 local function Paint(key, v)
@@ -501,7 +603,16 @@ local function Paint(key, v)
         local tint = v.glyphDesat and v.glyph or WHITE
         Tint(key.glyph, tint, v.glyphA)
         key.glyph:SetDesaturated(v.glyphDesat)
+        -- the end strips wear what the art wears
+        key.stripPaint = { tint, v.glyphA, v.glyphDesat }
+        if key.stripStyle ~= "stock" then StripEnds(key) end
+        for i = 1, key.stripCount or 0 do
+            Tint(key.strips[i], tint, v.glyphA)
+            key.strips[i]:SetDesaturated(v.glyphDesat)
+        end
     elseif runtime then
+        key.stripPaint = nil
+        if key.stripStyle == "stock" then StripEnds(key) end
         Tint(key.glyph, v.glyph, v.glyphA)
         -- the game's texture wears a look: the base stays grey, the ramp supplies the colour (grey too when disabled)
         if not key.chain.active then
@@ -580,6 +691,7 @@ local function SizeKey(key, s, keyW)
         end
         local left, right = Edge(cover.x0 * w), Edge((1 - cover.x1) * w)
         PlaceAt(key.cover, left, right)
+        key.geo = { left = left, right = right, top = top, bottom = bottom, w = w, h = h, px = px }
         -- the rectangle as drawn (snapped edges): the glyph's window is refitted to its aspect, so a key the layout made
         -- narrower is not squeezed sideways
         local rw = w - left - right
@@ -596,6 +708,7 @@ local function SizeKey(key, s, keyW)
             key.drawAspect = (w - left - right) / rh
         end
         PlaceAt(key.glyph, left, right)
+        key.geo.gl, key.geo.gr = left, right
         SetWindow(key)
     else
         -- The art covers the key: the square baked texture is stretched to the key's size and cropped (texcoords) to
@@ -1456,7 +1569,11 @@ local function SeatButtons(buttons, shown, slot, s, keyW, offsets, gap)
         if ok then
             placed = placed + 1
             local key = EnsureKey(button, i)
-            if key then SizeKey(key, s, keyW) end
+            if key then
+                local at, n = place[button], #shown
+                key.rowEnd = at and ((at == 1 and at == n and "both") or (at == 1 and "first") or (at == n and "last")) or nil
+                SizeKey(key, s, keyW)
+            end
         else
             Degrade("seat-" .. (button:GetName() or i), "could not seat a micro button: " .. tostring(err))
         end

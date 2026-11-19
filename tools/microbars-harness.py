@@ -428,12 +428,24 @@ function h_glyphPaths()
     return out
 end
 -- Per button: the glyph texture (rectangle, layer), the ring texture it must sit under, and the pieces of its look.
+-- The row end strips of the key on button i: each strip's rectangle (offsets from the key's corners) and texcoords, shown only.
+function h_strips(i)
+    local k = keyOf(BUTTONS[i])
+    local out = {}
+    for _, t in ipairs(k and k.strips or {}) do
+        if t.shown ~= false then
+            out[#out + 1] = { x0 = t.pts[1][4], y0 = -t.pts[1][5], x1 = k.geo.w + t.pts[2][4], y1 = k.geo.h - t.pts[2][5], c = t.coords, tex = tostring(t.tex) }
+        end
+    end
+    return out
+end
 function h_glyphInfo()
     local out = {}
     for i, b in ipairs(BUTTONS) do
         local k = keyOf(b)
         local info = { bw = b.w, bh = b.h }
         if k then
+            info.rowEnd, info.strips = k.rowEnd, k.stripCount or 0
             local g = k.glyph
             info.kind, info.tex, info.layer, info.sub, info.c = k.spec.kind, tostring(g.tex), g.layer, g.sublevel, g.coords
             info.w, info.h = g.w, g.h
@@ -1140,7 +1152,8 @@ def check_crisp() -> None:
     for factor, eff, scale in ((768 / 1440, 768 / 1440, 0.64), (768 / 1080, 768 / 1080, 0.64), (768 / 1440, 1.0, 1.0), (768 / 1440, 0.64, 0.64)):
         w = World(12, scale=scale, pixel_factor=factor, effective_scale=eff).login()
         px = factor / eff
-        infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+        # the two row ends crop their art and cover at the slant and draw the rest in strips (check_row_ends)
+        infos = [i for i in (dict(v.items()) for _, v in w.call("h_glyphInfo").items()) if not i.get("rowEnd")]
         offs = [(i["left"], i["right"], i["cl"], i["cr"]) for i in infos]
         whole = all(abs(v / px - round(v / px)) < 1e-6 for o in offs for v in o)
         check(f"crisp.every_edge_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_eff_{eff:.4f}_scale_{scale}", whole, f"px {px:.4f} {offs[:2]}")
@@ -1153,7 +1166,7 @@ def check_crisp() -> None:
         # per UI unit, no pixel inside the ring falls outside the glyph's window
         missed = {n: _key_wedge_misses(i, 1 / px) for n, i in enumerate(infos) if i["kind"] == "runtime"}
         check(f"crisp.the_art_meets_the_ring_on_whole_physical_pixels.factor_{factor:.3f}_eff_{eff:.4f}_scale_{scale}",
-              len(missed) == 12 and not any(missed.values()), f"px {px:.4f} {missed}")
+              len(missed) == 10 and not any(missed.values()), f"px {px:.4f} {missed}")
         # top and bottom edges: the key height lands on whole physical pixels too, both pieces alike
         heights = [(i["bh"] + i["vert"][p][2] - i["vert"][p][1]) for i in infos for p in ("g", "c")]
         check(f"crisp.the_key_height_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_eff_{eff:.4f}_scale_{scale}",
@@ -1178,7 +1191,7 @@ def check_window_follows_the_rect() -> None:
             px = factor / eff
             keys = list(w.get("FS.MicroBars.keys").values())
             for n, (k, i) in enumerate(zip(keys, (dict(v.items()) for _, v in w.call("h_glyphInfo").items()))):
-                if i["kind"] != "runtime":
+                if i["kind"] != "runtime" or i.get("rowEnd"):
                     continue
                 seen += 1
                 rw = i["bw"] - i["left"] - i["right"]
@@ -1218,6 +1231,64 @@ def check_window_survives_a_style_switch() -> None:
             if boost is None or [float(boost[m]) for m in (1, 2, 3, 4)] != c or any(abs(a - b) > 1e-6 for a, b in zip(c, fitted)):
                 bad[(count, n)] = (c, boost)
     check("window.a_style_switch_leaves_the_add_copy_on_the_keys_fitted_window", seen >= 20 and not bad, f"{seen} keys, bad {list(bad.items())[:2]}")
+
+
+def check_row_ends() -> None:
+    """The keys at the two ends of the row: the cover's dark plate colour over the outside triangle used to show there as a wedge
+    on the deck. The first key's top-left and the last key's bottom-right columns are drawn as one pixel strips of the art, each
+    only as tall as the key's inside there, and the cover is cropped to the rest; no other key has strips; the gradient style
+    keeps the cover; the slant tables are the shipped cover texture's."""
+    from PIL import Image
+    a = Image.open(ADDON / "Media" / "Textures" / "iconcover_key.tga").split()[-1]
+    W, H = a.size
+    want_top, want_low = [], []
+    for x in range(W):
+        rows = [y for y in range(H) if a.getpixel((x, y)) <= 128]
+        want_top.append(rows[0] if rows else -1)
+        want_low.append(rows[-1] if rows else -1)
+    src = MICRO_LUA.read_text(encoding="utf-8")
+    import re
+    def table(name):
+        m = re.search(r"local " + name + r" = \{(.*?)\}", src, re.S)
+        return [int(v) for v in re.findall(r"-?\d+", m.group(1))] if m else []
+    check("ends.the_slant_tables_are_the_shipped_cover_textures", table("SLANT_TOP") == want_top and table("SLANT_BOT") == want_low)
+    for factor, eff, scale in ((768 / 1440, 0.64, 0.64), (768 / 1440, 1.0, 1.0)):
+        w = World(12, scale=scale, pixel_factor=factor, effective_scale=eff).login()
+        px = factor / eff
+        infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+        ends = [n for n, i in enumerate(infos) if i.get("rowEnd")]
+        tag = f"eff_{eff:.4f}"
+        check(f"ends.{tag}.only_the_first_and_last_keys_are_row_ends_and_only_they_have_strips",
+              ends == [0, len(infos) - 1] and infos[0]["rowEnd"] == "first" and infos[-1]["rowEnd"] == "last"
+              and infos[0]["strips"] > 5 and infos[-1]["strips"] > 5 and all(i["strips"] == 0 for i in infos[1:-1]),
+              f"{[(i.get('rowEnd'), i['strips']) for i in infos]}")
+        first, last = infos[0], infos[-1]
+        bw, bh = first["bw"], first["bh"]
+        # the cover is cropped: the first starts and the last stops at the slant's cut column
+        check(f"ends.{tag}.the_cover_is_cropped_at_the_slant",
+              first["cl"] > bw * 0.3 and last["cr"] > bw * 0.25, f"{first['cl']} {last['cr']} of {bw}")
+        for n, name in ((1, "first"), (len(infos), "last")):
+            strips = [dict(v.items()) for _, v in w.call("h_strips", n).items()]
+            info = infos[n - 1]
+            cw = info["bw"] - info.get("coverL0", 0)
+            # every strip one pixel wide, on whole pixels, inside the key's inside rows of its column
+            ok = all(abs((st["x1"] - st["x0"]) - px) < 1e-6 or st["x1"] - st["x0"] < px for st in strips)
+            ok = ok and all(abs(v / px - round(v / px)) < 1e-6 for st in strips for v in (st["x0"], st["y0"]))
+            # a top-left strip starts lower the further left it is; a bottom-right one stops higher the further right
+            ys = [(st["x0"], st["y0"] if name == "first" else st["y1"]) for st in sorted(strips, key=lambda st: st["x0"])]
+            mono = all(b[1] <= a[1] + 1e-6 for a, b in zip(ys, ys[1:])) if name == "first" else all(b[1] <= a[1] + 1e-6 for a, b in zip(ys, ys[1:]))
+            # their texcoords run on from one strip to the next and meet the art's own
+            us = [(float(st["c"][1]), float(st["c"][2])) for st in sorted(strips, key=lambda st: st["x0"])]
+            cont = all(abs(a[1] - b[0]) < 1e-6 for a, b in zip(us, us[1:]))
+            g = [float(info["c"][m]) for m in (1, 2, 3, 4)]
+            meets = abs(us[-1][1] - g[0]) < 1e-6 if name == "first" else abs(us[0][0] - g[1]) < 1e-6
+            same = all(st["tex"] == info["tex"] for st in strips)
+            check(f"ends.{tag}.{name}.strips_follow_the_slant_on_whole_pixels_and_continue_the_art", ok and mono and cont and meets and same,
+                  f"ok {ok} mono {mono} cont {cont} meets {meets} same {same} {ys[:4]}")
+    w = World(12, style="gradient").login()
+    infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+    check("ends.the_gradient_style_keeps_the_cover_and_draws_no_strips", all(i["strips"] == 0 for i in infos),
+          f"{[i['strips'] for i in infos]}")
 
 
 def check_fit_window() -> None:
@@ -1378,7 +1449,7 @@ def check_zoomed_key() -> None:
             keys = list(w.get("FS.MicroBars.keys").values())
             infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
             for n, (k, i) in enumerate(zip(keys, infos)):
-                if i["kind"] != "runtime":
+                if i["kind"] != "runtime" or i.get("rowEnd"):
                     continue
                 rw = i["bw"] - i["left"] - i["right"]
                 rh = i["bh"] + i["vert"]["g"][2] - i["vert"]["g"][1]
@@ -1940,6 +2011,7 @@ def main() -> int:
     check_glyph_view()
     check_zoomed_key()
     check_late_class()
+    check_row_ends()
     check_glyph_tint()
     check_microstyle()
     check_art()
