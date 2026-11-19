@@ -71,7 +71,7 @@
 -- (SETTINGS, edited in the config window); a change applies live, in combat too (plain frames), through
 -- Config.OnChange, coalesced to one apply per box on the next frame, and a profile switch moves them too. One slider px is
 -- C.BAR_PX image px: the resource default (4) is the 2 image px rail above, the health default (11) a taller 5.5, and the
--- width setting is scaled by C.BAR_WIDTH_SCALE (its 100% is 1.2 x the name). The numbers are off until a player turns them on.
+-- width setting is a share of the box's padded width (100% and up is the full span, whatever the name's length). The numbers are off until a player turns them on.
 -- With them on the box grows UP (box.grow, Bars.Extra) so one row fits under the rails: health at its left end, resource at the right
 -- end, half the row each; the divider, line 2 and the tile keep their screen seats, and box.onGrow tells the tape.
 -- A PLAIN value is fitted to its half: "62 / 100", else compact ("2.1k/2.1k"), else a smaller size down to C.NUM_MIN, then
@@ -712,9 +712,9 @@ function Bars.Seat(box)
     local b = box.bars
     local k = ui(1)
     local wmax = (box.geom.w - 2 * C.PAD) * k
-    local w = wmax
-    if not box.nameSecret then w = math.min(wmax, math.max(C.TB_MIN_W * k, (box.nameImg or 0) * k)) end
-    w = math.min(wmax, w * (Setting(SETTINGS.width) / 100) * C.BAR_WIDTH_SCALE)
+    -- The rails span the box's padded width whatever the name's length (a short name left them
+    -- stubby); the width setting shrinks them from there, 100% and up is the full span.
+    local w = math.max(C.TB_MIN_W * k, math.min(wmax, wmax * Setting(SETTINGS.width) / 100))
     local hpH, pwH = Bars.Heights()
     Bars.SeatRail(box, b.hp.green, C.TB_HP_Y, hpH, w)
     Bars.SeatRail(box, b.hp.red, C.TB_HP_Y, hpH, w)

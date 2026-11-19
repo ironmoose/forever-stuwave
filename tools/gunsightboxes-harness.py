@@ -1735,12 +1735,12 @@ function T.the_target_bars_sit_under_line_one_at_the_option_b_offsets_at_two_hei
         local box, b = W.tgt.box, bars(W)
         ok(b, "the target box carries its bars")
         local wmax = (MB.base.BOXR.w - 2 * MB.PAD) * k
-        local want = math.min(wmax, math.max(MB.TB_MIN_W * k, box.l1:GetUnboundedStringWidth()) * OLD_WIDTH_120)
+        local want = wmax
         for _, r in ipairs({ b.hp.green, b.hp.red }) do
             local p = r.host._points.TOPLEFT
             eq(p.rel, box.frame); eq(p.relPoint, "TOPLEFT")
             near(p.x, MB.TB_X * k, 1e-6, "x = box.x + 7"); near(p.y, -MB.TB_HP_Y * k, 1e-6, "y = box.y + 26")
-            near(r.host._w, want, 1e-6, "as wide as the name at " .. h .. " (the old 120%)"); near(r.host._h, hpPx(11) * k, 1e-6, "11 px high")
+            near(r.host._w, want, 1e-6, "the full text width at " .. h); near(r.host._h, hpPx(11) * k, 1e-6, "11 px high")
         end
         local p = b.power.host._points.TOPLEFT
         eq(p.rel, box.frame); near(p.x, MB.TB_X * k, 1e-6); near(p.y, -(MB.TB_HP_Y + hpPx(11) + C.TB_GAP) * k, 1e-6, "under the 11 px health rule, one image px down")
@@ -1957,30 +1957,22 @@ function T.the_unfiltered_bar_event_fallback_ignores_other_units()
     eq(b.hp.green.sb._value, 12, "the target's does")
 end
 
-function T.the_bar_width_is_the_name_width_and_the_full_text_width_for_a_secret_name()
+function T.the_bars_span_the_full_text_width_whatever_the_name()
     local W = world()
-    local b, box = bars(W), W.tgt.box
-    local k = K()
-    local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
-    target("Kurak")
-    near(b.hp.green.host._w, box.l1:GetUnboundedStringWidth() * OLD_WIDTH_120, 1e-6, "a plain name: its measured width, scaled")
-    near(b.power.host._w, box.l1:GetUnboundedStringWidth() * OLD_WIDTH_120, 1e-6, "for both rules")
-    target("Al")
-    near(b.hp.green.host._w, MB.TB_MIN_W * k * OLD_WIDTH_120, 1e-6, "a short name: the 24 image px floor, scaled")
-    target("Archmage Antonidas the Great")
-    ok(b.hp.green.host._w <= wmax + 1e-6, "a long name is fitted, and so is the bar")
-    near(b.hp.green.host._w, math.min(wmax, box.l1:GetUnboundedStringWidth() * OLD_WIDTH_120), 1e-6)
-    target("Kurak")
+    local b = bars(W)
+    local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K()
+    for _, name in ipairs({ "Torn", "Al", "Kurak", "Archmage Antonidas the Great" }) do
+        target(name)
+        near(b.hp.green.host._w, wmax, 1e-6, name .. ": the full width")
+        near(b.power.host._w, wmax, 1e-6, name .. ": the power rule too")
+    end
     UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
-    near(b.hp.green.host._w, box.l1:GetUnboundedStringWidth() * OLD_WIDTH_120, 1e-6, "a rescale measures it again")
-    ok(b.hp.green.host._w < 49 * OLD_WIDTH_120, "at the smaller type")
+    near(b.hp.green.host._w, (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K(), 1e-6, "a rescale follows")
     secretUnit(); __fireEvent("PLAYER_TARGET_CHANGED")
-    near(b.hp.green.host._w, (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K(), 1e-6, "a secret name: the full text width")
-    __fireEvent("UNIT_NAME_UPDATE", "target")
+    near(b.hp.green.host._w, (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K(), 1e-6, "a secret name: the same")
     UIParent._h = 1440; UIParent._w = 1440 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
-    near(b.power.host._w, (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K(), 1e-6, "also after a rescale")
     W.clean(); noFails("a secret name was measured")
 end
 
@@ -2057,10 +2049,10 @@ local function numbersOn(format)
     setting("numbers", true)
     if format then setting("numberFormat", format) end
 end
-local function pctWidth(W, pct)       -- the rule width a width setting should give, from the name width (100% is the old 120%)
+local function pctWidth(W, pct)       -- the rule width a width setting should give: a share of the box text width, 100% the whole
     local k = K()
     local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
-    return math.min(wmax, W.tgt.box.l1:GetUnboundedStringWidth() * pct / 100 * OLD_WIDTH_120)
+    return math.max(MB.TB_MIN_W * k, math.min(wmax, wmax * pct / 100))
 end
 
 function T.the_settings_default_to_11_4_and_100_and_draw_the_taller_rails()
@@ -2173,41 +2165,19 @@ function T.bar_size_settings_survive_a_rescale()
     W.clean(); noFails()
 end
 
-function T.bar_width_is_a_percent_of_the_name_width_clamped_to_the_text_width()
+function T.bar_width_is_a_percent_of_the_text_width()
     local W = world()
     target("Kurak")
     local b = bars(W)
-    setting("width", 50)
-    near(b.hp.green.host._w, pctWidth(W, 50), 1e-6, "half the name width"); near(b.power.host._w, pctWidth(W, 50), 1e-6, "both rules")
-    near(b.hp.red.host._w, pctWidth(W, 50), 1e-6, "and the red twin")
-    setting("width", 150)
-    near(b.hp.green.host._w, pctWidth(W, 150), 1e-6)
-    target("Archmage Antonidas the Great")
     local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K()
-    near(b.hp.green.host._w, wmax, 1e-6, "never wider than the box text")
-    secretUnit(); __fireEvent("PLAYER_TARGET_CHANGED")
+    near(b.hp.green.host._w, wmax, 1e-6, "nothing stored: 100% is the full width")
     setting("width", 50)
-    near(b.hp.green.host._w, wmax * 0.5 * OLD_WIDTH_120, 1e-6, "a secret name has the full text width, so half of it, times the scale")
-    setting("width", 100)
-    near(b.hp.green.host._w, wmax, 1e-6)
-    W.clean(); noFails("a secret name was measured")
-end
-
-function T.the_default_width_draws_what_the_old_120_percent_drew_and_still_clamps_to_the_text()
-    local W = world()
-    local k = K()
-    target("Kurak")
-    local b = bars(W)
-    local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
-    local name = W.tgt.box.l1:GetUnboundedStringWidth()
-    ok(name * OLD_WIDTH_120 < wmax, "the short name leaves room, so the clamp is not what is measured")
-    near(b.hp.green.host._w, name * 1.2, 1e-6, "nothing stored: 100% is the old 120%")
-    near(b.power.host._w, name * 1.2, 1e-6, "on the power rule too")
-    near(b.hp.red.host._w, name * 1.2, 1e-6, "and the red twin")
-    target("Archmage Antonidas the Great")
-    near(b.hp.green.host._w, wmax, 1e-6, "a long name at the default is clamped to the box text width")
+    near(b.hp.green.host._w, wmax * 0.5, 1e-6, "half the width"); near(b.power.host._w, wmax * 0.5, 1e-6, "both rules")
+    near(b.hp.red.host._w, wmax * 0.5, 1e-6, "and the red twin")
+    target("Al")
+    near(b.hp.green.host._w, wmax * 0.5, 1e-6, "the name does not change it")
     setting("width", 150)
-    near(b.hp.green.host._w, wmax, 1e-6, "and so at the top of the range")
+    near(b.hp.green.host._w, wmax, 1e-6, "never wider than the box text")
     W.clean(); noFails()
 end
 
@@ -2239,7 +2209,7 @@ for _, c in ipairs({ { 120, nil }, { 150, 125 }, { 90, 75 }, { 100, 85 }, { 50, 
         eq(db.profiles.Default.settings[MIGRATED_KEY], true, "the profile is marked converted")
         if c[1] == 150 then                          -- old 150 drew 1.5 x the name; the converted 125 draws 1.25 x 1.2
             target("Kurak")
-            near(bars(W).hp.green.host._w, W.tgt.box.l1:GetUnboundedStringWidth() * 1.5, 1e-6, "same rail width as the old 150%")
+            near(bars(W).hp.green.host._w, pctWidth(W, 125), 1e-6, "the rails follow the converted value")
         end
         W.clean(); noFails()
     end
