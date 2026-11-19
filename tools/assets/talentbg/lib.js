@@ -1,6 +1,7 @@
 /* Shared helpers for the talent spec background scenes. Loaded as a plain script by bake.mjs (node vm) and preview.html.
    Every scene file calls TBG.add(scene); nothing here touches the DOM. */
-const W=156,H=236,SC=3;
+/* the canvas: 156 x 236 for the talent trees; another family (charbg) sets SCENE_W / SCENE_H in the context first */
+const W=typeof SCENE_W==='number'?SCENE_W:156,H=typeof SCENE_H==='number'?SCENE_H:236,SC=3;
 const TAU=Math.PI*2,fl=Math.floor;
 const clamp=(v,a=0,b=1)=>v<a?a:v>b?b:v;
 const frac=v=>v-fl(v);

@@ -1522,6 +1522,17 @@ local function TalentBackdropGroup(page)
     UI.Segmented(page, { label = def.label, tip = def.tip, key = def.key, options = options })
 end
 
+-- The character window background (Skins/CharBackdrop.lua), the same three choices. Out of the list without the module.
+local function CharBackdropGroup(page)
+    local bd = FS.CharBackdrop
+    if not (bd and bd.SETTING and bd.STYLES) then return end
+    local def = bd.SETTING
+    UI.Header(page, "Character")
+    local options = {}
+    for i, value in ipairs(bd.STYLES) do options[i] = { value = value, text = bd.STYLE_TEXT[value] } end
+    UI.Segmented(page, { label = def.label, tip = def.tip, key = def.key, options = options })
+end
+
 CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
     UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
     UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
@@ -1530,6 +1541,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     NameplatesGroup(page)
     DamageMeterGroup(page)
     TalentBackdropGroup(page)
+    CharBackdropGroup(page)
     local bands = FS.ChatFormat and FS.ChatFormat.BAND_SETTING
     if bands then
         UI.Header(page, "Chat")

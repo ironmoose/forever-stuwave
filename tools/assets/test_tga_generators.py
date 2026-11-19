@@ -2687,6 +2687,9 @@ OWN_BAKED = {"glyphart_character", "glyphart_legacy"}
 # The talent spec backgrounds: procedural scenes in tools/assets/talentbg/scenes/*.js, baked by bake.mjs (talentbg-harness.py
 # checks the committed sheets equal a fresh bake). The manifest it writes names every one.
 TALENTBG_MANIFEST = MEDIA_DIR.parent.parent / "Modules/Skins/TalentBgArt.lua"
+# The character window backdrop: the same kind of procedural scene in tools/assets/charbg/scenes/*.js, baked by its bake.mjs
+# (charbg-harness.py checks it). Its manifest names the one sheet.
+CHARBG_MANIFEST = MEDIA_DIR.parent.parent / "Modules/Skins/CharBgArt.lua"
 
 
 def _generated_stems() -> set[str]:
@@ -2701,7 +2704,8 @@ def test_every_shipped_texture_is_our_own_art() -> None:
     A texture that came from a game file (a spell icon, a micro button, a class icon) is neither, so this fails."""
     shipped = {p.stem for p in MEDIA_DIR.glob("*.tga")}
     talentbg = set(re.findall(r'"(talentbg_[a-z_]+)"', TALENTBG_MANIFEST.read_text(encoding="utf-8")))
-    unknown = sorted(shipped - _generated_stems() - OWN_BAKED - talentbg)
+    charbg = set(re.findall(r'"(charbg_[a-z_]+)"', CHARBG_MANIFEST.read_text(encoding="utf-8")))
+    unknown = sorted(shipped - _generated_stems() - OWN_BAKED - talentbg - charbg)
     assert not unknown, f"textures with no own-art source (a generator or the own-art bake): {unknown[:10]} ({len(unknown)})"
     assert OWN_BAKED <= shipped
 
