@@ -171,13 +171,15 @@ case("builds: chrome, header band over the stock top strip, no switch, the windo
     assert(S.header.title.text == 'stuwave://character', S.header.title.text)
     local l, t, r, b = Px(S.header.band[1], CharacterFrame)
     local wl, wt, wr, wb = Px(CharacterFrame, CharacterFrame)
-    assert(Near(l, 0) and Near(r, wr), 'band spans the window ' .. l .. ' ' .. r .. ' of ' .. wr)
+    -- inset to the chamfer of the cut corners, so the corners stay cut
+    local inset = FS.Theme.PanelBandInset()
+    assert(Near(l, inset) and Near(r, wr - inset) and Near(t, inset), 'band spans the window inside the chamfer ' .. l .. ' ' .. t .. ' ' .. r .. ' of ' .. wr)
     assert(Near(b, S.headPx), 'band height ' .. b .. ' for a header of ' .. S.headPx)
     -- two anchors: a window that changes width drags the band along
     CharacterFrame.w = CharacterFrame.w + 100
     local l2, t2, r2 = Px(S.header.band[1], CharacterFrame)
     local _, _, wr2 = Px(CharacterFrame, CharacterFrame)
-    assert(Near(r2, wr2), 'band did not follow the width')
+    assert(Near(r2, wr2 - inset), 'band did not follow the width')
     assert(CharacterFrame.fsCharacterSkin)
     assert(Near(CharacterFrame.h * PPU, math.floor(425 * PPU + 0.5) + FS.CharacterSkin.GEOM.FOOT_H, 0.01), 'window height ' .. CharacterFrame.h)
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
@@ -227,12 +229,12 @@ case("the title follows all six pages", f"""
     end
 """)
 
-case("the stock top strip, level line, pane art and divider are held, our own band under the strip", f"""
+case("the stock top strip, level line, pane art and divider are held, no band of ours on the strip", f"""
     {OPEN}
     local S = FS.CharacterSkin.state
     local strip = PaperDollFrame.TopBackgroundStripHost
     assert(strip.TopBackgroundStrip.alpha == 0 and strip.TopBackgroundStripBottomEdge.alpha == 0, 'strip art')
-    assert(S.stripUnder, 'no band under the strip')
+    assert(S.stripUnder == nil, 'a band on the strip again (it drew a line through the header)')
     assert(CharacterFrameLeftPaneHost.regions[1].alpha == 0, 'left pane art')
     assert(CharacterFrameRightPaneHost.regions[1].alpha == 0, 'right pane art')
     assert(CharacterFrameRightPaneHostStoneBg.alpha == 0, 'stone')
@@ -601,7 +603,9 @@ case("footer chips: one shared line, even spacing, the repair bill right aligned
     local foot = FS.CharacterSkin.GEOM.FOOT_H
     assert(Near(wb - b1, t1 - (wb - foot), 1), 'chips not centred in the footer: ' .. (wb - b1) .. ' vs ' .. (t1 - (wb - foot)))
     local fl, ft, fr, fb = Px(FS.CharacterSkin.state.footer.band, CharacterFrame)
-    assert(Near(fb, wb) and Near(fb - ft, foot), 'footer band ' .. ft .. ' ' .. fb)
+    -- inset to the chamfer of the cut corners on three sides, its top where the footer starts
+    local inset = FS.Theme.PanelBandInset()
+    assert(Near(fb, wb - inset) and Near(ft, wb - foot) and Near(fl, inset) and Near(fr, wr - inset), 'footer band ' .. fl .. ' ' .. ft .. ' ' .. fr .. ' ' .. fb)
 """)
 
 case("chips hide for a missing or secret value, and off the character page", f"""

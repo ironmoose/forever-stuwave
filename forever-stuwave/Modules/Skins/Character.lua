@@ -66,6 +66,8 @@ local G = { FOOT_H = 28, CHIP_H = 20, CHIP_GAP = 8, SIDE = 14, WEAR_W = 2, WEAR_
 Char.GEOM = G
 
 local function Weak() return setmetatable({}, { __mode = "k" }) end
+-- px between the window edge and our bands (header, footer, right pane fill): on the chamfer of the cut corners
+local function BandInset() return Theme.PanelBandInset and Theme.PanelBandInset() or 3 end
 -- Drawing helpers defined further down (the boxes and glyph cells), used by the page helpers above them.
 local LayoutBox, Box, PaintBox, ShownRegion, Cells, WatchShown
 local S = {
@@ -1335,20 +1337,21 @@ ShowGlyph = function(label)
 end
 
 -- A rect that spans the width of `host` from `y` px down, `h` px tall: two anchors, so it follows a window that changes width.
-local function Span(host, parent, y, h, color, alpha, layer, sub, fromBottom)
+local function Span(host, parent, y, h, color, alpha, layer, sub, fromBottom, inset)
     local t = parent:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
     t:SetColorTexture(color[1], color[2], color[3], alpha or 1)
     Kit.Snap(t)
-    local rec = { t = t, host = host, y = y, h = h, bottom = fromBottom }
+    local rec = { t = t, host = host, y = y, h = h, bottom = fromBottom, x = inset or 0 }
     local function apply()
         local k = Kit.U(host, 1)
+        local x = rec.x * k
         t:ClearAllPoints()
         if rec.bottom then
-            t:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 0, rec.y * k)
-            t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, rec.y * k)
+            t:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", x, rec.y * k)
+            t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -x, rec.y * k)
         else
-            t:SetPoint("TOPLEFT", host, "TOPLEFT", 0, -rec.y * k)
-            t:SetPoint("TOPRIGHT", host, "TOPRIGHT", 0, -rec.y * k)
+            t:SetPoint("TOPLEFT", host, "TOPLEFT", x, -rec.y * k)
+            t:SetPoint("TOPRIGHT", host, "TOPRIGHT", -x, -rec.y * k)
         end
         t:SetHeight(rec.h * k)
     end
@@ -1363,7 +1366,9 @@ local function BuildHeader(win)
     local headPx = math.max(24, math.ceil(gap * Kit.Ppu(win)))
     S.headPx = headPx
     -- under the window's border slice (BORDER 0), as the footer band is, so the border runs unbroken past the header
-    local band = Span(win, win, 1, headPx - 1, C.band, 1, "BORDER", -2)
+    -- inset to the chamfer (Theme.PanelBandInset, as every STUwave panel's band), so the cut corners stay cut
+    local inset = BandInset()
+    local band = Span(win, win, inset, headPx - inset, C.band, 1, "BORDER", -2, false, inset)
     local k = headPx >= 36 and 2 or 1
     local gx, gy = 12, math.floor((headPx - 16 * k) / 2)
     local title = Kit.Label(win, "stuwave://character", headPx >= 36 and 16 or 13, C.muted, "OVERLAY")
@@ -1383,20 +1388,14 @@ local function BuildHeader(win)
     Char.RefreshHeader()
 end
 
--- The stock strip under the header (it carries the level line): held, with our own band under it in the header's colour, so the
--- info row reads as the header's second line (no rule of its own: a second line under the header read as a stray, and a darker
--- strip as a black bar).
+-- The stock strip under the header (it carries the level line): held. No band of ours under it: the info row sits on the window
+-- fill (a band there, re-seated with the header spans, came back as a 1 px dark line through the header's title).
 local function SkinTopStrip()
     local paper = _G.PaperDollFrame
     local host = paper and paper.TopBackgroundStripHost
     if host then
         HeldArt.Hold(host.TopBackgroundStrip)
         HeldArt.Hold(host.TopBackgroundStripBottomEdge)
-        if not S.stripUnder and host.CreateTexture then
-            S.stripUnder = Span(host, host, 0, 1, C.band, 1, "ARTWORK", -8)
-            S.stripUnder:ClearAllPoints()
-            S.stripUnder:SetAllPoints(host)
-        end
     end
     local level = _G.CharacterLevelText
     if level then Kit.RestyleLabel(level, level, 12, C.amber); PinColor(level, C.amber) end
@@ -1438,7 +1437,8 @@ function Char.FitRightPane()
     if type(wt) == "number" and type(ht) == "number" then top = math.max(0, Kit.U(win, S.headPx or 24) - (wt - ht)) end
     under:ClearAllPoints()
     under:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -top)
-    under:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", 0, off)
+    -- clear of the window's right border
+    under:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", -Kit.U(win, BandInset()), off)
     divider:ClearAllPoints()
     divider:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -top)
     divider:SetPoint("BOTTOMLEFT", right, "BOTTOMLEFT", 0, off)
@@ -1628,7 +1628,7 @@ end
 local function BuildFooter(win)
     S.footer = {
         -- under the window's border slice (BORDER 0), so the border still closes the window round the footer
-        band = Span(win, win, 0, G.FOOT_H, C.band, 1, "BORDER", -2, true),
+        band = Span(win, win, BandInset(), G.FOOT_H - BandInset(), C.band, 1, "BORDER", -2, true, BandInset()),
     }
     S.chips = { level = Chip(win, C.amber), ilvl = Chip(win, C.amber), wear = Chip(win, C.cyan), repair = Chip(win, C.muted) }
     -- the level chip is filled amber with dark type, so it reads first
