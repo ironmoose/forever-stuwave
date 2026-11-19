@@ -1126,10 +1126,14 @@ local function ShownPage()
     return 1
 end
 
+local ShowGlyph -- the page glyphs, defined with the header below
+
 function Char.RefreshHeader()
     local h = S.header
     if not h then return end
-    h.title:SetText("stuwave://" .. PAGES[ShownPage()].label)
+    local label = PAGES[ShownPage()].label
+    h.title:SetText("stuwave://" .. label)
+    ShowGlyph(label)
 end
 
 -- The height of the stock strip above the panes, in UI units: measured from the frames, 24 when they will not say.
@@ -1141,12 +1145,170 @@ local function TopGapUnits(win)
     return 24
 end
 
--- A person glyph from one pixel runs: head and shoulders, `k` pixels per run unit.
-local function Glyph(win, x, y, k, color)
+-- The page glyphs (approved 2026-11-19, mockups/header-glyphs-2026-11-19.html, treatment B "neon outline"): 16 x 16 pixel maps,
+-- '#' the body, '+' a pink detail. A body pixel on the shape's edge is lit cyan, one inside it is cyan glass, and a halo pixel
+-- (empty, next to the shape) carries a faint cyan glow. Drawn as horizontal runs, `k` screen pixels per map pixel.
+local GLYPHS = {
+    character = {
+        "................",
+        ".....######.....",
+        "....########....",
+        "...##########...",
+        "...##########...",
+        "...#++++++++#...",
+        "...##########...",
+        "....########....",
+        ".....######.....",
+        "......####......",
+        "..############..",
+        ".##############.",
+        ".######++######.",
+        ".#####++++#####.",
+        ".##############.",
+        "................",
+    },
+    reputation = {
+        "................",
+        ".##.............",
+        ".#############..",
+        ".############...",
+        ".##++++#####....",
+        ".##+##+####.....",
+        ".##++++#####....",
+        ".############...",
+        ".#############..",
+        ".##.............",
+        ".##.............",
+        ".##.............",
+        ".##.............",
+        ".##.............",
+        "####............",
+        "................",
+    },
+    skills = {
+        "..........##....",
+        ".........####...",
+        "........####....",
+        ".......#.##.....",
+        "......#.........",
+        ".....#..........",
+        "................",
+        "..+##########...",
+        ".############++.",
+        "..##########....",
+        "....######......",
+        ".....####.......",
+        "....######......",
+        "...########.....",
+        "...########.....",
+        "................",
+    },
+    pvp = {
+        "##............##",
+        "###..........###",
+        ".###........###.",
+        "..###......###..",
+        "...###....###...",
+        "....###..###....",
+        ".....######.....",
+        "......####......",
+        ".....######.....",
+        "..+.###..###.+..",
+        "...+##....##+...",
+        "..+++......+++..",
+        ".++..........++.",
+        "++............++",
+        "................",
+        "................",
+    },
+    currency = {
+        "................",
+        ".....######.....",
+        "...##++++++##...",
+        "...##########...",
+        "................",
+        "..##########....",
+        "..#++++++++#....",
+        "..##########....",
+        "................",
+        "....##########..",
+        "....#++++++++#..",
+        "....##########..",
+        "....#++++++++#..",
+        "....##########..",
+        "................",
+        "................",
+    },
+    statistics = {
+        "..............+.",
+        "............++..",
+        "..........++.##.",
+        "........++...##.",
+        "......++..##.##.",
+        "....++....##.##.",
+        "..++..##..##.##.",
+        ".+....##..##.##.",
+        "..##..##..##.##.",
+        "..##..##..##.##.",
+        "..##..##..##.##.",
+        "..##..##..##.##.",
+        "..##..##..##.##.",
+        "################",
+        "................",
+        "................",
+    },
+}
+local GLYPH_PAINT = {
+    edge = { "cyan", 1 }, glass = { "cyan", 0.18 }, accent = { "pink", 1 }, halo = { "cyan", 0.22 },
+}
+
+local function GlyphClass(map, x, y)
+    local function at(i, j)
+        if j < 1 or j > 16 or i < 1 or i > 16 then return "." end
+        return map[j]:sub(i, i)
+    end
+    local c = at(x, y)
+    local open = at(x + 1, y) == "." or at(x - 1, y) == "." or at(x, y + 1) == "." or at(x, y - 1) == "."
+    if c == "+" then return "accent" end
+    if c == "#" then return open and "edge" or "glass" end
+    local near = at(x + 1, y) ~= "." or at(x - 1, y) ~= "." or at(x, y + 1) ~= "." or at(x, y - 1) ~= "."
+    return near and "halo" or nil
+end
+
+function Char.GlyphRuns(map)
+    local runs = {}
+    for y = 0, 17 do
+        local x = 0
+        while x <= 17 do
+            local cls = GlyphClass(map, x, y)
+            local n = 1
+            while cls and x + n <= 17 and GlyphClass(map, x + n, y) == cls do n = n + 1 end
+            if cls then runs[#runs + 1] = { x = x - 1, y = y - 1, n = n, cls = cls } end
+            x = x + n
+        end
+    end
+    return runs
+end
+
+local function Glyph(win, label, x, y, k)
+    local map = GLYPHS[label] or GLYPHS.character
     local out = {}
-    local runs = { { 4, 0, 6, 2 }, { 3, 2, 8, 4 }, { 0, 7, 14, 2 }, { 0, 9, 14, 7 } }
-    for _, r in ipairs(runs) do out[#out + 1] = Kit.Rect(win, x + r[1] * k, y + r[2] * k, r[3] * k, r[4] * k, color, 1, "OVERLAY", 3) end
+    for _, r in ipairs(Char.GlyphRuns(map)) do
+        local paint = GLYPH_PAINT[r.cls]
+        local sub = r.cls == "halo" and 1 or (r.cls == "glass" and 2 or 3)
+        out[#out + 1] = Kit.Rect(win, x + r.x * k, y + r.y * k, r.n * k, k, C[paint[1]], paint[2], "OVERLAY", sub)
+    end
     return out
+end
+
+-- Shows the shown page's glyph, building it the first time that page is met.
+ShowGlyph = function(label)
+    local h = S.header
+    if not h then return end
+    if not h.glyphs[label] then h.glyphs[label] = Glyph(h.win, label, h.gx, h.gy, h.gk) end
+    for name, set in pairs(h.glyphs) do
+        for _, t in ipairs(set) do t:SetShown(name == label) end
+    end
 end
 
 -- A rect that spans the width of `host` from `y` px down, `h` px tall: two anchors, so it follows a window that changes width.
@@ -1179,11 +1341,11 @@ local function BuildHeader(win)
     S.headPx = headPx
     local band = Span(win, win, 1, headPx - 1, C.band, 1, "ARTWORK", 0)
     local k = headPx >= 36 and 2 or 1
-    local glyph = Glyph(win, 12, math.floor((headPx - 16 * k) / 2), k, C.cyan)
+    local gx, gy = 12, math.floor((headPx - 16 * k) / 2)
     local title = Kit.Label(win, "stuwave://character", headPx >= 36 and 16 or 13, C.muted, "OVERLAY")
-    Kit.Place(title, win, 12 + 14 * k + 10, math.floor(headPx / 2), nil, nil, "LEFT", "TOPLEFT")
+    Kit.Place(title, win, gx + 16 * k + 10, math.floor(headPx / 2), nil, nil, "LEFT", "TOPLEFT")
     title:SetJustifyH("LEFT")
-    S.header = { title = title, band = { band }, glyph = glyph }
+    S.header = { title = title, band = { band }, glyphs = {}, win = win, gx = gx, gy = gy, gk = k }
 
     Kit.HoldFrame(_G.CharacterFrameTitleText)
     HeldArt.Hold(_G.CharacterFramePortrait)

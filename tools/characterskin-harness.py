@@ -293,6 +293,25 @@ case("info row: the stock level line is held; the full name, race and class sit 
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
+case("header glyph: each page shows its own neon glyph (lit edge, glass inside, pink detail), the others hidden", f"""
+    {OPEN}
+    local S = FS.CharacterSkin.state
+    local g = S.header.glyphs
+    assert(g.character and #g.character > 10, 'no character glyph')
+    local function shown(set) for _, t in ipairs(set) do if t.shown == false then return false end end return true end
+    assert(shown(g.character), 'the character glyph is hidden on its page')
+    CharacterFrameModeTab3.scripts.OnMouseUp()
+    FS.CharacterSkin.RefreshHeader()
+    assert(g.skills and shown(g.skills), 'the skills glyph is not shown on its page')
+    for _, t in ipairs(g.character) do assert(t.shown == false, 'the character glyph stayed up on the skills page') end
+    local cls = {{}}
+    for _, r in ipairs(FS.CharacterSkin.GlyphRuns({{ "................", ".####...........", ".####+..........", ".####...........", ".####...........",
+        "................", "................", "................", "................", "................", "................",
+        "................", "................", "................", "................", "................" }})) do cls[r.cls] = true end
+    assert(cls.edge and cls.glass and cls.accent and cls.halo, 'a glyph pixel class is missing')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
 case("pane toggle: the glyph is centred on its key at the live scale, not hung from the size the key had before it settled", f"""
     {OPEN}
     local S = FS.CharacterSkin.state
