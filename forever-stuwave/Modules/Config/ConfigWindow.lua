@@ -1683,11 +1683,12 @@ local CLASS_MODULE_HELP = {
         .. "the same count.\n\nRight: Slice and Dice. The star spins and the bar drains while it runs, amber in the last seconds; "
         .. "the ring pulses in combat when it is down.\n\nBottom: your energy. The blue mark is what your last builder cost, the "
         .. "pink mark your last finisher; each lights when you can afford it.\n\nStealthed, the fan turns violet and OPENER shows.",
-    DRUID = "The eyes change with your form; the word under them says what to do next.\n\nCaster: four Eclipse moons (Wrath "
-        .. "adds two, Starfire spends one) and their 15 s bar, from level 30.\n\nCat: the five claw marks are your combo points "
+    DRUID = "In caster form the bramble wreath is your Thorns: it dries from the top as the 10 minutes run out, leaves wilt "
+        .. "and fall, the last minute turns amber, and a \"~\" marks a time counted from your own cast in combat. When "
+        .. "Thorns is gone out of combat the wreath shows as a faint reminder.\n\nIn Bear and Cat form the eyes change "
+        .. "with your form; the word under them says what to do next.\n\nCat: the five claw marks are your combo points "
         .. "(FINISH at five), the energy bar and the Shifting Power chip.\n\nBear: the rage bar marked where Lacerate, Primal "
-        .. "Bite and Maul become affordable, the Primal Bite chip and five Lacerate stacks.\n\nHealing a friendly target: "
-        .. "the Rejuvenation and Regrowth lanes and the Swiftmend flower.\n\nOnly what you have learned is shown.",
+        .. "Bite and Maul become affordable, the Primal Bite chip and five Lacerate stacks.\n\nOnly what you have learned is shown.",
     WARLOCK = "The binding circle. The five gems are your soul shards (the number keeps counting past five). The medallion in "
         .. "the middle is your demon, filled by its health; a dashed ghost means none is out.\n\nThe right lane shows one "
         .. "prompt at a time: REAPING while Drain Soul runs, BINDING while you summon, BOLT (Shadow Trance) and FIRE "

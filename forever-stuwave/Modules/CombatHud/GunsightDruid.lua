@@ -1,20 +1,28 @@
--- Forever STUwave: Gunsight Class Module for the Druid: the Wildshape Eyes
+-- Forever STUwave: Gunsight Class Module for the Druid: one layout per form
 --
--- The design is the mockup "Druid Gunsight Module: Wildshape Eyes" (2026-11-16). A pair of eyes watches from a thicket and changes
--- with the form, with one gauge under them per form, and goes HOT with one word under it when there is something to do:
---   * CASTER / MOONKIN (owl eyes, cyan): four Eclipse moons (a Wrath banks two, a Starfire spends one, 15 s), the drain bar under them
---     and its seconds; the word is WRATH with no charge and STARFIRE with one. Below level 30 (Eclipse not learned) the moons, bar
---     and word are hidden: only what the player has learned is drawn (the same for the chips, the Shifting Power notch, the Bear's
---     L / B / M marks and Lacerate pips, and the Restoration lanes);
---     after a reload in combat they are dim with a ? until a cast tells the truth.
+-- CASTER (any target, friend or foe): the Thorns timer, the design mockup "Druid Thorns Concepts" (2026-11-17, concept A, the
+-- Bramble Wreath; the per form decision of 2026-11-16 drops the eyes, the Eclipse moons and the mana budget in caster form). A
+-- braided two strand bramble ring with hooked bone tipped thorns and ten leaves, one per minute of the 10 minute buff. It dries
+-- grey clockwise behind a green sap bead; each leaf browns as the dry line passes it and falls when its minute ends. Our own cast
+-- grows the vine round, snaps the thorns out, unfurls the leaves and sends a green ring out. The last minute has one leaf, an
+-- amber bead and blinking amber thorn tips. The time is under it (10M ... 1M, then seconds; "~" when it is our own cast's ledger
+-- in combat). Gone in combat: nothing drawn. Gone out of combat: a dim amber dashed ring and THORNS. Not learned: nothing. The
+-- heal over time lanes that go beside it are a later design; the old Restoration lanes and Eclipse moons are not drawn.
+--   The art is baked by generate_druid_gunsight.py into druid_thorns.tga (FS.DruidArt.THORNS): the vine and its glow in 60 angular
+--   wedges (a wedge is dry once its centre is behind the dry line, so the line steps every 10 s), every thorn and leaf in each of
+--   its looks and growth steps, a falling leaf in 32 turns, the label glyphs; the sap bead, the fireflies and the cast ring are
+--   flat px placed here with the page's own maths.
+--
+-- BEAR / CAT / TRAVEL: still the mockup "Druid Gunsight Module: Wildshape Eyes" (2026-11-16) until their layouts are ported. A pair
+-- of eyes watches from a thicket and changes with the form, with one gauge under them per form, and goes HOT with one word under it
+-- when there is something to do (only what the player has learned is drawn: the chips, the Shifting Power notch, the Bear's
+-- L / B / M marks and Lacerate pips):
 --   * CAT (slit eyes, gold): five claw gashes (the combo points), the energy bar with the Shifting Power notch and its zone, the
 --     number, the Shifting Power chip (it fills from the bottom over the cooldown, glows when ready); FINISH at five points, SHIFT
 --     when a plain read says energy is under the notch and the chip is ready.
 --   * BEAR (angry eyes, red): the rage bar with ticks for Lacerate (15), Primal Bite (20) and the Maul pool (35), the number, the Primal
 --     Bite chip, five Lacerate pips and their seconds; the word follows the Method priority (LACERATE when five stacks have 3 s or
 --     less, BITE when ready, LACERATE while under five stacks, else BEAR).
---   * RESTORATION (leaf eyes, green): a friendly target in caster form swaps the moons for two lanes (Rejuvenation 12 s, Regrowth
---     21 s) and the Swiftmend flower; the word says which HoT to put on next.
 --   * TRAVEL / AQUATIC / FLIGHT: the owl eyes half shut, no gauge.
 --   Changing form closes the eyes in a flash with a ring of sparks.
 --
@@ -28,12 +36,14 @@
 --     read (out of combat, or if the client allows it) additionally drives the words and the spend streak. A secret count shows the
 --     gashes and the flare but no word (CAT, muted).
 --   * Chips use the engine's cooldown duration object (SetTimerDuration), else a ledger fraction.
---   * Eclipse, Lacerate and the heal over time lanes are LEDGERS of the player's own casts (DruidState.lua), shown with "~".
+--   * Lacerate is a LEDGER of the player's own casts (DruidState.lua), shown with "~".
+--   * Thorns: DruidState reads the player's aura out of combat only (FS.AurasReadable) and keeps a ledger of our own cast in
+--     combat; this file only gets plain numbers from State.Thorns.
 -- Every value is type checked and secret guarded before use. Nothing here reads an aura.
 --
 -- VISIBILITY. A class module: the host hides with no target and onHide / onShow fire on that edge (GunsightAreas.lua). onShow
 -- subscribes and starts the ticker and the power events; onHide stops both. Plain frames only. A friendly target is the
--- Restoration look; Cat and Bear keep their own gauge.
+-- caster look too; Cat and Bear keep their own gauge.
 --
 -- TICKER. One OnUpdate on the module frame while it is shown, at most every C.TICK s (the eyes always breathe). The paint allocates
 -- nothing: colours are shared tables, sprite rects and tints are written only when they change, text is changed only on a new
@@ -68,9 +78,13 @@ local C = {
     TICK = 1 / 30,
     POLL = 0.5,                        -- seconds between the slow reads (cooldown flags)
     TICK_SLOW = 0.25,                  -- the Hot ledger's bloom check
-    ECLIPSE_LEN = 15, LACERATE_LEN = 15, REJUV_LEN = 12, REGROWTH_LEN = 21,
+    LACERATE_LEN = 15,
     WARN_S = 3,                        -- amber for the last seconds of a drain
-    SPARKS = 8, MOON_SPARKS = 6, STREAK = 14,
+    SPARKS = 8, STREAK = 14,
+    TH_HALO = 36, TH_FLIES = 7, TH_RING = 120, TH_SPARKS = 10, TH_GLYPHS = 7,   -- the Thorns px pools (the page's counts)
+    TH_LOW = 60,                       -- the last minute: amber
+    TH_CAST = 1.3,                     -- s of the cast ring after our own Thorns
+    TH_FALL = 2.4,                     -- s a leaf takes to fall
 }
 Druid.C = C
 
@@ -89,6 +103,7 @@ K.rgBody, K.rgHi = Mix(K.pink, K.out, 0.4), Mix(K.pink, K.white, 0.45)
 K.warnBody, K.warnHi = Mix(K.amber, K.out, 0.4), Mix(K.amber, K.white, 0.45)
 K.leaf = Mix(K.warm, K.white, 0.25)
 K.form = { moon = K.cyan, cat = K.gold, bear = K.warm, tree = K.green, travel = K.muted }
+K.thGlow, K.thSap, K.thFly, K.thSpark = Hex("#5dff8a"), Hex("#b8ff7a"), Hex("#d8ff8a"), Hex("#c4f57a")
 Druid.COLORS = K
 
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
@@ -113,6 +128,12 @@ if not (type(State) == "table" and State.Start) then
     return
 end
 local SPR, G, SCALE, ATL = Art.sprites, Art.GEOM, Art.SCALE, Art.ATLAS
+local TH = Art.THORNS
+if not (type(TH) == "table" and type(TH.sprites) == "table" and type(TH.ATLAS) == "table") then
+    LogOnce("nothorns", "FS.DruidArt.THORNS is missing, the Druid module is not built")
+    return
+end
+local TSPR, TATL = TH.sprites, TH.ATLAS
 
 -- Sprite names, built at load so the paint never concatenates.
 local NAME = { eye = {}, glyph = {} }
@@ -124,6 +145,30 @@ end
 NAME.glyph.travel, NAME.eye.travel = NAME.glyph.moon, NAME.eye.moon
 Druid.NAME = NAME
 
+-- the Thorns sprite names (FS.DruidArt.THORNS.sprites), indexed as the bake numbers them
+local TN = { vine = {}, glow = {}, thorn = {}, leaf = {}, amber = {}, fall = {}, glyph = {} }
+for k = 0, TH.WEDGES - 1 do
+    TN.vine[k] = { live = "th_vine_" .. k .. "_live", dry = "th_vine_" .. k .. "_dry" }
+    TN.glow[k] = "th_glow_" .. k
+end
+for j = 0, 19 do
+    local t = { dry = "th_thorn_" .. j .. "_dry", blink = "th_thorn_" .. j .. "_blink" }
+    for p = 1, TH.POPS do t[p] = "th_thorn_" .. j .. "_" .. p end
+    TN.thorn[j] = t
+end
+for i = 0, 9 do
+    local t = { wilt = "th_leaf_" .. i .. "_wilt" }
+    for u = 1, TH.UNF do t[u] = "th_leaf_" .. i .. "_" .. u end
+    TN.leaf[i] = t
+end
+for s = 0, TH.AMBER do TN.amber[s] = "th_leaf_9_amber_" .. s end
+for s = 0, TH.SPIN - 1 do TN.fall[s] = "th_fall_" .. s end
+for d = 0, 9 do TN.glyph[d] = "th_glyph_" .. d end
+for _, ch in ipairs({ "M", "S", "T", "H", "O", "R", "N" }) do TN.glyph[ch] = "th_glyph_" .. ch end
+TN.glyph.tilde = "th_glyph_tilde"
+TN.word = { TN.glyph.T, TN.glyph.H, TN.glyph.O, TN.glyph.R, TN.glyph.N, TN.glyph.S }
+Druid.THORN_NAMES = TN
+
 -------------------------------------------------------------------------------
 -- Data (written by the reads, read by the paint)
 -------------------------------------------------------------------------------
@@ -133,7 +178,7 @@ local D = {
     combo = nil, energyNum = nil, energyMax = 100,        -- plain reads, nil when secret or unreadable
     rageNum = nil, rageMax = 100,
     spStatus = nil, pbStatus = nil, smStatus = nil,       -- "ready" | "cool" | "none" | nil
-    hotKnown = { rejuv = true, regrow = true },           -- false only when the spell is plainly not learned yet
+    thornsKnown = nil,                                    -- State.Known("thorns"): true, false, nil when unreadable
     bearKnown = { lacerate = true, maul = true },         -- the same for the Bear's rage marks (Primal Bite: pbStatus "none")
     shiftAt = nil,
 }
@@ -145,7 +190,7 @@ Druid.cue = CUE
 local mod, art, bars, top
 local P = {}
 local seats = {}
-local groups = { common = {}, moon = {}, cat = {}, bear = {}, tree = {}, travel = {} }
+local groups = { common = {}, cat = {}, bear = {}, travel = {}, thorns = {} }
 local OX, OY = 0, 0
 local subscribed, ticking, acc, pollAcc, slowAcc = false, false, 0, 0, 0
 local shownKind
@@ -217,6 +262,14 @@ local function Spr(group, layer, sub, host)
     return Reg(group, t)
 end
 
+-- A sprite region on the Thorns atlas.
+local function SprT(layer, sub, host)
+    local t = Spr("thorns", layer, sub, host)
+    SetTex(t, MEDIA .. TATL.file .. ".tga")
+    t.fsSpr, t.fsAtl = TSPR, TATL
+    return t
+end
+
 -- A flat region (one sprite px unless sized).
 local function Dot(group, layer, sub, host)
     host = host or art
@@ -246,12 +299,13 @@ end
 
 -- Show sprite `name` with its origin at sprite (x, y); `flip` mirrors it (and its origin).
 local function Sprite(t, name, x, y, c, a, flip)
-    local s = name and SPR[name]
+    local s = name and (t.fsSpr or SPR)[name]
     if not s or a <= 0 then Off(t); return end
     local w, h = s[3], s[4]
     if t.fsName ~= name or t.fsFlip ~= flip then
         t.fsName, t.fsFlip = name, flip
-        local aw, ah = ATL.w, ATL.h
+        local atl = t.fsAtl or ATL
+        local aw, ah = atl.w, atl.h
         local l, r = s[1] / aw, (s[1] + w * SCALE) / aw
         if flip then l, r = r, l end
         t:SetTexCoord(l, r, s[2] / ah, (s[2] + h * SCALE) / ah)
@@ -359,18 +413,6 @@ local function Build()
     for i = 1, C.SPARKS do P.sparks[i] = Dot("common", "OVERLAY", 3, top) end
     P.cue = Text("common", "CENTER", 8)
 
-    -- the moons
-    P.moon = {}
-    for i = 1, G.MOON_N do
-        P.moon[i] = { dark = Spr("moon", "ARTWORK", 0), dotted = Spr("moon", "ARTWORK", 0), glow = Spr("moon", "ARTWORK", 1),
-            lit = Spr("moon", "ARTWORK", 2) }
-    end
-    P.moonSparks = {}
-    for i = 1, C.MOON_SPARKS do P.moonSparks[i] = Dot("moon", "OVERLAY", 3, top) end
-    P.drainTrack = Spr("moon", "ARTWORK", 0)
-    P.drainBody, P.drainHi = Dot("moon", "ARTWORK", 1), Dot("moon", "ARTWORK", 2)
-    P.drainSecs = Text("moon", "LEFT", 8)
-
     -- the claws
     P.slash, P.slashBar, P.flareBar = {}, {}, {}
     for i = 1, G.SLASH_N do
@@ -409,17 +451,32 @@ local function Build()
     P.lacSecs = Text("bear", "LEFT", 8)
     P.biteFlash = Dot("bear", "OVERLAY", 3, top)
 
-    -- the lanes
-    P.lane = {}
-    for i = 1, 2 do
-        local l = { track = Spr("tree", "ARTWORK", 0), icon = Spr("tree", "ARTWORK", 1), body = Dot("tree", "ARTWORK", 1),
-            hi = Dot("tree", "ARTWORK", 2), ticks = {}, secs = Text("tree", "LEFT", 8) }
-        for k = 1, 5 do l.ticks[k] = Dot("tree", "ARTWORK", 3) end
-        P.lane[i] = l
-    end
-    P.bloom = Dot("tree", "OVERLAY", 3, top)
-    P.chipSm = BuildChip("tree", "sm", "druid_chip_sm")
     P.travelLine = Dot("travel", "ARTWORK", 0)
+
+    -- the Bramble Wreath, back to front: the glow, the vine, the reminder rings, the thorns, the leaves (on the art frame);
+    -- the falling leaves, the sap bead, the fireflies, the cast ring, its sparkles and the label (on the top frame)
+    P.thGlow, P.thVine, P.thThorn, P.thLeaf, P.thFall = {}, {}, {}, {}, {}
+    P.thHalo, P.thFly, P.thRing, P.thSpark, P.thGlyph = {}, {}, {}, {}, {}
+    for k = 1, TH.WEDGES do
+        P.thGlow[k] = SprT("BACKGROUND", 0)
+        P.thVine[k] = SprT("BORDER", 0)
+    end
+    P.thGone = SprT("BORDER", 1)
+    for j = 1, 20 do P.thThorn[j] = SprT("ARTWORK", 5) end
+    for i = 1, 10 do
+        P.thLeaf[i] = SprT("ARTWORK", 6)
+        P.thFall[i] = SprT("ARTWORK", 0, top)
+    end
+    for n = 1, C.TH_HALO do P.thHalo[n] = Dot("thorns", "OVERLAY", 0, top) end
+    P.thBead = Dot("thorns", "OVERLAY", 1, top)
+    P.thBeadHi = Dot("thorns", "OVERLAY", 2, top)
+    for n = 1, C.TH_FLIES do P.thFly[n] = Dot("thorns", "OVERLAY", 3, top) end
+    for n = 1, C.TH_RING do P.thRing[n] = Dot("thorns", "OVERLAY", 4, top) end
+    for n = 1, C.TH_SPARKS do P.thSpark[n] = SprT("OVERLAY", 5, top) end
+    for n = 1, C.TH_GLYPHS do
+        P.thGlyph[n] = SprT("OVERLAY", 6, top)
+        P.thGlyph[n].fsGlyph = true
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -531,14 +588,8 @@ local function ReadAll()
             D.pbStatus = State.Cooldown("bite"); ChipStatus(P.chipPb, D.pbStatus, "bite")
             D.bearKnown.lacerate = State.Known("lacerate") ~= false
             D.bearKnown.maul = State.Known("maul") ~= false
-        elseif kind == "tree" then
-            D.hotKnown.rejuv = State.Known("rejuv") ~= false
-            D.hotKnown.regrow = State.Known("regrow") ~= false
-            local st = State.Cooldown("swift")
-            local now = GetTime()
-            if st == "ready" and not (State.Hot("rejuv", now) or State.Hot("regrow", now)) then st = "idle" end
-            D.smStatus = st
-            ChipStatus(P.chipSm, st, "swift")
+        else
+            D.thornsKnown = State.Known("thorns")
         end
         FeedPower()
     end
@@ -548,10 +599,14 @@ end
 -- Paint
 -------------------------------------------------------------------------------
 
+local function IsCaster(kind) return kind == "moon" or kind == "tree" end
+
+-- hide every group the look does not use (the caster has no eyes, so it hides the common group too)
 local function Switch(kind)
     shownKind = kind
+    local keep = IsCaster(kind) and "thorns" or kind
     for name, list in pairs(groups) do
-        if name ~= "common" and name ~= kind then
+        if name ~= keep and (name ~= "common" or keep == "thorns") then
             for i = 1, #list do Off(list[i]) end
         end
     end
@@ -563,12 +618,6 @@ local function ComputeCue(now)
     local word, color, hot, blink = "", K.muted, false, false
     if kind == "travel" then
         word = "TRAVEL"
-    elseif kind == "moon" then
-        local mode, charges = State.Eclipse(now)
-        if mode == "locked" then word = ""                -- nothing to say before Eclipse is learned
-        elseif mode == "unknown" then word = "?"
-        elseif charges > 0 then word, color, hot = "STARFIRE", K.gold, true
-        else word, color = "WRATH", K.cyan end
     elseif kind == "cat" then
         word = "CAT"
         local combo = D.combo
@@ -581,15 +630,7 @@ local function ComputeCue(now)
         elseif D.pbStatus == "ready" then word, color, hot = "BITE", K.warm, true
         elseif lac and stacks < 5 then word, color = "LACERATE", K.leaf
         else word = "BEAR" end
-    else
-        local rj, rg = State.Hot("rejuv", now), State.Hot("regrow", now)
-        -- a heal not learned yet is never the advice (a low level Druid has Rejuvenation before Regrowth)
-        local kn = D.hotKnown
-        if kn.rejuv and not rj then word, color, hot = "REJUV", K.green, true
-        elseif kn.regrow and not rg then word, color = "REGROWTH", K.pink
-        elseif D.smStatus == "ready" then word, color, hot = "SWIFTMEND", K.pink, true
-        else word = (kn.rejuv or kn.regrow) and "HOTS UP" or "HEAL" end
-    end
+    end                                                   -- caster: no word, the wreath has its own label
     CUE.word, CUE.color, CUE.hot, CUE.blink = word, color, hot, blink
 end
 
@@ -639,67 +680,6 @@ local function PaintCommon(now)
         TextColor(P.cue, CUE.color, kind == "travel" and 0.7 or 1)
         TextAt(P.cue, G.GLYPH_X, G.CUE_Y)
     else Off(P.cue) end
-end
-
-local function PaintMoon(now)
-    local red = D.reduced
-    local mode, charges, left = State.Eclipse(now)
-    local locked, unknown = mode == "locked", mode == "unknown"
-    local spendAt, grantAt = State.Stamp("spendAt"), State.Stamp("grantAt")
-    local since = spendAt and (now - spendAt) or 9
-    local grant = grantAt and (now - grantAt) or 9
-    for i = 1, G.MOON_N do
-        local m = P.moon[i]
-        local x, y = G.MOON_X + G.MOON_STEP * (i - 1), G.MOON_Y
-        if locked then                                   -- not learned yet: nothing drawn
-            Off(m.dotted); Off(m.dark); Off(m.glow); Off(m.lit)
-        else
-            Off(m.dotted)
-            Sprite(m.dark, "moon_dark", x, y, K.pure, unknown and 0.5 or 1, false)
-            if not unknown and i <= charges then
-                local pop = (not red and grant >= 0 and grant < 0.3 and i > charges - 2) and (1 - grant / 0.3) or 0
-                local hold = 0.35 + 0.2 * (red and 0.5 or (0.5 + 0.5 * sin(now * 2 * pi / 2.4)))
-                Sprite(m.glow, "moon_glow", x, y, K.gold, Stepped(hold + pop * 0.5), false)
-                Sprite(m.lit, "moon_lit", x, y, pop > 0 and K.pop[floor(pop * 3 - 0.001) + 1] or K.moonLit, 1, false)
-            elseif not red and not unknown and since >= 0 and since < 0.5 and i == charges + 1 then
-                local k = Stepped(1 - since / 0.5)
-                Sprite(m.lit, "moon_lit", x, y, K.pure, k, false)
-                Sprite(m.glow, "moon_glow", x, y, K.gold, k, false)
-            else
-                Off(m.lit); Off(m.glow)
-            end
-        end
-    end
-    -- the scatter of the spent moon
-    for j = 1, C.MOON_SPARKS do
-        if not red and not unknown and not locked and since >= 0 and since < 0.5 then
-            local a, r = (j - 1) * 1.05 + (charges + 1), 3 + since * 26
-            ShowDot(P.moonSparks[j], Round(G.MOON_X + G.MOON_STEP * charges + 9 + math.cos(a) * r), Round(G.MOON_Y + 9 + sin(a) * r), 1, 1,
-                j % 2 == 0 and K.gold or K.pure, Stepped(1 - since / 0.5))
-        else Off(P.moonSparks[j]) end
-    end
-    if locked then
-        Off(P.drainTrack); Off(P.drainBody); Off(P.drainHi); Off(P.drainSecs)
-        return
-    end
-    Sprite(P.drainTrack, "track_drain", G.DRAIN_X, G.DRAIN_Y, K.pure, 1, false)
-    if false then
-    elseif not unknown and charges > 0 then
-        local w = Round((G.DRAIN_W - 2) * max(0, min(1, left / C.ECLIPSE_LEN)))
-        local warn = left <= C.WARN_S
-        ShowDot(P.drainBody, G.DRAIN_X + 1, G.DRAIN_Y + 1, w, 5, warn and K.drainBodyW or K.drainBody, 1)
-        ShowDot(P.drainHi, G.DRAIN_X + 1, G.DRAIN_Y + 1, w, 1, warn and K.drainHiW or K.drainHi, 1)
-        On(P.drainSecs)
-        TextSecs(P.drainSecs, left)
-        TextColor(P.drainSecs, warn and K.amber or K.muted, 1)
-        TextAt(P.drainSecs, G.SECS_X, G.SECS_Y)
-    else
-        Off(P.drainBody); Off(P.drainHi)
-        On(P.drainSecs)
-        TextWord(P.drainSecs, unknown and "?" or "0")
-        TextColor(P.drainSecs, K.muted, 0.6)
-        TextAt(P.drainSecs, G.SECS_X, G.SECS_Y)
-    end
 end
 
 -- a chip: the ring, the dark glyph, the engine's fill, the glow while ready
@@ -774,7 +754,6 @@ local function PaintCat(now)
     PaintChip(P.chipSp, G.CHIP_X, G.CHIP_Y, K.cyan, now, State.Stamp("shiftCastAt"), State.TUNING.SHIFT_CD)
 end
 
-local HOT_KEYS = { "rejuv", "regrow" }
 local MARKS = { 15, 20, 35 }
 local LETTER = { "letter_L", "letter_B", "letter_M" }
 
@@ -838,59 +817,204 @@ local function PaintBear(now)
     else Off(P.biteFlash) end
 end
 
-local function PaintTree(now)
+-------------------------------------------------------------------------------
+-- The caster: Thorns, the Bramble Wreath. Every number is the design page's (drawWreath); positions are sprite px on the canvas.
+-------------------------------------------------------------------------------
+
+local TAU = 2 * pi
+local cos, abs, fmod = math.cos, math.abs, math.fmod
+
+local function Clamp01(v) if v < 0 then return 0 elseif v > 1 then return 1 end return v end
+
+-- a flat px where the page rounds it; off the canvas it is hidden (the page's canvas clips it)
+local function Pix(t, x, y, w, c, a)
+    x, y = Round(x), Round(y)
+    if x < 0 or y < 0 or x >= C.SW or y >= C.SH then Off(t); return end
+    ShowDot(t, x, y, w, w, c, a)
+end
+
+local function Glyph(i, name, x, c, a)
+    Sprite(P.thGlyph[i], name, x, TH.LABEL_Y, c, a, false)
+end
+
+-- the time under the wreath: "10M" ... "1M", then "59S" ... "1S" in amber; "~" before it for a ledger time
+local function ThornsLabel(left, est)
+    local low = left < C.TH_LOW
+    local n = low and math.ceil(left) or math.ceil(left / 60)
+    local digits = n >= 10 and 2 or 1
+    local x = Round(TH.CX - ((digits + 1) * 4 - 1) / 2)
+    local c = low and K.amber or K.muted
+    local i = 1
+    if est then Glyph(i, TN.glyph.tilde, x - 4, c, 1); i = i + 1 end
+    if digits == 2 then Glyph(i, TN.glyph[floor(n / 10) % 10], x, c, 1); i = i + 1; x = x + 4 end
+    Glyph(i, TN.glyph[n % 10], x, c, 1); i = i + 1; x = x + 4
+    Glyph(i, low and TN.glyph.S or TN.glyph.M, x, c, 1)
+    for k = i + 1, C.TH_GLYPHS do Off(P.thGlyph[k]) end
+end
+
+-- everything of the wreath off; `keepGone` keeps the reminder rings and the label for the gone look to paint
+local function ThornsHide(keepGone)
+    local list = groups.thorns
+    for i = 1, #list do
+        local t = list[i]
+        if not (keepGone and (t == P.thGone or t.fsGlyph)) then Off(t) end
+    end
+end
+
+local function PaintThorns(now)
     local red = D.reduced
-    for i = 1, 2 do
-        local l = P.lane[i]
-        local y = G.LANE_Y[i]
-        local len = i == 1 and C.REJUV_LEN or C.REGROWTH_LEN
-        local left = State.Hot(HOT_KEYS[i], now)
-        local up = left ~= nil
-        local c = i == 1 and K.green or K.pink
-        local learned = D.hotKnown[HOT_KEYS[i]]
-        if not learned and not up then                   -- a heal not learned yet: no lane
-            Off(l.track); Off(l.icon); Off(l.secs); Off(l.body); Off(l.hi)
-            for k = 1, 5 do Off(l.ticks[k]) end
+    local mode, left, est, castAt = State.Thorns(now)
+    local combat = type(InCombatLockdown) == "function" and InCombatLockdown() == true
+    local R, A, N, cx, cy, LEN = TH.R, TH.A, TH.N, TH.CX, TH.CY, TH.LEN
+    if mode ~= "up" then
+        -- gone: nothing in combat; out of combat, once Thorns is learned, the dim amber rings and THORNS
+        if mode == "gone" and not combat and D.thornsKnown == true then
+            ThornsHide(true)
+            Sprite(P.thGone, "th_gone", 0, 0, K.pure, 1, false)
+            local a = red and 0.7 or (0.55 + 0.35 * sin(now * 3))
+            local x = Round(TH.CX - (6 * 4 - 1) / 2)
+            for i = 1, 6 do Glyph(i, TN.word[i], x + (i - 1) * 4, K.amber, a) end
+            Off(P.thGlyph[7])
         else
-        Sprite(l.track, "track_lane", G.LANE_X, y, K.pure, 1, false)
-        local idle = not up and not red and floor(now * 2) % 2 == 0
-        Sprite(l.icon, i == 1 and "icon_rejuv" or "icon_regrow", G.ICON_X, y - 1, up and c or K.muted, up and 1 or (idle and 0.9 or 0.5), false)
-        On(l.secs)
-        TextAt(l.secs, G.LANE_SECS_X, y + 4)
-        if up then
-            local w = Round((G.LANE_W - 2) * max(0, min(1, left / len)))
-            local warn = left <= C.WARN_S
-            ShowDot(l.body, G.LANE_X + 1, y + 1, w, 7, warn and K.warnBody or (i == 1 and K.rjBody or K.rgBody), 1)
-            ShowDot(l.hi, G.LANE_X + 1, y + 1, w, 2, warn and K.warnHi or (i == 1 and K.rjHi or K.rgHi), 1)
-            for k = 1, 5 do ShowDot(l.ticks[k], G.LANE_X + 1 + Round((G.LANE_W - 2) * k / 6), y + 1, 1, 7, K.out, 0.35) end
-            TextSecs(l.secs, left)
-            TextColor(l.secs, warn and K.amber or K.muted, 1)
-        else
-            Off(l.body); Off(l.hi)
-            for k = 1, 5 do Off(l.ticks[k]) end
-            TextWord(l.secs, "--")
-            TextColor(l.secs, K.muted, 0.5)
+            ThornsHide(false)
         end
+        return
+    end
+    Off(P.thGone)
+    local elapsed = Clamp01(1 - left / LEN)
+    local castAge = (castAt and not red) and (now - castAt) or 99
+    if castAge < 0 then castAge = 99 end
+    local grow, pop, unf = Clamp01(castAge / 0.6), Clamp01((castAge - 0.45) / 0.3), Clamp01((castAge - 0.7) / 0.45)
+    local low = left < C.TH_LOW
+    local blink = low and not red and sin(now * 9) > 0
+    local breathe = red and 0.55 or (0.55 + 0.25 * sin(now * 1.6))
+    local glowC = low and K.amber or K.thGlow
+    -- the vine and the glow behind its living arc, wedge by wedge
+    local WN = TH.WEDGES
+    for k = 0, WN - 1 do
+        local vt, gt = P.thVine[k + 1], P.thGlow[k + 1]
+        local fk = (k + 0.5) / WN
+        if fk > grow then Off(vt); Off(gt)
+        else
+            local dry = fk < elapsed
+            local nm = TN.vine[k]
+            Sprite(vt, dry and nm.dry or nm.live, 0, 0, K.pure, 1, false)
+            if dry then Off(gt) else Sprite(gt, TN.glow[k], 0, 0, glowC, breathe, false) end
         end
     end
-    local bloomAt = State.Stamp("bloomAt")
-    local since = bloomAt and (now - bloomAt) or 9
-    if not red and since >= 0 and since < 0.5 then
-        ShowDot(P.bloom, G.LANE_X + 1, G.LANE_Y[1] + 1, G.LANE_W - 2, 7, K.white, Stepped((1 - since / 0.5) * 0.7))
-    else Off(P.bloom) end
-    PaintChip(P.chipSm, G.FLOWER_X + 2, G.FLOWER_Y + 8, K.pink, now, State.Stamp("swiftAt"), State.TUNING.SWIFTMEND_CD)
+    -- the thorns
+    for j = 0, 19 do
+        local t = P.thThorn[j + 1]
+        local f = (j + 0.35) / 20
+        local nm
+        if f <= grow then
+            local tn = TN.thorn[j]
+            if f < elapsed then nm = tn.dry
+            elseif pop >= 1 then nm = blink and tn.blink or tn[TH.POPS]
+            else
+                local p = Round(pop * TH.POPS)
+                nm = p >= 1 and tn[p] or nil
+            end
+        end
+        Sprite(t, nm, 0, 0, K.pure, 1, false)
+    end
+    -- the leaves: one browns as the dry line passes it, falls when its minute is up
+    for i = 0, 9 do
+        local t, ft = P.thLeaf[i + 1], P.thFall[i + 1]
+        local f = (i + 0.5) / 10
+        local fallAt = LEN - (i + 1) * 60
+        if f > grow then Off(t); Off(ft)
+        elseif left <= fallAt then
+            Off(t)
+            local age = fallAt - left
+            if red or age > C.TH_FALL then Off(ft)
+            else
+                local a = f * TAU
+                local rr = R + A * abs(sin(N * a)) + 0.8
+                local x = Round(cx + sin(a) * rr + sin(age * 4 + i) * 3 * age)
+                local y = Round(cy - cos(a) * rr + age * age * 7 + age * 3)
+                local s = floor(fmod(a + age * 5, TAU) / TAU * TH.SPIN + 0.5) % TH.SPIN
+                if x < 0 or y < 0 or x >= C.SW or y >= C.SH then Off(ft)
+                else Sprite(ft, TN.fall[s], x, y, K.pure, 1 - age / C.TH_FALL, false) end
+            end
+        else
+            Off(ft)
+            local nm
+            if elapsed > f then nm = TN.leaf[i].wilt
+            elseif low and i == 9 then nm = TN.amber[Round((red and 0.5 or (0.5 + 0.5 * sin(now * 5))) * TH.AMBER)]
+            else
+                local u = Round(unf * TH.UNF)
+                nm = u >= 1 and TN.leaf[i][u] or nil
+            end
+            Sprite(t, nm, 0, 0, K.pure, 1, false)
+        end
+    end
+    -- the sap bead on the dry line
+    if grow >= 1 then
+        local a = elapsed * TAU
+        local sx, sy = cx + sin(a) * R, cy - cos(a) * R
+        local c = low and K.amber or K.thSap
+        local n = 0
+        for r = 1, 3 do
+            for q = 0, 11 do
+                n = n + 1
+                local x, y = Round(sx + cos(q / 12 * TAU) * r), Round(sy + sin(q / 12 * TAU) * r)
+                if (x + y) % 2 == 0 then Pix(P.thHalo[n], x, y, 1, c, 0.25 * (1 - r / 4)) else Off(P.thHalo[n]) end
+            end
+        end
+        Pix(P.thBead, sx - 1, sy - 1, 2, c, 1)
+        Pix(P.thBeadHi, sx - 1, sy - 1, 1, K.pure, 0.9)
+    else
+        for n = 1, C.TH_HALO do Off(P.thHalo[n]) end
+        Off(P.thBead); Off(P.thBeadHi)
+    end
+    -- fireflies over the living arc
+    for i = 0, C.TH_FLIES - 1 do
+        local t = P.thFly[i + 1]
+        local odd = i % 2 == 1
+        local f = fmod(fmod(i * 0.137 + now * 0.03 * (odd and 1 or -1), 1) + 1, 1)
+        if red or f < elapsed or f > grow then Off(t)
+        else
+            local a = f * TAU
+            local rr = R + (odd and 8 or -9) + sin(now * 1.3 + i) * 2.5
+            local tw = 0.5 + 0.5 * sin(now * 3 + i * 2.1)
+            Pix(t, cx + sin(a) * rr, cy - cos(a) * rr - sin(now * 0.7 + i) * 1.5, 1, low and K.amber or K.thFly, 0.35 + 0.6 * tw)
+        end
+    end
+    -- our own cast: the green ring and its sparkles
+    if castAge < C.TH_CAST then
+        local k = castAge / C.TH_CAST
+        local rr = R + k * 26
+        for q = 0, C.TH_RING - 1 do
+            local a = q / C.TH_RING * TAU
+            local x, y = Round(cx + sin(a) * rr), Round(cy - cos(a) * rr)
+            if (x + y) % 2 == 0 then Pix(P.thRing[q + 1], x, y, 1, K.thGlow, (1 - k) * 0.9) else Off(P.thRing[q + 1]) end
+        end
+        for i = 0, C.TH_SPARKS - 1 do
+            local a = i / 10 * TAU + 0.3
+            local r2 = R + 4 + k * 18 * (1 + (i % 3) * 0.3)
+            local x, y = Round(cx + sin(a) * r2), Round(cy - cos(a) * r2)
+            local t = P.thSpark[i + 1]
+            if x < 1 or y < 1 or x > C.SW - 2 or y > C.SH - 2 then Off(t)
+            else Sprite(t, "th_sparkle", x, y, K.pure, 1 - k, false) end
+        end
+    else
+        for q = 1, C.TH_RING do Off(P.thRing[q]) end
+        for i = 1, C.TH_SPARKS do Off(P.thSpark[i]) end
+    end
+    ThornsLabel(left, est)
 end
+Druid.PaintThorns = PaintThorns
 
 local function Paint(now)
     if not mod then return end
     local kind = D.kind
     if kind ~= shownKind then Switch(kind) end
     ComputeCue(now)
+    if IsCaster(kind) then PaintThorns(now) return end
     PaintCommon(now)
-    if kind == "moon" then PaintMoon(now)
-    elseif kind == "cat" then PaintCat(now)
+    if kind == "cat" then PaintCat(now)
     elseif kind == "bear" then PaintBear(now)
-    elseif kind == "tree" then PaintTree(now)
     else
         ShowDot(P.travelLine, G.MOON_X, G.DRAIN_Y + 3, 92, 1, K.line, 0.6)
     end

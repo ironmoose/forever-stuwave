@@ -737,6 +737,295 @@ def chip_ring() -> Layer:
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Thorns: the Bramble Wreath (design mockup "Druid Thorns Concepts", 2026-11-17, concept A). A port of the page's drawWreath and
+# its helpers (Buf, thorn, leaf, h2, ang, the 3 x 5 label font). Everything is baked in absolute canvas px (origin 0, 0), so the
+# module places a piece at (0, 0); the moving pieces (the falling leaf, the sparkle) are baked round their own (0, 0).
+#
+# What the canvas draws per frame and how the bake splits it:
+#   * the glow behind the living arc: per px alpha (1 - (e - 4) / 5) * .32, a white mask cut into TH_WEDGES angular wedges; the
+#     module tints it (green, amber in the last minute) and multiplies the breath into the vertex alpha;
+#   * the braided vine and its dark outline: TH_WEDGES wedges by each px's own angle, in bark and in dry colours; the module shows
+#     a wedge dry when its centre angle is behind the dry line (exact when the time left is a multiple of 600 / TH_WEDGES s);
+#   * 20 thorns (live at TH_POPS pop steps, dry, and live with the amber tip of the last minute's blink) and 10 leaves (TH_UNF
+#     unfurl steps, wilted, and the last leaf's amber pulse in TH_AMBER steps). The canvas outlines the union of vine, thorns and
+#     leaves once; here each piece keeps the outline px that no other piece covers when everything is grown, so a piece drawn
+#     later never darkens one drawn before it (the outlines differ from the canvas only while the cast grows the wreath);
+#   * a falling leaf in TH_SPIN rotations, the cast sparkle, the 3 x 5 label glyphs (white masks) and the dim amber rings of the
+#     after combat reminder. The sap bead, the fireflies and the cast ring are flat px the module places itself (the page's own
+#     maths, see GunsightDruid.lua).
+# ---------------------------------------------------------------------------------------------------------------------
+TH = {"CX": 75, "CY": 36, "R": 22, "A": 2.3, "N": 7, "T": 1.75, "LABEL_Y": 74, "LEN": 600}
+TH_WEDGES, TH_POPS, TH_UNF, TH_AMBER, TH_SPIN = 60, 10, 10, 8, 32
+TH_W, TH_H = 150, 86
+TAU = math.pi * 2
+TH_OUT = "#100608"
+BARK = {"dk": "#3a1d0e", "md": "#643618", "lt": "#94592a", "hi": "#c48a48"}
+DRY = {"dk": "#2a221e", "md": "#463a32", "lt": "#66584a", "hi": "#857664"}
+LEAF = {"dk": "#145628", "md": "#2f9a3a", "lt": "#6fd04a", "hi": "#c4f57a"}
+WILT = {"dk": "#4a2a10", "md": "#8a5a20", "lt": "#c08a3a", "hi": "#d8a85a"}
+TH_TIP, TH_TIPHI, TH_DRYTIP, TH_AMBERD = "#f2e4b4", "#fff8dc", "#a8988a", "#7a4a10"
+TH_FONT = {"0": ["XXX", "X.X", "X.X", "X.X", "XXX"], "1": [".X.", "XX.", ".X.", ".X.", "XXX"], "2": ["XXX", "..X", "XXX", "X..", "XXX"],
+           "3": ["XXX", "..X", ".XX", "..X", "XXX"], "4": ["X.X", "X.X", "XXX", "..X", "..X"], "5": ["XXX", "X..", "XXX", "..X", "XXX"],
+           "6": ["XXX", "X..", "XXX", "X.X", "XXX"], "7": ["XXX", "..X", ".X.", ".X.", ".X."], "8": ["XXX", "X.X", "XXX", "X.X", "XXX"],
+           "9": ["XXX", "X.X", "XXX", "..X", "XXX"], "S": [".XX", "X..", ".X.", "..X", "XX."], "M": ["X.X", "XXX", "XXX", "X.X", "X.X"],
+           "T": ["XXX", ".X.", ".X.", ".X.", ".X."], "H": ["X.X", "X.X", "XXX", "X.X", "X.X"], "O": ["XXX", "X.X", "X.X", "X.X", "XXX"],
+           "R": ["XX.", "X.X", "XX.", "X.X", "X.X"], "N": ["XX.", "X.X", "X.X", "X.X", "X.X"],
+           "~": ["...", "...", ".XX", "XX.", "..."]}   # the estimate mark (not on the page: a time from our own cast in combat)
+TH_GLYPHS = "0123456789SMTHORN~"
+
+
+def _i32(v: int) -> int:
+    v &= 0xFFFFFFFF
+    return v - 0x100000000 if v >= 0x80000000 else v
+
+
+def _imul(a: int, b: int) -> int:
+    return _i32(_i32(a) * _i32(b))
+
+
+def h2(x, y) -> float:
+    """The page's integer hash (Math.imul and the unsigned shifts, bit for bit)."""
+    n = _imul(int(x), 374761393) + _imul(int(y), 668265263)          # a plain sum: JS does not wrap it here
+    n = _imul(_i32(n) ^ _i32((n & 0xFFFFFFFF) >> 13), 1274126177)
+    return ((_i32(n) ^ ((n & 0xFFFFFFFF) >> 16)) & 0xFFFFFFFF) / 4294967295
+
+
+def ang(x: float, y: float) -> float:
+    return math.fmod(math.atan2(x, -y) + TAU, TAU)
+
+
+def clampf(v, a, b):
+    return max(a, min(b, v))
+
+
+class Buf:
+    """The page's Buf: px set in order (a later set wins, the first set keeps its place)."""
+
+    def __init__(self):
+        self.m: dict[tuple[int, int], str] = {}
+
+    def set(self, x, y, c):
+        x, y = jround(x), jround(y)
+        if x < 0 or y < 0 or x >= TH_W or y >= TH_H:
+            return
+        self.m[(x, y)] = c
+
+    def outline(self) -> set:
+        out = set()
+        for (x, y) in self.m:
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                q = (x + dx, y + dy)
+                if q not in self.m and 0 <= q[0] < TH_W and 0 <= q[1] < TH_H:
+                    out.add(q)
+        return out
+
+
+def th_thorn(b: Buf, x, y, th, L, w, rmp, tip, shade):
+    dx, dy = math.sin(th), -math.cos(th)
+    nx, ny = -dy, dx
+    s = 0.0
+    while s <= L:
+        k = s / L
+        hw, bend = w * (1 - k), k * k * 1.2
+        o = -hw
+        while o <= hw + .01:
+            X, Y = x + dx * s + nx * (o - bend), y + dy * s + ny * (o - bend)
+            if k > .62:
+                c = TH_TIPHI if k > .88 else tip
+            else:
+                c = rmp["dk"] if o * shade > 0 else (rmp["hi"] if k > .35 else rmp["lt"])
+            b.set(X, Y, c)
+            o += .34
+        s += .34
+
+
+def th_leaf(b: Buf, x, y, th, L, w, R):
+    dx, dy = math.sin(th), -math.cos(th)
+    nx, ny = -dy, dx
+    if L <= 0:
+        return            # the page's p / L is NaN at L = 0, so its half width is NaN and no px is set
+    p = 0.0
+    while p <= L:
+        hw = w * math.pow(math.sin(math.pi * clampf(p / L, 0, 1)), .8)
+        q = -hw
+        while q <= hw:
+            X, Y = x + dx * p + nx * q, y + dy * p + ny * q
+            lit = (nx * q * -.6 + ny * q * -.8) / max(w, 1)
+            if abs(q) < .45 and .8 < p < L - 1:
+                c = R["dk"]
+            else:
+                c = R["hi"] if lit > .35 else R["lt"] if lit > -.1 else R["md"]
+            b.set(X, Y, c)
+            q += .3
+        p += .3
+
+
+def th_vine():
+    """{(x, y): (f, ramp key)} of the braided vine (the page's double loop, in its order)."""
+    R, A, N, T, cx, cy = TH["R"], TH["A"], TH["N"], TH["T"], TH["CX"], TH["CY"]
+    out = {}
+    for y in range(-R - 5, R + 6):
+        for x in range(-R - 5, R + 6):
+            d = math.hypot(x, y)
+            if d < R - A - T - 1 or d > R + A + T + 1:
+                continue
+            a = ang(x, y)
+            f = a / TAU
+            sw = math.sin(N * a)
+            r0, r1 = R + A * sw, R - A * sw
+            in0, in1 = abs(d - r0) <= T, abs(d - r1) <= T
+            if not in0 and not in1:
+                continue
+            m = jround(N * a / math.pi)
+            front = m % 2
+            k = front if (in0 and in1) else (0 if in0 else 1)
+            rk = r1 if k else r0
+            u = (d - rk) / T
+            lit = (x / d * u) * -.6 + (y / d * u) * -.8
+            c = "hi" if lit > .42 else "lt" if lit > .02 else "md" if lit > -.5 else "dk"
+            other = r0 if k else r1
+            if k != front and abs(d - other) <= T + 1.2:
+                c = "dk"
+            if c == "md" and h2(jround(a * 60), jround(d * 2)) > .8:
+                c = "dk"
+            if c == "lt" and h2(x * 3, y * 7) > .9:
+                c = "hi"
+            out[(cx + x, cy + y)] = (f, c)
+    return out
+
+
+def th_thorn_geom(j, pop, rmp, tip):
+    R, A, N, T, cx, cy = TH["R"], TH["A"], TH["N"], TH["T"], TH["CX"], TH["CY"]
+    a = (j + .35) / 20 * TAU
+    sw = abs(math.sin(N * a))
+    out = j % 2 == 0
+    rr = R + A * sw + T - .4 if out else R - A * sw - T + .4
+    L = (4.6 if out else 3.2) * pop
+    th = a - .45 if out else a + math.pi + .45
+    b = Buf()
+    if L >= .6:
+        th_thorn(b, cx + math.sin(a) * rr, cy - math.cos(a) * rr, th, L, 1.25, rmp, tip, 1 if out else -1)
+    return b
+
+
+def th_leaf_geom(i, unf, R2):
+    R, A, N, cx, cy = TH["R"], TH["A"], TH["N"], TH["CX"], TH["CY"]
+    a = (i + .5) / 10 * TAU
+    sw = abs(math.sin(N * a))
+    rr = R + A * sw + .8
+    side = 1 if i % 2 else -1
+    b = Buf()
+    th_leaf(b, cx + math.sin(a) * rr, cy - math.cos(a) * rr, a + side * 1.05, 6.5 * unf, 2.1 * unf, R2)
+    return b
+
+
+def th_amber_leaf(k: float) -> dict:
+    return {"dk": "#6a5010", "md": "#b89a2a", "lt": mix("#e8d060", AMBER, k), "hi": "#fff0a0"}
+
+
+def th_piece(b: Buf, blocked: set) -> Layer:
+    """A piece's px and the outline px that nothing grown covers (outline first, then the colours, as the page draws)."""
+    L = Layer()
+    for q in b.outline():
+        if q not in blocked:
+            L.px(q[0], q[1], TH_OUT)
+    for (x, y), c in b.m.items():
+        L.px(x, y, c)
+    return L
+
+
+def th_sprites() -> list:
+    """(name, Layer) of every Thorns piece."""
+    R, cx, cy = TH["R"], TH["CX"], TH["CY"]
+    out = []
+    vine = th_vine()
+    vset = set(vine)
+    full_thorns = [set(th_thorn_geom(j, 1.0, BARK, TH_TIP).m) for j in range(20)]
+    full_leaves = [set(th_leaf_geom(i, 1.0, LEAF).m) for i in range(10)]
+    vb = Buf()
+    vb.m = {q: BARK[c] for q, (_, c) in vine.items()}
+    voutline = vb.outline()
+    # the vine wedges: every px (and outline px) by its own angle
+    for k in range(TH_WEDGES):
+        for key, rmp in (("live", BARK), ("dry", DRY)):
+            L = Layer()
+            for q in voutline:
+                if int(ang(q[0] - cx, q[1] - cy) / TAU * TH_WEDGES) == k:
+                    L.px(q[0], q[1], TH_OUT)
+            for q, (f, c) in vine.items():
+                if int(f * TH_WEDGES) == k:
+                    L.px(q[0], q[1], rmp[c])
+            out.append((f"th_vine_{k}_{key}", L))
+        # the glow behind the living arc (white; the module tints it and multiplies the breath)
+        G = Layer()
+        for y in range(-R - 9, R + 10):
+            for x in range(-R - 9, R + 10):
+                d = math.hypot(x, y)
+                f = ang(x, y) / TAU
+                e = abs(d - R)
+                if e < 4 or e > 9 or int(f * TH_WEDGES) != k:
+                    continue
+                X, Y = cx + x, cy + y
+                if (X + Y) & 1 == 0:
+                    G.px(X, Y, "#ffffff", (1 - (e - 4) / 5) * .32)
+        out.append((f"th_glow_{k}", G))
+    # thorns: blocked = the vine, the other grown thorns, the grown leaves
+    for j in range(20):
+        blocked = vset.union(*(full_thorns[n] for n in range(20) if n != j), *full_leaves)
+        for p in range(1, TH_POPS + 1):
+            b = th_thorn_geom(j, p / TH_POPS, BARK, TH_TIP)
+            if b.m:
+                out.append((f"th_thorn_{j}_{p}", th_piece(b, blocked)))
+        out.append((f"th_thorn_{j}_dry", th_piece(th_thorn_geom(j, 1.0, DRY, TH_DRYTIP), blocked)))
+        out.append((f"th_thorn_{j}_blink", th_piece(th_thorn_geom(j, 1.0, BARK, AMBER), blocked)))
+    # leaves
+    for i in range(10):
+        blocked = vset.union(*full_thorns, *(full_leaves[n] for n in range(10) if n != i))
+        for u in range(1, TH_UNF + 1):
+            out.append((f"th_leaf_{i}_{u}", th_piece(th_leaf_geom(i, u / TH_UNF, LEAF), blocked)))
+        out.append((f"th_leaf_{i}_wilt", th_piece(th_leaf_geom(i, 1.0, WILT), blocked)))
+    for s in range(TH_AMBER + 1):
+        blocked = vset.union(*full_thorns, *full_leaves[:9])
+        out.append((f"th_leaf_9_amber_{s}", th_piece(th_leaf_geom(9, 1.0, th_amber_leaf(s / TH_AMBER)), blocked)))
+    # the falling leaf round its own (0, 0), drawn at (40, 40) so no px is clipped, then shifted back
+    for s in range(TH_SPIN):
+        b = Buf()
+        th_leaf(b, 40, 40, s / TH_SPIN * TAU, 6, 2, WILT)
+        out.append((f"th_fall_{s}", th_piece(b, set()).shifted(-40, -40)))
+    # the cast sparkle: white heart, arms at .7 (the module multiplies its fade), tinted nothing
+    S = Layer()
+    S.px(0, 0, "#ffffff")
+    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        S.px(dx, dy, "#c4f57a", .7)
+    out.append(("th_sparkle", S))
+    # the label glyphs (3 x 5 white masks, top left at 0, 0)
+    for ch in TH_GLYPHS:
+        L = Layer()
+        for j, row in enumerate(TH_FONT[ch]):
+            for q in range(3):
+                if row[q] == "X":
+                    L.px(q, j, "#ffffff")
+        out.append((f"th_glyph_{'tilde' if ch == '~' else ch}", L))
+    # the after combat reminder: two dim amber dashed rings and ten dots
+    Gn = Layer()
+
+    def dashed(r, c, a):
+        n = jround(TAU * r)
+        for i in range(n):
+            if i % 4 == 3:
+                continue
+            t = i / n * TAU
+            Gn.px(jround(cx + math.sin(t) * r), jround(cy - math.cos(t) * r), c, a)
+    dashed(R + 2, TH_AMBERD, .8)
+    dashed(R - 2, TH_AMBERD, .5)
+    for i in range(10):
+        t = (i + .5) / 10 * TAU
+        Gn.px(jround(cx + math.sin(t) * (R + 5)), jround(cy - math.cos(t) * (R + 5)), AMBER, .35)
+    out.append(("th_gone", Gn))
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Packing and output
 # ---------------------------------------------------------------------------------------------------------------------
 class Sprite:
@@ -858,6 +1147,9 @@ def atlas_sprites() -> list[Sprite]:
     return out
 
 
+THORNS_SIZE = (512, 512)
+
+
 def build():
     sprites = atlas_sprites()
     if not pack(sprites, ATLAS_SIZE):
@@ -865,7 +1157,14 @@ def build():
     return sprites
 
 
-def lua_manifest(sprites) -> str:
+def build_thorns():
+    sprites = [Sprite(name, layer) for name, layer in th_sprites() if layer.p]
+    if not pack(sprites, THORNS_SIZE):
+        raise SystemExit("the Thorns sprites do not fit their atlas")
+    return sprites
+
+
+def lua_manifest(sprites, thorns) -> str:
     g = GEOM
     keys = list(g)
     lines = [
@@ -892,7 +1191,16 @@ def lua_manifest(sprites) -> str:
     lines += ["    },", "    sprites = {"]
     for s in sorted(sprites, key=lambda s: s.name):
         lines.append(f'        ["{s.name}"] = {{ {s.tx}, {s.ty}, {s.w}, {s.h}, {-s.x0}, {-s.y0} }},')
-    lines += ["    },", "}", ""]
+    lines += ["    },",
+              "    -- the Thorns Bramble Wreath: its own atlas, the same sprite rows; pieces drawn in canvas px sit at (0, 0)",
+              "    THORNS = {",
+              f'        ATLAS = {{ file = "druid_thorns", w = {THORNS_SIZE[0]}, h = {THORNS_SIZE[1]} }},',
+              "        " + ", ".join(f"{k} = {v}" for k, v in TH.items()) + ",",
+              f"        WEDGES = {TH_WEDGES}, POPS = {TH_POPS}, UNF = {TH_UNF}, AMBER = {TH_AMBER}, SPIN = {TH_SPIN},",
+              "        sprites = {"]
+    for s in sorted(thorns, key=lambda s: s.name):
+        lines.append(f'            ["{s.name}"] = {{ {s.tx}, {s.ty}, {s.w}, {s.h}, {-s.x0}, {-s.y0} }},')
+    lines += ["        },", "    },", "}", ""]
     return "\n".join(lines)
 
 
@@ -914,11 +1222,13 @@ def main() -> None:
     lua = os.environ.get("FS_ART_LUA_OUTPUT", default_lua)
     sprites = build()
     verify(sprites)
+    thorns = build_thorns()
     write_tga_raw(os.path.join(here, "druid_gunsight.tga"), ATLAS_SIZE[0], ATLAS_SIZE[1], raster_atlas(ATLAS_SIZE, sprites))
+    write_tga_raw(os.path.join(here, "druid_thorns.tga"), THORNS_SIZE[0], THORNS_SIZE[1], raster_atlas(THORNS_SIZE, thorns))
     for name, (size, fn) in FILES.items():
         write_tga_raw(os.path.join(here, f"{name}.tga"), size[0], size[1], raster_file(size, fn()))
     with open(lua, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(lua_manifest(sprites))
+        fh.write(lua_manifest(sprites, thorns))
     print(f"wrote {lua}")
 
 

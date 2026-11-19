@@ -12,12 +12,18 @@
 --   * Rejuvenation 12 s, Regrowth 21 s, per target NAME (a GUID can be secret in an instance, a name is not).
 --   * Shifting Power 8 s, Primal Bite 6 s, Swiftmend 15 s: the module shows the engine's cooldown object; these are the
 --     fallback seconds when no object is available.
+--   * Thorns (the caster's Bramble Wreath): out of combat, while FS.AurasReadable(), the player's own aura by NAME is the truth
+--     (its plain expirationTime; a readably absent aura is "gone"). In combat the time is a ledger: our own Thorns cast lands on
+--     the player (UNIT_SPELLCAST_SENT names the target: an empty, secret or own name, or a target that is not a friend we can
+--     help, is the player; the client casts Thorns on you then) and lasts THORNS_SECONDS (600: "Lasts 10 min", Forever's rank 1
+--     tooltip); shown with "~". A reload in combat with no cast seen leaves it "unknown" (nothing drawn) until a read or a cast.
 -- Every number is in TUNING / DEFS below and UNVERIFIED on the live client (the Forever tuning moves with class patches).
 --
 -- The ledger listens from Start() on and never stops: a cast while the module is hidden (no target) cannot be read back later.
 -- API: Start(), Subscribe(fn(reason)), Unsubscribe(fn), Refresh(), Kind() -> "moon" | "cat" | "bear" | "tree" | "travel",
 -- Eclipse(now) -> mode, charges, left, Lacerate(now) -> stacks, left, Hot(key, now) -> left or nil, Stamp(key), Known(key),
--- Cooldown(key) -> "ready" | "cool" | "none" | nil, Duration(key), Tick(now), Friendly().
+-- Cooldown(key) -> "ready" | "cool" | "none" | nil, Duration(key), Tick(now), Friendly(),
+-- Thorns(now) -> mode ("up" | "gone" | "unknown"), seconds left (up only), est (a ledger time), castAt (our own cast's GetTime()).
 
 local _, FS = ...
 
@@ -36,6 +42,8 @@ local TUNING = {
     ENERGY_NOTCH = 55,                             -- Shifting Power: use it under this much energy (Method, wowfdb)
     RAGE_LACERATE = 15, RAGE_BITE = 20, RAGE_MAUL = 35,   -- the ability ticks under the rage bar (Method, SixtySim)
     BLOOM_WINDOW = 1.5,                            -- a HoT that runs out by itself blooms
+    THORNS_SECONDS = 600,                          -- Thorns rank 1 tooltip on Forever: "Lasts 10 min"
+    THORNS_REREAD = 0.2,                           -- s after an own cast out of combat before the aura is read back
 }
 State.TUNING = TUNING
 
@@ -46,9 +54,10 @@ local DEFS = {
     ["lacerate"] = "lacerate", ["primal bite"] = "bite",
     ["rip"] = "finisher", ["ferocious bite"] = "finisher",
     ["shifting power"] = "shift",
+    ["thorns"] = "thorns",
 }
 local SPELLS = { shift = "Shifting Power", bite = "Primal Bite", swift = "Swiftmend", rejuv = "Rejuvenation", regrow = "Regrowth",
-    lacerate = "Lacerate", maul = "Maul" }
+    lacerate = "Lacerate", maul = "Maul", thorns = "Thorns" }
 State.DEFS, State.SPELLS = DEFS, SPELLS
 
 local TRAVEL = { [3] = true, [4] = true, [27] = true, [29] = true }     -- travel, aquatic, flight forms
@@ -65,6 +74,9 @@ local level = nil                                  -- the player's level, re-rea
 local unknownUntil = nil
 local known = {}
 local cdCache = {}
+-- Thorns on the player: expires (GetTime()) or nil; read = a plain read or our own cast has said something since login
+local thorns = { expires = nil, est = false, castAt = nil, read = false, up = false }
+local sentSelf = true                               -- where the last UNIT_SPELLCAST_SENT pointed (true = the player)
 
 local function Now() return GetTime() end
 
@@ -181,11 +193,69 @@ function State.Hot(key, now)
     return left
 end
 
+local function Readable() return FS.AurasReadable and FS.AurasReadable() or false end
+
+-- The player's Thorns aura, out of combat only. Returns whether anything changed.
+local function ReadThorns()
+    if not Readable() then return false end
+    local byName = C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName
+    if type(byName) ~= "function" then return false end
+    local ok, aura = pcall(byName, "player", SPELLS.thorns, "HELPFUL")
+    if not ok or IsSecret(aura) then return false end
+    local th = thorns
+    local exp, up = nil, false
+    if type(aura) == "table" then
+        local e = PlainOf(aura.expirationTime, "number")
+        up = true
+        if e and e > 0 then exp = e end
+    end
+    local changed = th.up ~= up or th.expires ~= exp or th.est or not th.read
+    th.up, th.expires, th.est, th.read = up, exp, false, true
+    return changed
+end
+
+-- read the aura again (out of combat) and tell the listeners when it changed
+function State.RereadThorns()
+    if ReadThorns() then Notify("thorns") end
+end
+
+function State.Thorns(now)
+    local th = thorns
+    if not th.read then return "unknown", nil, false, th.castAt end
+    if not th.up then return "gone", nil, false, th.castAt end
+    if th.expires == nil then return "up", TUNING.THORNS_SECONDS, th.est, th.castAt end   -- an aura with no end time
+    local left = th.expires - now
+    if left <= 0 then return "gone", nil, false, th.castAt end
+    if left > TUNING.THORNS_SECONDS then left = TUNING.THORNS_SECONDS end
+    return "up", left, th.est, th.castAt
+end
+
+-- UNIT_SPELLCAST_SENT: (unit, target name, castGUID, spellID). Only a plain other name on a friend we can help is not the player.
+local function OnSent(target)
+    local own = PlainOf(Call(UnitName, "player"), "string")
+    local name = PlainOf(target, "string")
+    if name == nil or name == "" or name == own then sentSelf = true return end
+    local here = TargetName()
+    sentSelf = not (here == name and State.Friendly())
+end
+
 local function OnCast(spellID)
     local name = SpellNameOf(spellID)
     local key = name and DEFS[string.lower(name)]
     if not key then return end
     local now = Now()
+    if key == "thorns" then
+        if sentSelf then
+            local th = thorns
+            th.up, th.expires, th.est, th.read, th.castAt = true, now + TUNING.THORNS_SECONDS, true, true, now
+            if Readable() and C_Timer and C_Timer.After then
+                C_Timer.After(TUNING.THORNS_REREAD, State.RereadThorns)
+            end
+        end
+        sentSelf = true
+        Notify("cast")
+        return
+    end
     if key == "wrath" then
         eclipse.charges = math.min(TUNING.ECLIPSE_MAX, ((eclipse.at and now < eclipse.at + TUNING.ECLIPSE_SECONDS) and eclipse.charges or 0) + TUNING.WRATH_GRANTS)
         eclipse.at, eclipse.seen = now, true
@@ -283,6 +353,7 @@ end
 -------------------------------------------------------------------------------
 
 function State.Refresh()
+    ReadThorns()
     level = PlainOf(Call(UnitLevel, "player"), "number")
     local f = ReadForm()
     local changed = f ~= form
@@ -307,10 +378,14 @@ function State.Start()
     local now = Now()
     if type(InCombatLockdown) == "function" and InCombatLockdown() then unknownUntil = now + TUNING.UNKNOWN_SECONDS end
     frame = CreateFrame("Frame")
-    frame:SetScript("OnEvent", function(_, event, unit, _, spellID)
+    frame:SetScript("OnEvent", function(_, event, unit, a2, spellID)
         local ok, err
         if event == "UNIT_SPELLCAST_SUCCEEDED" then
             ok, err = pcall(OnCast, spellID)
+        elseif event == "UNIT_SPELLCAST_SENT" then
+            ok, err = pcall(OnSent, a2)
+        elseif event == "UNIT_AURA" then
+            ok, err = pcall(State.RereadThorns)
         elseif event == "SPELL_UPDATE_COOLDOWN" then
             Notify("cooldown"); ok = true
         elseif event == "UNIT_DISPLAYPOWER" then
@@ -323,8 +398,12 @@ function State.Start()
         end
     end)
     Register(frame, "UNIT_SPELLCAST_SUCCEEDED", "player")
+    Register(frame, "UNIT_SPELLCAST_SENT", "player")
+    Register(frame, "UNIT_AURA", "player")
     Register(frame, "UNIT_DISPLAYPOWER", "player")
     for _, e in ipairs(EVENTS) do Register(frame, e) end
+    -- the aura gate can still be shut for a moment after PLAYER_REGEN_ENABLED: read Thorns again once it opens
+    if FS.OnAurasReadable then pcall(FS.OnAurasReadable, State.RereadThorns) end
     pcall(State.Refresh)
 end
 

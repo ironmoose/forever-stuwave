@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """Runs the real GunsightDruid.lua (the Druid's Gunsight Class Module), DruidState.lua and the generated DruidArt.lua headless.
 
-The module draws the design "Druid Gunsight Module: Wildshape Eyes" (2026-11-16): owl, slit, angry and leaf eyes that follow the
-form, one gauge under them (Eclipse moons, five claw gashes and the energy bar, the rage bar and Lacerate pips, two heal over time
-lanes) and a cue word. These checks pin:
+The module draws one layout per form: in caster form the Thorns timer, the Bramble Wreath (design mockup "Druid Thorns Concepts",
+2026-11-17, concept A); in Cat and Bear still the design "Druid Gunsight Module: Wildshape Eyes" (2026-11-16): slit and angry eyes,
+one gauge under them (five claw gashes and the energy bar, the rage bar and Lacerate pips) and a cue word. These checks pin:
 
-  * the art: the committed DruidArt.lua and the eight druid_*.tga files are exactly what the generator writes now, every sprite
+  * the art: the committed DruidArt.lua and the nine druid_*.tga files are exactly what the generator writes now, every sprite
     name the module can ask for is in the manifest, the toc loads art, state, then module after the generic class module;
+  * Thorns: the aura read out of combat (the wedges dry, the leaves fallen, the label), the ledger of our own cast in combat ("~",
+    the cast ring), a cast on a friend is not ours, gone in combat draws nothing and gone out of combat the reminder, not learned
+    draws nothing, the last minute is amber (bead, leaf, blinking tips), a reload in combat is unknown until a read or a cast;
   * the registration: one "class" module for DRUID only; the generic GunsightClass.lua no longer lists DRUID;
   * the form: UnitPowerType ENERGY is Cat, RAGE is Bear, a travel form id is Travel, caster is Moon on a hostile target and
     Tree on a friendly one, a secret answer is caster;
-  * the Eclipse ledger (Wrath +2, Starfire -1, cap 4, 15 s, locked under level 30, unknown after a reload in combat), the cue words;
+  * the Eclipse and heal over time ledgers still count (nothing draws them now);
   * the Cat: the gashes and the five point flare are bars fed the count (a secret one reaches only SetValue), FINISH / SHIFT only
     from plain reads, the number only through SetFormattedText, the chip's engine timer or its ledger fallback, the spend streak;
   * the Bear: the rage bar, the cue priority, the Lacerate ledger (5 stacks, 15 s, reset on another target), the pips;
-  * the Restoration lanes: our HoTs by target name, the cue order, Swiftmend, the bloom flash;
   * every value secret at once (power, level, name, cooldown flags, form) draws without an error or a log line;
   * the shift (eyes shut, flash, sparks), reduced motion (no blink, flash, sparks, pulses), a rescale;
   * onShow subscribes and starts one OnUpdate and the power events, onHide stops them;
@@ -51,7 +53,7 @@ ARTLUA_PATH = CH / "DruidArt.lua"
 ARTLUA = ARTLUA_PATH.read_text(encoding="utf-8")
 GENERATOR = ROOT / "tools/assets/generate_druid_gunsight.py"
 MEDIA = ADDON / "Media/Textures"
-TEXTURES = ["druid_gunsight", "druid_slash_lit", "druid_slash_flare", "druid_energy_fill", "druid_rage_fill", "druid_chip_sp",
+TEXTURES = ["druid_gunsight", "druid_thorns", "druid_slash_lit", "druid_slash_flare", "druid_energy_fill", "druid_rage_fill", "druid_chip_sp",
             "druid_chip_pb", "druid_chip_sm"]
 
 MOCK = r"""
@@ -129,10 +131,10 @@ W = { powerType = { 0, "MANA" }, formId = nil, level = 60, name = "Boar", exists
       spells = {}, known = {}, cd = {}, secretPower = false, secretName = false, secretLevel = false, secretCd = false,
       secretForm = false, spellById = { [5176] = "Wrath", [2912] = "Starfire", [774] = "Rejuvenation", [8936] = "Regrowth", [6807] = "Maul",
       [18562] = "Swiftmend", [33745] = "Lacerate", [22568] = "Ferocious Bite", [1079] = "Rip", [9999] = "Primal Bite",
-      [8888] = "Shifting Power", [1] = "Auto Attack" } }
+      [8888] = "Shifting Power", [467] = "Thorns", [1] = "Auto Attack" }, auras = {} }
 function UnitPowerType(u) if W.secretForm then return SECRET, SECRET end return W.powerType[1], W.powerType[2] end
 function GetShapeshiftFormID() if W.secretForm then return SECRET end return W.formId end
-function UnitName(u) if W.secretName then return SECRET end return W.name end
+function UnitName(u) if W.secretName then return SECRET end if u == "player" then return "Stu" end return W.name end
 function UnitLevel(u) if W.secretLevel then return SECRET end return W.level end
 function UnitExists(u) return W.exists end
 function UnitCanAttack() return W.canAttack end
@@ -149,8 +151,18 @@ C_Spell = {
     end,
     GetSpellCooldownDuration = function(name) return { duration = name } end,
 }
+C_UnitAuras = {
+    GetAuraDataBySpellName = function(unit, name, filter)
+        if W.combat then return SECRET end
+        return W.auras[name]
+    end,
+}
+TIMERS = {}
+C_Timer = { After = function(d, fn) TIMERS[#TIMERS + 1] = fn end }
+function Timers() local list = TIMERS; TIMERS = {}; for _, fn in ipairs(list) do fn() end end
 SUBS = {}
 FS = {
+    AurasReadable = function() return not W.combat end,
     IsSecret = function(v) return v == SECRET end,
     Gunsight = { ui = function(px) return px * __scale end, Point = function(f, p, x, y) f.pt = { p, "root", "CENTER", x, y } end },
     GunsightAreas = Areas,
@@ -206,6 +218,25 @@ function Start(kind)
     Form(kind or "caster")
     M.Paint(__now)
 end
+function Sent(target) fire("UNIT_SPELLCAST_SENT", "player", target, "guid", 467) end
+function Aura() fire("UNIT_AURA", "player") end
+-- what the wreath shows: the glyph names left to right, the dry and live vine wedges, the shown leaves
+function Label()
+    local out = {}
+    for _, g in ipairs(P().thGlyph) do if g.fsOn then out[#out + 1] = g.fsName:gsub("th_glyph_", "") end end
+    return table.concat(out)
+end
+function Wedges()
+    local dry, live = 0, 0
+    for _, v in ipairs(P().thVine) do
+        if v.fsOn then if v.fsName:match("_dry$") then dry = dry + 1 else live = live + 1 end end
+    end
+    return dry, live
+end
+function AnyThorns()
+    for _, t in ipairs(P().thVine) do if t.fsOn then return true end end
+    return P().thGone.fsOn or P().thGlyph[1].fsOn
+end
 function Lit(list, key) local n = 0 for _, m in ipairs(list) do if m[key] and m[key].fsOn then n = n + 1 end end return n end
 """
 
@@ -232,13 +263,29 @@ case("every_sprite_the_module_names_is_in_the_manifest", """
         for _, v in pairs(M.NAME.eye[f]) do want(v) end
         want(M.NAME.glyph[f])
     end
-    for _, n in ipairs({ "ivy", "ivy_buds", "moon_dark", "moon_lit", "moon_dotted", "moon_glow", "halo", "slash_dark", "track_energy",
-        "track_rage", "track_lane", "track_drain", "pip_dark", "pip_lit", "icon_rejuv", "icon_regrow", "letter_L", "letter_B", "letter_M",
+    for _, n in ipairs({ "ivy", "ivy_buds", "halo", "slash_dark", "track_energy",
+        "track_rage", "pip_dark", "pip_lit", "letter_L", "letter_B", "letter_M",
         "chip_ring", "chip_sp", "chip_pb", "chip_sm" }) do want(n) end
     assert(#missing == 0, "missing sprites: " .. table.concat(missing, ", "))
     local seen = {}
     for _, name in ipairs({ "druid_slash_lit", "druid_slash_flare", "druid_energy_fill", "druid_rage_fill", "druid_chip_sp",
         "druid_chip_pb", "druid_chip_sm" }) do assert(Art.FILES[name], name) end
+    -- every Thorns name: a thorn pop step too short to draw (the page skips a thorn under 0.6 px) is the only gap
+    local TS = Art.THORNS.sprites
+    local function wantT(n, short)
+        if not TS[n] and not short then missing[#missing + 1] = tostring(n) end
+    end
+    local TN = M.THORN_NAMES
+    for k = 0, Art.THORNS.WEDGES - 1 do wantT(TN.vine[k].live); wantT(TN.vine[k].dry); wantT(TN.glow[k]) end
+    for j = 0, 19 do
+        wantT(TN.thorn[j].dry); wantT(TN.thorn[j].blink)
+        for p = 1, Art.THORNS.POPS do wantT(TN.thorn[j][p], p <= 2) end
+    end
+    for i = 0, 9 do wantT(TN.leaf[i].wilt); for u = 1, Art.THORNS.UNF do wantT(TN.leaf[i][u]) end end
+    for s = 0, Art.THORNS.AMBER do wantT(TN.amber[s]) end
+    for s = 0, Art.THORNS.SPIN - 1 do wantT(TN.fall[s]) end
+    for _, g in pairs(TN.glyph) do wantT(g) end
+    wantT("th_gone"); wantT("th_sparkle")
     -- the geometry the module needs
     for _, k in ipairs({ "W", "H", "EYE_Y", "EYE_L", "EYE_R", "MOON_X", "SLASH_X", "ENERGY_X", "RAGE_X", "LANE_X", "FILL_W", "FILL_BOX_W" }) do
         assert(type(Art.GEOM[k]) == "number", k)
@@ -271,50 +318,142 @@ case("the_form_picks_the_look", """
     NoLog()
 """)
 
-case("the_eclipse_ledger_and_the_moons", """
+case("the_eclipse_and_hot_ledgers_still_count", """
     Start("caster")
-    local w, hot = Cue()
-    assert(w == "WRATH" and not hot, "no charges: WRATH, " .. w)
-    assert(Lit(P().moon, "lit") == 0)
     Cast("Wrath", 1000)
-    Paint(1000.5)
-    w, hot = Cue()
-    assert(w == "STARFIRE" and hot, "banked: STARFIRE and the eyes go hot")
-    assert(Lit(P().moon, "lit") == 2, "Wrath banks two moons")
-    assert(P().drainBody.fsOn and P().drainBody.fsW > 0 and P().drainSecs.text == "~15s" or P().drainSecs.text == "~14s", "the drain and its seconds: " .. tostring(P().drainSecs.text))
+    local mode, ch = St.Eclipse(1000.5)
+    assert(mode == "ok" and ch == 2, "Wrath banks two")
     Cast("Starfire", 1001)
-    Paint(1001.7)
-    assert(Lit(P().moon, "lit") == 1, "Starfire spends one")
-    Cast("Wrath", 1002); Cast("Wrath", 1003); Cast("Wrath", 1004)
-    Paint(1004.1)
-    assert(Lit(P().moon, "lit") == 4, "the cap is four")
-    Paint(1004 + 14); local _, ch = St.Eclipse(__now)
-    assert(ch == 4, "still banked at 14 s")
-    Paint(1004 + 16)
-    w = Cue()
-    assert(w == "WRATH" and Lit(P().moon, "lit") == 0, "gone 15 s after the last grant")
-    -- amber under 3 s
-    Cast("Wrath", 1100); Paint(1100 + 13)
-    assert(P().drainSecs.tcolor[1] > 0.9 and P().drainSecs.tcolor[3] < 0.4, "the last seconds are amber")
-    -- below level 30 Eclipse is not learned: no moons, no drain bar, no word
-    W.level = 20; Refresh(); Paint(1200)
-    w = Cue()
-    for i = 1, 4 do
-        local m = P().moon[i]
-        assert(not (m.dotted.fsOn or m.dark.fsOn or m.lit.fsOn or m.glow.fsOn), "moon " .. i .. " hidden under the Eclipse level")
-    end
-    assert(w == "" and not P().drainTrack.fsOn and not P().drainSecs.fsOn and not P().cue.fsOn, "locked: nothing drawn, no word")
+    mode, ch = St.Eclipse(1001.5)
+    assert(ch == 1, "Starfire spends one")
+    W.canAttack, W.canAssist, W.name = false, true, "Tank"
+    fire("PLAYER_TARGET_CHANGED")
+    Cast("Rejuvenation", 1002)
+    assert(St.Hot("rejuv", 1003) and math.abs(St.Hot("rejuv", 1003) - 11) < 1e-6, "Rejuvenation on the friend, 12 s")
+    assert(not P().eye[1].fsOn, "no eyes in caster form, friend or foe")
     NoLog()
 """)
 
-case("a_reload_in_combat_leaves_the_moons_unknown_until_a_cast", """
+case("thorns_out_of_combat_is_the_aura", """
+    W.known["Thorns"] = true
+    W.auras["Thorns"] = { expirationTime = 1000 + 265 }
+    Start("caster")
+    Aura()
+    Paint(1000)
+    local mode, left, est = St.Thorns(1000)
+    assert(mode == "up" and left == 265 and not est, "the plain aura: " .. tostring(mode) .. " " .. tostring(left))
+    local dry, live = Wedges()
+    assert(dry == 33 and live == 27, "265 s left: 33 of 60 wedges dry, got " .. dry .. "/" .. live)
+    assert(Label() == "5M", "the label: " .. Label())
+    local leaves = 0
+    for i = 1, 10 do if P().thLeaf[i].fsOn then leaves = leaves + 1 end end
+    assert(leaves == 5, "five minutes, five leaves: " .. leaves)
+    assert(P().thLeaf[6].fsName == "th_leaf_5_wilt" and P().thLeaf[7].fsName == "th_leaf_6_10", "the leaf under the dry line browns")
+    assert(P().thBead.fsOn and not P().thRing[1].fsOn, "the bead, no cast ring")
+    assert(not P().eye[1].fsOn and not P().cue.fsOn, "no eyes and no word")
+    for j = 1, 20 do assert(P().thThorn[j].fsOn, "thorn " .. j) end
+    NoLog()
+""")
+
+case("thorns_gone_is_a_reminder_out_of_combat_and_nothing_in_combat", """
+    W.known["Thorns"] = true
+    Start("caster")
+    Aura()
+    Paint(1000)
+    assert(St.Thorns(1000) == "gone")
+    assert(P().thGone.fsOn and Label() == "THORNS", "after combat: the dim rings and THORNS: " .. Label())
+    local dry, live = Wedges()
+    assert(dry + live == 0, "no wreath")
+    W.combat = true
+    fire("PLAYER_REGEN_DISABLED")
+    Paint(1001)
+    assert(not AnyThorns(), "in combat nothing is drawn")
+    W.combat = false
+    W.known["Thorns"] = false
+    fire("PLAYER_REGEN_ENABLED")
+    CooldownChanged()
+    Paint(1002)
+    assert(not AnyThorns(), "not learned: no reminder")
+    NoLog()
+""")
+
+case("thorns_cast_in_combat_is_a_ledger_and_plays_the_cast", """
+    W.known["Thorns"] = true
     W.combat = true
     Start("caster")
-    local w = Cue()
-    assert(w == "?" and P().moon[1].dark.fsOn and Lit(P().moon, "lit") == 0, "unknown right after a reload in combat")
-    Cast("Wrath", 1005)
-    w = Cue()
-    assert(w == "STARFIRE", "a cast tells the truth")
+    assert(St.Thorns(1000) == "unknown" and not AnyThorns(), "a reload in combat: unknown, nothing drawn")
+    Cast("Thorns", 1000)
+    Paint(1000.3)
+    local dry, live = Wedges()
+    assert(dry == 0 and live > 0 and live < 60, "the vine grows round: " .. live)
+    assert(P().thRing[1].fsOn or P().thRing[2].fsOn, "the green ring goes out")
+    Paint(1000.63)
+    assert(P().thThorn[1].fsName == "th_thorn_0_6", "the thorns snap out: " .. tostring(P().thThorn[1].fsName))
+    Paint(1002)
+    dry, live = Wedges()
+    assert(live == 60 and not P().thRing[1].fsOn and not P().thRing[2].fsOn, "grown, the ring gone")
+    assert(P().thLeaf[1].fsName == "th_leaf_0_10", "the leaves unfurled")
+    local mode, left, est = St.Thorns(1002)
+    assert(mode == "up" and est and math.abs(left - 598) < 1e-6, "the ledger: 600 s from the cast")
+    assert(Label() == "tilde10M", "the estimate mark: " .. Label())
+    Paint(1000 + 601)
+    assert(not AnyThorns(), "run out in combat: nothing")
+    -- a cast on a friend is not ours
+    W.canAttack, W.canAssist, W.name = false, true, "Tank"
+    fire("PLAYER_TARGET_CHANGED")
+    Sent("Tank"); Cast("Thorns", 1700)
+    assert(St.Thorns(1700) ~= "up", "Thorns on the friend")
+    Sent(""); Cast("Thorns", 1705)
+    assert(St.Thorns(1705) == "up", "an empty target name is the player")
+    Sent("Stu"); Cast("Thorns", 1710)
+    assert(St.Thorns(1710) == "up", "our own name is the player")
+    -- after combat the aura is the truth
+    W.combat = false
+    W.auras["Thorns"] = { expirationTime = 1710 + 500 }
+    fire("PLAYER_REGEN_ENABLED")
+    local _, l2, e2 = St.Thorns(1710)
+    assert(not e2 and l2 == 500, "the read drops the mark")
+    NoLog()
+""")
+
+case("thorns_out_of_combat_cast_reads_the_aura_back", """
+    W.known["Thorns"] = true
+    Start("caster")
+    Cast("Thorns", 1000)
+    W.auras["Thorns"] = { expirationTime = 1000 + 600 }
+    Timers()
+    local mode, left, est = St.Thorns(1001)
+    assert(mode == "up" and not est and left == 599, "read back after the cast")
+    NoLog()
+""")
+
+case("thorns_last_minute_is_amber", """
+    W.known["Thorns"] = true
+    W.auras["Thorns"] = { expirationTime = 1000 + 40 }
+    Start("caster")
+    Aura()
+    Paint(1000)
+    assert(Label() == "40S" and P().thGlyph[1].color[1] > 0.9 and P().thGlyph[1].color[3] < 0.4, "seconds, in amber: " .. Label())
+    assert(P().thLeaf[10].fsName:match("^th_leaf_9_amber_"), "the last leaf pulses amber: " .. tostring(P().thLeaf[10].fsName))
+    for i = 1, 9 do assert(not P().thLeaf[i].fsOn, "leaf " .. i .. " fell") end
+    assert(P().thBead.color[1] > 0.9 and P().thBead.color[3] < 0.4, "the bead is amber")
+    local blinks = {}
+    for k = 0, 20 do Paint(1000 + k * 0.05); blinks[P().thThorn[20].fsName] = true end
+    assert(blinks["th_thorn_19_blink"] and blinks["th_thorn_19_10"], "the thorn tips blink amber")
+    NoLog()
+""")
+
+case("a_falling_leaf_drops_for_two_and_a_half_seconds", """
+    W.known["Thorns"] = true
+    W.auras["Thorns"] = { expirationTime = 1000 + 541 }
+    Start("caster")
+    Aura()
+    Paint(1000)
+    assert(P().thLeaf[1].fsOn and not P().thFall[1].fsOn)
+    Paint(1002)                                   -- 539 s left: leaf 0 fell 1 s ago
+    assert(not P().thLeaf[1].fsOn and P().thFall[1].fsOn and P().thFall[1].fsName:match("^th_fall_"), "it falls")
+    Paint(1004)
+    assert(not P().thFall[1].fsOn, "and is gone")
     NoLog()
 """)
 
@@ -448,54 +587,6 @@ case("the_rage_number_is_plain_only_for_the_letters", """
     NoLog()
 """)
 
-case("the_restoration_lanes_follow_our_own_hots_on_the_target", """
-    W.canAttack, W.canAssist, W.name = false, true, "Tank"
-    W.known["Swiftmend"], W.known["Rejuvenation"], W.known["Regrowth"] = true, true, true
-    W.cd["Swiftmend"] = false
-    Start("caster")
-    assert(M.data.kind == "tree")
-    local w = Cue()
-    assert(w == "REJUV" and M.cue.hot, "nothing up: put Rejuvenation on")
-    Cast("Rejuvenation", 1000)
-    Paint(1001)
-    w = Cue()
-    assert(w == "REGROWTH", "Regrowth next")
-    assert(P().lane[1].body.fsOn and P().lane[1].secs.text == "~11s", "the first lane drains: " .. tostring(P().lane[1].secs.text))
-    assert(not P().lane[2].body.fsOn)
-    Cast("Regrowth", 1002)
-    CooldownChanged()
-    Paint(1003)
-    w = Cue()
-    assert(w == "SWIFTMEND" and M.cue.hot and P().chipSm.status == "ready", "both up and Swiftmend ready")
-    W.name = "Healer"
-    Paint(1004)
-    assert(not P().lane[1].body.fsOn, "another friend has none of ours")
-    W.name = "Tank"
-    -- the full time: it blooms
-    Paint(1000 + 12.1); St.Tick(__now); Paint(__now + 0.01)
-    assert(P().bloom.fsOn, "a HoT that ran out blooms")
-    Paint(__now + 1)
-    assert(not P().bloom.fsOn)
-    NoLog()
-""")
-
-case("a_low_level_druid_is_never_told_to_cast_a_heal_it_has_not_learned", """
-    W.canAttack, W.canAssist, W.name = false, true, "Tank"
-    W.known["Rejuvenation"], W.known["Regrowth"] = true, false
-    Start("caster")
-    assert(Cue() == "REJUV", "Rejuvenation first")
-    Cast("Rejuvenation", 1000)
-    Paint(1001)
-    local w = Cue()
-    assert(w == "HOTS UP", "no Regrowth yet, so Rejuvenation up is all there is: " .. tostring(w))
-    W.known["Rejuvenation"] = false
-    Start("caster")
-    Paint(1500)
-    w = Cue()
-    assert(w == "HEAL", "no heal over time learned at all: " .. tostring(w))
-    NoLog()
-""")
-
 case("a_new_bear_sees_only_what_it_has_learned", """
     W.known["Primal Bite"], W.known["Lacerate"], W.known["Maul"] = false, false, true
     Start("bear")
@@ -510,18 +601,6 @@ case("a_new_bear_sees_only_what_it_has_learned", """
     for i = 1, 5 do assert(not P().pipDark[i].fsOn and not P().pipLit[i].fsOn, "no Lacerate pip " .. i) end
     local w = Cue()
     assert(w == "BEAR", "and never told to Lacerate: " .. tostring(w))
-    NoLog()
-""")
-
-case("a_restoration_lane_for_a_heal_not_learned_is_hidden", """
-    W.canAttack, W.canAssist, W.name = false, true, "Tank"
-    W.known["Rejuvenation"], W.known["Regrowth"], W.known["Swiftmend"] = true, false, false
-    Start("caster")
-    Paint(1000)
-    local l1, l2 = P().lane[1], P().lane[2]
-    assert(l1.track.fsOn and l1.icon.fsOn, "Rejuvenation's lane shows")
-    assert(not (l2.track.fsOn or l2.icon.fsOn or l2.secs.fsOn or l2.body.fsOn), "Regrowth's lane is hidden")
-    assert(not (P().chipSm.ring.fsOn or P().chipSm.dark.fsOn), "and so is the Swiftmend flower")
     NoLog()
 """)
 
@@ -543,15 +622,15 @@ case("travel_has_no_gauge", """
     Paint(1005)
     local w = Cue()
     assert(w == "TRAVEL" and not M.cue.hot)
-    assert(not P().moon[1].dark.fsOn and not P().slash[1].fsOn and not P().rageTrack.fsOn and P().travelLine.fsOn)
+    assert(not P().thVine[1].fsOn and not P().slash[1].fsOn and not P().rageTrack.fsOn and P().travelLine.fsOn)
     assert(P().eye[1].fsName == "eye_moon_half", "the owl eyes are half shut")
     NoLog()
 """)
 
 case("the_form_switch_shuts_the_eyes_flashes_and_sparks", """
-    Start("caster")
+    Start("bear")
     Paint(1002)
-    assert(P().eye[1].fsName == "eye_moon_open" or P().eye[1].fsName == "eye_moon_half")
+    assert(P().eye[1].fsName == "eye_bear_open" or P().eye[1].fsName == "eye_bear_half")
     __now = 1010
     Form("cat")
     Paint(1010.05)
@@ -580,10 +659,16 @@ case("reduced_motion_holds_still", """
     assert(not P().flash[1].fsOn and not P().sparks[1].fsOn, "no flash or sparks on the shift")
     Cast("Rip", 2010); Paint(2010.2)
     for _, d in ipairs(P().streak) do assert(not d.fsOn, "no streak") end
+    W.known["Thorns"] = true
+    W.combat = true
     Start("caster")
-    Cast("Wrath", 2020); Cast("Starfire", 2020.1)
+    Cast("Thorns", 2020)
     Paint(2020.2)
-    for _, d in ipairs(P().moonSparks) do assert(not d.fsOn, "no scatter") end
+    for _, d in ipairs(P().thRing) do assert(not d.fsOn, "no cast ring") end
+    for _, d in ipairs(P().thFly) do assert(not d.fsOn, "no fireflies") end
+    local dry, live = Wedges()
+    assert(live == 60, "the wreath is there at once")
+    W.combat = false
     ForeverSTUwaveDB = nil
     NoLog()
 """)
@@ -604,10 +689,12 @@ case("onshow_subscribes_and_onhide_stops_everything", """
     SPEC.onHide("lower")
     assert(not M.frame.scripts.OnUpdate and not M.frame.scripts.OnEvent and not M.frame.events.UNIT_POWER_FREQUENT, "hidden: all of it stopped")
     -- the ledger keeps listening while hidden
-    Cast("Wrath", 1000)
+    W.combat = true
+    Cast("Thorns", 1000)
     SPEC.onShow("lower")
     Paint(1001)
-    assert(M.cue.word == "STARFIRE", "a cast while hidden is not lost")
+    assert(St.Thorns(1001) == "up" and P().thVine[1].fsOn, "a cast while hidden is not lost")
+    W.combat = false
     NoLog()
 """)
 
@@ -638,13 +725,17 @@ case("the_paint_allocates_nothing_once_warm", """
     end
     W.known["Shifting Power"], W.known["Primal Bite"], W.known["Swiftmend"] = true, true, true
     W.power[4], W.power[3], W.power[1] = 4, 70, 30
+    W.known["Thorns"] = true
+    W.auras["Thorns"] = { expirationTime = 3000 + 75 }
     Build()
-    Form("caster"); Cast("Wrath", 3000); Cast("Starfire", 3001)
+    Form("caster"); Aura()
     run("caster")
     Cast("Lacerate", 3000); Cast("Rejuvenation", 3000)
     run("cat")
     run("bear")
     W.canAttack, W.canAssist = false, true
+    W.auras["Thorns"] = nil
+    Form("caster"); Aura()
     run("caster")
     NoLog()
 """)
@@ -673,8 +764,8 @@ loadAddonFile(FRAMEHELPERS_SRC, "Core/FrameHelpers.lua")
 loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
 TARGET = { exists = true }
 UnitExists = function(u) if u == "player" then return true end return u == "target" and TARGET.exists end
-UnitPowerType = function() return 0, "MANA" end
-GetShapeshiftFormID = function() return nil end
+UnitPowerType = function() return 1, "RAGE" end
+GetShapeshiftFormID = function() return 5 end
 UnitName = function() return "Boar" end
 UnitLevel = function() return 60 end
 UnitCanAttack = function() return true end
@@ -695,10 +786,10 @@ check(isVisible(host), "a target shows the host")
 local G = FS.GunsightDruid
 check(G.frame and isVisible(G.frame), "the module is built and drawn under the host")
 check(onUpdateFrames() == 1, "ticking: " .. onUpdateFrames())
-check(isVisible(G.parts.eye[1]) and isVisible(G.parts.moon[1].dark), "the eyes and the moons are drawn")
+check(isVisible(G.parts.eye[1]) and isVisible(G.parts.rageTrack), "the Bear's eyes and rage bar are drawn")
 TARGET.exists = false
 fire("PLAYER_TARGET_CHANGED")
-check(not isVisible(host) and not isVisible(G.frame) and not isVisible(G.parts.eye[1]) and not isVisible(G.parts.moon[1].dark),
+check(not isVisible(host) and not isVisible(G.frame) and not isVisible(G.parts.eye[1]) and not isVisible(G.parts.rageTrack),
     "no target hides the host and everything under it")
 check(onUpdateFrames() == 0, "and stops the OnUpdate")
 TARGET.exists = true
