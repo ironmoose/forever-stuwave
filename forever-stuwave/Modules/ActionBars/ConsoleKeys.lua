@@ -504,7 +504,7 @@ end
 -- The first HINT_TIMES times the chat is minimised into its key, the key's tooltip opens on its own for HINT_SECONDS with a
 -- line saying where the chat went (a minimised chat draws nothing while its key is on screen). Counted per account in
 -- ForeverSTUwaveDB.chatMinimiseHints; a click on the key or the mouse leaving it closes the tip as usual.
-local HINT_TIMES, HINT_SECONDS = 3, 6
+local HINT_TIMES, HINT_SECONDS = 5, 15
 local HINT_TEXT = "Chat minimised here. Click to restore."
 local hintGen = 0
 function ConsoleKeys.ChatMinimiseHint()
