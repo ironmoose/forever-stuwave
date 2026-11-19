@@ -104,7 +104,7 @@ local BT = {
 BuffTab.BT = BT
 
 for i, def in ipairs(BT.BUTTONS) do
-    FS.BindingLabel("BINDING_NAME_CLICK FSBuffTabButton" .. i .. ":LeftButton", def.label)
+    _G["BINDING_NAME_CLICK FSBuffTabButton" .. i .. ":LeftButton"] = def.label
 end
 
 local IsSecret = FS.IsSecret

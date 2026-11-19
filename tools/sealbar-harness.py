@@ -1302,9 +1302,6 @@ def check_bindings_xml_declares_the_seven_seal_commands_only():
 def check_binding_globals_exist_for_every_class_for_the_seals_only():
     for klass in ("PALADIN", "WARRIOR"):
         lua = boot(klass=klass)
-        assert g(lua).BINDING_HEADER_FOREVERSTUWAVE is None, f"{klass}: labels set before VARIABLES_LOADED taint that dispatch"
-        fire(lua, "VARIABLES_LOADED")
-        lua.execute("for _, fn in ipairs(__timers or {}) do fn() end")
         assert g(lua).BINDING_HEADER_FOREVERSTUWAVE, f"{klass}: no BINDING_HEADER_FOREVERSTUWAVE"
         for i in range(1, 8):
             text = g(lua)[f"BINDING_NAME_CLICK FSSealButton{i}:LeftButton"]

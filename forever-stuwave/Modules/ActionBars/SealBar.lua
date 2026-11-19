@@ -107,9 +107,9 @@ local SB = {
 -- key binding screen, and for every class, so a non-Paladin sees the (inert) entries too. Button N
 -- is always seal N of SB.SEALS, so the label is that seal's name. An aura key is Blizzard's own
 -- SHAPESHIFTBUTTONi, which already has its label.
-FS.BindingLabel("BINDING_HEADER_FOREVERSTUWAVE", "Forever STUwave")
+BINDING_HEADER_FOREVERSTUWAVE = "Forever STUwave"
 for i, def in ipairs(SB.SEALS) do
-    FS.BindingLabel("BINDING_NAME_CLICK FSSealButton" .. i .. ":LeftButton", def[1])
+    _G["BINDING_NAME_CLICK FSSealButton" .. i .. ":LeftButton"] = def[1]
 end
 
 local IsSecret = FS.IsSecret
