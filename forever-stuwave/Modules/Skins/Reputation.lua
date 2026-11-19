@@ -339,6 +339,60 @@ local function EachRow(fn)
     end
 end
 
+-- The detail panel is seated inside the window's right pane with an even margin (live: the stock size ran it over the header and
+-- the footer, with its texts flush against the panel edge). Its description is pinned under the standing bar and the check boxes
+-- to its foot by the stock anchors, so the gap between them closes with the shorter panel. A plain frame, not a secure one.
+Rep.DETAIL_MARGIN = 10
+Rep.DETAIL_PAD = 12
+local padded = setmetatable({}, { __mode = "k" })
+
+-- Insets a stock child by PAD from where the stock put it: every anchor read once and kept (so a re-seat never adds twice), a
+-- LEFT anchor moved right, a RIGHT anchor moved left.
+local function PadChild(child, pad)
+    if type(child) ~= "table" or type(child.GetPoint) ~= "function" then return end
+    local rec = padded[child]
+    if not rec then
+        rec = {}
+        local n = child.GetNumPoints and child:GetNumPoints() or 1
+        for k = 1, n do
+            local ok, point, rel, relPoint, x, y = pcall(child.GetPoint, child, k)
+            if not ok or not point or type(x) ~= "number" then return end
+            rec[k] = { point, rel, relPoint, x, y }
+        end
+        padded[child] = rec
+    end
+    child:ClearAllPoints()
+    for _, a in ipairs(rec) do
+        local dx = a[1]:find("LEFT") and pad or (a[1]:find("RIGHT") and -pad or 0)
+        child:SetPoint(a[1], a[2], a[3], a[4] + dx, a[5])
+    end
+end
+
+function Rep.SeatDetail(detail)
+    local host, win = _G.CharacterFrameRightPaneHost, _G.CharacterFrame
+    if type(detail) ~= "table" or type(host) ~= "table" or type(win) ~= "table" or InCombatLockdown() then return end
+    local cs = FS.CharacterSkin
+    local headPx = cs and cs.state and cs.state.headPx or 24
+    local footPx = cs and cs.GEOM and cs.GEOM.FOOT_H or 28
+    local m = Kit.U(win, Rep.DETAIL_MARGIN)
+    local wt, ht, wb, hb = win:GetTop(), host:GetTop(), win:GetBottom(), host:GetBottom()
+    if not (wt and ht and wb and hb) then return end
+    -- from the header rule down to the footer rule, the margin inside both, the pane's own width
+    local top = Kit.U(win, headPx) + m - (wt - ht)
+    local bottom = Kit.U(win, footPx) + m - (hb - wb)
+    detail:ClearAllPoints()
+    detail:SetPoint("TOPLEFT", host, "TOPLEFT", m, -top)
+    detail:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -m, bottom)
+    local pad = Kit.U(win, Rep.DETAIL_PAD)
+    PadChild(detail.Description, pad)
+    -- only a box hung from the panel or its footer moves; one hung from the box above follows it
+    for _, key in ipairs({ "AtWarCheckbox", "MakeInactiveCheckbox", "WatchFactionCheckbox" }) do
+        local box = detail[key]
+        local ok, _, rel = pcall(box and box.GetPoint or error, box, 1)
+        if ok and (padded[box] or rel == detail or rel == detail.Footer) then PadChild(box, pad) end
+    end
+end
+
 local function SkinPane()
     local frame = _G.ReputationFrame
     if not frame then return end
@@ -351,6 +405,8 @@ local function SkinPane()
         Restyle(detail.Title, detail, 14, C.cyan)
         if FS.CharacterSkin and FS.CharacterSkin.SkinDetail then pcall(FS.CharacterSkin.SkinDetail, detail) end
         if PanelSkins.SweepControls then pcall(PanelSkins.SweepControls, detail) end
+        Rep.SeatDetail(detail)
+        Kit.HookScript(detail, "OnShow", function() Kit.Later(function() pcall(Rep.SeatDetail, detail) end) end)
     end
     if PanelSkins.SweepControls then pcall(PanelSkins.SweepControls, frame) end
 end
