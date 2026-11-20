@@ -1950,10 +1950,10 @@ local function Build()
             T.opens[#T.opens + 1] = open
             while #T.opens > 5 do table.remove(T.opens, 1) end
             -- the next eight frame times (ms) after the window opens
-            local probe = S.openProbe or CreateFrame("Frame")
-            S.openProbe = probe
+            local watch = S.openWatch or CreateFrame("Frame")
+            S.openWatch = watch
             local n = 0
-            probe:SetScript("OnUpdate", function(self, elapsed)
+            watch:SetScript("OnUpdate", function(self, elapsed)
                 n = n + 1
                 open.frames[n] = math.floor(elapsed * 1000 + 0.5)
                 if n >= 8 then self:SetScript("OnUpdate", nil) end
