@@ -333,9 +333,26 @@ case("the_eclipse_and_hot_ledgers_still_count", """
     assert(ch == 1, "Starfire spends one")
     W.canAttack, W.canAssist, W.name = false, true, "Tank"
     fire("PLAYER_TARGET_CHANGED")
-    Cast("Rejuvenation", 1002)
+    Sent("Tank"); Cast("Rejuvenation", 1002)
     assert(St.Hot("rejuv", 1003) and math.abs(St.Hot("rejuv", 1003) - 11) < 1e-6, "Rejuvenation on the friend, 12 s")
     assert(not P().eye[1].fsOn, "no eyes in caster form, friend or foe")
+    NoLog()
+""")
+
+case("a_hot_on_yourself_follows_you_with_no_target_or_an_enemy", """
+    Start("caster")
+    W.name, W.canAttack, W.canAssist = nil, false, false
+    fire("PLAYER_TARGET_CHANGED")
+    Sent(""); Cast("Rejuvenation", 2000)
+    assert(St.Hot("rejuv", 2001) and Near(St.Hot("rejuv", 2001), 11), "a self Rejuvenation with nothing targeted is kept")
+    W.name, W.canAttack, W.canAssist = "Boar", true, false
+    fire("PLAYER_TARGET_CHANGED")
+    assert(St.Hot("rejuv", 2002) and Near(St.Hot("rejuv", 2002), 10), "an enemy targeted: the HoTs still follow you")
+    Sent("Boar"); Cast("Regrowth", 2003)
+    assert(St.Hot("regrow", 2004) and Near(St.Hot("regrow", 2004), 20), "a Regrowth cast with an enemy targeted lands on you")
+    W.name, W.canAttack, W.canAssist = "Tank", false, true
+    fire("PLAYER_TARGET_CHANGED")
+    assert(St.Hot("rejuv", 2004) == nil, "a friend targeted: only HoTs on that friend show")
     NoLog()
 """)
 

@@ -118,6 +118,10 @@ local function TargetName()
     return n
 end
 
+local function PlayerName()
+    return PlainOf(Call(UnitName, "player"), "string")
+end
+
 -------------------------------------------------------------------------------
 -- Form and target
 -------------------------------------------------------------------------------
@@ -182,9 +186,15 @@ function State.Lacerate(now)
     return lace.stacks, left
 end
 
--- seconds left on our own HoT on the current target, or nil
+-- Whose HoTs the module shows: the friend targeted, else the player (no target, an enemy, or ourselves).
+local function HotOwner()
+    if State.Friendly() then return TargetName() end
+    return PlayerName()
+end
+
+-- seconds left on our own HoT on whoever the module follows (HotOwner), or nil
 function State.Hot(key, now)
-    local name = TargetName()
+    local name = HotOwner()
     local rec = name and hots[name]
     local exp = rec and rec[key]
     if not exp then return nil end
@@ -281,7 +291,8 @@ local function OnCast(spellID)
     elseif key == "shift" then
         stamp.shiftCastAt = now
     elseif key == "rejuv" or key == "regrow" then
-        local who = TargetName()
+        -- on the player when UNIT_SPELLCAST_SENT pointed at the player (no target, an enemy, ourselves), else on the friend
+        local who = sentSelf and PlayerName() or TargetName()
         if who then
             local rec = hots[who]
             if not rec then rec = {}; hots[who] = rec end
@@ -295,7 +306,7 @@ local HOT_KEYS = { "rejuv", "regrow" }
 
 -- A HoT that ran its full time blooms: stamp it once and forget it. Called from the module's ticker (no allocation).
 function State.Tick(now)
-    local name = TargetName()
+    local name = HotOwner()
     local rec = name and hots[name]
     if rec then
         for i = 1, #HOT_KEYS do

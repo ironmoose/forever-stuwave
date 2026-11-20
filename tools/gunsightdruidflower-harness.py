@@ -981,6 +981,9 @@ function meta.EnableMouse(self, on) self.mouse = on end
 function meta.SetBlendMode(self, m) self.blend = m end
 W.known["Thorns"], W.known["Regrowth"], W.known["Rejuvenation"] = true, true, true
 W.spellById[100], W.spellById[101] = "Claw", "Rake"
+-- the client fires UNIT_SPELLCAST_SENT before each cast, naming a friend we help, else nothing (the HoT lands on us)
+local __Cast = Cast
+function Cast(name, t) Sent((W.canAssist and not W.canAttack) and W.name or ""); __Cast(name, t) end
 function Hot(who, key) -- our own cast on `who`
     W.name = who
     Cast(key == "rejuv" and "Rejuvenation" or "Regrowth", __now)
