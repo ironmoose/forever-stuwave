@@ -298,6 +298,20 @@ case("every_sprite_the_module_names_is_in_the_manifest", """
     NoLog()
 """)
 
+case("the_caster_look_sits_left_of_the_box_and_the_other_forms_do_not", """
+    Start("caster")
+    local ox = (200 - 150 * 1.25) / 2
+    local function x() return M.frame.pt[4] end
+    assert(Near(x(), ox - 28 * 1.25), "caster: 28 sprite px left of the box: " .. tostring(x()))
+    Form("bear"); M.Paint(__now)
+    assert(Near(x(), ox), "bear: the box's place: " .. tostring(x()))
+    Form("cat"); M.Paint(__now)
+    assert(Near(x(), ox), "cat: the box's place")
+    Form("caster"); M.Paint(__now)
+    assert(Near(x(), ox - 28 * 1.25), "back to caster: left again")
+    NoLog()
+""")
+
 case("the_form_picks_the_look", """
     Start("caster")
     assert(M.data.kind == "moon", "a caster on a hostile target is the moon")

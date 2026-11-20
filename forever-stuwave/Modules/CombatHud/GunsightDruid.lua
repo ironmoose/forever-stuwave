@@ -77,6 +77,9 @@ local C = {
     SPX = 1.25,                        -- image px per sprite px (the other class modules')
     SW = 150, SH = 86,
     DROP = 5,                          -- image px the module sits below the area's top
+    CASTER_SHIFT = 28,                 -- sprite px the caster look (wreath, flower, numbers) sits left of the box's place: its
+                                       -- cluster only spans x 32 to 124, so centred it left the box's left third empty and read
+                                       -- as pushed right (owner 2026-11-20); shifted it starts about 30 image px right of the tape
     TICK = 1 / 30,
     POLL = 0.5,                        -- seconds between the slow reads (cooldown flags)
     TICK_SLOW = 0.25,                  -- the Hot ledger's bloom check
@@ -607,6 +610,8 @@ end
 -------------------------------------------------------------------------------
 
 local function IsCaster(kind) return kind == "moon" or kind == "tree" end
+-- the module frame's left edge in image px: the caster look sits CASTER_SHIFT sprite px left of the box's place
+local function ModuleX() return OX - (IsCaster(shownKind) and C.CASTER_SHIFT * C.SPX or 0) end
 -- the key a kind's look is registered under: both caster kinds share the one look "caster"
 local function LookKey(kind) return IsCaster(kind) and "caster" or kind end
 
@@ -653,6 +658,7 @@ end
 -- own registered look (the caster's, if one is registered, is drawn over the wreath, which stays)
 local function Switch(kind)
     shownKind = kind
+    if mod then Gunsight.Point(mod, "TOPLEFT", ModuleX(), OY) end
     local keep = IsCaster(kind) and "thorns" or nil
     for name, list in pairs(groups) do
         if name ~= keep then
@@ -1183,7 +1189,7 @@ local function BuildModule(host)
     bars = CreateFrame("Frame", nil, mod)
     top = CreateFrame("Frame", nil, mod)
     Seat(function()
-        Gunsight.Point(mod, "TOPLEFT", OX, OY)
+        Gunsight.Point(mod, "TOPLEFT", ModuleX(), OY)
         mod:SetSize(ui(C.SW * C.SPX), ui(C.SH * C.SPX))
         art:SetAllPoints(mod)
         bars:SetAllPoints(mod)
