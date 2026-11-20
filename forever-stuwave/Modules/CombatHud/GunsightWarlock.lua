@@ -1,30 +1,34 @@
--- Forever STUwave: the Warlock Class Module for the Gunsight target side ("the Binding Circle")
+-- Forever STUwave: the Warlock Class Module for the Gunsight target side ("the Grimoire")
 --
--- Design mockup: mockups/gunsight-class-module-warlock-2026-11-16.html (concepts page next to it; research in the adze doc
--- "Warlock stock-UI pain points (research 2026-11-16)"). One 150 x 86 sprite px canvas, `C.SPX` image px per sprite px.
---   THE CIRCLE (left, centre 40,43): the five points of the pentagram are the soul shard sockets (a gem is lit for each shard
---   held, up to five; more shows in the number); the middle is a medallion of the demon: dark when it is gone, lit from the
---   bottom up by the demon's health when it is out, a ghost with a dashed rim when the demon is dead or not summoned. Ten
---   runes orbit; the ring colour is the cue colour.
---   THE CUE LANE (right): ONE cue at a time by priority, REAPING (a Drain Soul channel) > BINDING (a Summon cast) > BOLT (a free
---   instant Shadow Bolt, Shadow Trance) > FIRE (a free fast Soul Fire, Decimation) > SUMMON (no demon; names the demon and the
---   shard it costs) > TAP (the next Shadow Bolt cannot be paid) > DRAIN (fewer than three shards). The two proc cues carry a
---   drain bar for their 10 s window, REAPING one for the channel's ticks. Under it SOULS and the shard number at 3x.
+-- Design: the concept "The Grimoire" (2026-11-20, picked over the Soul Jar and the Crowned Skull; concept page
+-- debug/warlock-concepts-2026-11-20.html, decision in the adze doc of that date). One 150 x 86 sprite px canvas, `C.SPX`
+-- image px per sprite px.
+--   THE BOOK (left, top left BX,BY): the demon's pact book. Its cover lights from the bottom with the demon's health over the
+--   dark book; with no demon (or a dead one) it is dark with a chain across the cover and an amber rim (pink when the Summon
+--   cannot be paid), shaking on SUMMON. The cover gem and the eyes take the cue colour, else the demon's colour. The book
+--   acts the cue out: lightning from the horns into the gem (BOLT), the pages burn (FIRE), blood drips from the bottom and a
+--   pink ring bursts on the tap (TAP), the book lifts and souls stream into the gem (REAPING), the book lifts on a fel rune
+--   ring (BINDING). Unreadable: a grey book and a "?".
+--   THE LANE (right, from C.TX): ONE cue word by priority, REAPING (a Drain Soul channel) > BINDING (a Summon cast) > BOLT
+--   (Shadow Trance) > FIRE (Decimation) > SUMMON (with its note: the demon and its shard, IMP FREE, NO SHARD) > TAP (the next
+--   Shadow Bolt cannot be paid) > DRAIN (fewer than three shards); calm shows the demon's name. BOLT and FIRE carry a drain
+--   bar for their 10 s window, REAPING one for the channel's ticks. Under it five soul crystals, one per shard, "+N" past five.
 -- It does not draw mana or DoT timers: the mana regen module and GunsightDots already do.
 --
 -- DATA. Shards, procs, the Drain Soul channel come from the Hud's pushed state (a plain item count, plain proc flags, the
 -- channel ledger). The demon, a Summon cast, "a bolt cannot be paid" and Life Tap are `FS.WarlockState` (plain reads only,
 -- all UNPROBED on this client). The demon's HEALTH is secret: `UnitHealth("pet")` and its max go only to a vertical StatusBar's
--- SetValue / SetMinMaxValues (the Priest shield technique: the lit sigil texture stretched over the bar so the engine's crop
+-- SetValue / SetMinMaxValues (the Priest shield technique: the lit book texture stretched over the bar so the engine's crop
 -- is the art). It is never compared, printed or stored. Nothing here reads the player's own health or mana.
 --
--- ART is baked by tools/assets/generate_warlock_circle.py (an atlas of masks and full colour sprites, five 64 x 64 lit
--- sigils, and the generated manifest WarlockArt.lua); the module tints the masks with SetVertexColor. One 30 Hz OnUpdate runs
--- while the module is shown; a tick allocates nothing (strings and positions are tables built once; the harness measures it).
+-- ART is baked by tools/assets/generate_warlock_grimoire.py (an atlas of the book's looks, crystals, effects and the font, the
+-- lit book for the bar, and the generated manifest WarlockArt.lua); the module tints the masks with SetVertexColor. One 30 Hz
+-- OnUpdate runs while the module is shown; a tick allocates nothing (strings and positions are tables built once; the
+-- harness measures it).
 --
--- Reduced motion (ForeverSTUwaveDB.reducedMotion == true): no orbiting rune head, no breathing halo, no shimmer, no comet, no
--- bolts, fire, motes or drops, no blink; the colours, the cue, the gems and the medallion still say everything.
--- Every cue and sub-part has an off switch (WarlockState.SETTINGS, shown on the Gunsight HUD page for a Warlock).
+-- Reduced motion (ForeverSTUwaveDB.reducedMotion == true): no breathing halo, shimmer, shake, lift, blink, bolts, flames,
+-- drops, souls or sparks; the rune ring stands still. The colours, the cue word, the crystals and the book still say
+-- everything. Every cue and sub-part has an off switch (WarlockState.SETTINGS, shown on the Gunsight HUD page for a Warlock).
 
 local _, FS = ...
 
@@ -55,7 +59,10 @@ local C = {
     LOW_SHARDS = 3,             -- DRAIN shows below this many shards (the Hud profile's drain_soul rule: shardsAtLeast 3)
     FRAC_AMBER = 0.2,           -- a proc's last fifth of its window is amber
     GAIN_S = 0.7, SPEND_S = 0.6, TAP_S = 0.7,   -- the event animations, seconds
-    TX = 84,                    -- the right lane's left edge, sprite px
+    TX = 66,                    -- the right lane's left edge, sprite px
+    BX = 10, BY = 14,           -- the book's top left, sprite px
+    CRY_Y = 46, CRY_GAP = 15,   -- the crystal row: top, and the step from one crystal to the next
+    BAR_W = 60,                 -- the cue's drain bar, sprite px
 }
 C.W = C.SW * C.SPX
 C.H = C.SH * C.SPX
@@ -64,6 +71,7 @@ Warlock.C = C
 local K = {
     violet = Hex("#a855f7"), amber = Hex("#ffb648"), pink = Hex("#ff2e97"), orange = Hex("#ff6a2e"), bolt = Hex("#c58bff"),
     white = Hex("#f3fbff"), muted = Hex("#9d93c4"), track = Hex("#2c2048"), gold = Hex("#ffd23f"), pure = { 1, 1, 1 },
+    fel = Hex("#39ff14"), ember = Hex("#a0201a"),
 }
 Warlock.COLORS = K
 local DEMON_COL = {
@@ -104,9 +112,11 @@ do
 end
 
 local SPR, SCALE, ATL = Art.sprites, Art.SCALE, Art.ATLAS
-local CX, CY, R_IN = Art.CX, Art.CY, Art.R_IN
-local BX, BY = CX - 15, CY - 15                      -- the medallion box's top left
 local ATLAS_PATH = MEDIA .. ATL.file .. ".tga"
+local LIT_PATH = MEDIA .. Art.LIT .. ".tga"
+local BX, BY = C.BX, C.BY
+local BCX = BX + floor(Art.BOOK_W / 2)               -- the book's centre column and row
+local BCY = BY + floor(Art.BOOK_H / 2)
 
 local function Hash(n)
     local v = sin(n * 12.9898 + 78.233) * 43758.5453
@@ -118,30 +128,35 @@ local function Round(v) return floor(v + 0.5) end
 -- Tables built once (a tick builds none)
 -------------------------------------------------------------------------------
 
-local SOCK_X, SOCK_Y = {}, {}
-for i = 1, 5 do
-    local a = Art.POINTS[i] * pi / 180
-    SOCK_X[i], SOCK_Y[i] = CX + Round(cos(a) * R_IN), CY + Round(sin(a) * R_IN)
-end
-local RUNE_X, RUNE_Y = {}, {}
-for i = 1, Art.RUNES do
-    local a = Art.RUNE_ANG[i] * pi / 180
-    RUNE_X[i], RUNE_Y[i] = CX + Round(cos(a) * Art.R_RUNE), CY + Round(sin(a) * Art.R_RUNE)
-end
-local ZAP = {}
+local ZAP, RING = {}, {}
 for i = 0, Art.ZAPS - 1 do ZAP[i] = "zap" .. i end
-local DIM, GHOST = {}, {}
-for _, d in ipairs(Art.DEMONS) do DIM[d], GHOST[d] = "dim_" .. d, "ghost_" .. d end
+for i = 0, Art.RING_FRAMES - 1 do RING[i] = "ring" .. i end
+local N_FIRE = 30
 local FIRE_H, FIRE_X = {}, {}
-for i = 0, 9 do
+for i = 0, N_FIRE - 1 do
     FIRE_H[i] = Hash(i * 7)
-    FIRE_X[i] = cos(Hash(i * 13 + 5) * 6.28) * (6 + Hash(i) * 12)
+    FIRE_X[i] = (Hash(i * 13) - 0.5) * 40
 end
+local SPARK_X = {}
+for i = 0, 9 do SPARK_X[i] = (Hash(i) - 0.5) * 40 end
 local BURST_COS, BURST_SIN = {}, {}
 for m = 1, 24 do
     local a = (m - 1) / 24 * 6.283
     BURST_COS[m], BURST_SIN[m] = cos(a), sin(a)
 end
+local GAIN_COS, GAIN_SIN = {}, {}
+for m = 1, 16 do
+    local a = (m - 1) / 16 * 6.283
+    GAIN_COS[m], GAIN_SIN[m] = cos(a), sin(a)
+end
+local SPARK8_COS, SPARK8_SIN = {}, {}
+for m = 1, 8 do
+    local a = (m - 1) / 8 * 6.283
+    SPARK8_COS[m], SPARK8_SIN[m] = cos(a), sin(a)
+end
+local CRY_X = {}
+for i = 1, 5 do CRY_X[i] = C.TX + (i - 1) * C.CRY_GAP end
+local CRY_CX, CRY_CY = floor(Art.CRY_W / 2), floor(Art.CRY_H / 2)
 
 -- glyphs: the character's sprite and advance
 local GLYPH = {}
@@ -150,19 +165,8 @@ local function GlyphName(ch)
     return "f_" .. (map[ch] or ch)
 end
 for ch in pairs(Art.GLYPH_W) do GLYPH[ch] = GlyphName(ch) end
-local function TextW(str, k)
-    local w = 0
-    for i = 1, #str do
-        local ch = str:sub(i, i)
-        if ch == " " then w = w + 2 * k else w = w + ((Art.GLYPH_W[ch] or 3) + 1) * k end
-    end
-    return w - k
-end
-local NUM, FULL_X = {}, {}
-for n = 0, 99 do
-    NUM[n] = tostring(n)
-    FULL_X[n] = C.TX + TextW(NUM[n], 3) + 5
-end
+local MORE = {}
+for n = 6, 99 do MORE[n] = "+" .. (n - 5) end
 local NOTE_SUMMON = { none = "A DEMON -1" }
 for d, name in pairs(DEMON_NAME) do
     NOTE_SUMMON[d] = (COST[d] or 1) == 0 and (name .. " FREE") or (name .. " -1")
@@ -275,6 +279,7 @@ local function SetLine(l, str, x, y, c, a)
     end
     if l.str == str and l.x == x and l.y == y and l.c == c and l.a == a and l.seatEpoch == P.epoch then return end
     l.str, l.x, l.y, l.c, l.a, l.seatEpoch = str, x, y, c, a, P.epoch
+    l.blinkA = nil
     local k, cx, n = l.k, x, 0
     for i = 1, #str do
         local ch = str:sub(i, i)
@@ -293,71 +298,73 @@ local function SetLine(l, str, x, y, c, a)
     for i = n + 1, l.n do Off(l[i]) end
 end
 
+-- the alpha of a laid out line, without laying it out again (a blink)
+local function LineAlpha(l, a)
+    if l.str == false or l.str == nil or l.blinkA == a then return end
+    l.blinkA = a
+    for i = 1, l.n do
+        local t = l[i]
+        if t.fsOn then Tint(t, l.c, a) end
+    end
+end
+
 -------------------------------------------------------------------------------
 -- Build
 -------------------------------------------------------------------------------
 
 local function Build()
     P.epoch = 0
-    -- the circle (art frame)
+    -- under the book (art frame)
     P.halo = Spr(art, "BACKGROUND", 0)
-    P.ringOut = Spr(art, "BACKGROUND", 1)
-    P.ringIn = Spr(art, "BACKGROUND", 2)
-    P.rune = {}
-    for i = 1, Art.RUNES do P.rune[i] = Spr(art, "BORDER", 0) end
-    P.star = Spr(art, "BORDER", 2)
-    P.zapA, P.zapB = Spr(art, "ARTWORK", -2), Spr(art, "ARTWORK", -1)
-    P.sock, P.gem, P.shine = {}, {}, {}
-    for i = 1, 5 do
-        P.sock[i] = Spr(art, "ARTWORK", 0)
-        P.gem[i] = Spr(art, "ARTWORK", 1)
-        P.shine[i] = Spr(art, "ARTWORK", 2)
-    end
-    P.dim = Spr(art, "ARTWORK", 3)
-    -- the lit medallion: the engine fills it from the demon's secret health
+    P.shadow = Spr(art, "BACKGROUND", 1)
+    P.ring = Spr(art, "BACKGROUND", 2)
+    P.dim = Spr(art, "ARTWORK", 0)
+    -- the lit book: the engine fills it from the demon's secret health
     bar = CreateFrame("StatusBar", nil, mod)
     bar:EnableMouse(false)
-    bar:SetStatusBarTexture(MEDIA .. "warlock_sigil_bound.tga")
+    bar:SetStatusBarTexture(LIT_PATH)
     if bar.SetOrientation then pcall(bar.SetOrientation, bar, "VERTICAL") end
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
     bar:Hide()
     P.bar = bar
-    -- the rest of the medallion and every effect (top frame)
-    P.rim = Spr(top, "OVERLAY", 0)
-    P.ghost = Spr(top, "OVERLAY", 1)
-    P.dash = Spr(top, "OVERLAY", 2)
-    P.dashFx = Spr(top, "OVERLAY", 3)
-    P.dashBind = Spr(top, "OVERLAY", 3)
-    P.evGem = Spr(top, "OVERLAY", 4)
-    P.evSpend = Spr(top, "OVERLAY", 4)
-    P.trailGain, P.trailSpend = {}, {}
-    for m = 1, 6 do
-        P.trailGain[m] = Dot(top, "OVERLAY", 5)
-        P.trailSpend[m] = Dot(top, "OVERLAY", 5)
-    end
-    P.comet = {}
-    for i = 1, 4 do P.comet[i] = Dot(top, "OVERLAY", 5) end
+    -- over the book (top frame)
+    P.chain = Spr(top, "ARTWORK", 0)
+    P.rim = Spr(top, "ARTWORK", 1)
+    P.flash = Spr(top, "ARTWORK", 2)
+    P.coverGem = Spr(top, "ARTWORK", 3)
+    P.eye = { Dot(top, "ARTWORK", 4, 2, 1), Dot(top, "ARTWORK", 4, 2, 1) }
+    P.zapA, P.zapB = Spr(top, "OVERLAY", 0), Spr(top, "OVERLAY", 1)
+    P.unknownQ = Line(top, 1, 3, "OVERLAY", 2)
     P.fire = {}
-    for i = 1, 10 do P.fire[i] = Dot(top, "OVERLAY", 5) end
+    for i = 1, N_FIRE do P.fire[i] = Dot(top, "OVERLAY", 3) end
     P.drops = {}
-    for i = 1, 4 do P.drops[i] = Spr(top, "OVERLAY", 5) end
+    for i = 1, 3 do P.drops[i] = Spr(top, "OVERLAY", 3) end
     P.motes = {}
-    for i = 1, 9 do P.motes[i] = Dot(top, "OVERLAY", 5) end
+    for i = 1, 9 do P.motes[i] = Dot(top, "OVERLAY", 3) end
+    P.sparks = {}
+    for i = 1, 10 do P.sparks[i] = Dot(top, "OVERLAY", 3) end
     P.burst = {}
     for m = 1, 24 do P.burst[m] = Dot(top, "OVERLAY", 6) end
-    P.unknownQ = Line(top, 1, 3, "OVERLAY", 7)
-    -- the right lane (art frame)
+    -- the soul crystals (art frame) and their events (top frame)
+    P.sock, P.gem, P.shine = {}, {}, {}
+    for i = 1, 5 do
+        P.sock[i] = Spr(art, "ARTWORK", 1)
+        P.gem[i] = Spr(art, "ARTWORK", 2)
+        P.shine[i] = Spr(art, "ARTWORK", 3)
+    end
+    P.evGem = Spr(top, "OVERLAY", 4)
+    P.evSpend = Spr(top, "OVERLAY", 4)
+    P.gainRing, P.trailSpend = {}, {}
+    for m = 1, 16 do P.gainRing[m] = Dot(top, "OVERLAY", 5) end
+    for m = 1, 8 do P.trailSpend[m] = Dot(top, "OVERLAY", 5) end
+    -- the lane (art frame)
     P.word = Line(art, 7, 2, "OVERLAY", 0)
     P.note = Line(art, 14, 1, "OVERLAY", 0)
     P.name = Line(art, 10, 1, "OVERLAY", 0)
-    P.souls = Line(art, 5, 1, "OVERLAY", 0)
-    P.num = Line(art, 2, 3, "OVERLAY", 0)
-    P.full = Line(art, 4, 1, "OVERLAY", 0)
-    P.track = Dot(art, "OVERLAY", 1, 62, 2)
-    P.fill = Dot(art, "OVERLAY", 2, 62, 2)
-    P.sep = {}
-    for i = 1, 31 do P.sep[i] = Dot(art, "OVERLAY", 1) end
+    P.more = Line(art, 3, 1, "OVERLAY", 0)
+    P.track = Dot(art, "OVERLAY", 1, C.BAR_W, 2)
+    P.fill = Dot(art, "OVERLAY", 2, C.BAR_W, 2)
     P.ready = true
 end
 
@@ -369,11 +376,16 @@ local function SeatRegions()
         t.fsX, t.fsY, t.fsName = nil, nil, nil
         if t.fsDot then t:SetSize(S(t.fsW), S(t.fsH)) end
     end
-    if bar then
-        bar:ClearAllPoints()
-        bar:SetPoint("TOPLEFT", mod, "TOPLEFT", S(BX), -S(BY))
-        bar:SetSize(S(Art.MED_BOX), S(Art.MED_BOX))
-    end
+    P.barX, P.barY = nil, nil
+    if bar then bar:SetSize(S(Art.BOX), S(Art.BOX)) end
+end
+
+-- the bar's box sits round the book at (x, y), the book's top left in sprite px
+local function SeatBar(x, y)
+    if P.barX == x and P.barY == y then return end
+    P.barX, P.barY = x, y
+    bar:ClearAllPoints()
+    bar:SetPoint("TOPLEFT", mod, "TOPLEFT", S(x - Art.BOX_X), -S(y - Art.BOX_Y))
 end
 
 -------------------------------------------------------------------------------
@@ -479,20 +491,16 @@ local function BarFallback()
 end
 
 local barOn = false
-local barDemon
-local function PaintBar(on, demon)
-    if on and demon ~= barDemon then
-        barDemon = demon
-        bar:SetStatusBarTexture(MEDIA .. "warlock_sigil_" .. demon .. ".tga")
-    end
+local function PaintBar(on, x, y)
     if not on then
         if barOn then barOn = false; bar:Hide() end
         return
     end
+    SeatBar(x, y)
     if not barOn then barOn = true; bar:Show() end
     if not pcall(SetHp) then
         BarFallback()
-        LogOnce("hp", "the demon's health could not be read, the medallion shows full")
+        LogOnce("hp", "the demon's health could not be read, the book shows full")
     end
 end
 
@@ -502,216 +510,231 @@ local function Paint(now)
     local R = D.reduced
     local live = not R
     local count = D.shards
+    local unknown = count == nil
     local pet = st.pet
-    local demon = st.demon or "bound"
-    local dcol = DEMON_COL[demon]
+    local demon = st.demon
+    local dcol = demon and DEMON_COL[demon] or K.violet
+    local cost = (demon and COST[demon]) or 1
     local cue = ChooseCue(st, count)
     D.cue = cue
+    local warn = (count == 0 and cost > 0) and K.pink or K.amber
+    local ccol = cue and (cue == "summon" and warn or CUE_COL[cue]) or nil
 
-    -- ring colour
-    local ring, ringA = K.violet, 0.78
-    if cue then
-        if cue == "summon" and count == 0 and demon ~= "imp" then ring = K.pink else ring = CUE_COL[cue] end
-        ringA = 0.95
-    end
-    if pet == "unknown" or count == nil then ring, ringA = K.muted, 0.5 end
-    local blink = 1
-    if cue == "summon" and live and sin(now * 7) <= 0 then blink = 0.55 end
+    -- the book's place: it shakes on SUMMON and lifts while a Summon or Drain Soul is cast
+    local dx, dy = 0, 0
+    if live and cue == "summon" and sin(now * 40) > 0.6 then dx = 1 end
+    if live and (cue == "binding" or cue == "reap") then dy = -Round(1 + sin(now * 2)) end
+    local bx, by = BX + dx, BY + dy
 
-    -- halo and rings
+    -- halo, shadow, rune ring
+    local hcol = ccol or (pet == "alive" and dcol or K.muted)
+    if unknown and pet == "unknown" then hcol = K.muted end
     local breath = R and 0.8 or (0.7 + 0.3 * sin(now * 1.6))
-    local haloA = (cue and 0.8 or 0.45) * breath * (pet == "unknown" and 0.3 or 1)
-    Cell(P.halo, "halo", CX, CY, ring, haloA)
-    Cell(P.ringOut, "ring_out", CX, CY, ring, ringA * blink)
-    Cell(P.ringIn, "ring_in", CX, CY, ring, 0.55 * blink)
-
-    -- runes: a bright head travels round them
-    local speed = cue == "binding" and 1.2 or (cue and 0.55 or 0.22)
-    for i = 1, Art.RUNES do
-        local al = 0.5
-        if live then
-            local d = ((i - 1) - now * speed * 10) % 10
-            if d > 5 then d = 10 - d end
-            al = 0.32 + 0.68 * max(0, 1 - d / 2.6)
-        end
-        Cell(P.rune[i], "rune" .. (i - 1), RUNE_X[i], RUNE_Y[i], ring, al)
+    Cell(P.halo, "halo", BCX, BCY, hcol, (cue and 0.8 or 0.45) * breath * (pet == "unknown" and 0.3 or 1))
+    Cell(P.shadow, "shadow", BCX, BY + Art.BOOK_H + 2, K.pure, 1)
+    if cue == "binding" then
+        Cell(P.ring, RING[live and floor(now * 8) % Art.RING_FRAMES or 0], BCX, BY + Art.BOOK_H + 1, K.fel, 0.9)
+    else
+        Off(P.ring)
     end
 
-    -- star and bolts
-    local starA = (cue == "bolt") and 0.9 or ((count and count >= 5) and 0.8 or 0.5)
-    Cell(P.star, "star", CX, CY, ring, starA)
-    if cue == "bolt" and live then
-        local k = floor(now * 14) % 6
-        Cell(P.zapA, ZAP[k], CX, CY, K.white, 0.95)
-        Cell(P.zapB, ZAP[(k + 3) % 6], CX, CY, K.bolt, 0.7)
+    -- the book
+    local pulse = R and 0.9 or (0.55 + 0.45 * (0.5 + 0.5 * sin(now * 6)))
+    if pet == "alive" then
+        Cell(P.dim, "book_dark", bx, by, K.pure, 1)
+        PaintBar(true, bx, by)
+        Off(P.chain); Off(P.rim)
+        SetLine(P.unknownQ, nil, 0, 0, K.muted, 0)
+    elseif pet == "none" then
+        Cell(P.dim, "book_dark", bx, by, K.pure, 1)
+        PaintBar(false)
+        Cell(P.chain, "chain", bx, by, K.pure, 0.95)
+        Cell(P.rim, "book_rim", bx, by, warn, cue == "summon" and pulse or 0.4)
+        SetLine(P.unknownQ, nil, 0, 0, K.muted, 0)
+    else
+        Cell(P.dim, "book_grey", bx, by, K.pure, 1)
+        PaintBar(false)
+        Off(P.chain); Off(P.rim)
+        SetLine(P.unknownQ, "?", BCX - 4, by + 24, K.muted, 0.9)
+    end
+    if live and cue == "bolt" then
+        Cell(P.flash, "book_white", bx, by, K.bolt, 0.25 + 0.15 * sin(now * 20))
+    else
+        Off(P.flash)
+    end
+    -- the cover gem and the eyes: the cue colour, else the demon's
+    local gcol = ccol or (pet == "alive" and dcol or nil)
+    if gcol then
+        local f = R and 1 or (0.7 + 0.3 * sin(now * 3))
+        Cell(P.coverGem, "book_gem", bx, by, gcol, 0.6 * f)
+        ShowDot(P.eye[1], bx + Art.EYE1_X, by + Art.EYE_Y, gcol, f)
+        ShowDot(P.eye[2], bx + Art.EYE2_X, by + Art.EYE_Y, gcol, f)
+    else
+        Off(P.coverGem); Off(P.eye[1]); Off(P.eye[2])
+    end
+
+    -- effects by cue
+    if live and cue == "bolt" then
+        local k = floor(now * 12) % Art.ZAPS
+        Cell(P.zapA, ZAP[k], bx, by, K.white, 0.95)
+        Cell(P.zapB, ZAP[(k + 3) % Art.ZAPS], bx, by, K.bolt, 0.8)
     else
         Off(P.zapA); Off(P.zapB)
     end
+    if live and cue == "fire" then
+        for i = 0, N_FIRE - 1 do
+            local k = (now * 1.4 + FIRE_H[i]) % 1
+            local t = P.fire[i + 1]
+            local big = k < 0.4 and 2 or 1
+            DotSize(t, big, big)
+            local col = k < 0.3 and K.gold or (k < 0.65 and K.orange or K.ember)
+            ShowDot(t, BCX + FIRE_X[i] * (1 - k * 0.5) + sin(now * 6 + i) * 1.2, by + 6 - k * 18, col, 1 - k)
+        end
+    else
+        OffAll(P.fire)
+    end
+    if live and cue == "tap" then
+        for i = 0, 2 do
+            local k = (now * 0.9 + i / 3) % 1
+            Cell(P.drops[i + 1], "drop", bx + 12 + i * 11, by + Art.BOOK_H + k * 14, K.pure, sin(k * pi) * 0.95)
+        end
+    else
+        OffAll(P.drops)
+    end
+    if live and cue == "reap" then
+        local tx, ty = bx + Art.GEM_X, by + Art.GEM_Y
+        for i = 0, 8 do
+            local k = (now * 0.8 + i / 9) % 1
+            local s = sin(k * pi)
+            ShowDot(P.motes[i + 1], 80 + (tx - 80) * k + sin(k * 9 + i) * 4 * s, 8 + (ty - 8) * k + cos(k * 7 + i * 2) * 5 * s,
+                (i % 2 ~= 0) and K.white or K.violet, 0.35 + 0.65 * k)
+        end
+    else
+        OffAll(P.motes)
+    end
+    if live and cue == "binding" then
+        for i = 0, 9 do
+            local k = (now * 0.9 + i / 10) % 1
+            ShowDot(P.sparks[i + 1], BCX + SPARK_X[i], BY + Art.BOOK_H - k * 30, (i % 2 ~= 0) and K.fel or K.white, 1 - k)
+        end
+    else
+        OffAll(P.sparks)
+    end
+    local tk = st.tapAt and (now - st.tapAt) / C.TAP_S
+    if tk and tk >= 0 and tk < 1 then
+        local r = 14 + tk * 22
+        for m = 1, 24 do
+            ShowDot(P.burst[m], BCX + BURST_COS[m] * r, BCY + BURST_SIN[m] * r, K.pink, (1 - tk) * 0.9)
+        end
+    else
+        OffAll(P.burst)
+    end
 
-    -- sockets and gems
-    local unknown = count == nil
+    -- the soul crystals
     local lit = unknown and 0 or min(count, 5)
+    local pendingOn = cue == "summon" and cost > 0
     for i = 1, 5 do
-        local x, y = SOCK_X[i], SOCK_Y[i]
-        Cell(P.sock[i], unknown and "socket_q" or "socket", x, y, K.pure, 1)
+        local x, y = CRY_X[i], C.CRY_Y
+        Cell(P.sock[i], unknown and "crys_q" or "crys_empty", x, y, K.pure, 1)
         local gem, ga, sh = nil, 1, 0
         if not unknown and i <= lit then
-            local pending = cue == "summon" and (COST[demon] or 1) > 0 and i == lit
-            gem = "gem_violet"
-            if pending and (R or sin(now * 7) > 0) then gem = "gem_amber" end
+            local pending = pendingOn and i == lit
+            gem = "crys_lit"
+            if pending and (R or sin(now * 7) > 0) then gem = "crys_amber" end
             if live and not pending then
                 local s = max(0, sin(now * 1.9 + (i - 1) * 1.3))
                 local s2 = s * s
                 local s4 = s2 * s2
-                sh = 0.5 * (s4 * s4 * s2)                  -- s^10: a short flash
+                sh = 0.6 * (s4 * s4 * s2)                  -- s^10: a short flash
             end
             if count >= 5 and cue ~= "summon" then sh = sh + 0.12 end
         elseif cue == "drain" and live and not unknown and i == lit + 1 then
-            gem, ga = "gem_violet", 0.15 + 0.2 * (0.5 + 0.5 * sin(now * 3))
+            gem, ga = "crys_lit", 0.15 + 0.25 * (0.5 + 0.5 * sin(now * 3))
         end
         Cell(P.gem[i], gem, x, y, K.pure, ga)
-        Cell(P.shine[i], sh > 0.025 and "gem_white" or nil, x, y, K.pure, sh)
+        Cell(P.shine[i], sh > 0.03 and "crys_white" or nil, x, y, K.pure, sh)
+    end
+    if not unknown and count > 5 then
+        SetLine(P.more, MORE[min(count, 99)], C.TX + 5 * C.CRY_GAP, C.CRY_Y + 4, K.violet, 1)
+    else
+        SetLine(P.more, nil, 0, 0, K.muted, 0)
     end
 
     -- gain and spend events
     local gk = D.gainAt and (now - D.gainAt) / C.GAIN_S
     if gk and not unknown and gk >= 0 and gk < 1 then
         local i = min(max(count, 1), 5)
-        local x, y = SOCK_X[i], SOCK_Y[i]
-        Cell(P.evGem, gk < 0.3 and "gem_white" or nil, x, y, K.pure, 1 - gk / 0.3)
-        for m = 1, 6 do
-            local kk = Clamp01(gk * 1.4 - (m - 1) * 0.08)
-            ShowDot(P.trailGain[m], CX + (x - CX) * kk, CY + (y - CY) * kk, K.white, (1 - kk) * 0.9 + 0.1)
-        end
+        local cx, cy = CRY_X[i] + CRY_CX, C.CRY_Y + CRY_CY
+        Cell(P.evGem, gk < 0.35 and "crys_white" or nil, CRY_X[i], C.CRY_Y, K.pure, 1 - gk / 0.35)
+        local r = 3 + gk * 10
+        for m = 1, 16 do ShowDot(P.gainRing[m], cx + GAIN_COS[m] * r, cy + GAIN_SIN[m] * r, K.white, (1 - gk) * 0.8) end
     else
-        Off(P.evGem); OffAll(P.trailGain)
+        Off(P.evGem); OffAll(P.gainRing)
     end
     local sk = D.spendAt and (now - D.spendAt) / C.SPEND_S
     if sk and not unknown and sk >= 0 and sk < 1 then
         local i = min(count, 4) + 1
-        local x, y = SOCK_X[i], SOCK_Y[i]
-        Cell(P.evSpend, "gem_amber", x, y, K.pure, 1 - sk)
-        for m = 1, 6 do
-            local kk = Clamp01(sk * 1.3 - (m - 1) * 0.06)
-            local f = D.bind and kk or -kk * 0.6
-            ShowDot(P.trailSpend[m], x + (CX - x) * f, y + (CY - y) * f, D.bind and K.amber or K.white, 1 - kk)
-        end
-        if D.bind and sk > 0.75 then Cell(P.dashBind, "med_dash", BX, BY, K.white, (1 - sk) * 3) else Off(P.dashBind) end
-    else
-        Off(P.evSpend); OffAll(P.trailSpend); Off(P.dashBind)
-    end
-
-    -- the medallion
-    local dimN = pet == "alive" and demon or (pet == "none" and demon or "bound")
-    Cell(P.dim, DIM[dimN], BX, BY, K.pure, 1)
-    if pet == "alive" then
-        PaintBar(true, demon)
-        Cell(P.rim, "med_rim", BX, BY, dcol, 0.95)
-        Off(P.ghost); Off(P.dash)
-        SetLine(P.unknownQ, nil, 0, 0, K.muted, 0)
-    elseif pet == "none" then
-        PaintBar(false)
-        Off(P.rim)
-        local pulse = R and 0.9 or (0.55 + 0.45 * (0.5 + 0.5 * sin(now * 6)))
-        local gc = (count == 0 and demon ~= "imp") and K.pink or K.amber
-        Cell(P.ghost, GHOST[dimN], BX, BY, gc, pulse)
-        Cell(P.dash, "med_dash", BX, BY, gc, pulse)
-        SetLine(P.unknownQ, nil, 0, 0, K.muted, 0)
-    else
-        PaintBar(false)
-        Off(P.rim); Off(P.ghost); Off(P.dash)
-        SetLine(P.unknownQ, "?", CX - 4, CY - 7, K.muted, 0.9)
-    end
-    if cue == "binding" and live then
-        Cell(P.dashFx, "med_dash", BX, BY, K.white, 0.9 * (1 - (now * 1.5) % 1))
-    else
-        Off(P.dashFx)
-    end
-
-    -- effects by cue
-    if live and cue == "fire" then
-        for i = 0, 9 do
-            local k = (now * 0.6 + FIRE_H[i]) % 1
-            ShowDot(P.fire[i + 1], CX + FIRE_X[i] * (1 - k * 0.3), CY + 12 - k * 36, (i % 3 ~= 0) and K.orange or K.gold, 1 - k)
-        end
-    else
-        OffAll(P.fire)
-    end
-    if live and cue == "tap" then
-        for i = 0, 3 do
-            local k = (now * 0.7 + i * 0.25) % 1
-            Cell(P.drops[i + 1], "drop", CX - 9 + i * 6, CY - 13 + k * 26, K.pink, sin(k * 3.14) * 0.9)
-        end
-    else
-        OffAll(P.drops)
-    end
-    if live and cue == "reap" then
-        for i = 0, 8 do
-            local k = (now * 0.9 + i / 9) % 1
-            local a = i * 0.7 + 1
-            ShowDot(P.motes[i + 1], CX + sin(a + k * 6) * (20 * (1 - k)), CY - 34 + k * 30, (i % 2 ~= 0) and K.white or K.violet, 0.4 + 0.6 * k)
-        end
-    else
-        OffAll(P.motes)
-    end
-    if live and (cue == "summon" or cue == "binding" or cue == nil) then
-        local sp = cue == "binding" and 2.4 or (cue and 0.9 or 0.5)
-        local cc = ring == K.muted and K.muted or K.white
-        for i = 1, 4 do
-            local a = (now * sp - (i - 1) * 0.07) * 6.283 - 1.57
-            ShowDot(P.comet[i], CX + Round(cos(a) * 39), CY + Round(sin(a) * 39), cc, 0.95 - (i - 1) * 0.24)
-        end
-    else
-        OffAll(P.comet)
-    end
-    local tk = st.tapAt and (now - st.tapAt) / C.TAP_S
-    if tk and tk >= 0 and tk < 1 then
-        local r = 16 + tk * 22
-        for m = 1, 24 do
-            ShowDot(P.burst[m], CX + BURST_COS[m] * r, CY + BURST_SIN[m] * r, K.pink, (1 - tk) * 0.9)
-        end
-    else
-        OffAll(P.burst)
-    end
-
-    -- the right lane
-    local X = C.TX
-    local word, note, wcol, frac
-    if cue == "summon" then
-        word, wcol = "SUMMON", K.amber
-        local cost = st.demon and (COST[st.demon] or 1) or 1
-        if st.demon and cost == 0 then
-            note = NOTE_SUMMON[st.demon]
-        elseif count == 0 then
-            note, wcol = "NO SHARD", K.pink
+        local cx, cy = CRY_X[i] + CRY_CX, C.CRY_Y + CRY_CY
+        Cell(P.evSpend, "crys_amber", CRY_X[i], C.CRY_Y, K.pure, 1 - sk)
+        if D.bind then
+            -- a Summon spend: the soul flies into the book's gem
+            local gx, gy = bx + Art.GEM_X, by + Art.GEM_Y
+            for m = 1, 8 do
+                local kk = Clamp01(sk * 1.3 - (m - 1) * 0.06)
+                ShowDot(P.trailSpend[m], cx + (gx - cx) * kk, cy + (gy - cy) * kk, K.amber, 1 - kk)
+            end
         else
-            note = NOTE_SUMMON[st.demon or "none"]
+            for m = 1, 8 do
+                ShowDot(P.trailSpend[m], cx + SPARK8_COS[m] * sk * 9, cy + SPARK8_SIN[m] * sk * 9 - sk * 4,
+                    (m % 2 == 0) and K.amber or K.white, 1 - sk)
+            end
+        end
+    else
+        Off(P.evSpend); OffAll(P.trailSpend)
+    end
+
+    -- the lane
+    local X = C.TX
+    local word, note, frac
+    if cue == "summon" then
+        word = "SUMMON"
+        if demon and cost == 0 then
+            note = NOTE_SUMMON[demon]
+        elseif count == 0 then
+            note = "NO SHARD"
+        else
+            note = NOTE_SUMMON[demon or "none"]
         end
     elseif cue == "bolt" then
-        word, note, wcol, frac = "BOLT", "INSTANT", K.bolt, ProcFrac(D.tranceAt, now)
+        word, frac = "BOLT", ProcFrac(D.tranceAt, now)
     elseif cue == "fire" then
-        word, note, wcol, frac = "FIRE", "FREE SOUL FIRE", K.orange, ProcFrac(D.decimAt, now)
+        word, frac = "FIRE", ProcFrac(D.decimAt, now)
     elseif cue == "tap" then
-        word, note, wcol = "TAP", "MANA LOW", K.pink
+        word = "TAP"
     elseif cue == "reap" then
-        word, note, wcol = "REAPING", "KEEP CASTING", K.violet
+        word = "REAPING"
         if D.reapTicks > 0 then frac = Clamp01(D.reapDone / D.reapTicks) end
     elseif cue == "binding" then
-        word, note, wcol = "BINDING", "CASTING", K.white
+        word = "BINDING"
     elseif cue == "drain" then
-        word, note, wcol = "DRAIN", "SOULS LOW", K.violet
+        word = "DRAIN"
     end
     if word then
-        SetLine(P.word, word, X, 9, wcol, cue == "drain" and 0.85 or 1)
+        SetLine(P.word, word, X, 10, ccol, cue == "drain" and 0.85 or 1)
+        if cue == "summon" then
+            LineAlpha(P.word, (live and sin(now * 7) <= 0) and 0.6 or 1)
+        else
+            P.word.blinkA = nil
+        end
         SetLine(P.note, note, X, 28, K.white, 0.9)
         SetLine(P.name, nil, 0, 0, K.muted, 0)
         if frac then
-            DotSize(P.track, 62, 2); ShowDot(P.track, X, 22, K.track, 1)
-            local w = Round(62 * frac)
+            ShowDot(P.track, X, 22, K.track, 1)
+            local w = Round(C.BAR_W * frac)
             if w > 0 then
                 DotSize(P.fill, w, 2)
                 local amber = (cue == "bolt" or cue == "fire") and frac < C.FRAC_AMBER
-                ShowDot(P.fill, X, 22, amber and K.amber or wcol, 1)
+                ShowDot(P.fill, X, 22, amber and K.amber or ccol, 1)
             else
                 Off(P.fill)
             end
@@ -723,24 +746,12 @@ local function Paint(now)
         SetLine(P.note, nil, 0, 0, K.muted, 0)
         Off(P.track); Off(P.fill)
         if pet == "alive" then
-            SetLine(P.name, DEMON_NAME[demon], X, 10, dcol, 1)
+            SetLine(P.name, DEMON_NAME[demon or "bound"], X, 13, dcol, 1)
         elseif pet == "unknown" then
-            SetLine(P.name, "NO READ", X, 10, K.muted, 1)
+            SetLine(P.name, "NO READ", X, 13, K.muted, 1)
         else
-            SetLine(P.name, "NO DEMON", X, 10, K.muted, 1)
+            SetLine(P.name, "NO DEMON", X, 13, K.muted, 1)
         end
-    end
-    SetLine(P.souls, "SOULS", X, 46, K.muted, 1)
-    local num = unknown and "?" or NUM[min(count, 99)]
-    SetLine(P.num, num, X, 54, unknown and K.muted or (count == 0 and K.muted or K.white), 1)
-    if not unknown and count > 5 then
-        SetLine(P.full, "FULL", FULL_X[min(count, 99)], 56, K.violet, 0.9)
-    else
-        SetLine(P.full, nil, 0, 0, K.muted, 0)
-    end
-    if not P.sepDone or P.sepEpoch ~= P.epoch then
-        P.sepDone, P.sepEpoch = true, P.epoch
-        for i = 1, 31 do ShowDot(P.sep[i], X + (i - 1) * 2, 40, K.violet, 0.3) end
     end
 end
 

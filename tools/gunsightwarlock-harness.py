@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """Runs the real GunsightWarlock.lua, WarlockState.lua and the generated WarlockArt.lua (the Warlock's Gunsight Class Module).
 
-The module draws the design mockup "Warlock Binding Circle" (2026-11-16): a summoning circle whose five points are the soul
-shard sockets, a medallion of the demon lit by its health, and one cue at a time on the right. These checks pin:
+The module draws the concept "The Grimoire" (2026-11-20): the demon's pact book lit from the bottom by its health, five soul
+crystals, and one cue at a time on the right that the book acts out. These checks pin:
 
-  * the art: the committed WarlockArt.lua, warlock_circle.tga and the five warlock_sigil_*.tga files are exactly what the
-    generator writes now; the toc loads the art and the state before the module;
+  * the art: the committed WarlockArt.lua, warlock_grimoire.tga and warlock_grimoire_lit.tga are exactly what the generator
+    writes now; the toc loads the art and the state before the module;
   * GunsightClass.lua no longer claims WARLOCK (the Rogue and the Druid are not this file's business), and under the REAL
     GunsightAreas.lua with both modules loaded a Warlock gets this one;
   * registration: one "class" module for WARLOCK only, a frame named ForeverSTUwaveGunsightWarlock under the host;
-  * the shards: a gem per shard up to five, the count (a number, "?" for an unknown or secret count), FULL past five;
-  * the cue lane: SUMMON (the demon and the shard it costs, IMP FREE, NO SHARD), BINDING, BOLT and FIRE with a drain bar for the
+  * the shards: a crystal per shard up to five, "+N" past five, question marked crystals for an unknown or secret count;
+  * the cue lane: SUMMON (with a note: the demon and the shard it costs, IMP FREE, NO SHARD), BINDING, BOLT and FIRE with a drain bar for the
     10 s window (amber for its last fifth), TAP, DRAIN, REAPING with a bar for the channel's ticks, and the priority between them;
   * the switches: every cue has an off switch that removes exactly that cue;
-  * the demon: alive (the engine fills the lit sigil from the SECRET health, passed straight to the bar, never compared), gone
-    (the ghost and the dashed rim), unreadable ("?" and NO READ); the demon's identity from the family or the Summon ledger;
+  * the demon: alive (the engine fills the lit book from the SECRET health, passed straight to the bar, never compared), gone
+    (the dark book, the chain and the rim), unreadable ("?" and NO READ); the demon's identity from the family or the Summon ledger;
   * the events: a gain flash, a spend (with the binding when a Summon was just cast), the Life Tap burst;
-  * reduced motion: nothing orbits, breathes, blinks or flies; the state still reads;
+  * reduced motion: nothing breathes, blinks, shakes or flies; the state still reads;
   * onShow subscribes and starts one OnUpdate, onHide stops both; a rescale rewrites every size;
   * the paint allocates nothing once warm;
   * under the real areas the host hides with no target, the module stops, and it comes back with a target.
@@ -49,9 +49,8 @@ MODULE = (CH / "GunsightWarlock.lua").read_text(encoding="utf-8")
 STATE = (CH / "WarlockState.lua").read_text(encoding="utf-8")
 ARTLUA = (CH / "WarlockArt.lua").read_text(encoding="utf-8")
 CLASSLUA = (CH / "GunsightClass.lua").read_text(encoding="utf-8")
-GENERATOR = ROOT / "tools/assets/generate_warlock_circle.py"
+GENERATOR = ROOT / "tools/assets/generate_warlock_grimoire.py"
 MEDIA = ADDON / "Media/Textures"
-DEMONS = ("imp", "voidwalker", "sayaad", "felhunter", "bound")
 
 MOCK = r"""
 local Obj = {}
@@ -219,15 +218,13 @@ case("the_shards_light_a_gem_each_up_to_five_and_the_number_follows", """
         push(HS(n))
         Paint(__now)
         assert(Lit() == math.min(n, 5), n .. " shards lit " .. Lit() .. " gems")
-        assert(Txt(P().num) == tostring(n), "the number " .. Txt(P().num))
-        assert((Txt(P().full) == "FULL") == (n > 5), "FULL past five at " .. n)
-        assert(P().sock[1].fsName == "socket" and Txt(P().souls) == "SOULS")
+        assert(Txt(P().more) == (n > 5 and ("+" .. (n - 5)) or ""), "past five: " .. Txt(P().more))
+        assert(P().sock[1].fsName == "crys_empty")
     end
     push(HS(nil)); Paint(__now)
-    assert(Lit() == 0 and Txt(P().num) == "?" and P().sock[1].fsName == "socket_q", "unknown: sockets with a question mark")
-    assert(ColorIs(P().ringOut, M.COLORS.muted), "unknown: a muted ring")
+    assert(Lit() == 0 and Txt(P().more) == "" and P().sock[1].fsName == "crys_q", "unknown: crystals with a question mark")
     push({ shards = SECRET, procs = {} }); Paint(__now)
-    assert(M.D.shards == nil and Txt(P().num) == "?", "a secret count is unknown, never compared")
+    assert(M.D.shards == nil and P().sock[1].fsName == "crys_q", "a secret count is unknown, never compared")
     NoLog()
 """)
 
@@ -241,7 +238,7 @@ case("a_shard_spent_or_gained_while_hidden_plays_nothing_when_the_module_shows",
     Paint(__now)
     assert(M.D.spendAt == nil or __now - M.D.spendAt > 5, "no spend plays on show for a shard spent while hidden")
     assert(M.D.gainAt == nil or __now - M.D.gainAt > 5, "and no gain")
-    assert(Lit() == 3 and Txt(P().num) == "3", "the count is the current one")
+    assert(Lit() == 3, "the count is the current one")
     push(HS(2)); Paint(__now)
     assert(M.D.spendAt == __now, "a spend after the show still plays")
     NoLog()
@@ -253,11 +250,11 @@ case("the_cue_lane_names_what_to_do_and_the_priority_holds", """
     assert(Cue() == nil and Txt(P().word) == "" and Txt(P().name) == "VOIDWALKER", "idle: the demon's name, no cue")
     -- drain
     push(HS(2)); Paint(__now)
-    assert(Cue() == "drain" and Txt(P().word) == "DRAIN" and Txt(P().note) == "SOULSLOW")
+    assert(Cue() == "drain" and Txt(P().word) == "DRAIN" and Txt(P().note) == "", "only SUMMON has a note")
     push(HS(3)); Paint(__now)
     -- tap
     USABLE.noMana = true; World()
-    assert(Cue() == "tap" and Txt(P().word) == "TAP" and Txt(P().note) == "MANALOW", "tap: " .. tostring(Cue()))
+    assert(Cue() == "tap" and Txt(P().word) == "TAP", "tap: " .. tostring(Cue()))
     push(HS(1)); Paint(__now)
     assert(Cue() == "tap", "tap beats drain")
     -- summon beats tap
@@ -265,17 +262,17 @@ case("the_cue_lane_names_what_to_do_and_the_priority_holds", """
     assert(Cue() == "summon" and Txt(P().word) == "SUMMON" and Txt(P().note) == "VOIDWALKER-1", "summon: " .. Txt(P().note))
     -- fire beats summon, bolt beats fire
     push(HS(1, { decim = true })); Paint(__now)
-    assert(Cue() == "fire" and Txt(P().word) == "FIRE" and Txt(P().note) == "FREESOULFIRE")
+    assert(Cue() == "fire" and Txt(P().word) == "FIRE" and Txt(P().note) == "")
     push(HS(1, { decim = true, trance = true })); Paint(__now)
-    assert(Cue() == "bolt" and Txt(P().word) == "BOLT" and Txt(P().note) == "INSTANT")
+    assert(Cue() == "bolt" and Txt(P().word) == "BOLT")
     -- binding beats bolt
     Fire("UNIT_SPELLCAST_START", "player", 100)
     Paint(__now)
-    assert(Cue() == "binding" and Txt(P().word) == "BINDING" and Txt(P().note) == "CASTING", "binding: " .. tostring(Cue()))
+    assert(Cue() == "binding" and Txt(P().word) == "BINDING" and On(P().ring), "binding: " .. tostring(Cue()))
     -- reaping beats everything
     push(HS(1, { decim = true, trance = true, reap = true, done = 2, ticks = 5 })); Paint(__now)
-    assert(Cue() == "reap" and Txt(P().word) == "REAPING" and Txt(P().note) == "KEEPCASTING")
-    assert(On(P().track) and P().fill.fsW == 25 and ColorIs(P().fill, M.COLORS.violet), "the channel bar: 2 of 5 ticks of 62 px: " .. tostring(P().fill.fsW))
+    assert(Cue() == "reap" and Txt(P().word) == "REAPING")
+    assert(On(P().track) and P().fill.fsW == 24 and ColorIs(P().fill, M.COLORS.violet), "the channel bar: 2 of 5 ticks of 60 px: " .. tostring(P().fill.fsW))
     Fire("UNIT_SPELLCAST_STOP", "player", 100)
     NoLog()
 """)
@@ -290,7 +287,7 @@ case("the_summon_cue_names_the_demon_and_its_shard_and_the_imp_is_free", """
     assert(Txt(P().note) == "VOIDWALKER-1" and ColorIs(P().word[1], M.COLORS.amber))
     push(HS(0)); Paint(__now)
     assert(Txt(P().note) == "NOSHARD" and ColorIs(P().word[1], M.COLORS.pink), "no shard: pink")
-    assert(ColorIs(P().ringOut, M.COLORS.pink), "the ring warns too")
+    assert(ColorIs(P().halo, M.COLORS.pink) and ColorIs(P().rim, M.COLORS.pink), "the halo and the rim warn too")
     PET.exists = true; PET.family = "Imp"; World()
     PET.exists = false; World()
     push(HS(0)); Paint(__now)
@@ -298,8 +295,8 @@ case("the_summon_cue_names_the_demon_and_its_shard_and_the_imp_is_free", """
     -- the gem that will be spent blinks amber
     push(HS(3)); PET.family = "Felhunter"; PET.exists = true; World(); PET.exists = false; World()
     local amber, violet = false, false
-    for k = 0, 20 do Paint(__now + k * 0.05); local n = P().gem[3].fsName; amber = amber or n == "gem_amber"; violet = violet or n == "gem_violet" end
-    assert(amber and violet, "the last lit gem blinks")
+    for k = 0, 20 do Paint(__now + k * 0.05); local n = P().gem[3].fsName; amber = amber or n == "crys_amber"; violet = violet or n == "crys_lit" end
+    assert(amber and violet, "the last lit crystal blinks")
     NoLog()
 """)
 
@@ -307,9 +304,9 @@ case("the_proc_cues_carry_a_ten_second_drain_bar_that_turns_amber_at_the_end", "
     Build()
     push(HS(3, { trance = true })); Paint(__now)
     local t0 = __now
-    assert(Cue() == "bolt" and P().fill.fsW == 62 and ColorIs(P().fill, M.COLORS.bolt), "a full bar at the start")
+    assert(Cue() == "bolt" and P().fill.fsW == 60 and ColorIs(P().fill, M.COLORS.bolt), "a full bar at the start")
     Paint(t0 + 5)
-    assert(P().fill.fsW == 31, "half at 5 s: " .. tostring(P().fill.fsW))
+    assert(P().fill.fsW == 30, "half at 5 s: " .. tostring(P().fill.fsW))
     Paint(t0 + 8.5)
     assert(ColorIs(P().fill, M.COLORS.amber) and P().fill.fsW == 9, "amber in the last fifth: " .. tostring(P().fill.fsW))
     Paint(t0 + 11)
@@ -345,27 +342,27 @@ case("every_cue_has_an_off_switch_that_removes_only_that_cue", """
     NoLog()
 """)
 
-case("the_medallion_is_lit_by_the_secret_health_through_the_bar_and_never_compared", """
+case("the_book_is_lit_by_the_secret_health_through_the_bar_and_never_compared", """
     Build()
     push(HS(3)); World()
     local bar = P().bar
-    assert(bar.shown and bar.barTex:match("warlock_sigil_voidwalker%.tga$"), "alive: the lit sigil of the demon")
+    assert(bar.shown and bar.barTex:match("warlock_grimoire_lit%.tga$"), "alive: the lit book")
     assert(bar.value == SECRET and bar.max == SECRET and bar.min == 0, "the secret health goes straight to the bar")
-    assert(On(P().rim), "the rim")
-    assert(not On(P().ghost) and not On(P().dash))
+    assert(P().dim.fsName == "book_dark" and On(P().coverGem) and ColorIs(P().coverGem, { 168 / 255, 85 / 255, 247 / 255 }), "the gem in the demon's colour")
+    assert(not On(P().chain) and not On(P().rim))
     HEALTH.v, HEALTH.m = 40, 100
     Paint(__now)
     assert(bar.value == 40 and bar.max == 100, "a plain health feeds the same")
     -- the demon is gone
     PET.exists = false; World()
-    assert(not bar.shown and On(P().ghost) and On(P().dash) and not On(P().rim), "gone: the ghost and the dashed rim")
-    assert(P().dim.fsName == "dim_voidwalker", "the dark medallion stays")
+    assert(not bar.shown and On(P().chain) and On(P().rim), "gone: the chain and the rim")
+    assert(P().dim.fsName == "book_dark", "the dark book stays")
     PET.exists = true; PET.dead = true; World()
-    assert(not bar.shown and On(P().ghost), "a dead demon reads as gone")
+    assert(not bar.shown and On(P().chain), "a dead demon reads as gone")
     -- unreadable
     PET.dead = false; PET.unreadable = true; World()
     assert(not bar.shown and Txt(P().unknownQ) == "?" and Txt(P().name) == "NOREAD", "unreadable: a question mark")
-    assert(ColorIs(P().ringOut, M.COLORS.muted))
+    assert(P().dim.fsName == "book_grey" and ColorIs(P().halo, M.COLORS.muted))
     NoLog()
 """)
 
@@ -397,19 +394,19 @@ case("a_gain_a_spend_the_binding_and_the_life_tap_burst_play", """
     push(HS(3)); Paint(__now)
     local t0 = __now
     push(HS(4)); Paint(t0 + 0.1)
-    assert(On(P().evGem) and P().evGem.fsName == "gem_white", "a shard lands: the white gem")
-    assert(On(P().trailGain[1]), "and a streak")
+    assert(On(P().evGem) and P().evGem.fsName == "crys_white", "a shard lands: the white crystal")
+    assert(On(P().gainRing[1]), "and a ring")
     Paint(t0 + 0.5)
-    assert(not On(P().evGem) and On(P().trailGain[2]), "the flash is short, the streak runs")
+    assert(not On(P().evGem) and On(P().gainRing[2]), "the flash is short, the ring runs")
     Paint(t0 + 1)
-    assert(not On(P().trailGain[1]), "and ends")
+    assert(not On(P().gainRing[1]), "and ends")
     -- a spend without a summon: the sparks fly outward
     push(HS(3)); Paint(__now + 0.1)
-    assert(On(P().evSpend) and P().evSpend.fsName == "gem_amber" and not M.D.bind, "a plain spend")
+    assert(On(P().evSpend) and P().evSpend.fsName == "crys_amber" and not M.D.bind, "a plain spend")
     -- a spend right after a Summon: the binding
     Fire("UNIT_SPELLCAST_SUCCEEDED", "player", 100)
-    push(HS(2)); Paint(__now + 0.5)
-    assert(M.D.bind and On(P().dashBind), "a Summon spend flashes the medallion's rim")
+    push(HS(2)); Paint(__now + 0.2)
+    assert(M.D.bind and On(P().trailSpend[1]) and P().trailSpend[1].fsX < 96, "a Summon spend flies toward the book")
     -- the Life Tap burst
     Fire("UNIT_SPELLCAST_SUCCEEDED", "player", 104)
     Paint(__now + 0.2)
@@ -427,7 +424,6 @@ case("reduced_motion_stops_every_flourish_and_the_state_still_reads", """
     push(HS(3)); World()
     local a = P().halo.fsA
     for k = 1, 10 do Paint(__now + k * 0.31); assert(P().halo.fsA == a, "the halo holds still") end
-    for i = 1, 4 do assert(not On(P().comet[i]), "no comet") end
     assert(not On(P().shine[1]) , "no shimmer")
     push(HS(3, { decim = true })); Paint(__now + 1)
     assert(Cue() == "fire" and Txt(P().word) == "FIRE")
@@ -437,9 +433,9 @@ case("reduced_motion_stops_every_flourish_and_the_state_still_reads", """
     PET.exists = false; World()
     push(HS(3)); USABLE.noMana = false; Paint(__now + 1)
     assert(Cue() == "summon")
-    local c = P().ghost.fsA
-    for k = 1, 10 do Paint(__now + k * 0.1); assert(P().ghost.fsA == c, "no pulse") end
-    for i = 1, 4 do assert(not On(P().drops[i]) and not On(P().motes[i])) end
+    local c, x = P().rim.fsA, P().dim.fsX
+    for k = 1, 10 do Paint(__now + k * 0.1); assert(P().rim.fsA == c and P().dim.fsX == x, "no pulse, no shake") end
+    for i = 1, 3 do assert(not On(P().drops[i]) and not On(P().motes[i])) end
     ForeverSTUwaveDB = nil
     NoLog()
 """)
@@ -474,7 +470,7 @@ case("every_sprite_the_module_draws_is_in_the_manifest", """
     assert(#missing == 0, "not in the manifest: " .. table.concat(missing, ", "))
     local n = 0
     for _ in pairs(seen) do n = n + 1 end
-    assert(n > 40, "the sweep exercised " .. n .. " sprites")
+    assert(n > 30, "the sweep exercised " .. n .. " sprites")
     NoLog()
 """)
 
@@ -486,7 +482,7 @@ case("show_and_hide_drive_the_subscriptions_and_the_ticker", """
     SPEC.onShow("lower")
     assert(#SUBS == 1 and m.scripts.OnUpdate, "and they come back")
     -- the ticker paints at its own rate
-    push(HS(3)); local before = P().num.fsA
+    push(HS(3)); local before = P().word.fsA
     PET.exists = false
     __now = __now + 1
     m.scripts.OnUpdate(m, 0.2)
@@ -503,8 +499,8 @@ case("a_rescale_rewrites_every_size", """
     SPEC.seat({ x = 0, y = 0, w = 200, h = 128 })
     Paint(__now)
     assert(Near(sock.w, w * 2), "the sockets double with the scale: " .. tostring(sock.w) .. " vs " .. tostring(w))
-    assert(Near(P().bar.w, Art.MED_BOX * 1.25 * 2), "the medallion bar too")
-    assert(Near(P().sep[1].w, 1.25 * 2) , "a flat region too")
+    assert(Near(P().bar.w, Art.BOX * 1.25 * 2), "the book bar too")
+    assert(Near(P().eye[1].w, 2 * 1.25 * 2) , "a flat region too")
     NoLog()
 """)
 
@@ -596,7 +592,7 @@ check(isVisible(host), "a target shows the host")
 local G = FS.GunsightWarlock
 check(G.frame and isVisible(G.frame), "the module (not the Rogue and Druid plate) is built and drawn under the host")
 check(onUpdateFrames() == 1, "ticking: " .. onUpdateFrames())
-check(isVisible(G.parts.sock[1]) and G.parts.num and G.parts.bar, "the circle is drawn")
+check(isVisible(G.parts.sock[1]) and isVisible(G.parts.dim) and G.parts.bar, "the book is drawn")
 TARGET.exists = false
 fire("PLAYER_TARGET_CHANGED")
 check(not isVisible(host) and not isVisible(G.frame) and not isVisible(G.parts.sock[1]), "no target hides the host and everything under it")
@@ -652,8 +648,8 @@ def static_checks() -> list[str]:
         if run.returncode != 0:
             return [f"the generator failed: {run.stderr.strip()[-400:]}"]
         if (Path(tmp) / "WarlockArt.lua").read_text(encoding="utf-8") != ARTLUA:
-            errs.append("WarlockArt.lua differs from the generator's (run tools/assets/generate_warlock_circle.py)")
-        names = ["warlock_circle"] + [f"warlock_sigil_{d}" for d in DEMONS]
+            errs.append("WarlockArt.lua differs from the generator's (run tools/assets/generate_warlock_grimoire.py)")
+        names = ["warlock_grimoire", "warlock_grimoire_lit"]
         for name in names:
             mine = MEDIA / f"{name}.tga"
             if not mine.exists():

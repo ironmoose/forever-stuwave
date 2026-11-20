@@ -1697,11 +1697,11 @@ local CLASS_MODULE_HELP = {
         .. "with your form; the word under them says what to do next.\n\nCat: the five claw marks are your combo points "
         .. "(FINISH at five), the energy bar and the Shifting Power chip.\n\nBear: the rage bar marked where Lacerate, Primal "
         .. "Bite and Maul become affordable, the Primal Bite chip and five Lacerate stacks.\n\nOnly what you have learned is shown.",
-    WARLOCK = "The binding circle. The five gems are your soul shards (the number keeps counting past five). The medallion in "
-        .. "the middle is your demon, filled by its health; a dashed ghost means none is out.\n\nThe right lane shows one "
-        .. "prompt at a time: REAPING while Drain Soul runs, BINDING while you summon, BOLT (Shadow Trance) and FIRE "
-        .. "(Decimation) with a 10 s bar, SUMMON when your demon is gone, TAP when your mana cannot pay the next Shadow Bolt, "
-        .. "DRAIN under three shards. Each prompt has a switch below.",
+    WARLOCK = "The Grimoire, your demon's pact book. The cover lights from the bottom with your demon's health. A dark book "
+        .. "with a chain across it means no demon is out.\n\nThe five crystals are your soul shards (+N past five). The word "
+        .. "beside the book shows one prompt at a time and the book acts it out: REAPING while Drain Soul runs, BINDING while "
+        .. "you summon, BOLT (Shadow Trance) and FIRE (Decimation) with a 10 s bar, SUMMON when your demon is gone, TAP when "
+        .. "your mana cannot pay the next Shadow Bolt, DRAIN under three shards. Each prompt has a switch below.",
     SHAMAN = "Four totem poles: Fire, Earth, Water, Air. A pole's blocks sink as its totem runs out, the last block amber. DROP "
         .. "means nothing stands, FAR that you left its range. A totem element you have not learned yet is not shown. Click a pole to drop "
         .. "that totem.\n\nRight: the shock cooldown (RDY when ready), and under it Fire Nova while a Fire totem stands.",
