@@ -14,7 +14,7 @@ crystals, and one cue at a time on the right that the book acts out. These check
     10 s window (amber for its last fifth), TAP, DRAIN, REAPING with a bar for the channel's ticks, and the priority between them;
   * the switches: every cue has an off switch that removes exactly that cue;
   * the demon: alive (the engine fills the lit book from the SECRET health, passed straight to the bar, never compared), gone
-    (the dark book, the chain and the rim), unreadable ("?" and NO READ); the demon's identity from the family or the Summon ledger;
+    (the dark book and its amber outline), unreadable ("?" and NO READ); the demon's identity from the family or the Summon ledger;
   * the events: a gain flash, a spend (with the binding when a Summon was just cast), the Life Tap burst;
   * reduced motion: nothing breathes, blinks, shakes or flies; the state still reads;
   * onShow subscribes and starts one OnUpdate, onHide stops both; a rescale rewrites every size;
@@ -349,16 +349,16 @@ case("the_book_is_lit_by_the_secret_health_through_the_bar_and_never_compared", 
     assert(bar.shown and bar.barTex:match("warlock_grimoire_lit%.tga$"), "alive: the lit book")
     assert(bar.value == SECRET and bar.max == SECRET and bar.min == 0, "the secret health goes straight to the bar")
     assert(P().dim.fsName == "book_dark" and On(P().coverGem) and ColorIs(P().coverGem, { 168 / 255, 85 / 255, 247 / 255 }), "the gem in the demon's colour")
-    assert(not On(P().chain) and not On(P().rim))
+    assert(not On(P().rim), "no outline while the demon is out")
     HEALTH.v, HEALTH.m = 40, 100
     Paint(__now)
     assert(bar.value == 40 and bar.max == 100, "a plain health feeds the same")
     -- the demon is gone
     PET.exists = false; World()
-    assert(not bar.shown and On(P().chain) and On(P().rim), "gone: the chain and the rim")
+    assert(not bar.shown and On(P().rim), "gone: the outline")
     assert(P().dim.fsName == "book_dark", "the dark book stays")
     PET.exists = true; PET.dead = true; World()
-    assert(not bar.shown and On(P().chain), "a dead demon reads as gone")
+    assert(not bar.shown and On(P().rim), "a dead demon reads as gone")
     -- unreadable
     PET.dead = false; PET.unreadable = true; World()
     assert(not bar.shown and Txt(P().unknownQ) == "?" and Txt(P().name) == "NOREAD", "unreadable: a question mark")

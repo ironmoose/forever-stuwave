@@ -232,7 +232,7 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # swing and rise frames (cold, filled, tint mask, outline), and the slam effects (column, rays, shocks, runes, cracks).
     "paladin_seal": {"paladin_seal": (512, 512), "paladin_hammer": (1024, 1024), "paladin_fx": (1024, 512)},
     # generate_warlock_grimoire.py: the Warlock Gunsight module's Grimoire atlas (the book's dark, grey, rim, white and gem looks,
-    # the chain, crystals, bolts, rune ring frames, glyphs) and the lit book the demon's health fills. It loads the book from
+    # crystals, bolts, rune ring frames, glyphs) and the lit book the demon's health fills. It loads the book from
     # warlock_grimoire_art/ (found through FS_ASSETS_DIR, set by _run_generator); it also writes WarlockArt.lua, not a .tga.
     "warlock_grimoire": {"warlock_grimoire": (512, 512), "warlock_grimoire_lit": (128, 128)},
     # generate_priest_shield.py: the Priest Gunsight module's round shield (an atlas of 128 texel cells: dark shield, rims,

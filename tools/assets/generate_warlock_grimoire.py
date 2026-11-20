@@ -7,14 +7,14 @@ pixelized from source_generated_1024.png: ComfyUI, Juggernaut XL, an esports mas
 with the demon's health; five soul crystals stand in a row beside it; the cue word is small, the book acts the cue out.
 Every sprite px is SCALE x SCALE texels of one flat colour, so the art stays blocky under the client's filter.
 
-    warlock_grimoire.tga      the atlas: the dark, grey, rim, white and gem looks of the book, the chain, the shadow, the
-                              halo, the crystals, the bolts, the rune ring frames, the blood drop and the font
+    warlock_grimoire.tga      the atlas: the dark, grey, rim, white and gem looks of the book, the shadow, the halo,
+                              the crystals, the bolts, the rune ring frames, the blood drop and the font
     warlock_grimoire_lit.tga  the LIT book alone in a 64 x 64 sprite px box (128 x 128 texels), the book at BOOK_IN_BOX. A
                               vertical StatusBar stretches it over the whole box, so the engine fills it from the bottom with
                               the secret pet health.
 
 White masks are tinted by the module with SetVertexColor (rim, white, gem, halo, bolts, rune ring, font); the book looks, the
-chain, the crystals and the drop are full colour.
+crystals and the drop are full colour.
 
 The packing is written to forever-stuwave/Modules/CombatHud/WarlockArt.lua (FS.WarlockArt). Do not edit it by hand;
 gunsightwarlock-harness.py regenerates it and fails on a diff.
@@ -101,8 +101,21 @@ def grey_of(layer):
     return out
 
 
+def silhouette_of(layer):
+    """The book's solid shape: a px is inside when art lies on both sides of it in its row AND in its column, so the gaps
+    in the art (the mouth, beside the horns) fill in while the open sky between the horns stays out."""
+    rows, cols = {}, {}
+    for x, y in layer:
+        lo, hi = rows.get(y, (x, x)); rows[y] = (min(lo, x), max(hi, x))
+        lo, hi = cols.get(x, (y, y)); cols[x] = (min(lo, y), max(hi, y))
+    return {(x, y) for y, (x0, x1) in rows.items() for x in range(x0, x1 + 1)
+            if x in cols and cols[x][0] <= y <= cols[x][1]}
+
+
 def edge_of(layer):
-    return {p: W1 for p in layer if any((p[0] + dx, p[1] + dy) not in layer for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))}
+    """The OUTER outline of the book's solid shape, never the edges of the gaps inside the art."""
+    solid = silhouette_of(layer)
+    return {p: W1 for p in solid if any((p[0] + dx, p[1] + dy) not in solid for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))}
 
 
 def mask_of(layer):
@@ -115,18 +128,6 @@ def gem_mask(layer):
     for (x, y), (r, g, b, a) in layer.items():
         if abs(x - GEM_C[0]) <= 5 and abs(y - GEM_C[1]) <= 8 and g > r + 30 and g > b + 30:
             out[(x, y)] = W1
-    return out
-
-
-def chain_layer():
-    """A chain across the cover, the demon unbound: links every 3 px on a slight sag (book px)."""
-    out = {}
-    for i in range(0, BOOK_W, 3):
-        y = 30 + jround(math.sin(i * 0.3) * 1.5)
-        for dx in (0, 1):
-            for dy in (0, 1):
-                out[(i + dx, y + dy)] = solid("#8a7da8")
-        out[(i + 1, y)] = solid("#30264a")
     return out
 
 
@@ -352,7 +353,6 @@ def build():
     add("book_rim", edge_of(book), True)
     add("book_white", mask_of(book), True)
     add("book_gem", gem_mask(book))
-    add("chain", chain_layer())
     add("shadow", shadow_layer())
     add("halo", halo_layer())
     for kind in CRY_PAL:

@@ -1753,7 +1753,7 @@ local CLASS_MODULE_HELP = {
         .. "Fire: the flame grows with Fire Vulnerability stacks, and the comet is Fire Blast.\n"
         .. "Ice oval: Ice Barrier (or Mana Shield) and how much it can still absorb. Click it to cast.",
     WARLOCK = "The book: your demon's pact book. The cover lights up from the bottom with your demon's health.\n"
-        .. "Dark book with an amber outline: your demon is gone. SUMMON names the demon and what it costs.\n"
+        .. "Dark, smoking book: your demon is gone. SUMMON names the demon and what it costs.\n"
         .. "Five crystals: your soul shards, one per crystal. +2 means you carry two more.\n"
         .. "Lightning into the gem: BOLT, your next Shadow Bolt is instant.\n"
         .. "Burning pages: FIRE, Soul Fire is free and fast.\n"

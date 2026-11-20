@@ -4,7 +4,7 @@
 -- debug/warlock-concepts-2026-11-20.html, decision in the adze doc of that date). One 150 x 86 sprite px canvas, `C.SPX`
 -- image px per sprite px.
 --   THE BOOK (left, top left BX,BY): the demon's pact book. Its cover lights from the bottom with the demon's health over the
---   dark book; with no demon (or a dead one) it is dark with a chain across the cover and an amber rim (pink when the Summon
+--   dark book; with no demon (or a dead one) it is dark with an amber outline and a slow smoke (pink when the Summon
 --   cannot be paid), shaking on SUMMON. The cover gem and the eyes take the cue colour, else the demon's colour. The book
 --   acts the cue out: lightning from the horns into the gem (BOLT), the pages burn (FIRE), blood drips from the bottom and a
 --   pink ring bursts on the tap (TAP), the book lifts and souls stream into the gem (REAPING), the book lifts on a fel rune
@@ -136,6 +136,12 @@ local FIRE_H, FIRE_X = {}, {}
 for i = 0, N_FIRE - 1 do
     FIRE_H[i] = Hash(i * 7)
     FIRE_X[i] = (Hash(i * 13) - 0.5) * 40
+end
+local N_WISP = 10
+local WISP_H, WISP_X = {}, {}
+for i = 0, N_WISP - 1 do
+    WISP_H[i] = Hash(i * 5 + 3)
+    WISP_X[i] = (Hash(i * 11 + 1) - 0.5) * 34
 end
 local SPARK_X = {}
 for i = 0, 9 do SPARK_X[i] = (Hash(i) - 0.5) * 40 end
@@ -329,7 +335,6 @@ local function Build()
     bar:Hide()
     P.bar = bar
     -- over the book (top frame)
-    P.chain = Spr(top, "ARTWORK", 0)
     P.rim = Spr(top, "ARTWORK", 1)
     P.flash = Spr(top, "ARTWORK", 2)
     P.coverGem = Spr(top, "ARTWORK", 3)
@@ -342,6 +347,8 @@ local function Build()
     for i = 1, 3 do P.drops[i] = Spr(top, "OVERLAY", 3) end
     P.motes = {}
     for i = 1, 9 do P.motes[i] = Dot(top, "OVERLAY", 3) end
+    P.wisps = {}
+    for i = 1, N_WISP do P.wisps[i] = Dot(top, "OVERLAY", 3) end
     P.sparks = {}
     for i = 1, 10 do P.sparks[i] = Dot(top, "OVERLAY", 3) end
     P.burst = {}
@@ -543,18 +550,17 @@ local function Paint(now)
     if pet == "alive" then
         Cell(P.dim, "book_dark", bx, by, K.pure, 1)
         PaintBar(true, bx, by)
-        Off(P.chain); Off(P.rim)
+        Off(P.rim)
         SetLine(P.unknownQ, nil, 0, 0, K.muted, 0)
     elseif pet == "none" then
         Cell(P.dim, "book_dark", bx, by, K.pure, 1)
         PaintBar(false)
-        Cell(P.chain, "chain", bx, by, K.pure, 0.95)
         Cell(P.rim, "book_rim", bx, by, warn, cue == "summon" and pulse or 0.4)
         SetLine(P.unknownQ, nil, 0, 0, K.muted, 0)
     else
         Cell(P.dim, "book_grey", bx, by, K.pure, 1)
         PaintBar(false)
-        Off(P.chain); Off(P.rim)
+        Off(P.rim)
         SetLine(P.unknownQ, "?", BCX - 4, by + 24, K.muted, 0.9)
     end
     if live and cue == "bolt" then
@@ -611,6 +617,19 @@ local function Paint(now)
         end
     else
         OffAll(P.motes)
+    end
+    -- no demon: a slow smoke drifts up off the closed book
+    if live and pet == "none" and cue ~= "binding" then
+        for i = 0, N_WISP - 1 do
+            local k = (now * 0.35 + WISP_H[i]) % 1
+            local t = P.wisps[i + 1]
+            local big = k < 0.5 and 2 or 1
+            DotSize(t, big, big)
+            ShowDot(t, BCX + WISP_X[i] + sin(now * 1.3 + i * 1.7) * 3 * k, by + 4 - k * 26,
+                (i % 3 == 0) and warn or K.violet, sin(k * pi) * 0.7)
+        end
+    else
+        OffAll(P.wisps)
     end
     if live and cue == "binding" then
         for i = 0, 9 do
