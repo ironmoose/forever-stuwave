@@ -7,7 +7,9 @@
 -- grows the vine round, snaps the thorns out, unfurls the leaves and sends a green ring out. The last minute has one leaf, an
 -- amber bead and blinking amber thorn tips. The time is under it (10M ... 1M, then seconds; "~" when it is our own cast's ledger
 -- in combat). Gone in combat: nothing drawn. Gone out of combat: a dim amber dashed ring and THORNS. Not learned: nothing. The
--- heal over time lanes that go beside it are a later design; the old Restoration lanes and Eclipse moons are not drawn.
+-- heal over time lanes that go beside it are a later design; the old Restoration lanes and Eclipse moons are not drawn. The HoT
+-- flower (GunsightDruidFlower.lua, the look registered as the "caster" form) is drawn over the wreath, after it, for both caster
+-- kinds; the wreath and its label are not touched by it.
 --   The art is baked by generate_druid_gunsight.py into druid_thorns.tga (FS.DruidArt.THORNS): the vine and its glow in 60 angular
 --   wedges (a wedge is dry once its centre is behind the dry line, so the line steps every 10 s), every thorn and leaf in each of
 --   its looks and growth steps, a falling leaf in 32 turns, the label glyphs; the sap bead, the fireflies and the cast ring are
@@ -605,12 +607,15 @@ end
 -------------------------------------------------------------------------------
 
 local function IsCaster(kind) return kind == "moon" or kind == "tree" end
+-- the key a kind's look is registered under: both caster kinds share the one look "caster"
+local function LookKey(kind) return IsCaster(kind) and "caster" or kind end
 
 -- FORM LOOKS. The Wildshape Eyes are retired (decision 2026-11-16: one layout per form, no eyes). Bear and Cat each draw from
 -- their own file, registered with `Druid.RegisterForm(kind, spec)` after this one loads: spec = { build(parent) -> frame,
 -- seat(ox, oy, spx), paint(now, data), show(), hide() }. `parent` is the module frame; `ox, oy` the canvas origin in image px
 -- from the host (`Gunsight.Point`), `spx` image px per sprite px. Only the form on show is painted; the others are hidden. A form
--- with no registered look (travel, aquatic, flight, or a look that failed to build) draws nothing.
+-- with no registered look (travel, aquatic, flight, or a look that failed to build) draws nothing. The kind "caster" names the
+-- look of both caster kinds (moon and tree): it is shown and painted with the Thorns wreath, after it.
 Druid.forms = Druid.forms or {}
 local formFrames = {}
 
@@ -645,7 +650,7 @@ function Druid.RegisterForm(kind, spec)
 end
 
 -- hide every group the look does not use (the caster has no eyes, so it hides the common group too); a form shows only its
--- own registered look
+-- own registered look (the caster's, if one is registered, is drawn over the wreath, which stays)
 local function Switch(kind)
     shownKind = kind
     local keep = IsCaster(kind) and "thorns" or nil
@@ -654,9 +659,10 @@ local function Switch(kind)
             for i = 1, #list do Off(list[i]) end
         end
     end
+    local key = LookKey(kind)
     for k, f in pairs(formFrames) do
         if f then
-            local fn = Druid.forms[k][k == kind and "show" or "hide"]
+            local fn = Druid.forms[k][k == key and "show" or "hide"]
             local ok, err = pcall(fn)
             if not ok then LogOnce("form-switch-" .. k, err) end
         end
@@ -1070,8 +1076,9 @@ local function Paint(now)
     local kind = D.kind
     if kind ~= shownKind then Switch(kind) end
     ComputeCue(now)
-    if IsCaster(kind) then PaintThorns(now) return end
-    if formFrames[kind] then Druid.forms[kind].paint(now, D) end
+    if IsCaster(kind) then PaintThorns(now) end            -- the wreath first: the caster's look is drawn over it
+    local key = LookKey(kind)
+    if formFrames[key] then Druid.forms[key].paint(now, D) end
 end
 Druid.Paint = Paint
 

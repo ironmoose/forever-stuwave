@@ -549,6 +549,53 @@ case("forms_draw_only_their_registered_look", """
     NoLog()
 """)
 
+case("a_caster_look_serves_both_caster_kinds_and_is_painted_after_the_wreath", """
+    -- the key "caster" names one look for the moon and the tree kinds: shown with the wreath, painted after it, hidden in every other form
+    local calls = { show = 0, hide = 0, paint = 0 }
+    local order = {}
+    local spec = {
+        build = function(parent) calls.built = parent; return CreateFrame("Frame", nil, parent) end,
+        seat = function() end,
+        show = function() calls.show = calls.show + 1; calls.on = true end,
+        hide = function() calls.hide = calls.hide + 1; calls.on = false end,
+        paint = function(now, data) calls.paint = calls.paint + 1; calls.kind = data.kind; order[#order + 1] = "look" end,
+    }
+    assert(M.RegisterForm("caster", spec), "registered before the module is built, as the toc loads it")
+    Start("caster")
+    assert(calls.built == M.frame, "built under the module frame")
+    local realThorns = St.Thorns
+    St.Thorns = function(...) order[#order + 1] = "wreath"; return realThorns(...) end
+    W.known["Thorns"] = true
+    W.auras["Thorns"] = { expirationTime = 1000 + 100 }
+    Aura()
+    -- a hostile target: the moon kind
+    Paint(1000.1)
+    assert(calls.on == true and calls.kind == "moon", "shown and painted for the moon kind: " .. tostring(calls.kind))
+    assert(P().thVine[1].fsOn and P().thLabel.fsOn, "the wreath is drawn as before")
+    assert(order[#order - 1] == "wreath" and order[#order] == "look", "the look is painted after the wreath: " .. table.concat(order, ","))
+    -- a friend: the tree kind, the same look
+    W.canAttack, W.canAssist, W.name = false, true, "Tank"
+    fire("PLAYER_TARGET_CHANGED")
+    local before = calls.paint
+    order = {}
+    Paint(1000.2)
+    assert(calls.kind == "tree" and calls.paint == before + 1 and calls.on == true, "the tree kind is painted by the same look")
+    assert(order[1] == "wreath" and order[2] == "look" and #order == 2, "once each, wreath first: " .. table.concat(order, ","))
+    -- the other forms hide it and do not paint it
+    for _, k in ipairs({ "cat", "bear", "travel" }) do
+        Form(k); Paint(1001)
+        assert(calls.on == false, k .. ": the caster look is hidden")
+        local n = calls.paint
+        Paint(1001.1)
+        assert(calls.paint == n, k .. ": and not painted")
+    end
+    Form("caster"); Paint(1002)
+    assert(calls.on == true, "the caster form shows it again")
+    -- the wreath is untouched by the look in the caster form
+    assert(P().thVine[1].fsOn or P().thLabel.fsOn, "the wreath is still drawn")
+    NoLog()
+""")
+
 case("onshow_subscribes_and_onhide_stops_everything", """
     Build()
     assert(M.frame.scripts.OnUpdate and M.frame.scripts.OnEvent and M.frame.events.UNIT_POWER_FREQUENT, "shown: the ticker and the power events")
