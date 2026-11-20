@@ -213,6 +213,10 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # 1 texel per sprite px); it also writes DruidClearcastingArt.lua. It imports the Warrior generator's bake machinery
     # (FS_ASSETS_DIR) and loads its head frames from druid_cc_art/ (FS_DRUID_CC_ART_DIR), both set by _run_generator.
     "druid_clearcasting": {"druid_clearcasting_1": (2048, 1024)},
+    # generate_druid_bear.py: the Druid Bear look's one atlas (the cloud loop, bolts, halo, sound arcs, shock rings, the bear head frames
+    # and the Thorns segments, 1 texel per sprite px); it also writes DruidBearArt.lua. It imports the Warrior generator's bake
+    # machinery and loads its head frames from druid_bear_art/, both found through FS_ASSETS_DIR (set by _run_generator).
+    "druid_bear": {"druid_bear_1": (2048, 512)},
     # generate_paladin_seal.py: the Paladin Gunsight module's wax seals, emblems and pixel digits, the war hammer's baked
     # swing and rise frames (cold, filled, tint mask, outline), and the slam effects (column, rays, shocks, runes, cracks).
     "paladin_seal": {"paladin_seal": (512, 512), "paladin_hammer": (1024, 1024), "paladin_fx": (1024, 512)},
