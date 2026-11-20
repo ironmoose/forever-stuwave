@@ -19,8 +19,8 @@
 --   * the BASE (the cup round the rose, the leaves and stem) is Regrowth's too: lit while Regrowth is up, dimmed and greyed
 --     otherwise, so nothing teal is lit for Rejuvenation.
 -- TEXT is mono (the Thorns label's face and size, Druid.C.TH_LABEL_PX), at whole sprite px: the Rejuvenation seconds left of the
--- wreath (pink, amber at 3 s or less), the Regrowth seconds right of it (teal, the same amber), nothing for a HoT that is not up;
--- the target name top left (ON YOU in muted violet, a friend's name in leaf green), only while at least one HoT is up.
+-- wreath (pink, amber at 3 s or less), the Regrowth seconds right of it (teal, the same amber), nothing for a HoT that is not up.
+-- No name: the HoTs shown are always ours, on the friend targeted or else on us (the target box names the friend).
 --
 -- DATA. State.Hot(key, now) (DruidState.lua) is the seconds left of our OWN Rejuvenation or Regrowth on the current target's
 -- name, a ledger of our casts and never a secret, so every heal and every look here is a function of elapsed = length - left:
@@ -100,7 +100,7 @@ local C = {
     POLL = 2,                          -- s between the Regrowth learned reads
     END_GRACE = 0.5,                   -- Regrowth seen with this little left (and gone now) ran out: its last heal lands
     TEXT_PX = (type(Druid.C) == "table" and Druid.C.TH_LABEL_PX) or 10,    -- the Thorns label's size (sprite px)
-    REJ_X = 27, REJ_Y = 30, REG_X = 123, REG_Y = 30, NAME_X = 3, NAME_Y = 2, NAME_MAX = 10,
+    REJ_X = 38, REJ_Y = 36, REG_X = 118, REG_Y = 36,   -- the numbers hug the wreath, level with its centre
     GLOW_ROSE = 40, GLOW_FLOWER = 64,  -- the glows' sizes (sprite px)
     SPIN = Art.SPIN or 16,             -- baked turns of a falling petal over one full turn
     TURNS = 1,                         -- full turns a petal makes while it falls
@@ -134,12 +134,10 @@ for j = 1, C.SPARKS do
     local a = (j - 1) / C.SPARKS * TAU + 0.35
     SPARK_COS[j], SPARK_SIN[j] = cos(a), sin(a)
 end
-local ON_YOU = "ON YOU"
 
 local P = {}
 local V = {
     spx = 1.25, regKnown = nil, poll = -99, idle = false,
-    nameRaw = nil, nameShown = nil,
     regLeft = nil, regSeen = 0, finale = nil,
 }
 Flower.state, Flower.parts = V, P
@@ -324,7 +322,7 @@ local function Build(parent)
     P.spark = {}
     for j = 1, C.SPARKS do P.spark[j] = Dot(f, "OVERLAY", 1) end
 
-    P.rejT, P.regT, P.name = Text(txt, "CENTER"), Text(txt, "CENTER"), Text(txt, "TOPLEFT")
+    P.rejT, P.regT = Text(txt, "CENTER"), Text(txt, "CENTER")
     return f
 end
 
@@ -362,7 +360,7 @@ local function PaintIdle()
     for i = 1, N do Sprite(P.petal[i], PG[i], x, y, K.dim, 1); Off(P.petalM[i]) end
     Off(P.glowRose); Off(P.glowFlower)
     SparksOff()
-    Off(P.rejT); Off(P.regT); Off(P.name)
+    Off(P.rejT); Off(P.regT)
 end
 
 -- the rose's countdown step for `left` seconds of Rejuvenation: the nearest of RS steps of the plain ledger fraction, 0 just
@@ -454,47 +452,13 @@ local function Secs(left)
     return SECS[n]
 end
 
--- cut at `C.NAME_MAX` bytes without splitting a multi byte letter, upper case like ON YOU
-local function Shorten(name)
-    local s = string.upper(name)
-    if #s <= C.NAME_MAX then return s end
-    local cut = C.NAME_MAX
-    while cut > 1 do
-        local b = string.byte(s, cut + 1)
-        if b and b >= 0x80 and b < 0xC0 then cut = cut - 1 else break end
-    end
-    return string.sub(s, 1, cut)
-end
-
--- the friend targeted, as plain text, or nil
-local function FriendName()
-    if type(UnitName) ~= "function" then return nil end
-    local ok, n = pcall(UnitName, "target")
-    if not ok or IsSecret(n) or type(n) ~= "string" or n == "" then return nil end
-    return n
-end
-
-local function PaintText(rl, gl, data)
+local function PaintText(rl, gl)
     if rl ~= nil then
         On(P.rejT); TextWord(P.rejT, Secs(rl)); TextColor(P.rejT, rl <= C.WARN and K.amber or K.pinkText); TextAt(P.rejT, C.REJ_X, C.REJ_Y)
     else Off(P.rejT) end
     if gl ~= nil then
         On(P.regT); TextWord(P.regT, Secs(gl)); TextColor(P.regT, gl <= C.WARN and K.amber or K.tealText); TextAt(P.regT, C.REG_X, C.REG_Y)
     else Off(P.regT) end
-    -- the name: ON YOU when the HoTs follow you, the friend's name when a friend is targeted
-    local word, col = ON_YOU, K.muted
-    if data and data.kind == "tree" then
-        local n = FriendName()
-        if n then
-            if n ~= V.nameRaw then V.nameRaw, V.nameShown = n, Shorten(n) end
-            word, col = V.nameShown, K.leaf
-        else
-            word = nil
-        end
-    end
-    if word then
-        On(P.name); TextWord(P.name, word); TextColor(P.name, col); TextAt(P.name, C.NAME_X, C.NAME_Y)
-    else Off(P.name) end
 end
 
 local function Paint(now, data)
@@ -539,7 +503,7 @@ local function Paint(now, data)
         SparksOff()
     end
     PaintPetals(now, gl, red)
-    PaintText(rl, gl, data)
+    PaintText(rl, gl)
 end
 
 -------------------------------------------------------------------------------

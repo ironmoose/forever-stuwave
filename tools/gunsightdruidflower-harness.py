@@ -18,7 +18,7 @@ look is a function of elapsed = length - left. These checks pin:
     turning, fading, gone at 1.4 s), a cast flashes every petal toward white and restores them, amber for the last 3 s, grey and dim when
     Regrowth is not up or not learned, the teal glow;
   * the text: the seconds of each HoT left and right of the wreath (position, colour, amber at 3 s or less, hidden when not up), the
-    name top left (ON YOU in violet or a friend's name in green, only while a HoT is up), the Thorns label's size, whole sprite px;
+    no name (the HoTs are ours, on the friend targeted or on us), the Thorns label's size, whole sprite px;
   * nothing up: the flower stays drawn, grey and dim; reduced motion; both caster kinds; a re-seat at another scale; a hole in the world;
     no secret is ever compared; a paint allocates nothing; the manifest and every sprite name, the toc lines, the generator's bytes;
   * the real GunsightDruid.lua: the flower is shown and painted after the wreath for moon and tree, the wreath is exactly what it is
@@ -775,17 +775,17 @@ case("both_hots_gone_leaves_the_whole_flower_drawn_grey_and_dim", """
 case("the_seconds_stand_left_and_right_of_the_wreath_in_pink_and_teal", """
     Mount()
     At(4.1, 5.2)                                        -- 7.9 s and 15.8 s left
-    local rej, reg, name = P().rejT, P().regT, P().name
+    local rej, reg = P().rejT, P().regT
     check(TextOf(rej) == "8" and TextOf(reg) == "16", "the seconds left, rounded up: " .. tostring(rej.text) .. " " .. tostring(reg.text))
     check(rej.pt[1] == "CENTER" and reg.pt[1] == "CENTER", "centred on their spots")
     local x, y = Canvas(rej)
-    check(Near(x, 27) and Near(y, 30), "Rejuvenation: centre 27, 30: " .. x .. "," .. y)
+    check(Near(x, 38) and Near(y, 36), "Rejuvenation: centre 38, 36, against the wreath: " .. x .. "," .. y)
     x, y = Canvas(reg)
-    check(Near(x, 123) and Near(y, 30), "Regrowth: centre 123, 30: " .. x .. "," .. y)
-    check(27 < TH.CX - TH.R and 123 > TH.CX + TH.R, "left and right of the wreath")
+    check(Near(x, 118) and Near(y, 36), "Regrowth: centre 118, 36, past the Thorns bolt: " .. x .. "," .. y)
+    check(38 < TH.CX - TH.R and 118 > TH.CX + TH.R, "left and right of the wreath")
     check(TextRGB(rej, Hexc("#ff5cb8")), "pink")
     check(TextRGB(reg, Hexc("#4fe0f0")), "teal")
-    check(Near(rej.size, 10 * SPX) and Near(reg.size, 10 * SPX) and Near(name.size, 10 * SPX), "the Thorns label's size: " .. tostring(rej.size))
+    check(Near(rej.size, 10 * SPX) and Near(reg.size, 10 * SPX), "the Thorns label's size: " .. tostring(rej.size))
     check(rej.size == FS.GunsightDruid.C.TH_LABEL_PX * SPX, "read from the Druid module's TH_LABEL_PX")
     -- one second at a time
     At(4.1, 5.2)
@@ -793,7 +793,7 @@ case("the_seconds_stand_left_and_right_of_the_wreath_in_pink_and_teal", """
     for k = 1, 12 do At(k * 0.7, nil); seen[TextOf(rej)] = true end
     check(seen["12"] or seen["11"], "counts down from the length")
     At(11.5, nil); check(TextOf(rej) == "1", "ends on 1: " .. tostring(rej.text))
-    check(#Texts() == 2 or #Texts() == 1 + 1, "name and one number")
+    check(#Texts() == 1, "one number and no name: " .. #Texts())
     NoLog()
 """)
 
@@ -811,46 +811,21 @@ case("each_number_turns_amber_at_three_seconds_or_less_and_hides_when_its_hot_is
     At(nil, 4.5)
     check(TextOf(P().rejT) == nil and TextOf(P().regT) ~= nil, "no Rejuvenation, no Rejuvenation number")
     At(nil, nil)
-    check(TextOf(P().rejT) == nil and TextOf(P().regT) == nil and TextOf(P().name) == nil, "nothing up: no text at all")
+    check(TextOf(P().rejT) == nil and TextOf(P().regT) == nil, "nothing up: no text at all")
     NoLog()
 """)
 
-case("the_name_is_on_you_in_violet_or_the_friend_in_leaf_green_and_only_while_a_hot_is_up", """
+case("there_is_no_name_the_hots_are_ours_on_the_friend_or_on_us", """
     Mount()
-    local name = P().name
-    DATA.kind = "moon"
-    At(4.5, nil)
-    check(TextOf(name) == "ON YOU", "no friend targeted: " .. tostring(name.text))
-    check(TextRGB(name, Hexc("#9d93c4")), "in muted violet")
-    check(name.pt[1] == "TOPLEFT", "left aligned")
-    local x, y = Canvas(name)
-    check(Near(x, 3) and Near(y, 2), "top left at 3, 2: " .. x .. "," .. y)
-    DATA.kind = "tree"
-    T.name = "Mahna"
-    At(nil, 4.5)
-    check(TextOf(name) == "MAHNA", "a friend: " .. tostring(name.text))
-    check(TextRGB(name, Hexc("#7dff6a")), "in leaf green")
-    x, y = Canvas(name)
-    check(Near(x, 3) and Near(y, 2), "same place")
-    T.name = "Stormwhisperer"
-    At(4.5, 4.5)
-    check(TextOf(name) == "STORMWHISP", "a long name is cut so it stays clear of the wreath: " .. tostring(name.text))
-    T.name = "Ándrès"
-    At(4.5, 4.5)
-    check(#TextOf(name) <= 10, "multi byte letters")
-    T.name = "Mahna"
-    At(nil, nil)
-    check(TextOf(name) == nil, "nothing up: no name")
-    At(4.5, nil); check(TextOf(name) ~= nil, "one HoT is enough")
-    -- an unreadable friend's name draws no name; the numbers stay
-    T.secretName = true
-    At(4.5, nil)
-    check(TextOf(name) == nil and TextOf(P().rejT) ~= nil, "a secret name is not shown or compared")
-    T.secretName = false
-    T.name = ""
-    At(4.5, nil)
-    check(TextOf(name) == nil, "an empty name")
-    T.name = "Mahna"
+    check(P().name == nil, "no name part is built")
+    for _, kind in ipairs({ "moon", "tree" }) do
+        DATA.kind = kind
+        T.name = "Mahna"
+        At(4.5, 4.5)
+        local words = {}
+        for _, t in ipairs(Texts()) do words[#words + 1] = t end
+        check(#words == 2, kind .. ": the two numbers only: " .. table.concat(words, ","))
+    end
     DATA.kind = "moon"
     NoLog()
 """)
@@ -860,7 +835,7 @@ case("both_caster_kinds_draw_the_same_flower", """
     for _, kind in ipairs({ "moon", "tree" }) do
         DATA.kind = kind
         At(2.5, 2.5)
-        check(RoseLit() and PetalsLive() == 7 and TextOf(P().rejT) and TextOf(P().regT) and TextOf(P().name), kind .. " draws it")
+        check(RoseLit() and PetalsLive() == 7 and TextOf(P().rejT) and TextOf(P().regT), kind .. " draws it")
     end
     NoLog()
 """)
@@ -993,7 +968,7 @@ case("a_hole_in_the_world_degrades_quietly_and_recovers", """
     T.errKnown = false
     DATA.kind = nil
     At(4.5, 4.5)
-    check(TextOf(P().name) == "ON YOU", "an absent kind is ON YOU")
+    check(TextOf(P().rejT) ~= nil, "an absent kind still draws")
     DATA = nil
     SPEC.paint(__now, nil)
     DATA = { reduced = false, kind = "tree" }
@@ -1104,15 +1079,15 @@ ORDER = {}
 Paint(__now + 1)
 check(ORDER[1] == "wreath" and ORDER[2] == "flower", "the flower is painted after the wreath: " .. table.concat(ORDER, ","))
 check(#ORDER == 3 or #ORDER == 4, "once each: " .. #ORDER)
--- both kinds: a hostile target is ON YOU, a friend is a name
+-- both kinds: a hostile target shows our own, a friend shows theirs, and neither has a name
 Hot("Boar", "rejuv"); Paint(__now + 1.1)
-check(Fl.parts.name.text == "ON YOU" and vis(Fl.parts.name), "moon: ON YOU")
+check(Fl.parts.name == nil, "no name part")
 W.canAttack, W.canAssist, W.name = false, true, "Mahna"
 fire("PLAYER_TARGET_CHANGED")
 Hot("Mahna", "rejuv"); Hot("Mahna", "regrow")
 Paint(__now)
 check(M.data.kind == "tree", "a friend is the tree kind: " .. tostring(M.data.kind))
-check(vis(Fl.parts.rose) and Fl.parts.name.text == "MAHNA" and Fl.parts.rejT.text == "12" and Fl.parts.regT.text == "21", "tree: the same flower with the friend's name")
+check(vis(Fl.parts.rose) and Fl.parts.rejT.text == "12" and Fl.parts.regT.text == "21", "tree: the same flower")
 check(vis(Fl.parts.rose) and Fl.parts.rose.fsName == "rose_w0" and vis(Fl.parts.petal[1]), "the full pink rose and live petals")
 -- the wreath's label is still the wreath's
 check(P().thLabel.fsOn and P().thLabel.fsWord and P().thLabel.fsWord:match("M$"), "the Thorns label is untouched: " .. tostring(P().thLabel.fsWord))
