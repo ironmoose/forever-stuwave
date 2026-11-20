@@ -43,7 +43,7 @@ FS.GunsightWarlock = FS.GunsightWarlock or {}
 local Warlock = FS.GunsightWarlock
 
 local ui, Point = Gunsight.ui, Gunsight.Point
-local floor, max, min, sin, cos, pi = math.floor, math.max, math.min, math.sin, math.cos, math.pi
+local floor, max, min, sin, cos, pi, abs = math.floor, math.max, math.min, math.sin, math.cos, math.pi, math.abs
 
 local function Hex(h)
     return { tonumber(h:sub(2, 3), 16) / 255, tonumber(h:sub(4, 5), 16) / 255, tonumber(h:sub(6, 7), 16) / 255 }
@@ -63,6 +63,7 @@ local C = {
     BX = 10, BY = 14,           -- the book's top left, sprite px
     CRY_Y = 46, CRY_GAP = 15,   -- the crystal row: top, and the step from one crystal to the next
     BAR_W = 60,                 -- the cue's drain bar, sprite px
+    BAR_Y = 22, BAR_H = 4,      -- the drain bar's top and height
 }
 C.W = C.SW * C.SPX
 C.H = C.SH * C.SPX
@@ -71,7 +72,7 @@ Warlock.C = C
 local K = {
     violet = Hex("#a855f7"), amber = Hex("#ffb648"), pink = Hex("#ff2e97"), orange = Hex("#ff6a2e"), bolt = Hex("#c58bff"),
     white = Hex("#f3fbff"), muted = Hex("#9d93c4"), track = Hex("#2c2048"), gold = Hex("#ffd23f"), pure = { 1, 1, 1 },
-    fel = Hex("#39ff14"), ember = Hex("#a0201a"),
+    fel = Hex("#39ff14"), ember = Hex("#a0201a"), frame = Hex("#08040f"),
 }
 Warlock.COLORS = K
 local DEMON_COL = {
@@ -144,7 +145,7 @@ for i = 0, N_WISP - 1 do
     WISP_X[i] = (Hash(i * 11 + 1) - 0.5) * 34
 end
 -- the summon, binding and reaping effects' tables, in one upvalue (Paint is near Lua's 60 upvalue cap)
-local FX = { N_MOTE = 30, MOX = {}, MOY = {}, N_RIPPLE = 28, N_VORTEX = 40, RCOS = {}, RSIN = {}, VA = {} }
+local FX = { N_BFX = 48, BH1 = {}, BH2 = {}, N_MOTE = 30, MOX = {}, MOY = {}, N_RIPPLE = 28, N_VORTEX = 40, RCOS = {}, RSIN = {}, VA = {} }
 for i = 0, FX.N_MOTE - 1 do
     -- each soul starts somewhere on a ring round the book, kept inside the canvas
     local a = ((i * 7) % FX.N_MOTE) / FX.N_MOTE * 6.283 + Hash(i * 3 + 7) * 0.4   -- 7 steps round: neighbours in time land apart
@@ -152,6 +153,7 @@ for i = 0, FX.N_MOTE - 1 do
     FX.MOX[i], FX.MOY[i] = cos(a) * d, sin(a) * d
 end
 local N_SPARK = 24
+for i = 1, FX.N_BFX do FX.BH1[i], FX.BH2[i] = Hash(i * 19 + 5), Hash(i * 23 + 11) end
 for m = 1, FX.N_RIPPLE do
     local a = (m - 1) / FX.N_RIPPLE * 6.283
     FX.RCOS[m], FX.RSIN[m] = cos(a), sin(a)
@@ -388,8 +390,17 @@ local function Build()
     P.note = Line(art, 14, 1, "OVERLAY", 0)
     P.name = Line(art, 10, 1, "OVERLAY", 0)
     P.more = Line(art, 3, 1, "OVERLAY", 0)
-    P.track = Dot(art, "OVERLAY", 1, C.BAR_W, 2)
-    P.fill = Dot(art, "OVERLAY", 2, C.BAR_W, 2)
+    P.barFrame = Dot(art, "OVERLAY", 0, C.BAR_W + 2, C.BAR_H + 2)
+    P.track = Dot(art, "OVERLAY", 1, C.BAR_W, C.BAR_H)
+    P.fill = Dot(art, "OVERLAY", 2, C.BAR_W, C.BAR_H)
+    P.fillShine = Dot(top, "OVERLAY", 0, C.BAR_W, 1)
+    P.fillDeep = Dot(top, "OVERLAY", 0, C.BAR_W, 1)
+    P.head = Dot(top, "OVERLAY", 1, 2, C.BAR_H + 2)
+    P.headGlow = Dot(top, "OVERLAY", 0, 4, C.BAR_H + 4)
+    P.notch = {}
+    for i = 1, 8 do P.notch[i] = Dot(top, "OVERLAY", 1, 1, C.BAR_H) end
+    P.barFx = {}
+    for i = 1, FX.N_BFX do P.barFx[i] = Dot(top, "OVERLAY", 2) end
     P.ready = true
 end
 
@@ -526,6 +537,99 @@ local function PaintBar(on, x, y)
     if not pcall(SetHp) then
         BarFallback()
         LogOnce("hp", "the demon's health could not be read, the book shows full")
+    end
+end
+
+-- the lane's drain bar: a framed track, the fill with a shine and a shade, a bright head, and the cue's own effect
+local function PaintLaneBar(cue, frac, col, now, live, ticks)
+    if not frac then
+        Off(P.barFrame); Off(P.track); Off(P.fill); Off(P.fillShine); Off(P.fillDeep); Off(P.head); Off(P.headGlow)
+        OffAll(P.notch); OffAll(P.barFx)
+        return
+    end
+    local X, Y, H = C.TX, C.BAR_Y, C.BAR_H
+    ShowDot(P.barFrame, X - 1, Y - 1, K.frame, 1)
+    ShowDot(P.track, X, Y, K.track, 1)
+    local w = Round(C.BAR_W * frac)
+    local hx = X + w
+    if w > 0 then
+        DotSize(P.fill, w, H); DotSize(P.fillShine, w, 1); DotSize(P.fillDeep, w, 1)
+        ShowDot(P.fill, X, Y, col, 1)
+        ShowDot(P.fillShine, X, Y, K.white, 0.45)
+        ShowDot(P.fillDeep, X, Y + H - 1, K.frame, 0.35)
+        local beat = live and (0.75 + 0.25 * sin(now * 10)) or 0.9
+        ShowDot(P.head, hx - 1, Y - 1, K.white, beat)
+        ShowDot(P.headGlow, hx - 2, Y - 2, K.white, 0.25 * beat)
+    else
+        Off(P.fill); Off(P.fillShine); Off(P.fillDeep); Off(P.head); Off(P.headGlow)
+    end
+    -- REAPING: a notch at every tick
+    local n = (cue == "reap" and ticks and ticks > 1) and min(ticks - 1, 8) or 0
+    for i = 1, 8 do
+        local nx = i <= n and X + Round(C.BAR_W * i / ticks)
+        if nx and (nx < hx - 2 or nx > hx + 1) then ShowDot(P.notch[i], nx, Y, K.frame, 0.8) else Off(P.notch[i]) end
+    end
+    if not live or w <= 0 then OffAll(P.barFx); return end
+    local B1, B2 = FX.BH1, FX.BH2
+    local fx = P.barFx
+    if cue == "bolt" then
+        -- an arc of lightning zigzags through the fill, re-struck every few frames: 20 flat pieces, each joined to the
+        -- next by an upright, so it reads as one unbroken bolt; and sparks jump off it
+        local f = floor(now * 15)
+        local seg = w / 20
+        for i = 1, 20 do
+            local y0 = floor(((sin(f * 4.1414 + i * 15.77) * 9631.31) % 1) * (H + 2))
+            local y1 = i < 20 and floor(((sin(f * 4.1414 + (i + 1) * 15.77) * 9631.31) % 1) * (H + 2)) or y0
+            local x0 = Round(X + (i - 1) * seg)
+            local x1 = max(x0 + 1, Round(X + i * seg))
+            DotSize(fx[i], x1 - x0, 1)
+            ShowDot(fx[i], x0, Y - 1 + y0, K.white, 0.95)
+            local up = fx[20 + i]
+            if y1 ~= y0 then
+                DotSize(up, 1, abs(y1 - y0) + 1)
+                ShowDot(up, x1 - 1, Y - 1 + min(y0, y1), K.white, 0.95)
+            else
+                Off(up)
+            end
+        end
+        for i = 41, FX.N_BFX do
+            local t = fx[i]
+            local g = floor(now * 18 + B1[i] * 7)
+            local u = (sin(g * 12.9898 + i * 78.233) * 43758.5453) % 1
+            local v = (sin(g * 7.233 + i * 3.71) * 9631.31) % 1
+            DotSize(t, 1, 1)
+            ShowDot(t, X + u * w, Y - 4 + v * (H + 8), (i % 2 == 0) and K.white or K.bolt, 0.85)
+        end
+        return
+    end
+    for i = 1, FX.N_BFX do
+        local t = fx[i]
+        if i > 32 then
+            Off(t)
+        elseif cue == "fire" then
+            -- flames lick up off the fill
+            local k = (now * 1.6 + B1[i]) % 1
+            if i <= 12 then
+                -- tongues: tall licks standing on the fill, flickering
+                local hgt = 2 + floor(((sin(floor(now * 12) * 3.7 + i * 9.1) * 4375.85) % 1) * 4)
+                DotSize(t, 1, hgt)
+                ShowDot(t, X + (i - 0.5) / 12 * w, Y - hgt + 1, (i % 2 == 0) and K.gold or K.orange, 0.9)
+            else
+                local big = k < 0.4 and 2 or 1
+                DotSize(t, big, big)
+                local c = k < 0.4 and K.gold or (k < 0.75 and K.orange or K.ember)
+                ShowDot(t, X + B2[i] * w + sin(now * 7 + i) * 1.5, Y - 1 - k * 14 * (0.6 + 0.4 * B2[i]), c, (1 - k * k) * 0.95)
+            end
+        elseif cue == "reap" then
+            -- souls stream along the fill toward its head and rise off it
+            local k = (now * 0.9 + B1[i]) % 1
+            local big = (i % 3 == 0) and 2 or 1
+            DotSize(t, big, big)
+            ShowDot(t, X + k * w, Y + 1 + B2[i] * (H - 2) - sin(k * pi) * 9 * B2[i],
+                (i % 3 == 0) and K.white or K.bolt, sin(k * pi))
+        else
+            Off(t)
+        end
     end
 end
 
@@ -811,23 +915,12 @@ local function Paint(now)
         end
         SetLine(P.note, note, X, 28, K.white, 0.9)
         SetLine(P.name, nil, 0, 0, K.muted, 0)
-        if frac then
-            ShowDot(P.track, X, 22, K.track, 1)
-            local w = Round(C.BAR_W * frac)
-            if w > 0 then
-                DotSize(P.fill, w, 2)
-                local amber = (cue == "bolt" or cue == "fire") and frac < C.FRAC_AMBER
-                ShowDot(P.fill, X, 22, amber and K.amber or ccol, 1)
-            else
-                Off(P.fill)
-            end
-        else
-            Off(P.track); Off(P.fill)
-        end
+        local amber = frac and (cue == "bolt" or cue == "fire") and frac < C.FRAC_AMBER
+        PaintLaneBar(cue, frac, amber and K.amber or ccol, now, live, D.reapTicks)
     else
         SetLine(P.word, nil, 0, 0, K.muted, 0)
         SetLine(P.note, nil, 0, 0, K.muted, 0)
-        Off(P.track); Off(P.fill)
+        PaintLaneBar(nil)
         if pet == "alive" then
             SetLine(P.name, DEMON_NAME[demon or "bound"], X, 13, dcol, 1)
         elseif pet == "unknown" then
