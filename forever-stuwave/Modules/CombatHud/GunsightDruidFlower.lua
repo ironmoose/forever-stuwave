@@ -16,7 +16,8 @@
 --     px with a little sway, turns and fades over 1.4 s. A cast flashes every petal toward white for 0.5 s and restores them (the
 --     time left starts again). The last 3 s the live petals pulse amber. Not up, or not learned: all petals grey and dim, still
 --     drawn. A soft teal glow sits behind the flower while Regrowth is up.
---   * the BASE (leaves and stem) is always drawn, dimmed and greyed when neither HoT is up.
+--   * the BASE (the cup round the rose, the leaves and stem) is Regrowth's too: lit while Regrowth is up, dimmed and greyed
+--     otherwise, so nothing teal is lit for Rejuvenation.
 -- TEXT is mono (the Thorns label's face and size, Druid.C.TH_LABEL_PX), at whole sprite px: the Rejuvenation seconds left of the
 -- wreath (pink, amber at 3 s or less), the Regrowth seconds right of it (teal, the same amber), nothing for a HoT that is not up;
 -- the target name top left (ON YOU in muted violet, a friend's name in leaf green), only while at least one HoT is up.
@@ -529,7 +530,8 @@ local function Paint(now, data)
     end
     V.idle = false
     local x, y = Art.FX, Art.FY
-    Sprite(P.base, "base", x, y, K.white, 1)
+    -- the base (the cup round the rose and the leaves) is Regrowth's, like the petals: lit only while Regrowth is up
+    if gl ~= nil then Sprite(P.base, "base", x, y, K.white, 1) else Sprite(P.base, "base_g", x, y, K.dim, 1) end
     if rl ~= nil then PaintRose(now, rl, red)
     else
         Sprite(P.rose, "rose_g", x, y, K.dim, 1)
