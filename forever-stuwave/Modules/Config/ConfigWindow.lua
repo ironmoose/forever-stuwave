@@ -896,7 +896,7 @@ local function OpenMenu(anchor, items, onPick, current)
     state.catcher:Show()
 end
 
--- {label, tip, get, items, set, text}: `items` is a function returning {value, text} entries; `text(value)`
+-- {label, tip, get, items, set, text, free}: `free` keeps it usable when settings are read-only (it picks a view, not a setting). `items` is a function returning {value, text} entries; `text(value)`
 -- names the current value on the button (it shows tostring(value) without it).
 function UI.Dropdown(content, o)
     local row = NewRow(content, { label = o.label, tip = o.tip })
@@ -915,7 +915,7 @@ function UI.Dropdown(content, o)
         local value = o.get()
         b.fsValue = value
         b.fsLabel:SetText(o.text and o.text(value) or tostring(value))
-        SetLook(b, Writable())
+        SetLook(b, o.free or Writable())
     end)
     row.control = b
     return row
@@ -929,6 +929,30 @@ function UI.Value(content, fn)
     fs:SetPoint("LEFT", line, "LEFT", 0, 0)
     Track(function() fs:SetText(fn()) end)
     return UI.Stack(content, line)
+end
+
+-- A wrapped block of text from `fn`, for the Help page. It must be the last row on its page: when the text
+-- changes it grows or shrinks, and the page cursor and scroll range follow it.
+function UI.Text(content, fn)
+    local block = CreateFrame("Frame", nil, content)
+    block:SetHeight(18)
+    local fs = Label(block, "", 11, C.text)
+    fs:SetPoint("TOPLEFT", block, "TOPLEFT", 0, 0)
+    fs:SetWidth(CONTENT_W)
+    fs:SetJustifyH("LEFT")
+    fs:SetJustifyV("TOP")
+    fs:SetSpacing(4)
+    UI.Stack(content, block)
+    local c = Cursor(content)
+    local base = c.y - block:GetHeight()
+    Track(function()
+        fs:SetText(fn())
+        local h = math.max(18, math.ceil(fs:GetStringHeight() or 0) + 6)
+        block:SetHeight(h)
+        c.y = base + h
+        CW.RefreshScroll()
+    end)
+    return block
 end
 
 -------------------------------------------------------------------------------
@@ -1685,47 +1709,65 @@ local function DruidGroup(page)
     UI.Toggle(page, { label = CC.SETTING.label, key = CC.SETTING.key, tip = CC.SETTING.tip })
 end
 
--- What the player's own class module shows, as the ? tip of a header (one per class; only the player's class is listed).
+-- What each class module shows, one "Name: what it means" line per piece. The Gunsight HUD page shows the player's
+-- own class as the ? tip of a header; the Help page lists every class. Keep it short and player facing.
 local CLASS_MODULE_HELP = {
-    ROGUE = "The dagger fan. Each dagger is a combo point; at five the fan turns gold and FINISH shows. The digit on the ring is "
-        .. "the same count.\n\nRight: Slice and Dice. The star spins and the bar drains while it runs, amber in the last seconds; "
-        .. "the ring pulses in combat when it is down.\n\nBottom: your energy. The blue mark is what your last builder cost, the "
-        .. "pink mark your last finisher; each lights when you can afford it.\n\nStealthed, the fan turns violet and OPENER shows.",
-    DRUID = "In caster form the bramble wreath is your Thorns: it dries from the top as the 10 minutes run out, leaves wilt "
-        .. "and fall, the last minute turns amber, and a \"~\" marks a time counted from your own cast in combat. When "
-        .. "Thorns is gone out of combat the wreath shows as a faint reminder.\n\nIn Bear and Cat form the eyes change "
-        .. "with your form; the word under them says what to do next.\n\nCat: the five claw marks are your combo points "
-        .. "(FINISH at five), the energy bar and the Shifting Power chip.\n\nBear: the rage bar marked where Lacerate, Primal "
-        .. "Bite and Maul become affordable, the Primal Bite chip and five Lacerate stacks.\n\nOnly what you have learned is shown.",
-    WARLOCK = "The Grimoire, your demon's pact book. The cover lights from the bottom with your demon's health. A dark book "
-        .. "with a chain across it means no demon is out.\n\nThe five crystals are your soul shards (+N past five). The word "
-        .. "beside the book shows one prompt at a time and the book acts it out: REAPING while Drain Soul runs, BINDING while "
-        .. "you summon, BOLT (Shadow Trance) and FIRE (Decimation) with a 10 s bar, SUMMON when your demon is gone, TAP when "
-        .. "your mana cannot pay the next Shadow Bolt, DRAIN under three shards. Each prompt has a switch below.",
-    SHAMAN = "Four totem poles: Fire, Earth, Water, Air. A pole's blocks sink as its totem runs out, the last block amber. DROP "
-        .. "means nothing stands, FAR that you left its range. A totem element you have not learned yet is not shown. Click a pole to drop "
-        .. "that totem.\n\nRight: the shock cooldown (RDY when ready), and under it Fire Nova while a Fire totem stands.",
-    WARRIOR = "Two shout helms. The big ring is Battle Shout: eight runes orbit and go out as it runs down, the last one "
-        .. "amber. The small one is Demoralizing Shout. Click a helm to cast that shout.\n\nThe bar under them lights when "
-        .. "Overpower, Revenge or Victory Rush opens and drains until the chance is gone, amber at the end.",
-    PALADIN = "Left: the wax seal is your active seal, draining from the top; it cracks amber in the last seconds, and a "
-        .. "dashed ring means no seal.\n\nRight: the hammer is Judgement. It fills as the cooldown ends and slams when you "
-        .. "judge, in your seal's colour. The rune under it is the Judgement on your target, its ring draining.",
-    PRIEST = "The shield is Power Word: Shield on your friendly target, or on you. It lights by how much absorb is left, with "
-        .. "the number; the violet ring is Weakened Soul and a teal rim the cooldown.\n\nThe right side shows Prayer of "
-        .. "Mending in a group, or Spirit Tap and Inner Fire solo (amber when Inner Fire is missing). Pick it under Right "
-        .. "side shows.",
-    MAGE = "The left piece follows your talents.\n\nFrost: a snowflake that is Frost Nova (dark and refilling on cooldown), "
-        .. "the ice crust while the target is frozen, two Fingers of Frost crystals and Ice Lance.\n\nArcane: an eye that "
-        .. "opens with Arcane Blast stacks, four gems on their timer, a Clearcasting spark and the next Blast's cost.\n\n"
-        .. "Fire: a flame that grows with Fire Vulnerability stacks, its 30 s ring, and Fire Blast.\n\nRight: Ice Barrier "
-        .. "or Mana Shield, lit by how much absorb is left. Click it to cast.",
-    HUNTER = "The radar: you are the centre dot, the rings are melee, dead zone, shooting range and too far, and the skull "
-        .. "sits on your target's ring.\n\nThe rim is your Auto Shot timer. It fills cyan; the gold zone at the end is when "
-        .. "to stand still. Moving as it winds up turns it pink; out of range it waits with DEAD ZONE, MELEE or FAR. The "
-        .. "quiver warns when ammo runs low.\n\nRight: the trap jaws show the shared trap cooldown (READY, SET on a cast), "
-        .. "with a slot each for your fire and frost traps.",
+    WARRIOR = "Red helm: Battle Shout. The runes around it go dark as the shout runs out.\n"
+        .. "Violet helm: Demoralizing Shout, same idea.\n"
+        .. "Amber, pulsing helm: your shout is down. Shout again. Click a helm to cast it.\n"
+        .. "Bar under the helms: Overpower, Revenge or Victory Rush is up. Use it before the bar runs out.\n"
+        .. "Big alert over your character: the same chances, big enough to catch from the corner of your eye. Each one can be turned off.",
+    PALADIN = "Wax seal: your seal. The colour tells you which one, and the wax drains as it runs out.\n"
+        .. "Cracked amber seal: about to drop. Recast it.\n"
+        .. "Warhammer: Judgement. It fills up as the cooldown comes back and glows when ready.\n"
+        .. "The slam: cast Judgement and the hammer smashes down.\n"
+        .. "Rune on the ground: the Judgement on your target and how long it has left.",
+    PRIEST = "Shield: Power Word: Shield on your friendly target, or on you. The light inside is how much it can still absorb, and the number is the amount.\n"
+        .. "Shield rim: violet means Weakened Soul, cyan means you can shield again.\n"
+        .. "Amber dashed shield in a fight: nobody has a shield. Put one up.\n"
+        .. "Skull: Spirit Tap after a kill, with its time. Pull the next mob while it lasts.\n"
+        .. "Gold flame: Inner Fire and its charges. It pulses amber when it is missing.\n"
+        .. "In a group the right side can show Prayer of Mending instead. Pick it under Right side shows.",
+    SHAMAN = "Four totem poles: Fire, Earth, Water and Air. The pole shrinks as your totem runs out.\n"
+        .. "Amber top block: your totem is nearly gone. Drop it again.\n"
+        .. "DROP: no totem in that element. Click the pole to drop one.\n"
+        .. "FAR: you walked away from your totem.\n"
+        .. "Lightning disc: your shock cooldown. RDY means shock now.\n"
+        .. "Flame disc: Fire Nova, shown while you have a Fire totem down.",
+    ROGUE = "Dagger fan: your combo points, one dagger per point.\n"
+        .. "Gold fan and FINISH: five points. Spend them.\n"
+        .. "Shadow fan and OPENER: you are in stealth.\n"
+        .. "Spinning star: Slice and Dice and its time. It pulses amber in a fight when it is down.\n"
+        .. "Gold bar: your energy. The two gems light up when you can afford your builder and your finisher.",
+    DRUID = "Caster form, rose: Rejuvenation. It greys out as the time runs down.\n"
+        .. "Caster form, seven petals: Regrowth. One petal wilts each time it heals.\n"
+        .. "Caster form, pink and teal numbers: time left on Rejuvenation and Regrowth.\n"
+        .. "Bramble wreath or ring of thorns: your Thorns. It dries out as Thorns runs down.\n"
+        .. "Bear form, bear head: Demoralizing Roar. Bright and snarling while it is on the enemies, grey when it is not.\n"
+        .. "Bear form, sound arcs: the roar's time, turning amber near the end.\n"
+        .. "Cat form, hide with five slots: your combo points. The paw rakes a gash for each one.\n"
+        .. "Cat form, gold gashes and FINISH: five points. Spend them.",
+    MAGE = "You see the piece for your talents.\n"
+        .. "Frost: the snowflake is Frost Nova, the ice ring is your target staying frozen, and the ice spike shines when Ice Lance hits hardest.\n"
+        .. "Arcane: the eye opens as Arcane Blast stacks up, with the cost of your next Blast under it.\n"
+        .. "Fire: the flame grows with Fire Vulnerability stacks, and the comet is Fire Blast.\n"
+        .. "Ice oval: Ice Barrier (or Mana Shield) and how much it can still absorb. Click it to cast.",
+    WARLOCK = "The book: your demon's pact book. The cover lights up from the bottom with your demon's health.\n"
+        .. "Dark book with an amber outline: your demon is gone. SUMMON names the demon and what it costs.\n"
+        .. "Five crystals: your soul shards, one per crystal. +2 means you carry two more.\n"
+        .. "Lightning into the gem: BOLT, your next Shadow Bolt is instant.\n"
+        .. "Burning pages: FIRE, Soul Fire is free and fast.\n"
+        .. "Blood dripping: TAP, use Life Tap before your next Shadow Bolt.\n"
+        .. "Souls flying into the book: REAPING, keep channeling Drain Soul.\n"
+        .. "Each prompt can be turned off on the Gunsight HUD page.",
+    HUNTER = "Scope: you are the dot, the skull is your target. The rings show melee, dead zone, shooting range and too far.\n"
+        .. "Rim: your Auto Shot timer. Walk while it fills.\n"
+        .. "PLANT: stand still, the shot is coming.\n"
+        .. "Pink rim: you moved and the shot was late.\n"
+        .. "Jaws: your traps. Open and READY means you can lay one.",
 }
+-- The Help page's class order.
+local HELP_CLASSES = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
 FS.ClassModuleHelp = CLASS_MODULE_HELP
 
 local function ClassModuleHelpGroup(page)
@@ -1891,3 +1933,50 @@ local function ProfilesPage(page)
 end
 
 CW.RegisterCategory({ key = "profiles", label = "Profiles", order = 9, build = ProfilesPage })
+
+-- The Help page: the commands, then what each class module shows. Opens on the player's own class.
+local function HelpLines(text)
+    local out = {}
+    for line in tostring(text or ""):gmatch("[^\n]+") do
+        local name, rest = line:match("^([^:]+:)( .*)$")
+        if name and #name < 48 then
+            out[#out + 1] = "|cffff2e97" .. name .. "|r" .. rest
+        else
+            out[#out + 1] = line
+        end
+    end
+    return table.concat(out, "\n\n")
+end
+
+local function HelpPage(page)
+    UI.Header(page, "Getting started")
+    UI.Value(page, function() return "|cff22e0ff/fsconfig|r  this window, or the STU key on the minimap" end)
+    UI.Value(page, function() return "|cff22e0ff/fsedit|r  move and resize frames" end)
+    UI.Value(page, function() return "|cff22e0ff/fsgun on|r or |cff22e0ffoff|r  the Gunsight HUD" end)
+    UI.Value(page, function() return "|cff22e0ff/fsbug|r  what went wrong: saves a bug report to paste into a GitHub issue" end)
+    UI.Value(page, function() return "A |cff22e0ff~|r in front of a timer means it is counted from your own cast." end)
+    local own
+    if type(UnitClass) == "function" then own = select(2, UnitClass("player")) end
+    local shown = CLASS_MODULE_HELP[own or ""] and own or HELP_CLASSES[1]
+    local function ClassName(token)
+        return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]) or Capitalize(token:lower())
+    end
+    UI.Header(page, "Class modules")
+    UI.Dropdown(page, {
+        label = "Class", free = true,
+        get = function() return shown end,
+        text = ClassName,
+        items = function()
+            local items = {}
+            for i, token in ipairs(HELP_CLASSES) do items[i] = { value = token, text = ClassName(token) } end
+            return items
+        end,
+        set = function(value)
+            shown = value
+            CW.RefreshAll()
+        end,
+    })
+    UI.Text(page, function() return HelpLines(CLASS_MODULE_HELP[shown]) end)
+end
+
+CW.RegisterCategory({ key = "help", label = "Help", order = 10, build = HelpPage })

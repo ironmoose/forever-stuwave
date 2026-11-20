@@ -405,7 +405,7 @@ end
 
 function T.categories_register_sorted_by_order()
     local W = boot()
-    eq(keys(W.Categories()), "unitframes,gunsight,profiles")
+    eq(keys(W.Categories()), "unitframes,gunsight,profiles,help")
     local c = W.Categories()
     eq(c[1].label, "Unit Frames"); eq(c[1].order, 1)
     eq(c[2].label, "Gunsight HUD"); eq(c[2].order, 2)
@@ -415,11 +415,11 @@ end
 function T.register_before_the_window_is_built_sorts_in()
     local W = boot()
     yes(W.RegisterCategory({ key = "layout", label = "Layout", order = 3, build = function() end }))
-    eq(keys(W.Categories()), "unitframes,gunsight,layout,profiles")
+    eq(keys(W.Categories()), "unitframes,gunsight,layout,profiles,help")
     W.Open()
     local nav = {}
     for _, o in ipairs(ALL) do if o.fsCategory and o:IsVisible() then nav[#nav + 1] = o.fsCategory end end
-    eq(table.concat(nav, ","), "unitframes,gunsight,layout,profiles", "nav entries in order")
+    eq(table.concat(nav, ","), "unitframes,gunsight,layout,profiles,help", "nav entries in order")
 end
 
 function T.register_after_the_window_is_built_adds_a_nav_entry()
@@ -467,10 +467,10 @@ function T.register_rejects_bad_specs_and_replaces_a_repeated_key()
     local W = boot()
     no(W.RegisterCategory(nil)); no(W.RegisterCategory({})); no(W.RegisterCategory({ key = "x" }))
     no(W.RegisterCategory({ key = "x", label = "X", build = "nope" }))
-    eq(#W.Categories(), 3)
+    eq(#W.Categories(), 4)
     W.RegisterCategory({ key = "layout", label = "Layout", order = 3, build = function() end })
     W.RegisterCategory({ key = "layout", label = "Layout 2", order = 3, build = function() end })
-    eq(#W.Categories(), 4, "a repeated key replaces")
+    eq(#W.Categories(), 5, "a repeated key replaces")
     eq(W.Categories()[3].label, "Layout 2")
 end
 
@@ -478,7 +478,7 @@ function T.equal_orders_sort_by_key()
     local W = boot()
     W.RegisterCategory({ key = "b", label = "B", order = 5, build = function() end })
     W.RegisterCategory({ key = "a", label = "A", order = 5, build = function() end })
-    eq(keys(W.Categories()), "unitframes,gunsight,a,b,profiles")
+    eq(keys(W.Categories()), "unitframes,gunsight,a,b,profiles,help")
 end
 
 -------------------------------------------------------------------------------
@@ -1021,6 +1021,36 @@ local function menuTexts()
     local out = {}
     for _, t in ipairs(texts(menu())) do out[#out + 1] = t end
     return table.concat(out, ",")
+end
+
+-- ---- the Help page: commands, then one class's module text picked from a dropdown ----
+
+function T.help_page_opens_on_the_players_class_and_switches_class()
+    UnitClass = function() return "Druid", "DRUID" end
+    local W = boot()
+    W.Open("help")
+    yes(hasText(win(), "/fsconfig"), "the commands are listed")
+    yes(hasText(win(), "Demoralizing Roar"), "opens on the player's own class")
+    no(hasText(win(), "Battle Shout"), "one class at a time")
+    openMenu("Class")
+    local m = menu()
+    for _, o in ipairs(ALL) do
+        if o.kind == "FontString" and o:IsVisible() and under(m, o) and o:GetText() == "Warrior" then
+            local b = owner(o)
+            b.scripts.OnClick(b, "LeftButton")
+            break
+        end
+    end
+    yes(hasText(win(), "Battle Shout"), "picking Warrior shows the Warrior text")
+    no(hasText(win(), "Demoralizing Roar"), "and drops the Druid text")
+end
+
+function T.help_class_pick_works_while_settings_are_read_only()
+    local W = boot({ db = "junk" })
+    yes(FS.Config.IsReadOnly(), "settings are read-only")
+    W.Open("help")
+    local b = row("Class").control
+    yes(b.enabled, "the class picker is a view, not a setting")
 end
 
 -- ---- the mana regen group on the Unit Frames page (FiveSecondTab.lua's SETTINGS) ----
