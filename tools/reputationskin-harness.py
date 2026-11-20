@@ -206,6 +206,28 @@ case("the stock bar art, text and scripts are kept; its name and standing text a
     assert(row.Content.BackgroundHighlight.regions[1].alpha == 0, 'stock highlight not held')
 """)
 
+case("hovering a row moves its numbers to the middle of the ladder on a dark chip, and back on leave", f"""
+    {OPEN}
+    local row = {row(4)}
+    local bar = row.Content.ReputationBar
+    local p = FS.ReputationSkin.state.rows[row]
+    local function pt() local q = p.label.points[1] return q.point, q.rel, q.relPoint end
+    local a, rel, b = pt()
+    assert(a == 'RIGHT' and rel == bar and b == 'LEFT', 'rest: left of the ladder: ' .. tostring(a))
+    assert(not p.chip.shown, 'rest: no chip')
+    HOVERED = row
+    row:RefreshBackgroundHighlight()
+    bar.BarText:SetText('905 / 3000')
+    a, rel, b = pt()
+    assert(a == 'CENTER' and rel == bar and b == 'CENTER', 'hover: centred on the ladder: ' .. tostring(a))
+    assert(p.chip.shown and p.chip.color and p.chip.color[4] > 0.8, 'hover: a dark chip behind the numbers')
+    assert(p.label.text == '905 / 3000', 'hover: the numbers mirrored')
+    HOVERED = nil
+    row:RefreshBackgroundHighlight()
+    a = pt()
+    assert(a == 'RIGHT' and not p.chip.shown, 'leave: back left of the ladder, chip gone')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
 case("a header row is restyled and keeps its art held", f"""
     {OPEN}
     local h = {row(1)}
@@ -246,6 +268,7 @@ case("the detail pane takes the panel chrome, keeps its parts and writes no scri
 
 SCENES = {
     "reputation": "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); PaperDollFrame:Hide(); ReputationFrame:Show(); FlushTimers(); FS.CharacterSkin.RefreshHeader(); return DumpOps({ CharacterFrame })",
+    "reputation-hover": "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); PaperDollFrame:Hide(); ReputationFrame:Show(); FlushTimers(); FS.CharacterSkin.RefreshHeader(); local r = ReputationFrame.ScrollBox.rows[4]; HOVERED = r; r:RefreshBackgroundHighlight(); r.Content.ReputationBar.BarText:SetText('905 / 3,000'); return DumpOps({ CharacterFrame })",
 }
 
 if __name__ == "__main__":

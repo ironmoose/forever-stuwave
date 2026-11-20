@@ -112,11 +112,41 @@ local function Parts(row, bar)
     end
     p.bar = bar
     -- the stock standing / progress text sits on the bar, where the ladder is: it is held and mirrored in small muted mono just left
-    -- of the ladder, level with it (a label over the row's top right ran into the segments on the 30 unit 16001 rows)
-    p.label = Kit.Label(row, "", 11, C.muted, "OVERLAY")
-    Kit.Place(p.label, bar, -4, 0, nil, nil, "RIGHT", "LEFT", row)
-    p.label:SetJustifyH("RIGHT")
+    -- of the ladder, level with it (a label over the row's top right ran into the segments on the 30 unit 16001 rows). On hover
+    -- the stock text turns to the numbers ("905 / 3,000"), which are too long for that spot and ran into the faction name, so
+    -- while the row is hovered the label moves to the middle of the ladder, in the row's text colour, on a dark chip.
+    p.label = Kit.Label(bar, "", 11, C.muted, "OVERLAY")
+    if p.label.SetDrawLayer then p.label:SetDrawLayer("OVERLAY", 6) end
+    p.chip = bar:CreateTexture(nil, "OVERLAY", nil, 5)
+    p.chip:SetColorTexture(C.panel[1], C.panel[2], C.panel[3], 0.94)
+    Kit.Snap(p.chip)
+    p.chip:Hide()
+    p.centred = nil
+    Rep.PlaceLabel(p, row, false)
     return p
+end
+
+-- The label left of the ladder (rest) or centred on it over the chip (hover); a no-op when the spot is unchanged.
+function Rep.PlaceLabel(p, row, hover)
+    hover = hover and true or false
+    if p.centred == hover then return end
+    p.centred = hover
+    local label, chip = p.label, p.chip
+    if hover then
+        Kit.Place(label, p.bar, 0, 0, nil, nil, "CENTER", "CENTER", row)
+        label:SetJustifyH("CENTER")
+        Kit.Recolor(label, C.text)
+        local padX, padY = Kit.U(row, 6), Kit.U(row, 2)
+        chip:ClearAllPoints()
+        chip:SetPoint("TOPLEFT", label, "TOPLEFT", -padX, padY)
+        chip:SetPoint("BOTTOMRIGHT", label, "BOTTOMRIGHT", padX, -padY)
+        chip:Show()
+    else
+        chip:Hide()
+        Kit.Place(label, p.bar, -4, 0, nil, nil, "RIGHT", "LEFT", row)
+        label:SetJustifyH("RIGHT")
+        Kit.Recolor(label, C.muted)
+    end
 end
 
 local function Mirror(p)
@@ -241,6 +271,8 @@ function Rep.PaintMarks(row)
         m.stripe:Hide()
     end
     if type(content.Name) == "table" then Kit.Recolor(content.Name, atWar and C.pink or C.text) end
+    local p = S.rows[row]
+    if p and p.label then Rep.PlaceLabel(p, row, hover) end
 end
 
 -------------------------------------------------------------------------------
