@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.0.0-beta.4 (2026-11-20)
+
+Class modules for Druid, Rogue and Warlock, a reworked character window, talent scenes, and the STUwave look on almost every game window.
+
+### New
+- Class modules beside the Gunsight for the last three classes:
+  - Druid: one look per form. In caster form a bramble wreath times your Thorns, and a flower over it shows your heals over time: the rose is Rejuvenation and counts down as a clockwise sweep, the seven petals and the leaves are Regrowth and a petal falls on each heal, with the seconds left beside the wreath. The flower follows the friend you target, or you. In Bear form a roaring bear head tracks Demoralizing Roar. In Cat form a lion paw rakes your combo points into a hide, with a gold FINISH at five. A Clearcasting alert above the character shows the free cast for your form (Maul, Shred or a spell) and drains over 15 s, amber for the last 3.
+  - Rogue: a dagger fan for combo points, a Slice and Dice rail and an energy rail. Combo pips also show under the target plate and on the target nameplate.
+  - Warlock: the Binding Circle for shards, your demon and one cue.
+- Warrior: power up alerts for Overpower, Revenge and Victory Rush, with strike windows under the helms, and a Thunder Clap tab beside the stances.
+- Class modules hide parts you have not learned yet. A ? on the Gunsight page explains each class.
+- Character window rework: name, race, class and level in one row, a model well with a backdrop from your main talent tree, a glyph per page in the header, a side pane toggle, item level, durability and repair chips, and every page (reputation ladders, currency caps, skills, PvP, statistics) restyled.
+- Talents: an animated scene behind every talent tree, three per class.
+- Inspect: item level difference on each slot and in the footer.
+- Window skins: bags, bank, guild bank, mail, vendor, auction house (Auctionator tabs too), quests, gossip, trainer, professions, trade, loot and rolls, world map, flight map, calendar, achievements, collections, settings, keybindings, addon list, social, guild, LFG, PvP, dressing room and more.
+- Reputation: hovering a faction shows its numbers in the middle of the ladder.
+- Dialog text plays fast by default; normal or instant on the Unit Frames page.
+- Gossip and quest rows show new, in progress and ready chips.
+- Minimap: one panel with lit keys, the STU key in place of the gear, an addon tray and a coordinate tag.
+- Micro bar: keys, gaps and the edges are evenly spaced, and the row end keys follow the slant.
+- Chat key: the first five times you minimise chat, its tip says where chat went.
+
+### Fixes
+- Opening the character window no longer gets slower each time.
+- Using an item from your bags after a bank visit is no longer blocked.
+- Opening the bank from a banker's chat no longer taints the bank.
+- Quest reward tooltips show again, and rewards keep their quality colour.
+- Lower memory use from weapon tooltip reads and the XP bar.
+
+### Known issues
+- The Druid, Rogue and Warlock modules are new and lightly tested in game. Reports welcome.
+
 ## 1.0.0-beta.3 (2026-11-10)
 
 A new Paladin module, our own raid frames, a damage meter skin, and chat and data bar polish.
