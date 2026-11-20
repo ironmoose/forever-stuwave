@@ -1377,8 +1377,17 @@ def art_checks() -> list[str]:
         t = atlas[y:y + h * 2, x:x + w * 2]
         return t[::2, ::2], t
 
-    def layer(name):
-        return np.asarray(Image.open(LAYERS / f"{name}.png").convert("RGBA"))
+    def layer(name, raw=False):
+        a = np.asarray(Image.open(LAYERS / f"{name}.png").convert("RGBA"))
+        if raw or name != "base":
+            return a
+        import importlib.util                           # the base is baked leaf green (the generator's leafy)
+        spec = importlib.util.spec_from_file_location("gen_flower", ROOT / "tools" / "assets" / "generate_druid_flower.py")
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        b = a.copy()
+        b[b[..., 3] == 0] = 0
+        return gen.leafy(b)
 
     for stem in ["base"] + [f"petal{i}" for i in range(1, 8)]:
         src = layer(stem)
@@ -1414,7 +1423,7 @@ def art_checks() -> list[str]:
     # the layers and the reference agree on every solid px
     full = layer("full")
     for s in ["base", "rose"] + [f"petal{i}" for i in range(1, 8)]:
-        L = layer(s)
+        L = layer(s, raw=True)                          # the source art, before the base is turned green
         solid = L[..., 3] > 0
         if not (L[solid] == full[solid]).all():
             errs.append(f"{s} differs from full.png")

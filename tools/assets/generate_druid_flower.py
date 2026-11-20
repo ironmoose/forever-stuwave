@@ -98,6 +98,39 @@ def grey(a: np.ndarray) -> np.ndarray:
     return out
 
 
+def leafy(a: np.ndarray) -> np.ndarray:
+    """The base's teal turned leaf green (the wreath's leaves), so teal on the flower only ever means Regrowth. Pixels whose hue is
+    in the cyan band (150 to 230 degrees) are rotated to 105 degrees at 0.7 of their saturation (the wreath leaves' softer green), keeping
+    their value; the magenta stays."""
+    rgb = a[..., :3].astype(np.float64) / 255.0
+    mx, mn = rgb.max(axis=-1), rgb.min(axis=-1)
+    d = mx - mn
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    safe = np.where(d == 0, 1.0, d)
+    h = np.where(mx == r, ((g - b) / safe) % 6, np.where(mx == g, (b - r) / safe + 2, (r - g) / safe + 4)) * 60.0
+    s = np.where(mx == 0, 0.0, d / np.where(mx == 0, 1.0, mx))
+    v = mx
+    band = (d > 0.08) & (h >= 150) & (h <= 230)
+    h2 = np.where(band, 105.0, h)
+    s = np.where(band, s * 0.7, s)
+    c = v * s
+    x = c * (1 - np.abs((h2 / 60.0) % 2 - 1))
+    m = v - c
+    k = (h2 // 60).astype(int) % 6
+    zero = np.zeros_like(c)
+    table = [(c, x, zero), (x, c, zero), (zero, c, x), (zero, x, c), (x, zero, c), (c, zero, x)]
+    out_rgb = np.zeros_like(rgb)
+    for i, (rr, gg, bb) in enumerate(table):
+        sel = k == i
+        out_rgb[..., 0] = np.where(sel, rr + m, out_rgb[..., 0])
+        out_rgb[..., 1] = np.where(sel, gg + m, out_rgb[..., 1])
+        out_rgb[..., 2] = np.where(sel, bb + m, out_rgb[..., 2])
+    out = a.copy()
+    out[..., :3] = np.where(band[..., None], np.clip(np.rint(out_rgb * 255), 0, 255).astype(np.uint8), a[..., :3])
+    out[a[..., 3] == 0] = 0
+    return out
+
+
 def hot(a: np.ndarray) -> np.ndarray:
     """Tinted toward hot pink #ff3ea5 and brightened: the px's luminance picks a point on a ramp from a dark rose through the pink
     to a near white highlight, and the result is mostly that ramp (the art's own shading stays), a little of the original colour."""
@@ -209,7 +242,7 @@ def turned(canvas: np.ndarray, step: int) -> np.ndarray:
 # ---------------------------------------------------------------------------------------------------------------------------
 
 def build() -> dict:
-    base, rose = load("base"), load("rose")
+    base, rose = leafy(load("base")), load("rose")
     petals = [load(f"petal{i}") for i in range(1, PETALS + 1)]
     sprites: list[tuple[str, np.ndarray, int, int]] = []     # name, tight crop, anchor x, anchor y (sprite px)
 
