@@ -1853,8 +1853,29 @@ end
 -------------------------------------------------------------------------------
 
 local logged = {}
+-- Open-time cost readout: each step's last and worst run in ms, and the frame times right after the window opens (a texture
+-- loaded on first draw shows there, not in a step), in ForeverSTUwaveDB.charTiming (on disk after a /reload). Diagnostic only.
+local clock = type(_G.debugprofilestop) == "function" and _G.debugprofilestop or nil
+local function Timing()
+    local db = _G.ForeverSTUwaveDB
+    if type(db) ~= "table" then return nil end
+    if type(db.charTiming) ~= "table" then db.charTiming = { steps = {}, opens = {} } end
+    return db.charTiming
+end
+
 local function Step(name, fn, ...)
+    local t0 = clock and clock()
     local ok, err = pcall(fn, ...)
+    if t0 then
+        local T = Timing()
+        if T then
+            local ms = clock() - t0
+            local r = T.steps[name]
+            if not r then r = { last = 0, max = 0, n = 0 }; T.steps[name] = r end
+            r.last, r.n = ms, r.n + 1
+            if ms > r.max then r.max = ms end
+        end
+    end
     if not ok and not logged[name] then
         logged[name] = true
         FS.LogDegradeOnce("character:" .. name, ("|cffff4488Forever STUwave|r: character skin step '%s' failed: %s"):format(name, tostring(err)))
@@ -1922,7 +1943,28 @@ local function Build()
     Step("footer", BuildFooter, win)
     Step("levelChip", BuildLevel, win)
     Step("well", BuildWell)
-    Kit.HookScript(win, "OnShow", function() Kit.Later(function() Relayout(); Refresh() end) end)
+    Kit.HookScript(win, "OnShow", function()
+        local T = clock and Timing()
+        local open = T and { at = (Kit.Now and Kit.Now()) or 0, frames = {} }
+        if open then
+            T.opens[#T.opens + 1] = open
+            while #T.opens > 5 do table.remove(T.opens, 1) end
+            -- the next eight frame times (ms) after the window opens
+            local probe = S.openProbe or CreateFrame("Frame")
+            S.openProbe = probe
+            local n = 0
+            probe:SetScript("OnUpdate", function(self, elapsed)
+                n = n + 1
+                open.frames[n] = math.floor(elapsed * 1000 + 0.5)
+                if n >= 8 then self:SetScript("OnUpdate", nil) end
+            end)
+        end
+        Kit.Later(function()
+            local t0 = clock and clock()
+            Relayout(); Refresh()
+            if open and t0 then open.passMs = clock() - t0 end
+        end)
+    end)
     -- the window gains its footer after the stock layout and the right pane folds away with its toggle: lists follow
     Kit.HookScript(win, "OnSizeChanged", function() Kit.Later(function() Step("fitPages", Char.FitPages) end) end)
     Kit.HookFunc(win, "SetHeight", function() if not S.extending then Kit.Later(function() ExtendWindow(win) end) end end)
