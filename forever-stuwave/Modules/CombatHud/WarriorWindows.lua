@@ -22,6 +22,12 @@
 -- close still counts as the cast (the engine may drop the glow a beat before the cast event reaches us).
 -- COMBAT_LOG_EVENT_UNFILTERED is protected on this client and is never registered here.
 --
+-- A window is not shown while the spell is on its OWN cooldown (Revenge after a block it already used): the reactive
+-- trigger fires on every block, dodge or parry regardless. It shows once the cooldown ends, if the window is still open.
+-- C_Spell.GetSpellCooldown's isActive and isOnGCD are never secret, so this works in combat. The global cooldown does not
+-- count: with isOnGCD true, or (where the client leaves it nil) while the GCD spell itself is cooling, it cannot be told
+-- apart, so the window stays shown rather than flicker after every cast.
+--
 -- A spell the player does not know never opens a window. Victory Rush carries a health gate: while the player's health is
 -- plainly above hideAboveHealth percent the window is open but not "shown" (the heal is not worth a cue). UnitHealth and
 -- UnitHealthMax may be secret in combat: both plain gives the percent, else UnitHealthPercent if its answer is plain, else the
@@ -31,8 +37,9 @@
 --
 -- API: Start(), Refresh(), Subscribe(fn), Unsubscribe(fn), Tick(now), Get(key) -> record, Remaining(key, now),
 -- Shown(key, now), Urgent(now) -> key or nil (the shown window with the least time left, ORDER breaks a tie).
--- A listener is called fn(key, reason): "open", "change" (the clock restarted), "close" (ended early), "cast", "expire", "learn".
--- Record fields: key, known, id (the rank id we use), localName, open, openAt, expires, length, source ("glow" | "usable" | nil),
+-- A listener is called fn(key, reason): "open", "change" (the clock restarted), "ready" (its own cooldown ended while open),
+-- "close" (ended early), "cast", "expire", "learn".
+-- Record fields: cooling (on its own cooldown: not shown), key, known, id (the rank id we use), localName, open, openAt, expires, length, source ("glow" | "usable" | nil),
 -- usable (the last plain read), hidden (the health gate), closedAt, closedWhy ("cast" | "expire" | "glow" | "usable"),
 -- shownAtClose (was it shown the moment it closed, so the lane knows whether to play the cast flash or the expiry outline).
 
@@ -174,6 +181,28 @@ local function ReadUsable(s)
     return nil
 end
 
+local GCD_SPELL = 61304            -- the client's global cooldown spell
+
+local function CooldownActive(spell)
+    local get = C_Spell and C_Spell.GetSpellCooldown
+    if type(get) ~= "function" or spell == nil then return nil, nil end
+    local ok, info = pcall(get, spell)
+    if not ok or type(info) ~= "table" or IsSecret(info) then return nil, nil end
+    local active, gcd = info.isActive, info.isOnGCD
+    if IsSecret(active) or type(active) ~= "boolean" then active = nil end
+    if IsSecret(gcd) or type(gcd) ~= "boolean" then gcd = nil end
+    return active, gcd
+end
+
+-- true only when the spell is plainly on its own cooldown; nil and false both mean "may be shown"
+local function ReadCooling(s)
+    local active, onGCD = CooldownActive(s.id or s.localName or DEFS[s.key].name)
+    if not active then return false end
+    if onGCD == true then return false end
+    if onGCD == nil and CooldownActive(GCD_SPELL) then return false end
+    return true
+end
+
 -------------------------------------------------------------------------------
 -- State
 -------------------------------------------------------------------------------
@@ -188,10 +217,11 @@ function Windows.Remaining(key, now)
     return r
 end
 
--- Is this window one the lane should draw right now: known, open, not run out, not held back by the health gate.
+-- Is this window one the lane should draw right now: known, open, not run out, not held back by the health gate
+-- or the spell's own cooldown.
 function Windows.Shown(key, now)
     local s = state[key]
-    if not (s and s.known and s.open and s.expires and not s.hidden) then return false end
+    if not (s and s.known and s.open and s.expires and not s.hidden and not s.cooling) then return false end
     return s.expires > (now or Now())
 end
 
@@ -221,13 +251,14 @@ local function Open(s, source, now)
     local len = DEFS[s.key].length
     s.open, s.openAt, s.expires, s.length, s.source = true, now, now + len, len, source
     s.hidden = GateOf(s)
+    s.cooling = ReadCooling(s)
     Notify(s.key, "open")
     return true
 end
 
 local function Close(s, why, now)
-    s.shownAtClose = s.open and not s.hidden
-    s.open, s.expires, s.source, s.hidden = false, nil, nil, false
+    s.shownAtClose = s.open and not s.hidden and not s.cooling
+    s.open, s.expires, s.source, s.hidden, s.cooling = false, nil, nil, false, false
     s.closedAt, s.closedWhy = now, why
 end
 
@@ -245,6 +276,11 @@ local function PollKey(s, now)
         end
     end
     if s.open and DEFS[s.key].hideAboveHealth then s.hidden = GateOf(s) end
+    if s.open then
+        local was = s.cooling
+        s.cooling = ReadCooling(s)
+        if was and not s.cooling then Notify(s.key, "ready") end
+    end
 end
 
 local function PollAll(now)
@@ -345,7 +381,7 @@ function Windows.Start()
             Guard("glow", OnGlow, a1, true)
         elseif event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
             Guard("glow", OnGlow, a1, false)
-        elseif event == "SPELL_UPDATE_USABLE" then
+        elseif event == "SPELL_UPDATE_USABLE" or event == "SPELL_UPDATE_COOLDOWN" then
             Guard("usable", PollAll, Now())
         else
             Guard("refresh", Windows.Refresh)
@@ -357,12 +393,14 @@ function Windows.Start()
         FH.RegisterEvent(frame, "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
         FH.RegisterEvent(frame, "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
         FH.RegisterEvent(frame, "SPELL_UPDATE_USABLE")
+        FH.RegisterEvent(frame, "SPELL_UPDATE_COOLDOWN")
         if FH.RegisterEvents then FH.RegisterEvents(frame, EVENTS) end
     else
         pcall(frame.RegisterUnitEvent, frame, "UNIT_SPELLCAST_SUCCEEDED", "player")
         pcall(frame.RegisterEvent, frame, "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
         pcall(frame.RegisterEvent, frame, "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
         pcall(frame.RegisterEvent, frame, "SPELL_UPDATE_USABLE")
+        pcall(frame.RegisterEvent, frame, "SPELL_UPDATE_COOLDOWN")
         for _, e in ipairs(EVENTS) do pcall(frame.RegisterEvent, frame, e) end
     end
     Guard("refresh", Windows.Refresh)

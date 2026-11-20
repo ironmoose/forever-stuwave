@@ -91,7 +91,13 @@ __names[55555] = "Overpower"                    -- a rank the id table does not 
 __names[133] = "Fireball"
 __aura = nil                                     -- { expirationTime =, duration = } or nil
 __usable = { Overpower = false, Revenge = false, ["Victory Rush"] = false }     -- by spell name: true, false or SECRET
+__cd = {}                                        -- by spell name (61304 = "GCD"): { isActive =, isOnGCD = } or nil
+__names[61304] = "GCD"
 C_Spell = {
+    GetSpellCooldown = function(spell)
+        if type(spell) == "number" then spell = __names[spell] end
+        return __cd[spell] or { isActive = false, isEnabled = true, startTime = 0, duration = 0 }
+    end,
     GetSpellName = function(id) return __names[id] end,
     IsSpellUsable = function(spell)
         if type(spell) == "number" then spell = __names[spell] end
@@ -795,13 +801,39 @@ case("a_dodge_while_hidden_is_recorded_and_the_lane_catches_up_on_show", """
     assert(L.mode == nil and not LaneUp(), "and plays no flash for a cast it missed")
 """)
 
+case("a_block_while_revenge_is_on_its_own_cooldown_waits_for_the_cooldown", """
+    __known[6572] = true
+    Build()
+    Tick(0.3)
+    __cd.Revenge = { isActive = true, isOnGCD = false }
+    Glow(6572, true)
+    Tick(0.3)
+    assert(Open("revenge"), "the block still opens the window")
+    assert(not Win.Shown("revenge", __now) and not LaneUp(), "but it is not shown while Revenge is cooling")
+    __cd.Revenge = nil
+    Tick(0.3)
+    assert(Win.Shown("revenge", __now) and LaneUp(), "it shows once the cooldown ends inside the window")
+    Tick(5)
+    __cd.Revenge = { isActive = true, isOnGCD = true }
+    Glow(6572, true)
+    Tick(0.3)
+    assert(Win.Shown("revenge", __now), "the global cooldown alone does not hold it back")
+    __cd.Revenge = { isActive = true }
+    __cd.GCD = { isActive = true }
+    Tick(0.3)
+    assert(Win.Shown("revenge", __now), "no isOnGCD answer while the GCD spell cools: still shown")
+    __cd.GCD = nil
+    Tick(0.3)
+    assert(not Win.Shown("revenge", __now), "its own cooldown with the GCD done holds it back")
+""")
+
 case("the_lane_listens_for_the_overlay_glow_usable_and_cast_events_and_never_the_combat_log", """
     __known[7384] = true
     Build()
     local f = WinFrame()
     assert(f, "the windows frame registered")
     for _, e in ipairs({ "UNIT_SPELLCAST_SUCCEEDED", "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW",
-        "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", "SPELL_UPDATE_USABLE" }) do
+        "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", "SPELL_UPDATE_USABLE", "SPELL_UPDATE_COOLDOWN" }) do
         assert(f.events[e], "missing " .. e)
     end
     for _, fr in ipairs(__frames) do
