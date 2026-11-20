@@ -1057,6 +1057,30 @@ local_send_prelude = """
     local P = SendMailFrame
 """
 
+case("the_subject_fills_from_the_item_or_the_gold_and_never_over_typed_text", local_send_prelude + """
+    local box = SendMailSubjectEditBox
+    function GetSendMailItem(i) return SEND.items[i] and "Linen Cloth" or nil, 2589, "tex", 20, 1 end
+    local copper = 0
+    function MoneyInputFrame_GetCopper() return copper end
+    box:SetText("")
+    SEND.items = { [1] = true }
+    SendMailFrame_Update()
+    assert(box:GetText() == "Linen Cloth (20)", "item fill: " .. tostring(box:GetText()))
+    SEND.items = {}
+    SendMailFrame_Update()
+    assert(box:GetText() == "", "its own text clears with the item: " .. tostring(box:GetText()))
+    copper = 254012
+    FS.MailAutoSubject()
+    assert(box:GetText() == "25g 40s 12c", "gold fill: " .. tostring(box:GetText()))
+    copper = 10000
+    FS.MailAutoSubject()
+    assert(box:GetText() == "1g", "gold follows the amount: " .. tostring(box:GetText()))
+    box:SetText("rent")
+    SEND.items = { [1] = true }
+    SendMailFrame_Update()
+    assert(box:GetText() == "rent", "typed subject kept: " .. tostring(box:GetText()))
+""")
+
 case("send_prompt_lines_postage_chip_and_pad_keep_the_mocks_margins", local_send_prelude + """
     local name, subject = SendMailNameEditBox, SendMailSubjectEditBox
     -- the typed text starts 12 px after its label (TO 16 px, SUBJECT 55 px wide); TO stops 12 px short of the postage chip

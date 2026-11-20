@@ -1347,6 +1347,64 @@ local function PostageText(copper)
     return table.concat(parts, " ")
 end
 
+-- The subject fills itself the way the stock form is meant to (it never did on Forever): the first attached
+-- item's name, with the stack count, or else the gold being sent ("25g 40s"). It only writes over an empty subject
+-- or one it wrote itself, so anything typed stays, and it clears its own text when the item or gold is taken off.
+local autoSubject = ""
+local function AttachedName()
+    if type(_G.HasSendMailItem) ~= "function" then return nil end
+    for i = 1, (_G.ATTACHMENTS_MAX_SEND or 12) do
+        if Try(_G.HasSendMailItem, i) then
+            local name, itemID, count                   -- Try passes back only three values; the count is the fourth
+            if type(_G.GetSendMailItem) == "function" then
+                local ok, a, b, _, d = pcall(_G.GetSendMailItem, i)
+                if ok then name, itemID, count = a, b, d end
+            end
+            name = Plain(name)
+            if type(name) ~= "string" or name == "" then
+                local link = Plain(Try(_G.GetSendMailItemLink, i))
+                name = type(link) == "string" and link:match("%[(.-)%]") or nil
+            end
+            if (type(name) ~= "string" or name == "") and itemID and _G.C_Item and _G.C_Item.GetItemNameByID then
+                name = Plain(Try(_G.C_Item.GetItemNameByID, itemID))
+            end
+            if type(name) == "string" and name ~= "" then
+                count = tonumber(Plain(count)) or 1
+                return count > 1 and (name .. " (" .. count .. ")") or name
+            end
+        end
+    end
+end
+local function GoldText(copper)
+    copper = math.floor(tonumber(copper) or 0)
+    if copper <= 0 then return nil end
+    local parts = {}
+    local g, s2, c = math.floor(copper / 10000), math.floor(copper % 10000 / 100), copper % 100
+    if g > 0 then parts[#parts + 1] = g .. "g" end
+    if s2 > 0 then parts[#parts + 1] = s2 .. "s" end
+    if c > 0 then parts[#parts + 1] = c .. "c" end
+    return table.concat(parts, " ")
+end
+local function AutoSubject()
+    local box = _G.SendMailSubjectEditBox
+    if not (box and box.GetText and box.SetText) then return end
+    local current = Plain(Try(box.GetText, box))
+    if type(current) ~= "string" then return end
+    if current ~= "" and current ~= autoSubject then return end
+    local want = AttachedName()
+    if not want and type(_G.MoneyInputFrame_GetCopper) == "function" and _G.SendMailMoney then
+        local cod = _G.SendMailCODButton and Try(_G.SendMailCODButton.GetChecked, _G.SendMailCODButton)
+        if not cod then want = GoldText(Plain(Try(_G.MoneyInputFrame_GetCopper, _G.SendMailMoney))) end
+    end
+    want = want or ""
+    if want ~= current then
+        box:SetText(want)
+        if type(_G.SendMailFrame_CanSend) == "function" then pcall(_G.SendMailFrame_CanSend) end
+    end
+    autoSubject = want
+end
+FS.MailAutoSubject = AutoSubject
+
 local function RefreshSend()
     local L = S.send
     if not L then return end
@@ -1586,8 +1644,13 @@ local function SkinSend(win)
     end
     L.reseat = reseat
     if type(_G.SendMailFrame_Update) == "function" then
-        HookFunc(_G, "SendMailFrame_Update", function() reseat(); Later(RefreshSend) end)
+        HookFunc(_G, "SendMailFrame_Update", function() reseat(); Later(RefreshSend); AutoSubject() end)
     end
+    for _, name in ipairs({ "SendMailMoneyGold", "SendMailMoneySilver", "SendMailMoneyCopper" }) do
+        HookScript(_G[name], "OnTextChanged", function() AutoSubject() end)
+    end
+    HookScript(_G.SendMailCODButton, "OnClick", function() AutoSubject() end)
+    HookFunc(_G, "SendMailFrame_Reset", function() autoSubject = "" end)
     HookScript(send, "OnShow", function() RefreshSend(); Later(function() PanelSkins.SweepScrollBars(send) end) end)
     RefreshSend()
 end
