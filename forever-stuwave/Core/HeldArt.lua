@@ -65,11 +65,20 @@ function HeldArt.HoldNormal(button)
     end
 end
 
--- Post-hooks each of `methods` that exists on `button` with `sweep` (called with the button).
+local setterHooks = setmetatable({}, { __mode = "k" })  -- button -> { [method] = { [sweep] = true } }: hooks already in
+
+-- Post-hooks each of `methods` that exists on `button` with `sweep` (called with the button). Once per button, method and
+-- sweep: a second call (a row met again by a sweep) adds nothing, since a hook can never be taken off.
 function HeldArt.HookSetters(button, methods, sweep)
     if type(hooksecurefunc) ~= "function" or type(button) ~= "table" then return end
+    local done = setterHooks[button]
+    if not done then done = {}; setterHooks[button] = done end
     for _, method in ipairs(methods) do
-        if type(button[method]) == "function" then pcall(hooksecurefunc, button, method, sweep) end
+        local bySweep = done[method]
+        if not bySweep then bySweep = setmetatable({}, { __mode = "k" }); done[method] = bySweep end
+        if not bySweep[sweep] and type(button[method]) == "function" and pcall(hooksecurefunc, button, method, sweep) then
+            bySweep[sweep] = true
+        end
     end
 end
 

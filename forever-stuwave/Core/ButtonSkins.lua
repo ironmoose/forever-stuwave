@@ -410,8 +410,17 @@ function ButtonSkins.RehookMotion(button)
     local p = parts[button]
     if not p or type(button.HookScript) ~= "function" then return end
     p.hover, p.pressed = false, false
-    pcall(button.HookScript, button, "OnEnter", function(self) p.hover = true; PaintText(self) end)
-    pcall(button.HookScript, button, "OnLeave", function(self) p.hover, p.pressed = false, false; PaintText(self) end)
+    -- Only when the scripts were really replaced since our last hook: a HookScript changes what GetScript returns, so the
+    -- same functions as after our last hook mean our hooks are still on them and another pair would stack.
+    local enter = type(button.GetScript) == "function" and button:GetScript("OnEnter")
+    local leave = type(button.GetScript) == "function" and button:GetScript("OnLeave")
+    if not (p.motionEnter and enter == p.motionEnter and leave == p.motionLeave) then
+        pcall(button.HookScript, button, "OnEnter", function(self) p.hover = true; PaintText(self) end)
+        pcall(button.HookScript, button, "OnLeave", function(self) p.hover, p.pressed = false, false; PaintText(self) end)
+        if type(button.GetScript) == "function" then
+            p.motionEnter, p.motionLeave = button:GetScript("OnEnter"), button:GetScript("OnLeave")
+        end
+    end
     PaintText(button)
 end
 

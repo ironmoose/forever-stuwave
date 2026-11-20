@@ -521,9 +521,13 @@ function DropdownSkins.HookMenus()
         local okMenu, frame = pcall(manager.GetOpenMenu, manager)
         return okMenu and frame or nil
     end
+    local acquiredHooked = Weak()  -- a description reopened later keeps its one callback
+    local function onAcquired() Run(current()) end
     local function opened(_, _, description)
-        if IsTable(description) and type(description.AddMenuAcquiredCallback) == "function" then
-            pcall(description.AddMenuAcquiredCallback, description, function() Run(current()) end)
+        if IsTable(description) and not acquiredHooked[description]
+            and type(description.AddMenuAcquiredCallback) == "function" then
+            acquiredHooked[description] = true
+            pcall(description.AddMenuAcquiredCallback, description, onAcquired)
         end
         Run(current())
     end

@@ -17,14 +17,27 @@ local PanelSkins = FS.PanelSkins
 -- in combat. None of the panels this addon skins are secure, but every
 -- consumer defers anyway for consistency with the rest of the addon's Init
 -- pattern.
+-- One shared frame and queue: a frame can never be freed, so one per call (a window opened in combat over and over) piled up.
+-- The same function queued twice in one fight runs once.
+local deferQueue, deferQueued, deferFrame = {}, {}, nil
 function PanelSkins.DeferCombat(fn)
     if InCombatLockdown() then
-        local regen = CreateFrame("Frame")
-        regen:RegisterEvent("PLAYER_REGEN_ENABLED")
-        regen:SetScript("OnEvent", function(self)
-            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-            fn()
-        end)
+        if deferQueued[fn] then return end
+        deferQueued[fn] = true
+        deferQueue[#deferQueue + 1] = fn
+        if not deferFrame then
+            deferFrame = CreateFrame("Frame")
+            deferFrame:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                local list = deferQueue
+                deferQueue, deferQueued = {}, {}
+                for _, queued in ipairs(list) do
+                    local ok, err = pcall(queued)
+                    if not ok and FS.LogQuiet then FS.LogQuiet("defer_combat", tostring(err)) end
+                end
+            end)
+        end
+        deferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     else
         fn()
     end

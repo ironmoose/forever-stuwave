@@ -428,8 +428,12 @@ local function InitModernMenus()
     -- constructs one per invocation, e.g. a fresh right-click menu every
     -- right-click), not a reused object, so there is no repeat-registration
     -- risk to guard against here.
+    -- Guarded per description anyway: a caller that keeps and reopens one description would stack a callback per open.
+    local acquiredHooked = setmetatable({}, { __mode = "k" })
     local function OnMenuOpened(menuDescription)
-        if menuDescription and type(menuDescription.AddMenuAcquiredCallback) == "function" then
+        if menuDescription and not acquiredHooked[menuDescription]
+            and type(menuDescription.AddMenuAcquiredCallback) == "function" then
+            acquiredHooked[menuDescription] = true
             menuDescription:AddMenuAcquiredCallback(SkinCurrentMenu)
         end
         SkinCurrentMenu()

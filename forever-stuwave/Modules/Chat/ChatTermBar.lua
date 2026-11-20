@@ -341,6 +341,9 @@ local function SkinTitleButton(button, index, iconTexture, tooltip)
     -- has to tolerate a caller passing no tooltip at all. A nil `tooltip`
     -- (the channel button, and any future entry with no label) leaves behavior
     -- identical to before this change.
+    -- one pair of hooks per button: the menu and channel keys are shared, and this runs once per chat window skinned
+    if button.fsTitleHooked then return end
+    button.fsTitleHooked = true
     button:HookScript("OnEnter", function(self)
         self:SetAlpha(TITLE_BUTTON_ALPHA_HOVER)
         local text = Chat.ResolveTermBarTooltip and Chat.ResolveTermBarTooltip(self.tooltip)
