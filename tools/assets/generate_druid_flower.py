@@ -13,18 +13,25 @@ Everything is baked at SCALE x SCALE texels per sprite px (crisp, no smoothing).
 desaturate, brighten or rotate crisp art with a vertex colour alone, so each look that needs a colour change is its own sprite
 here, and the module only picks one and sets its alpha and vertex colour. Files:
 
-    druid_flower_art.tga   512 x 512  the atlas, one sprite each, tight crops (rects in the generated manifest):
-        base, rose, petal1..7              the art as drawn
+    druid_flower_art.tga   512 x 1024 the atlas, one sprite each, tight crops (rects in the generated manifest):
+        base, petal1..7                    the art as drawn
         base_g, rose_g, petal_g1..7        the same desaturated (a plain luminance grey); the module dims them with the vertex colour
                                            (about half for a HoT that is not up, 0.35 for a petal that has healed and wilted)
-        rose_hot                           the rose tinted toward hot pink #ff3ea5 and brightened; the module fades it over the rose
-                                           by the time left
-        rose_m, petal_m1..7                white silhouettes of the same px; the module tints them (white for the cast flash and
-                                           the heal pulse, amber #ffb020 for the last seconds) and sets their alpha over the art
+        petal_m1..7                        white silhouettes of the petals; the module tints them (white for the cast flash,
+                                           amber #ffb020 for the last seconds) and sets their alpha over the art
         fall<i>_<s>                        the wilted petal (the grey one) i turned s of SPIN steps clockwise about its own centre, each
                                            on a square canvas wide enough to turn on; the copy that falls on each heal is one of
                                            these, moved and faded by the module and swapped for the next step as it turns (baked
                                            turns, so every sprite px stays crisp and no texture rotation is needed)
+        rose_w0 .. rose_w24                the ROSE's countdown, one frame per step of Rejuvenation's time (ROSE_STEPS = 24, one per
+                                           0.5 s): the rose tinted hot pink and brightened where it is still lit, a dark grey (the
+                                           luminance at ROSE_DARK = 0.35) where the time has run out. Frame j greys the wedge that starts
+                                           at 12 o'clock and runs j / 24 of a turn clockwise, measured about the centroid of the rose's
+                                           opaque px, a px by the angle of its centre. rose_w0 is all pink, rose_w12 has the right half
+                                           (12 to 6 o'clock) grey, rose_w24 is all grey. Every frame has the rose's own box, so they
+                                           swap in place and the module only moves the texcoords
+        rose_m0 .. rose_m23                white silhouettes of the px that are still lit in the same frame (nothing of the grey wedge);
+                                           the module tints them for the cast flash, the heal pulse and the amber of the last seconds
     druid_flower_glow.tga   64 x 64   a white radial falloff in alpha (code, no source art): the soft glows behind the rose and
                                            the flower, tinted and added by the module
     DruidFlowerArt.lua     the manifest FS.DruidFlowerArt (never hand edit it, regenerate)
@@ -51,10 +58,12 @@ W, H = 150, 86                         # the module canvas, sprite px
 CX, CY = 75, 36                        # the Thorns wreath's centre
 SIZE = 46                              # the flower's canvas, sprite px
 FX, FY = CX - SIZE // 2, CY - SIZE // 2
-ATLAS_W, ATLAS_H = 512, 512            # texels
+ATLAS_W, ATLAS_H = 512, 1024           # texels
 GLOW_N = 64                            # texels square
 PETALS = 7
 SPIN = 16                              # baked turns of a falling petal over one full turn
+ROSE_STEPS = 24                        # the rose's countdown frames: Rejuvenation's 12 s in steps of 0.5 s (frames 0 to ROSE_STEPS)
+ROSE_DARK = 0.35                       # the brightness of the grey wedge, the same as a wilted petal
 TAU = math.tau
 HOT = (255, 62, 165)                   # #ff3ea5
 _HERE = Path(__file__).resolve().parent
@@ -112,6 +121,42 @@ def mask(a: np.ndarray) -> np.ndarray:
     out = np.zeros_like(a)
     solid = a[..., 3] > 0
     out[solid] = (255, 255, 255, 255)
+    return out
+
+
+def dark(a: np.ndarray) -> np.ndarray:
+    """The elapsed wedge of the rose: the px's luminance grey at ROSE_DARK of its brightness."""
+    out = grey(a)
+    out[..., :3] = np.rint(out[..., :3].astype(np.float64) * ROSE_DARK).astype(np.uint8)
+    out[a[..., 3] == 0] = 0
+    return out
+
+
+def centroid(a: np.ndarray) -> tuple[float, float]:
+    """The centre of mass of the opaque px, as a point on the canvas (a px's centre is its index + 0.5)."""
+    ys, xs = np.nonzero(a[..., 3] > 0)
+    return float(xs.mean()) + 0.5, float(ys.mean()) + 0.5
+
+
+def sweep_turns(shape: tuple[int, int], cx: float, cy: float) -> np.ndarray:
+    """Each px's angle about (cx, cy) in turns, 0 at 12 o'clock growing clockwise (3 o'clock is 0.25, 6 is 0.5), from the px's centre."""
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
+    dx, dy = xx + 0.5 - cx, yy + 0.5 - cy
+    return (np.arctan2(dx, -dy) % TAU) / TAU
+
+
+def rose_frame(lit: np.ndarray, dim: np.ndarray, turns: np.ndarray, step: int) -> np.ndarray:
+    """The rose `step` of ROSE_STEPS into Rejuvenation: the px whose angle is under step / ROSE_STEPS of a turn are the grey wedge."""
+    out = lit.copy()
+    gone = turns < step / ROSE_STEPS
+    out[gone] = dim[gone]
+    return out
+
+
+def rose_lit_mask(rose: np.ndarray, turns: np.ndarray, step: int) -> np.ndarray:
+    """A white silhouette of the px that are still lit at `step`."""
+    out = np.zeros_like(rose)
+    out[(rose[..., 3] > 0) & ~(turns < step / ROSE_STEPS)] = (255, 255, 255, 255)
     return out
 
 
@@ -174,10 +219,7 @@ def build() -> dict:
 
     add_box("base", base)
     add_box("base_g", grey(base))
-    add_box("rose", rose)
     add_box("rose_g", grey(rose))
-    add_box("rose_hot", hot(rose))
-    add_box("rose_m", mask(rose))
     for i, p in enumerate(petals, 1):
         add_box(f"petal{i}", p)
     for i, p in enumerate(petals, 1):
@@ -190,6 +232,15 @@ def build() -> dict:
         centres.append(centre)
         for step in range(SPIN):
             sprites.append((f"fall{i}_{step}", turned(canvas, step), canvas.shape[1] // 2, canvas.shape[0] // 2))   # anchored at its centre
+
+    # the rose's countdown: every frame cut to the rose's own box, so the frames swap in place
+    rx0, ry0, rx1, ry1 = bbox(rose)
+    turns = sweep_turns(rose.shape[:2], *centroid(rose))
+    lit, dim = hot(rose), dark(rose)
+    for step in range(ROSE_STEPS + 1):
+        sprites.append((f"rose_w{step}", rose_frame(lit, dim, turns, step)[ry0:ry1, rx0:rx1].copy(), -rx0, -ry0))
+    for step in range(ROSE_STEPS):
+        sprites.append((f"rose_m{step}", rose_lit_mask(rose, turns, step)[ry0:ry1, rx0:rx1].copy(), -rx0, -ry0))
 
     # a shelf packer: sprites in this order, a one sprite px gap, rows left to right
     aw, ah = ATLAS_W // SCALE, ATLAS_H // SCALE
@@ -242,7 +293,7 @@ def fmt(v: float) -> str:
 
 def lua_manifest(out: dict) -> str:
     L = ["-- Generated by tools/assets/generate_druid_flower.py. Never hand edit; regenerate.", "local _, FS = ...", "FS.DruidFlowerArt = {"]
-    L.append(f"    SCALE = {SCALE}, W = {W}, H = {H}, CX = {CX}, CY = {CY}, SIZE = {SIZE}, FX = {FX}, FY = {FY}, PETALS = {PETALS}, SPIN = {SPIN},")
+    L.append(f"    SCALE = {SCALE}, W = {W}, H = {H}, CX = {CX}, CY = {CY}, SIZE = {SIZE}, FX = {FX}, FY = {FY}, PETALS = {PETALS}, SPIN = {SPIN}, ROSE_STEPS = {ROSE_STEPS},")
     L.append(f"    ATLAS = \"druid_flower_art\", ATLAS_W = {ATLAS_W}, ATLAS_H = {ATLAS_H},")
     L.append(f"    GLOW = \"druid_flower_glow\", GLOW_W = {GLOW_N}, GLOW_H = {GLOW_N},")
     L.append("    -- the rose's centre and each petal's centre on the flower's own canvas (sprite px from its top left)")

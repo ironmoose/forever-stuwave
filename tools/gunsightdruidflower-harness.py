@@ -9,8 +9,11 @@ look is a function of elapsed = length - left. These checks pin:
 
   * the seam: a "caster" form registered with FS.GunsightDruid.RegisterForm; build under the parent above the wreath's frames, seat, show,
     hide; no events are registered; the layers stack on the wreath's centre (every art sprite is placed by the flower canvas origin);
-  * the rose: up (tinted pink, the tint draining with the time left), the white flash of the first 0.5 s, the pulse and ten sparkle px
-    outward over 0.7 s on each heal (3, 6, 9 s), amber for the last 3 s, the pink glow (amber then), gone (grey, half bright);
+  * the rose: up (a clockwise sweep: the part still lit is hot pink and is the fraction of Rejuvenation's time left, the elapsed part is
+    a dark grey wedge that starts at 12 o'clock and grows clockwise; 24 baked steps of 0.5 s, the frame follows the ledger fraction, the
+    texcoords are written only when the step changes; the baked frames are checked px by px: the right half grey and the left half lit at
+    6 s left), the white flash of the first 0.5 s, the pulse and ten sparkle px outward over 0.7 s on each heal (3, 6, 9 s) and the amber
+    of the last 3 s (all three on the lit part only), the pink glow (amber then), gone (grey, half bright);
   * the petals: all live at a cast, petal i wilts when heal i lands (3 i s), a copy falls (down about 40 sprite px, a little sway,
     turning, fading, gone at 1.4 s), a cast flashes every petal toward white and restores them, amber for the last 3 s, grey and dim when
     Regrowth is not up or not learned, the teal glow;
@@ -31,6 +34,7 @@ Exit 0 = every check passed.
 from __future__ import annotations
 
 import importlib.util
+import math
 import os
 import re
 import subprocess
@@ -115,6 +119,7 @@ function Obj:SetTexCoord(l, r, t, b)
     local c = self.tc or {}
     c[1], c[2], c[3], c[4] = l, r, t, b
     self.tc = c
+    self.tcn = (self.tcn or 0) + 1
 end
 function Obj:SetVertexColor(r, g, b, a)
     local c = self.color or {}
@@ -239,6 +244,10 @@ function Sprites()   -- every sprite name any texture is showing now
     return out
 end
 function Has(name) for _, n in ipairs(Sprites()) do if n == name then return true end end return false end
+-- the rose's frame: its countdown step (0 all lit .. ROSE_STEPS all grey) or nil when the rose shows no countdown frame; and its mask's
+function RoseStep() local t = P().rose; local n = t.fsName and t.fsName:match("^rose_w(%d+)$"); if n and Shown(t) then return tonumber(n) end return nil end
+function RoseLit() return RoseStep() ~= nil end
+function MaskStep() local t = P().roseM; local n = t.fsName and t.fsName:match("^rose_m(%d+)$"); if n and Shown(t) then return tonumber(n) end return nil end
 function TexCount(list) local n = 0 for _, t in ipairs(list) do if Shown(t) then n = n + 1 end end return n end
 function Alpha(t) return t.color and t.color[4] end
 function Tint(t) return t.color[1], t.color[2], t.color[3] end
@@ -321,8 +330,6 @@ case("the_layers_stack_on_the_wreaths_centre", """
     check(Art.SIZE == 46 and Art.W == 150 and Art.H == 86, "46 x 46 on the 150 x 86 canvas")
     At(4.5, 4.5)
     -- every art layer is placed by the flower canvas origin: its sprite's own anchor sits on (FX, FY)
-    local names = { "base", "rose", "rose_hot" }
-    for i = 1, 7 do names[#names + 1] = "petal" .. i end
     local seen = 0
     for _, t in ipairs(__textures) do
         if Shown(t) and t.fsName and not t.fsName:match("^fall") then
@@ -333,7 +340,8 @@ case("the_layers_stack_on_the_wreaths_centre", """
             seen = seen + 1
         end
     end
-    check(seen == 10, "base, rose, the hot rose and seven petals: " .. seen)
+    check(seen == 9, "base, the rose's frame and seven petals: " .. seen)
+    check(P().roseHot == nil, "the old pink layer over the rose is gone: the pink is baked into the frames")
     -- the glows are centred on the rose and on the flower
     local rx, ry = SparkCentre()
     local gx, gy, gw, gh = Canvas(P().glowRose)
@@ -341,37 +349,101 @@ case("the_layers_stack_on_the_wreaths_centre", """
     gx, gy, gw, gh = Canvas(P().glowFlower)
     check(Near(gx + gw / 2, TH.CX, 0.5) and Near(gy + gh / 2, TH.CY, 0.5), "the flower glow is on the wreath's centre")
     check(P().glowRose.blend == "ADD" and P().glowFlower.blend == "ADD", "the glows are added to what is behind them")
-    -- back to front: glows, base, petals, rose, hot rose, falling copy, sparks, then the text frame
+    -- back to front: glows, base, petals, rose, its lit mask, falling copy, sparks, then the text frame
     local function z(t) return { t.parent.level, ({ BACKGROUND = 1, BORDER = 2, ARTWORK = 3, OVERLAY = 4 })[t.layer], t.sub } end
     local function before(a, b)
         local za, zb = z(a), z(b)
         for k = 1, 3 do if za[k] ~= zb[k] then return za[k] < zb[k] end end
         return a.seq < b.seq
     end
-    local order = { P().glowFlower, P().glowRose, P().base, P().petal[1], P().petalM[1], P().rose, P().roseHot, P().roseM, P().fall, P().spark[1] }
+    local order = { P().glowFlower, P().glowRose, P().base, P().petal[1], P().petalM[1], P().rose, P().roseM, P().fall, P().spark[1] }
     for i = 1, #order - 1 do check(before(order[i], order[i + 1]), "layer " .. i .. " is drawn before layer " .. i + 1) end
     check(P().rejT.parent.level > P().spark[1].parent.level, "the text is above everything")
     NoLog()
 """)
 
-case("the_rose_is_tinted_pink_and_the_tint_drains_with_the_time_left", """
+case("the_rose_frame_follows_the_time_left_full_at_the_cast_half_at_six_seconds_and_grey_at_the_end", """
     Mount()
-    At(4.5)                                   -- Rejuvenation 4.5 s old: 7.5 s left, no flash, no heal, not amber
-    check(Has("rose") and Has("rose_hot") and not Has("rose_g"), "the live rose and the pink one over it")
-    check(P().rose.fsName == "rose" and SameRGB(P().rose, WHITE) and Alpha(P().rose) == 1, "the rose is drawn as it is")
-    local a1 = Alpha(P().roseHot)
-    check(Near(a1, 0.65, 0.051), "the pink is the time left over the length (7.5 / 12): " .. a1)
-    At(1.5); local a0 = Alpha(P().roseHot)
-    At(8.5); local a2 = Alpha(P().roseHot)
-    check(a0 > a1 and a1 > a2, "the pink drains: " .. a0 .. " " .. a1 .. " " .. a2)
-    At(11.5); check(Alpha(P().roseHot) < 0.1, "nearly gone at the end")
-    -- a fresh cast is full pink and brightest
-    At(0.6); check(Alpha(P().roseHot) == 0.95, "just cast: nearly full: " .. Alpha(P().roseHot))
-    check(not Shown(P().roseM) and not Shown(P().glowFlower), "no mask and no teal glow with only the rose up")
-    -- the pink glow is added behind it, brighter while the tint is strong
-    At(4.5); local g1 = Alpha(P().glowRose)
+    local N = Art.ROSE_STEPS
+    check(N == 24, "24 steps, one per half second of the 12 s: " .. tostring(N))
+    At(0.0)                                   -- cast now: 12 s left
+    check(RoseStep() == 0 and P().rose.fsName == "rose_w0", "full at the cast: " .. tostring(P().rose.fsName))
+    At(6.0)                                   -- 6 s left
+    check(RoseStep() == 12, "half at 6 s left: " .. tostring(RoseStep()))
+    At(6.0 + 1e-7); check(RoseStep() == 12, "a hair either way is still half")
+    At(6.0 - 1e-7); check(RoseStep() == 12, "(rounded to the nearest step)")
+    At(9.0); check(RoseStep() == 18, "a quarter of the time left (3 s): " .. tostring(RoseStep()))
+    At(3.0); check(RoseStep() == 6, "three quarters left (9 s): " .. tostring(RoseStep()))
+    At(11.5); check(RoseStep() == 23, "half a second left: " .. tostring(RoseStep()))
+    At(11.9); check(RoseStep() == N and P().rose.fsName == "rose_w24", "the last frame near 0 is all grey: " .. tostring(RoseStep()))
+    At(11.999); check(RoseStep() == N, "to the very end")
+    -- the frame is the nearest step of the plain fraction left / length, and only ever goes forward as time passes
+    local prev = 0
+    for k = 0, 1199 do
+        local el = k * 0.01
+        At(el)
+        local step = RoseStep()
+        local left = 12 - el
+        check(step ~= nil and step >= prev and step <= prev + 1, "the step only moves forward one at a time at " .. el .. ": " .. tostring(prev) .. " -> " .. tostring(step))
+        check(math.abs((N - step) / N - left / 12) <= 0.5 / N + 1e-9, "the lit fraction is the time left at " .. el .. ": " .. (N - step) / N .. " vs " .. left / 12)
+        prev = step
+    end
+    check(prev == N, "it ends on the last frame")
+    -- a recast puts the rose back to full
+    At(8.0); check(RoseStep() > 12)
+    At(0.1); check(RoseStep() == 0, "a recast restarts the sweep")
+    -- the pink is baked into the frames: the vertex colour stays white and nothing is drawn over the rose to tint it
+    At(4.5)
+    check(P().rose.fsName == "rose_w9" and SameRGB(P().rose, WHITE) and Alpha(P().rose) == 1, "drawn as baked: " .. tostring(P().rose.fsName))
+    check(Has("rose_w9") and not Has("rose_g") and not Shown(P().roseM) and not Shown(P().glowFlower), "no mask and no teal glow with only the rose up")
+    -- the pink glow is added behind it, brighter while the time is long
+    local g1 = Alpha(P().glowRose)
     check(Shown(P().glowRose) and SameRGB(P().glowRose, Hexc("#ff3ea5")), "a pink glow behind the rose")
     At(8.5); check(Alpha(P().glowRose) < g1, "and it fades with the time left")
+    NoLog()
+""")
+
+case("the_rose_texcoords_are_written_only_when_the_step_changes", """
+    Mount()
+    At(4.0)                                             -- el 4.0: step 8 (the next step starts at 4.25)
+    local r = P().rose
+    check(RoseStep() == 8, "step 8: " .. tostring(RoseStep()))
+    local n0 = r.tcn
+    check(n0 ~= nil and n0 >= 1, "the sprite's texcoords were written once")
+    SPEC.paint(__now, DATA); SPEC.paint(__now, DATA)
+    check(r.tcn == n0, "the same paint twice writes no texcoords")
+    for _ = 1, 6 do Step() end                          -- 0.2 s later: still step 8
+    check(RoseStep() == 8 and r.tcn == n0, "a paint inside the step writes no texcoords: " .. tostring(r.tcn) .. " vs " .. n0)
+    Run(0.1)                                            -- 4.3 s: step 9
+    check(RoseStep() == 9 and r.tcn == n0 + 1, "a new step writes them once: " .. tostring(RoseStep()) .. " " .. tostring(r.tcn))
+    for _ = 1, 6 do Step() end
+    check(RoseStep() == 9 and r.tcn == n0 + 1, "and then no more until the next")
+    -- the whole countdown: one write per step, no more (12 s, 24 steps and the first frame)
+    EXP.rejuv = nil; At(nil, nil); At(0.0)
+    local w0 = P().rose.tcn
+    for _ = 1, 360 + 15 do Step() end                   -- a hair over 12.4 s: the ledger ends at 12 s and the rose goes grey
+    local sets = P().rose.tcn - w0
+    check(sets <= 25 + 1, "about one write per step over the whole countdown: " .. sets)
+    -- amber and the same step share one mask write per step, not one per paint
+    At(nil, nil); At(10.0)
+    local m = P().roseM
+    check(Shown(m) and MaskStep() == RoseStep(), "the mask is the frame's own lit part")
+    local m0 = m.tcn
+    for _ = 1, 8 do Step() end
+    check(m.tcn - m0 <= 1, "the mask writes its texcoords only on a step: " .. tostring(m.tcn - m0))
+    NoLog()
+""")
+
+case("the_mask_is_the_lit_part_of_the_frame_under_it", """
+    Mount()
+    for _, age in ipairs({ 0.05, 0.3, 3.2, 6.2, 9.4, 10.3, 11.2, 11.7 }) do
+        At(age)
+        local mk, step = MaskStep(), RoseStep()
+        check(mk ~= nil and mk == step, "at " .. age .. " the mask is frame " .. tostring(step) .. "'s lit part: " .. tostring(mk))
+    end
+    At(11.95)                                            -- nothing is left lit: nothing to flash or pulse
+    check(RoseStep() == Art.ROSE_STEPS and not Shown(P().roseM), "an all grey rose has no mask")
+    check(SameRGB(P().glowRose, AMBER), "(the amber glow stays)")
     NoLog()
 """)
 
@@ -379,7 +451,7 @@ case("the_rose_flashes_white_for_half_a_second_after_the_cast", """
     Mount()
     At(0.05)
     local m = P().roseM
-    check(Shown(m) and m.fsName == "rose_m" and SameRGB(m, WHITE), "a white silhouette over the rose")
+    check(Shown(m) and m.fsName == "rose_m0" and SameRGB(m, WHITE), "a white silhouette of the lit part over the rose: " .. tostring(m.fsName))
     local a0 = Alpha(m)
     check(a0 >= 0.8, "starts strong: " .. a0)
     At(0.25); local a1 = Alpha(m)
@@ -402,6 +474,7 @@ case("each_heal_pulses_the_rose_and_throws_ten_sparkle_px_outward_over_a_moment"
         check(TexCount(P().spark) == 0, "no sparkles before heal " .. heal)
         At(heal + 0.02)
         check(Shown(P().roseM) and SameRGB(P().roseM, WHITE) and Alpha(P().roseM) > 0.3, "the pulse: a white mask at heal " .. heal)
+        check(MaskStep() == RoseStep() and RoseStep() == math.floor(heal / 12 * 24 + 0.5), "on the lit part of the frame at heal " .. heal .. ": " .. tostring(MaskStep()))
         local sp = SparksShown()
         check(#sp == 10, "ten sparkle px: " .. #sp)
         local d0 = 0
@@ -440,6 +513,7 @@ case("the_rose_pulses_amber_for_the_last_three_seconds", """
     At(10.5)
     local m = P().roseM
     check(Shown(m) and SameRGB(m, AMBER), "an amber silhouette over the rose")
+    check(MaskStep() == RoseStep() and RoseStep() == 21, "on the lit part only: frame " .. tostring(RoseStep()) .. " mask " .. tostring(MaskStep()))
     check(SameRGB(P().glowRose, AMBER), "and an amber glow")
     local seen = {}
     for k = 0, 20 do __now = __now + 0.05; At(10.5); seen[#seen + 1] = Alpha(m) end
@@ -447,7 +521,8 @@ case("the_rose_pulses_amber_for_the_last_three_seconds", """
     for _, a in ipairs(seen) do lo, hi = math.min(lo, a), math.max(hi, a) end
     check(hi - lo >= 0.15, "it pulses: " .. lo .. " to " .. hi)
     check(lo >= 0.25 and hi <= 0.65, "within the amber range: " .. lo .. " " .. hi)
-    At(11.99); check(Shown(m), "to the very end")
+    At(11.7); check(Shown(m) and SameRGB(m, AMBER), "to the last lit sliver")
+    At(11.99); check(RoseStep() == Art.ROSE_STEPS and not Shown(m) and SameRGB(P().glowRose, AMBER), "nothing lit is left to pulse; the glow is amber to the end")
     EXP.rejuv = __now + 3                               -- exactly three seconds left is amber
     SPEC.paint(__now, DATA)
     check(SameRGB(P().glowRose, AMBER), "3.0 s left is amber")
@@ -458,11 +533,11 @@ case("a_rose_that_is_not_up_is_grey_and_half_bright", """
     Mount()
     At(nil, 4.5)
     local r = P().rose
-    check(Shown(r) and r.fsName == "rose_g", "the desaturated rose")
+    check(Shown(r) and r.fsName == "rose_g" and not RoseLit(), "the desaturated rose, no countdown frame")
     check(Near(r.color[1], 0.5) and Near(r.color[2], 0.5) and Near(r.color[3], 0.5) and r.color[4] == 1, "dimmed to half")
-    check(not Shown(P().roseHot) and not Shown(P().roseM) and not Shown(P().glowRose) and TexCount(P().spark) == 0, "no tint, no mask, no glow, no sparkles")
+    check(not Shown(P().roseM) and not Shown(P().glowRose) and TexCount(P().spark) == 0, "no mask, no glow, no sparkles")
     At(4.5, 4.5)
-    check(P().rose.fsName == "rose" and Shown(P().roseHot), "and it comes back up")
+    check(RoseLit() and SameRGB(P().rose, WHITE), "and it comes back up, drawn as baked")
     At(nil, nil)
     check(P().rose.fsName == "rose_g", "grey with nothing up")
     NoLog()
@@ -589,9 +664,9 @@ case("the_seventh_heal_lands_as_regrowth_runs_out_and_its_petal_falls_from_the_g
     check(after == sets, "painted once more and then left alone")
     -- the rose recast during the fall: the fall goes on while the rose is up
     Cast("regrow"); Run(20.9); Cast("rejuv"); Run(0.5)
-    check(Has("rose_hot") and Shown(P().fall) and P().fall.fsName:match("^fall7_"), "the fall plays with the rose up")
+    check(RoseLit() and Shown(P().fall) and P().fall.fsName:match("^fall7_"), "the fall plays with the rose up")
     Run(1.2)
-    check(not Shown(P().fall) and Has("rose_hot"), "and ends")
+    check(not Shown(P().fall) and RoseLit(), "and ends")
     -- not a last heal: a target change drops it with plenty of time left
     EXP.rejuv = nil
     Cast("regrow"); Run(10); EXP.regrow = nil; Run(0.1)
@@ -691,9 +766,9 @@ case("both_hots_gone_leaves_the_whole_flower_drawn_grey_and_dim", """
     check(#Texts() == 0, "no text")
     -- the HoTs running out by themselves ends in the same picture
     Cast("rejuv"); Cast("regrow"); Run(0.5)
-    check(Has("rose") and Has("petal1"), "up")
+    check(RoseLit() and Has("petal1"), "up")
     Run(22)
-    check(not Has("rose") and Has("rose_g") and Has("petal_g1") and #Texts() == 0, "and grey again when they run out")
+    check(not RoseLit() and Has("rose_g") and Has("petal_g1") and #Texts() == 0, "and grey again when they run out")
     NoLog()
 """)
 
@@ -785,7 +860,7 @@ case("both_caster_kinds_draw_the_same_flower", """
     for _, kind in ipairs({ "moon", "tree" }) do
         DATA.kind = kind
         At(2.5, 2.5)
-        check(Has("rose_hot") and PetalsLive() == 7 and TextOf(P().rejT) and TextOf(P().regT) and TextOf(P().name), kind .. " draws it")
+        check(RoseLit() and PetalsLive() == 7 and TextOf(P().rejT) and TextOf(P().regT) and TextOf(P().name), kind .. " draws it")
     end
     NoLog()
 """)
@@ -793,6 +868,8 @@ case("both_caster_kinds_draw_the_same_flower", """
 case("reduced_motion_keeps_the_state_and_drops_the_motion", """
     Mount()
     DATA.reduced = true
+    At(6.0)
+    check(RoseStep() == 12, "the sweep is state, not motion: it stays")
     At(0.1, 0.1)
     check(MaskCount() == 0 and not Shown(P().roseM), "no flash")
     At(3.2, 3.2)
@@ -800,6 +877,7 @@ case("reduced_motion_keeps_the_state_and_drops_the_motion", """
     check(PetalsWilted() == 1 and PetalsLive() == 6, "but the petal still wilts")
     At(10.5, 19.0)
     check(Shown(P().roseM) and SameRGB(P().roseM, AMBER) and Near(Alpha(P().roseM), 0.45), "amber, steady")
+    check(MaskStep() == RoseStep() and RoseStep() > 0 and RoseStep() < Art.ROSE_STEPS, "on the lit part of the countdown frame")
     check(MaskCount(AMBER) == 1 and Near(Alpha(P().petalM[7]), 0.45), "the petals too")
     local a = Alpha(P().roseM)
     for k = 1, 10 do __now = __now + 0.07; At(10.5, 19.0); check(Alpha(P().roseM) == a, "it does not move") end
@@ -860,6 +938,8 @@ case("a_paint_allocates_nothing_idle_up_pulsing_falling_and_amber", """
     scene("heal six", 9.0, 18.0, 45)
     scene("the last petal", nil, 20.9, 45)
     scene("amber", 9.5, 18.5, 120)
+    scene("a sweep over several steps", 1.0, nil, 300)
+    scene("the last steps", 10.5, nil, 40)
     scene("a friend", 4.1, 5.2, 600)
     DATA.kind = "moon"
     scene("on you", 4.1, 5.2, 600)
@@ -905,11 +985,11 @@ case("a_hole_in_the_world_degrades_quietly_and_recovers", """
     T.errHot = false
     __logged = nil
     At(4.5, 4.5)
-    check(Has("rose_hot"), "and the flower comes back")
+    check(RoseLit(), "and the flower comes back")
     T.errKnown = true
     V().poll = -99
     At(2.5, 2.5)
-    check(PetalsLive() == 7 and Has("rose_hot"), "an unreadable spellbook is not an error and keeps the ledger")
+    check(PetalsLive() == 7 and RoseLit(), "an unreadable spellbook is not an error and keeps the ledger")
     T.errKnown = false
     DATA.kind = nil
     At(4.5, 4.5)
@@ -1033,7 +1113,7 @@ Hot("Mahna", "rejuv"); Hot("Mahna", "regrow")
 Paint(__now)
 check(M.data.kind == "tree", "a friend is the tree kind: " .. tostring(M.data.kind))
 check(vis(Fl.parts.rose) and Fl.parts.name.text == "MAHNA" and Fl.parts.rejT.text == "12" and Fl.parts.regT.text == "21", "tree: the same flower with the friend's name")
-check(vis(Fl.parts.roseHot) and vis(Fl.parts.petal[1]), "pink rose and live petals")
+check(vis(Fl.parts.rose) and Fl.parts.rose.fsName == "rose_w0" and vis(Fl.parts.petal[1]), "the full pink rose and live petals")
 -- the wreath's label is still the wreath's
 check(P().thLabel.fsOn and P().thLabel.fsWord and P().thLabel.fsWord:match("M$"), "the Thorns label is untouched: " .. tostring(P().thLabel.fsWord))
 -- another form hides the flower, the caster brings it back
@@ -1188,6 +1268,8 @@ def sprite_names_case() -> str | None:
     At(nil, nil); note()
     At(5, nil); note(); At(nil, 5); note()
     for heal = 1, 6 do for k = 0, 140 do At(nil, 3 * heal + k * 0.01); note() end end
+    -- the rose's whole countdown, a hundredth of a second at a time (every frame; the masks where the flash, the pulses and the amber show)
+    for k = 0, 1199 do At(k * 0.01, nil); note() end
     -- Regrowth running out by itself: the seventh petal's heal lands as the ledger drops it
     EXP.rejuv, EXP.regrow = nil, nil
     SPEC.paint(__now, DATA)
@@ -1196,9 +1278,18 @@ def sprite_names_case() -> str | None:
     local missing = {}
     for n in pairs(seen) do if not Art.SPR[n] then missing[#missing + 1] = n end end
     check(#missing == 0, "sprites not in the manifest: " .. table.concat(missing, ","))
-    -- every sprite of the manifest is used by some state (no dead art)
+    -- every sprite of the manifest is used by some state (no dead art). A lit mask is baked for every step, because the steps the flash,
+    -- the pulses and the amber fall on move with the length of Rejuvenation (a talent): the ones those fall on here must show, and each
+    -- shown mask was checked against its frame in the countdown cases
     local unused = {}
-    for n in pairs(Art.SPR) do if not seen[n] then unused[#unused + 1] = n end end
+    for n in pairs(Art.SPR) do if not seen[n] and not n:match("^rose_m%d+$") then unused[#unused + 1] = n end end
+    for _, j in ipairs({ 0, 1, 6, 7, 12, 13, 18, 19, 20, 21, 22, 23 }) do
+        if not seen["rose_m" .. j] then unused[#unused + 1] = "rose_m" .. j end
+    end
+    for j = 0, Art.ROSE_STEPS do check(Art.SPR["rose_w" .. j] ~= nil, "a frame for step " .. j) end
+    for j = 0, Art.ROSE_STEPS - 1 do check(Art.SPR["rose_m" .. j] ~= nil, "a lit mask for step " .. j) end
+    check(Art.SPR["rose_m" .. Art.ROSE_STEPS] == nil, "no mask of an all grey rose")
+    check(Art.SPR.rose == nil and Art.SPR.rose_hot == nil and Art.SPR.rose_m == nil, "the old whole rose, pink layer and mask are gone")
     table.sort(unused)
     check(#unused == 0, "sprites no state shows: " .. table.concat(unused, ","))
     -- every rect lies inside the atlas and the glow file is named
@@ -1289,7 +1380,7 @@ def art_checks() -> list[str]:
     def layer(name):
         return np.asarray(Image.open(LAYERS / f"{name}.png").convert("RGBA"))
 
-    for stem in ["base", "rose"] + [f"petal{i}" for i in range(1, 8)]:
+    for stem in ["base"] + [f"petal{i}" for i in range(1, 8)]:
         src = layer(stem)
         ys, xs = np.nonzero(src[..., 3] > 0)
         x0, y0 = int(xs.min()), int(ys.min())
@@ -1304,14 +1395,14 @@ def art_checks() -> list[str]:
             errs.append(f"{stem}: the atlas is not the layer's px")
         if not (np.repeat(np.repeat(t, 2, 0), 2, 1) == full).all():
             errs.append(f"{stem}: the atlas is not two texels a sprite px of one colour (crisp)")
-        # the grey, the white mask: the same px set (the base has no mask: it never flashes)
+        # the grey, the white mask: the same px set (the base has no mask: it never flashes; the rose has its own checks below)
         g, _ = tile(stem.replace("petal", "petal_g") if stem.startswith("petal") else stem + "_g")
         if not ((g[..., 3] > 0) == (t[..., 3] > 0)).all():
             errs.append(f"{stem}: the grey does not cover the same px")
         if not (g[..., 0] == g[..., 1]).all() or not (g[..., 1] == g[..., 2]).all():
             errs.append(f"{stem}: the grey is not grey")
         if stem != "base":
-            m, _ = tile(stem.replace("petal", "petal_m") if stem.startswith("petal") else stem + "_m")
+            m, _ = tile(stem.replace("petal", "petal_m"))
             if not ((m[..., 3] > 0) == (t[..., 3] > 0)).all():
                 errs.append(f"{stem}: the mask does not cover the same px")
             if not (m[..., :3][m[..., 3] > 0] == 255).all():
@@ -1327,14 +1418,7 @@ def art_checks() -> list[str]:
         solid = L[..., 3] > 0
         if not (L[solid] == full[solid]).all():
             errs.append(f"{s} differs from full.png")
-    # the pink rose is pinker than the rose: more red than green, and brighter on average
-    hot, _ = tile("rose_hot")
-    rose, _ = tile("rose")
-    solid = hot[..., 3] > 0
-    if not (hot[..., 0][solid].astype(int) > hot[..., 1][solid].astype(int) + 40).mean() > 0.9:
-        errs.append("the hot rose is not pink")
-    if hot[..., :3][solid].astype(int).sum() <= rose[..., :3][solid].astype(int).sum():
-        errs.append("the hot rose is not brighter than the rose")
+    errs += rose_checks(rects, atlas, layer, tile)
     # a falling petal turns about its centre without losing a px, and step 0 is the grey petal
     for i in range(1, 8):
         counts = [int((tile(f"fall{i}_{s}")[0][..., 3] > 0).sum()) for s in range(16)]
@@ -1355,6 +1439,119 @@ def art_checks() -> list[str]:
     return errs
 
 
+def rose_checks(rects, atlas, layer, tile) -> list[str]:
+    """The rose's countdown frames against the committed layer, px by px, with the geometry written out here (not the generator's
+    code): frame j greys the wedge of j / 24 of a turn that starts at 12 o'clock and runs clockwise about the centroid of the rose's
+    opaque px, and the rest is the hot pink; the masks are white where the frame is still lit."""
+    import numpy as np
+    errs: list[str] = []
+    steps = int(re.search(r"ROSE_STEPS = (\d+)", ART).group(1))
+    if steps != 24:
+        errs.append(f"ROSE_STEPS is {steps}, the brief is 24 (one step per half second of 12 s)")
+    aw, ah = (int(v) for v in re.search(r"ATLAS_W = (\d+), ATLAS_H = (\d+)", ART).groups())
+    if atlas.shape[1] != aw or atlas.shape[0] != ah:
+        errs.append(f"druid_flower_art.tga is {atlas.shape[1]} x {atlas.shape[0]}, the manifest says {aw} x {ah}")
+    for stale in ("rose", "rose_hot", "rose_m"):
+        if stale in rects:
+            errs.append(f"{stale} is still in the atlas: the countdown frames replace it")
+    src = layer("rose")
+    ys, xs = np.nonzero(src[..., 3] > 0)
+    x0, y0, x1, y1 = int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+    w, h = x1 - x0, y1 - y0
+    solid = src[y0:y1, x0:x1, 3] > 0
+    # the centroid of the opaque px, by hand (a px's centre is its index + 0.5)
+    pts = [(int(x) + 0.5, int(y) + 0.5) for x, y in zip(xs, ys)]
+    cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+    if not (abs(cx - 22.92) < 0.01 and abs(cy - 20.44) < 0.01):
+        errs.append(f"the rose's centroid moved: {cx:.2f}, {cy:.2f} (22.92, 20.44)")
+    # the grey of a HoT that is not up
+    g, _ = tile("rose_g")
+    if not ((g[..., 3] > 0) == solid).all() or not (g[..., 0] == g[..., 1]).all() or not (g[..., 1] == g[..., 2]).all():
+        errs.append("rose_g is not the rose's px in grey")
+    if "rose_g" not in rects or rects["rose_g"][2:6] != (w, h, -x0, -y0):
+        errs.append("rose_g: the manifest rect is not the rose layer's alpha box")
+    names = [f"rose_w{j}" for j in range(steps + 1)]
+    missing = [n for n in names + [f"rose_m{j}" for j in range(steps)] if n not in rects]
+    if missing:
+        return errs + ["rose frames missing from the atlas: " + ", ".join(missing[:4])]
+    frames = [tile(n)[0] for n in names]
+    masks = [tile(f"rose_m{j}")[0] for j in range(steps)]
+    for n in names + [f"rose_m{j}" for j in range(steps)]:
+        if rects[n][2:6] != (w, h, -x0, -y0):
+            errs.append(f"{n}: not the rose's own box {w} x {h} anchored at {-x0}, {-y0}: {rects[n][2:6]} (the frames swap in place)")
+    # frame 0 is all hot pink (as before at the cast), frame `steps` is all dark grey at about 0.35 of the luminance
+    lit, dim = frames[0], frames[steps]
+    if not ((lit[..., 3] > 0) == solid).all():
+        errs.append("rose_w0 does not cover the rose's px")
+    sel = solid
+    r, gg, b = (lit[..., k].astype(int)[sel] for k in range(3))
+    if not ((r > gg + 40).mean() > 0.9):
+        errs.append("the lit rose is not pink")
+    crop = src[y0:y1, x0:x1]
+    if lit[..., :3].astype(int)[sel].sum() <= crop[..., :3].astype(int)[sel].sum():
+        errs.append("the lit rose is not brighter than the layer")
+    if not ((dim[..., 3] > 0) == solid).all() or not (dim[..., 0] == dim[..., 1]).all() or not (dim[..., 1] == dim[..., 2]).all():
+        errs.append("the elapsed wedge is not a grey on the rose's px")
+    lum = np.rint((crop[..., 0] * 0.299 + crop[..., 1] * 0.587 + crop[..., 2] * 0.114)) * 0.35
+    if np.abs(dim[..., 0].astype(float)[sel] - lum[sel]).max() > 1.01:
+        errs.append("the elapsed wedge is not 0.35 of the layer's luminance")
+    # the rule, px by px: a px is in the wedge when its angle about the centroid, clockwise from 12 o'clock, is under j / 24 of a turn
+    def turn(px, py):
+        return (math.atan2(px + x0 + 0.5 - cx, -(py + y0 + 0.5 - cy)) % math.tau) / math.tau
+    for j in range(steps + 1):
+        bad = 0
+        for py in range(h):
+            for px in range(w):
+                if not solid[py, px]:
+                    continue
+                want = dim if turn(px, py) < j / steps else lit
+                if not (frames[j][py, px] == want[py, px]).all():
+                    bad += 1
+        if bad:
+            errs.append(f"rose_w{j}: {bad} px are not on the right side of the wedge")
+        if j < steps:
+            m = masks[j]
+            for py in range(h):
+                for px in range(w):
+                    want = solid[py, px] and not turn(px, py) < j / steps
+                    if (m[py, px, 3] > 0) != want or (want and not (m[py, px, :3] == 255).all()):
+                        errs.append(f"rose_m{j}: the mask is not the white lit part at {px},{py}")
+                        break
+                else:
+                    continue
+                break
+    # the wedge only grows
+    for j in range(steps):
+        a = (frames[j] == dim).all(-1) & solid
+        b = (frames[j + 1] == dim).all(-1) & solid
+        if (a & ~b).any():
+            errs.append(f"rose_w{j + 1} un-greys a px that rose_w{j} greyed")
+    # spot checks that need no angle at all: the quadrants about the centroid
+    def px_class(frame, test):
+        out = []
+        for py in range(h):
+            for px in range(w):
+                if solid[py, px] and test(px + x0 + 0.5 - cx, py + y0 + 0.5 - cy):
+                    out.append(bool((frame[py, px] == dim[py, px]).all()))
+        return out
+    half = steps // 2
+    right, left = px_class(frames[half], lambda dx, dy: dx > 0), px_class(frames[half], lambda dx, dy: dx < 0)
+    if not (right and all(right)):
+        errs.append("at the half frame the right half (12 to 6 o'clock, clockwise) is not all grey")
+    if not (left and not any(left)):
+        errs.append("at the half frame the left half is not all lit")
+    q = steps // 4
+    ur = px_class(frames[q], lambda dx, dy: dx > 0 and dy < 0)
+    rest = px_class(frames[q], lambda dx, dy: not (dx > 0 and dy < 0))
+    if not (ur and all(ur) and not any(rest)):
+        errs.append("at the quarter frame only the upper right quadrant is grey")
+    ul = px_class(frames[3 * q], lambda dx, dy: dx < 0 and dy < 0)
+    rest = px_class(frames[3 * q], lambda dx, dy: not (dx < 0 and dy < 0))
+    if not (ul and not any(ul) and all(rest)):
+        errs.append("at the three quarter frame only the upper left quadrant is still lit")
+    return errs
+
+
 # --- a render of the flower over the real wreath, drawn from the module's own regions and the shipped art ----------------------------
 
 SHOTS = [
@@ -1370,6 +1567,9 @@ SHOTS = [
     ("i_regrowth_only", "Both(nil, 7.5)"),
     ("j_on_you", "Both(5.5, 5.5, 'moon')"),
     ("k_regrowth_not_learned", "Both(5.5, 5.5, 'tree', true)"),
+    ("l_rose_quarter_gone", "Both(3.9, nil)"),
+    ("m_rose_half_gone", "Both(6.2, nil)"),
+    ("n_rose_last_sliver", "Both(11.2, nil)"),
 ]
 TEXEL = 2
 ZOOM = 3

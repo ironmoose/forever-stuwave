@@ -3,10 +3,14 @@
 -- THE FLOWER. In caster form (the kinds "moon" and "tree") the class slot already shows the Thorns Bramble Wreath, which this
 -- file leaves exactly as it is (GunsightDruid.lua paints it and its label). Over the wreath, centred on the wreath's centre, sits
 -- a 46 x 46 sprite px pixel art flower that is the player's two heals over time on the current target:
---   * the ROSE in the middle is Rejuvenation (12 s, four heals, one every 3 s after the cast). Up: the rose is tinted toward hot
---     pink and brightened, the pink and brightness draining with the time left; a white flash for the first 0.5 s after the cast;
---     on each heal a bright pulse and a small burst of sparkle px outward over 0.7 s; the last 3 s it pulses amber. A soft pink
---     added glow sits behind it (amber in the last 3 s). Not up: desaturated and dimmed to about half.
+--   * the ROSE in the middle is Rejuvenation (12 s, four heals, one every 3 s after the cast). Up: a clockwise SWEEP, the Thorns
+--     wreath's own language. The part of the rose that is still lit is hot pink and is the fraction of the time left; the elapsed
+--     part is a dark grey wedge (0.35 bright) that starts at 12 o'clock and grows clockwise, the right half grey at 6 s left, all of
+--     it at the end, measured about the rose's own centre. It is baked in steps of half a second (24, the frames rose_w0 to
+--     rose_w24), so every px stays crisp. A white flash for the first 0.5 s after the cast; on each heal a bright pulse and a small
+--     burst of sparkle px outward over 0.7 s; the last 3 s it pulses amber, the flash, the pulse and the amber on the lit part only
+--     (a lit mask baked for every frame, rose_m0 to rose_m23). A soft pink added glow sits behind it (amber in the last 3 s). Not
+--     up: desaturated and dimmed to about half.
 --   * the seven PETALS are Regrowth (21 s, seven heals, one every 3 s; petal 1 first, lower left, over the top, to lower right).
 --     When heal i lands petal i wilts in place (desaturated, dark, 0.35) and a copy of it falls: it drifts down about 40 sprite
 --     px with a little sway, turns and fades over 1.4 s. A cast flashes every petal toward white for 0.5 s and restores them (the
@@ -25,14 +29,15 @@
 -- Regrowth had under half a second left when it was last seen). Nothing here reads an aura, a power or a count; no value is
 -- secret, none is compared.
 --
--- ART. tools/assets/generate_druid_flower.py bakes druid_flower_art.tga (the layers as drawn, the same desaturated, the rose
--- tinted pink, white silhouettes the module tints for the flash, the pulse and the amber, and each falling petal baked in 16
--- clockwise turns) and druid_flower_glow.tga (a soft white falloff), and the manifest FS.DruidFlowerArt
+-- ART. tools/assets/generate_druid_flower.py bakes druid_flower_art.tga (the layers as drawn, the same desaturated, white
+-- silhouettes of the petals the module tints for the flash and the amber, each falling petal baked in 16 clockwise turns, and the
+-- rose's 25 countdown frames with their 24 lit masks) and druid_flower_glow.tga (a soft white falloff), and the manifest FS.DruidFlowerArt
 -- (DruidFlowerArt.lua, never edited by hand). Art layers keep the flower canvas, so they stack where they were cut.
 --
 -- UNITS AND TICK. One sprite px is spx image px on the 150 x 86 canvas the Druid module hands over; every position is a whole
 -- sprite px. The Druid module calls paint at 30 Hz while the caster is shown. A paint allocates nothing: strings and sparkle
--- angles are built at load, colours are numbers, and a region is written only when its sprite, place, colour or alpha changes. With
+-- angles are built at load, colours are numbers, and a region is written only when its sprite, place, colour or alpha changes (the
+-- rose's frame is picked from the plain ledger fraction left / length, and its texcoords are written only when the step changes). With
 -- no HoT up the whole flower is painted once and left alone. No events are registered here.
 --
 -- Reduced motion (data.reduced): no flash, no heal pulse, no sparkles, no falling petal, no amber pulse (a steady amber); the
@@ -56,7 +61,8 @@ local function LogOnce(key, msg)
     end
 end
 
-if not (type(Art) == "table" and type(Art.SPR) == "table" and type(Art.PETAL) == "table" and type(Art.ROSE) == "table") then
+if not (type(Art) == "table" and type(Art.SPR) == "table" and type(Art.PETAL) == "table" and type(Art.ROSE) == "table"
+    and type(Art.ROSE_STEPS) == "number" and Art.ROSE_STEPS >= 1) then
     LogOnce("noart", "FS.DruidFlowerArt is missing, the HoT flower is not built")
     return
 end
@@ -80,6 +86,7 @@ local ATLAS_FILE = MEDIA .. Art.ATLAS .. ".tga"
 local GLOW_FILE = MEDIA .. Art.GLOW .. ".tga"
 local TUNING = State.TUNING or {}
 local N = Art.PETALS
+local RS = Art.ROSE_STEPS                 -- the rose's countdown steps: frame 0 is all lit, frame RS all grey
 
 local C = {
     SW = Art.W, SH = Art.H,
@@ -116,6 +123,9 @@ for i = 1, N do
     PN[i], PG[i], PM[i], FN[i] = "petal" .. i, "petal_g" .. i, "petal_m" .. i, {}
     for s = 0, C.SPIN - 1 do FN[i][s] = "fall" .. i .. "_" .. s end
 end
+local RW, RM = {}, {}                  -- the rose's frames and lit masks by step
+for j = 0, RS do RW[j] = "rose_w" .. j end
+for j = 0, RS - 1 do RM[j] = "rose_m" .. j end
 local SECS = {}
 for n = 0, 99 do SECS[n] = tostring(n) end
 local SPARK_COS, SPARK_SIN = {}, {}
@@ -308,7 +318,7 @@ local function Build(parent)
         P.petal[i] = Spr(f, "ARTWORK", 1)
         P.petalM[i] = Spr(f, "ARTWORK", 2)
     end
-    P.rose, P.roseHot, P.roseM = Spr(f, "ARTWORK", 3), Spr(f, "ARTWORK", 4), Spr(f, "ARTWORK", 5)
+    P.rose, P.roseM = Spr(f, "ARTWORK", 3), Spr(f, "ARTWORK", 4)
     P.fall = Spr(f, "OVERLAY", 0)
     P.spark = {}
     for j = 1, C.SPARKS do P.spark[j] = Dot(f, "OVERLAY", 1) end
@@ -347,31 +357,38 @@ local function PaintIdle()
     local x, y = Art.FX, Art.FY
     Sprite(P.base, "base_g", x, y, K.dim, 1)
     Sprite(P.rose, "rose_g", x, y, K.dim, 1)
-    Off(P.roseHot); Off(P.roseM)
+    Off(P.roseM)
     for i = 1, N do Sprite(P.petal[i], PG[i], x, y, K.dim, 1); Off(P.petalM[i]) end
     Off(P.glowRose); Off(P.glowFlower)
     SparksOff()
     Off(P.rejT); Off(P.regT); Off(P.name)
 end
 
--- Rejuvenation: the rose
+-- the rose's countdown step for `left` seconds of Rejuvenation: the nearest of RS steps of the plain ledger fraction, 0 just
+-- cast (all lit) to RS at the end (all grey)
+local function RoseStep(left)
+    return floor((1 - Clamp01(left / C.REJ_LEN)) * RS + 0.5)
+end
+
+-- Rejuvenation: the rose, a clockwise sweep that greys the part of the time that has gone
 local function PaintRose(now, left, red)
     local x, y = Art.FX, Art.FY
     local el = C.REJ_LEN - left
     if el < 0 then el = 0 end
     local k = Clamp01(left / C.REJ_LEN)
-    Sprite(P.rose, "rose", x, y, K.white, 1)
-    Sprite(P.roseHot, "rose_hot", x, y, K.white, Stepped(k))
+    local step = RoseStep(left)
+    Sprite(P.rose, RW[step], x, y, K.white, 1)          -- the pink and the grey are baked: the tint stays white
     local _, since = Heals(el, 4)
     local pulse = (not red and since < C.PULSE) and (1 - since / C.PULSE) or 0
     local flash = (not red and el < C.FLASH) and (1 - el / C.FLASH) or 0
     local low = left <= C.WARN
-    if flash > 0 then
-        Sprite(P.roseM, "rose_m", x, y, K.white, Stepped(0.9 * flash))
-    elseif pulse > 0 then
-        Sprite(P.roseM, "rose_m", x, y, K.white, Stepped(0.55 * pulse))
-    elseif low then
-        Sprite(P.roseM, "rose_m", x, y, K.amber, red and 0.45 or Stepped(0.3 + 0.3 * (0.5 + 0.5 * sin(now * 8))))
+    local lit = RM[step]                                -- the lit part of this frame; nothing is lit at the last one
+    if lit and flash > 0 then
+        Sprite(P.roseM, lit, x, y, K.white, Stepped(0.9 * flash))
+    elseif lit and pulse > 0 then
+        Sprite(P.roseM, lit, x, y, K.white, Stepped(0.55 * pulse))
+    elseif lit and low then
+        Sprite(P.roseM, lit, x, y, K.amber, red and 0.45 or Stepped(0.3 + 0.3 * (0.5 + 0.5 * sin(now * 8))))
     else
         Off(P.roseM)
     end
@@ -516,7 +533,7 @@ local function Paint(now, data)
     if rl ~= nil then PaintRose(now, rl, red)
     else
         Sprite(P.rose, "rose_g", x, y, K.dim, 1)
-        Off(P.roseHot); Off(P.roseM); Off(P.glowRose)
+        Off(P.roseM); Off(P.glowRose)
         SparksOff()
     end
     PaintPetals(now, gl, red)

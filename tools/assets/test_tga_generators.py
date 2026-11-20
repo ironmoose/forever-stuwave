@@ -223,10 +223,11 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
                   "druid_cat_gash_4": (64, 128), "druid_cat_gash_5": (64, 128), "druid_cat_cool_1": (32, 128), "druid_cat_cool_2": (32, 128),
                   "druid_cat_cool_3": (32, 128), "druid_cat_cool_4": (32, 128), "druid_cat_cool_5": (32, 128), "druid_cat_gold": (256, 128),
                   "druid_cat_finish": (128, 32)},
-    # generate_druid_flower.py: the Druid caster form's HoT flower (the art layers, their grey, hot pink and white looks and the baked
-    # turns of a falling petal in one atlas) and its soft glow falloff. It loads the layers from druid_flower_art/ (found through
-    # FS_ASSETS_DIR, set by _run_generator); the manifest DruidFlowerArt.lua is written beside the TGAs.
-    "druid_flower": {"druid_flower_art": (512, 512), "druid_flower_glow": (64, 64)},
+    # generate_druid_flower.py: the Druid caster form's HoT flower (the art layers, their grey and white looks, the baked turns of a
+    # falling petal and the rose's 25 countdown frames with their lit masks, in one atlas) and its soft glow falloff. It loads the
+    # layers from druid_flower_art/ (found through FS_ASSETS_DIR, set by _run_generator); the manifest DruidFlowerArt.lua is written
+    # beside the TGAs.
+    "druid_flower": {"druid_flower_art": (512, 1024), "druid_flower_glow": (64, 64)},
     # generate_paladin_seal.py: the Paladin Gunsight module's wax seals, emblems and pixel digits, the war hammer's baked
     # swing and rise frames (cold, filled, tint mask, outline), and the slam effects (column, rays, shocks, runes, cracks).
     "paladin_seal": {"paladin_seal": (512, 512), "paladin_hammer": (1024, 1024), "paladin_fx": (1024, 512)},
