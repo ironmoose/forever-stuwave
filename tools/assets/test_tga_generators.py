@@ -217,6 +217,12 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # and the Thorns segments, 1 texel per sprite px); it also writes DruidBearArt.lua. It imports the Warrior generator's bake
     # machinery and loads its head frames from druid_bear_art/, both found through FS_ASSETS_DIR (set by _run_generator).
     "druid_bear": {"druid_bear_1": (2048, 512)},
+    # generate_druid_cat.py: the Druid Cat look (the hide and its sprites in one atlas, a lit and a cooled gash per slot, the gold gashes
+    # and the FINISH plaque as the engine bars' own files). The manifest DruidCatArt.lua is written beside the TGAs by the generator.
+    "druid_cat": {"druid_cat_art": (1024, 512), "druid_cat_gash_1": (64, 128), "druid_cat_gash_2": (64, 128), "druid_cat_gash_3": (64, 128),
+                  "druid_cat_gash_4": (64, 128), "druid_cat_gash_5": (64, 128), "druid_cat_cool_1": (32, 128), "druid_cat_cool_2": (32, 128),
+                  "druid_cat_cool_3": (32, 128), "druid_cat_cool_4": (32, 128), "druid_cat_cool_5": (32, 128), "druid_cat_gold": (256, 128),
+                  "druid_cat_finish": (128, 32)},
     # generate_paladin_seal.py: the Paladin Gunsight module's wax seals, emblems and pixel digits, the war hammer's baked
     # swing and rise frames (cold, filled, tint mask, outline), and the slam effects (column, rays, shocks, runes, cracks).
     "paladin_seal": {"paladin_seal": (512, 512), "paladin_hammer": (1024, 1024), "paladin_fx": (1024, 512)},

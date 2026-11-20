@@ -158,6 +158,8 @@ Modules/CombatHud/DruidState.lua
 Modules/CombatHud/GunsightDruid.lua
 Modules/CombatHud/DruidBearArt.lua
 Modules/CombatHud/GunsightDruidBear.lua
+Modules/CombatHud/DruidCatArt.lua
+Modules/CombatHud/GunsightDruidCat.lua
 Modules/CombatHud/DruidClearcastingArt.lua
 Modules/CombatHud/DruidClearcasting.lua
 Modules/CombatHud/GunsightWarlock.lua
