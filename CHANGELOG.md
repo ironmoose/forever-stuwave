@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0-beta.5 (2026-11-20)
+
+A new Warlock module, a Help page, mail subjects that fill themselves, and a Revenge fix.
+
+### New
+- Warlock: the Grimoire replaces the Binding Circle. Your demon's pact book lights up from the bottom with its health and goes dark with rising smoke when no demon is out. Five crystals hold your soul shards. The book acts out one prompt at a time: lightning for BOLT (Shadow Trance), burning pages for FIRE (Decimation), blood for TAP, souls streaming in for REAPING (Drain Soul), and rings of light for SUMMON.
+- Help page in /fsconfig: the commands, then what every piece of each class module means. It opens on your own class and any class can be picked. The ? beside your class module on the Gunsight page shows the same lines.
+- Mail: the subject fills itself with the first attached item (and its stack count), or with the gold you are sending. It never writes over a subject you typed.
+
+### Fixes
+- Warrior: blocking no longer lights the Revenge alert while Revenge is on cooldown. The alert waits for the cooldown, and Overpower and Victory Rush get the same check.
+- The Druid explanation now matches the Bear and Cat form modules.
+
 ## 1.0.0-beta.4 (2026-11-20)
 
 Class modules for Druid, Rogue and Warlock, a reworked character window, talent scenes, and the STUwave look on almost every game window.
