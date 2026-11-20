@@ -185,6 +185,20 @@ case("builds: chrome, header band over the stock top strip, no switch, the windo
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
+case("opening the window again adds no hooks (each open used to stack a SetTextColor hook, so every open got slower)", f"""
+    local hooks = 0
+    local hsf = hooksecurefunc
+    hooksecurefunc = function(...) hooks = hooks + 1; return hsf(...) end
+    {OPEN}
+    CharacterFrame:Hide(); FlushTimers(); CharacterFrame:Show(); FlushTimers()
+    local h0 = hooks
+    for _ = 1, 5 do
+        CharacterFrame:Hide(); FlushTimers(); CharacterFrame:Show(); FlushTimers()
+    end
+    assert(hooks == h0, 'five more opens added ' .. (hooks - h0) .. ' hooks')
+    hooksecurefunc = hsf
+""")
+
 case("the stock title and portrait are held; no Inset is touched", f"""
     {OPEN}
     assert(CharacterFrameTitleText.alpha == 0)

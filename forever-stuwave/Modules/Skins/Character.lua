@@ -329,16 +329,27 @@ local function SkinSlots()
 end
 
 
+-- Pins `fs` to `color`: one SetTextColor post-hook per font string, ever (S.held holds the colour it keeps). A second call only
+-- changes the kept colour and writes it, so a pane met again on every open or row select does not stack hooks (it did: each open
+-- added a hook, and every SetTextColor ran all of them, so the window got slower to open each time).
 local function PinColor(fs, color)
-    if S.held[fs] or type(fs.SetTextColor) ~= "function" then return end
-    S.held[fs] = true
+    if type(fs) ~= "table" or type(fs.SetTextColor) ~= "function" then return end
+    local pin = S.held[fs]
+    if pin then
+        pin.color = color
+        pcall(fs.SetTextColor, fs, color[1], color[2], color[3], 1)
+        return
+    end
+    pin = { color = color }
+    S.held[fs] = pin
     fs:SetTextColor(color[1], color[2], color[3], 1)
     if type(hooksecurefunc) ~= "function" then return end
     local busy = false
     pcall(hooksecurefunc, fs, "SetTextColor", function(self, r, g, b)
-        if busy or (r == color[1] and g == color[2] and b == color[3]) then return end
+        local c = pin.color
+        if busy or (r == c[1] and g == c[2] and b == c[3]) then return end
         busy = true
-        pcall(self.SetTextColor, self, color[1], color[2], color[3], 1)
+        pcall(self.SetTextColor, self, c[1], c[2], c[3], 1)
         busy = false
     end)
 end
@@ -580,7 +591,6 @@ local function DetailTexts(detail)
     Char.RestyleFonts(detail)
     if type(detail.Title) == "table" then
         Kit.RestyleLabel(detail.Title, detail, 13, C.cyan)
-        S.held[detail.Title] = nil
         PinColor(detail.Title, C.cyan)
     end
     if type(detail.Subtitle) == "table" then Kit.RestyleLabel(detail.Subtitle, detail, 12, C.text) end
@@ -1043,7 +1053,6 @@ local function StatRow(row)
         rule:ClearAllPoints()
         if title then
             Kit.RestyleLabel(title, row, STAT.TITLE_PX, C.violet)
-            S.held[title] = nil
             PinColor(title, C.violet)
             if title.SetJustifyH then pcall(title.SetJustifyH, title, "LEFT") end
             pcall(title.ClearAllPoints, title)
