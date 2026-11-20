@@ -164,7 +164,7 @@ SUBS = {}
 FS = {
     AurasReadable = function() return not W.combat end,
     IsSecret = function(v) return v == SECRET end,
-    Gunsight = { G = { AREA = { x = 1213, w = 202, h = 128, upperY = 500, lowerY = 632 }, TR = { x0 = 1164, x1 = 1194 } },
+    Gunsight = { G = { AREA = { x = 1213, w = 202, h = 128, upperY = 500, lowerY = 632 } },
         ui = function(px) return px * __scale end, Point = function(f, p, x, y) f.pt = { p, "root", "CENTER", x, y } end },
     GunsightAreas = Areas,
     Theme = { ApplyMono = function(fs, size, color) fs.size = size; fs.tcolor = color; fs.monoSet = true end },
@@ -261,11 +261,11 @@ case("registers_the_class_module_for_druids_only", """
     NoLog()
 """)
 
-case("the_lower_area_draws_it_bigger_clear_of_the_tape_and_the_upper_area_keeps_it_inside", """
+case("the_lower_area_draws_it_bigger_left_aligned_and_the_upper_area_keeps_it_inside", """
     local m = Build()
     SPEC.seat({ x = 1213, y = 632, w = 202, h = 128 })
     assert(m.w == 150 * 2 and m.h == 86 * 2, "lower: twice the sprite px: " .. tostring(m.w))
-    assert(m.pt[4] == 1200 and m.pt[5] == 637, "lower: as centred as the tape allows (6 px right of it): " .. tostring(m.pt[4]))
+    assert(m.pt[4] == 1213 and m.pt[5] == 637, "lower: on the area's left edge, clear of the tape: " .. tostring(m.pt[4]))
     SPEC.seat({ x = 1213, y = 500, w = 202, h = 128 })
     assert(m.w == 150 * 1.25 and m.h == 86 * 1.25, "upper: the class modules' size: " .. tostring(m.w))
     assert(m.w <= 202 and m.h + 5 <= 128, "upper: inside the area")

@@ -77,8 +77,7 @@ local C = {
     SPX = 1.25,                        -- image px per sprite px, set by SeatModule (SPX_FIT or SPX_BIG)
     SPX_FIT = 1.25,                    -- inside the area (the other class modules' size); the upper area, with the lower one under it
     SPX_BIG = 2,                       -- the lower area: nothing sits under it or right of it, so the module is drawn bigger,
-                                       -- at whole px, centred on the area where the tape allows and hanging below it
-    TAPE_GAP = 6,                      -- image px kept between the target tape and the big module's left edge
+                                       -- at whole px, left aligned on the area (clear of the target tape) and hanging below it
     SW = 150, SH = 86,
     DROP = 5,                          -- image px the module sits below the area's top
     TICK = 1 / 30,
@@ -1176,9 +1175,7 @@ local function SeatModule(rect)
     local lower = type(G) == "table" and type(G.AREA) == "table" and y == G.AREA.lowerY
     C.SPX = lower and C.SPX_BIG or C.SPX_FIT
     if lower then
-        -- centred on the area like the small size (the wreath sits mid canvas), but kept clear of the target tape on its left
-        local clear = type(G.TR) == "table" and type(G.TR.x1) == "number" and G.TR.x1 + C.TAPE_GAP or x
-        OX, OY = math.max(x + (w - C.SW * C.SPX) / 2, clear), y + C.DROP
+        OX, OY = x, y + C.DROP
     else
         OX, OY = x + (w - C.SW * C.SPX) / 2, y + C.DROP
     end
