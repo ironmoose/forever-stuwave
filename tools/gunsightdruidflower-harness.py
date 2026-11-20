@@ -1462,8 +1462,8 @@ def rose_checks(rects, atlas, layer, tile) -> list[str]:
     # the centroid of the opaque px, by hand (a px's centre is its index + 0.5)
     pts = [(int(x) + 0.5, int(y) + 0.5) for x, y in zip(xs, ys)]
     cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
-    if not (abs(cx - 22.92) < 0.01 and abs(cy - 20.44) < 0.01):
-        errs.append(f"the rose's centroid moved: {cx:.2f}, {cy:.2f} (22.92, 20.44)")
+    if not (abs(cx - 22.92) < 0.01 and abs(cy - 18.90) < 0.01):
+        errs.append(f"the rose's centroid moved: {cx:.2f}, {cy:.2f} (22.92, 18.90): the bulb alone, its crescent is the base's")
     # the grey of a HoT that is not up
     g, _ = tile("rose_g")
     if not ((g[..., 3] > 0) == solid).all() or not (g[..., 0] == g[..., 1]).all() or not (g[..., 1] == g[..., 2]).all():
