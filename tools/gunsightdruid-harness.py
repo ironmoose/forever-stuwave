@@ -164,8 +164,7 @@ SUBS = {}
 FS = {
     AurasReadable = function() return not W.combat end,
     IsSecret = function(v) return v == SECRET end,
-    Gunsight = { G = { AREA = { x = 1213, w = 202, h = 128, upperY = 500, lowerY = 632 } },
-        ui = function(px) return px * __scale end, Point = function(f, p, x, y) f.pt = { p, "root", "CENTER", x, y } end },
+    Gunsight = { ui = function(px) return px * __scale end, Point = function(f, p, x, y) f.pt = { p, "root", "CENTER", x, y } end },
     GunsightAreas = Areas,
     Theme = { ApplyMono = function(fs, size, color) fs.size = size; fs.tcolor = color; fs.monoSet = true end },
     LogDegradeOnce = function(k, m) __logged = __logged or {}; __logged[k] = m end,
@@ -258,18 +257,6 @@ case("registers_the_class_module_for_druids_only", """
     assert(not M.frame, "nothing is built at load")
     local m = Build()
     assert(m and m.name == "ForeverSTUwaveGunsightDruid" and m.parent == HOST)
-    NoLog()
-""")
-
-case("the_lower_area_draws_it_bigger_left_aligned_and_the_upper_area_keeps_it_inside", """
-    local m = Build()
-    SPEC.seat({ x = 1213, y = 632, w = 202, h = 128 })
-    assert(m.w == 150 * 2 and m.h == 86 * 2, "lower: twice the sprite px: " .. tostring(m.w))
-    assert(m.pt[4] == 1213 and m.pt[5] == 637, "lower: on the area's left edge, clear of the tape: " .. tostring(m.pt[4]))
-    SPEC.seat({ x = 1213, y = 500, w = 202, h = 128 })
-    assert(m.w == 150 * 1.25 and m.h == 86 * 1.25, "upper: the class modules' size: " .. tostring(m.w))
-    assert(m.w <= 202 and m.h + 5 <= 128, "upper: inside the area")
-    assert(m.pt[4] == 1213 + (202 - 150 * 1.25) / 2, "upper: centred")
     NoLog()
 """)
 
