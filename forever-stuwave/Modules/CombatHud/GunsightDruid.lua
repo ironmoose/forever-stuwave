@@ -74,7 +74,10 @@ end
 local function Mix(a, b, k) return { a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k, a[3] + (b[3] - a[3]) * k } end
 
 local C = {
-    SPX = 1.25,                        -- image px per sprite px (the other class modules')
+    SPX = 1.25,                        -- image px per sprite px, set by SeatModule (SPX_FIT or SPX_BIG)
+    SPX_FIT = 1.25,                    -- inside the area (the other class modules' size); the upper area, with the lower one under it
+    SPX_BIG = 2,                       -- the lower area: nothing sits under it or right of it, so the module is drawn bigger,
+                                       -- at whole px, left aligned on the area (clear of the target tape) and hanging below it
     SW = 150, SH = 86,
     DROP = 5,                          -- image px the module sits below the area's top
     TICK = 1 / 30,
@@ -1168,7 +1171,14 @@ local function SeatModule(rect)
     if type(rect) ~= "table" then return end
     local x, y, w = rect.x, rect.y, rect.w
     if type(x) ~= "number" or type(y) ~= "number" or type(w) ~= "number" then return end
-    OX, OY = x + (w - C.SW * C.SPX) / 2, y + C.DROP
+    local G = Gunsight.G
+    local lower = type(G) == "table" and type(G.AREA) == "table" and y == G.AREA.lowerY
+    C.SPX = lower and C.SPX_BIG or C.SPX_FIT
+    if lower then
+        OX, OY = x, y + C.DROP
+    else
+        OX, OY = x + (w - C.SW * C.SPX) / 2, y + C.DROP
+    end
     if mod then
         SeatAll()
         SeatForms()
