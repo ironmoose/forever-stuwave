@@ -137,14 +137,28 @@ for i = 0, N_FIRE - 1 do
     FIRE_H[i] = Hash(i * 7)
     FIRE_X[i] = (Hash(i * 13) - 0.5) * 40
 end
-local N_WISP = 10
+local N_WISP = 18
 local WISP_H, WISP_X = {}, {}
 for i = 0, N_WISP - 1 do
     WISP_H[i] = Hash(i * 5 + 3)
     WISP_X[i] = (Hash(i * 11 + 1) - 0.5) * 34
 end
+-- the summon, binding and reaping effects' tables, in one upvalue (Paint is near Lua's 60 upvalue cap)
+local FX = { N_MOTE = 30, MOX = {}, MOY = {}, N_RIPPLE = 28, N_VORTEX = 40, RCOS = {}, RSIN = {}, VA = {} }
+for i = 0, FX.N_MOTE - 1 do
+    -- each soul starts somewhere on a ring round the book, kept inside the canvas
+    local a = ((i * 7) % FX.N_MOTE) / FX.N_MOTE * 6.283 + Hash(i * 3 + 7) * 0.4   -- 7 steps round: neighbours in time land apart
+    local d = 30 + Hash(i * 17 + 2) * 8
+    FX.MOX[i], FX.MOY[i] = cos(a) * d, sin(a) * d
+end
+local N_SPARK = 24
+for m = 1, FX.N_RIPPLE do
+    local a = (m - 1) / FX.N_RIPPLE * 6.283
+    FX.RCOS[m], FX.RSIN[m] = cos(a), sin(a)
+end
+for i = 0, FX.N_VORTEX - 1 do FX.VA[i] = i * 2.39996 end   -- the golden angle: the motes never line up
 local SPARK_X = {}
-for i = 0, 9 do SPARK_X[i] = (Hash(i) - 0.5) * 40 end
+for i = 0, N_SPARK - 1 do SPARK_X[i] = (Hash(i) - 0.5) * 44 end
 local BURST_COS, BURST_SIN = {}, {}
 for m = 1, 24 do
     local a = (m - 1) / 24 * 6.283
@@ -346,11 +360,15 @@ local function Build()
     P.drops = {}
     for i = 1, 3 do P.drops[i] = Spr(top, "OVERLAY", 3) end
     P.motes = {}
-    for i = 1, 9 do P.motes[i] = Dot(top, "OVERLAY", 3) end
+    for i = 1, FX.N_MOTE do P.motes[i] = Dot(top, "OVERLAY", 3) end
     P.wisps = {}
     for i = 1, N_WISP do P.wisps[i] = Dot(top, "OVERLAY", 3) end
+    P.ripA, P.ripB = {}, {}
+    for m = 1, FX.N_RIPPLE do P.ripA[m] = Dot(art, "BACKGROUND", 3); P.ripB[m] = Dot(art, "BACKGROUND", 3) end
+    P.vortex = {}
+    for i = 1, FX.N_VORTEX do P.vortex[i] = Dot(top, "OVERLAY", 4) end
     P.sparks = {}
-    for i = 1, 10 do P.sparks[i] = Dot(top, "OVERLAY", 3) end
+    for i = 1, N_SPARK do P.sparks[i] = Dot(top, "OVERLAY", 3) end
     P.burst = {}
     for m = 1, 24 do P.burst[m] = Dot(top, "OVERLAY", 6) end
     -- the soul crystals (art frame) and their events (top frame)
@@ -535,12 +553,16 @@ local function Paint(now)
 
     -- halo, shadow, rune ring
     local hcol = ccol or (pet == "alive" and dcol or K.muted)
+    if cue == "binding" then hcol = K.fel end
     if unknown and pet == "unknown" then hcol = K.muted end
     local breath = R and 0.8 or (0.7 + 0.3 * sin(now * 1.6))
     Cell(P.halo, "halo", BCX, BCY, hcol, (cue and 0.8 or 0.45) * breath * (pet == "unknown" and 0.3 or 1))
     Cell(P.shadow, "shadow", BCX, BY + Art.BOOK_H + 2, K.pure, 1)
     if cue == "binding" then
         Cell(P.ring, RING[live and floor(now * 8) % Art.RING_FRAMES or 0], BCX, BY + Art.BOOK_H + 1, K.fel, 0.9)
+    elseif cue == "summon" then
+        -- the circle waits, cold, for the Summon
+        Cell(P.ring, RING[0], BCX, BY + Art.BOOK_H + 1, warn, R and 0.5 or (0.3 + 0.25 * sin(now * 3)))
     else
         Off(P.ring)
     end
@@ -555,7 +577,11 @@ local function Paint(now)
     elseif pet == "none" then
         Cell(P.dim, "book_dark", bx, by, K.pure, 1)
         PaintBar(false)
-        Cell(P.rim, "book_rim", bx, by, warn, cue == "summon" and pulse or 0.4)
+        if cue == "binding" then
+            Cell(P.rim, "book_rim", bx, by, K.fel, R and 0.9 or (0.6 + 0.4 * sin(now * 14)))
+        else
+            Cell(P.rim, "book_rim", bx, by, warn, cue == "summon" and pulse or 0.4)
+        end
         SetLine(P.unknownQ, nil, 0, 0, K.muted, 0)
     else
         Cell(P.dim, "book_grey", bx, by, K.pure, 1)
@@ -565,6 +591,8 @@ local function Paint(now)
     end
     if live and cue == "bolt" then
         Cell(P.flash, "book_white", bx, by, K.bolt, 0.25 + 0.15 * sin(now * 20))
+    elseif live and cue == "binding" then
+        Cell(P.flash, "book_white", bx, by, K.fel, 0.18 + 0.12 * sin(now * 9))
     else
         Off(P.flash)
     end
@@ -609,11 +637,15 @@ local function Paint(now)
     end
     if live and cue == "reap" then
         local tx, ty = bx + Art.GEM_X, by + Art.GEM_Y
-        for i = 0, 8 do
-            local k = (now * 0.8 + i / 9) % 1
+        for i = 0, FX.N_MOTE - 1 do
+            local k = (now * 0.8 + i / FX.N_MOTE) % 1
             local s = sin(k * pi)
-            ShowDot(P.motes[i + 1], 80 + (tx - 80) * k + sin(k * 9 + i) * 4 * s, 8 + (ty - 8) * k + cos(k * 7 + i * 2) * 5 * s,
-                (i % 2 ~= 0) and K.white or K.violet, 0.35 + 0.65 * k)
+            local t = P.motes[i + 1]
+            local big = (k > 0.25 and k < 0.75 and i % 3 ~= 2) and 2 or 1
+            DotSize(t, big, big)
+            local ox, oy = tx + FX.MOX[i], ty + FX.MOY[i]
+            ShowDot(t, ox + (tx - ox) * k + sin(k * 9 + i) * 4 * s, oy + (ty - oy) * k + cos(k * 7 + i * 2) * 5 * s,
+                (i % 3 == 0) and K.white or (i % 3 == 1 and K.violet or K.bolt), 0.95 * min(1, k * 8, (1 - k) * 10))
         end
     else
         OffAll(P.motes)
@@ -631,9 +663,41 @@ local function Paint(now)
     else
         OffAll(P.wisps)
     end
+    -- SUMMON: the book calls, rings of light pulse out from it
+    if live and cue == "summon" then
+        for ring = 0, 1 do
+            local k = (now * 0.8 + ring * 0.5) % 1
+            local rx, ry = 25 + k * 9, 33 + k * 8
+            local a = (1 - k) * 0.9
+            local big = k < 0.5 and 2 or 1
+            local dots = ring == 0 and P.ripA or P.ripB
+            for m = 1, FX.N_RIPPLE do
+                local t = dots[m]
+                DotSize(t, big, big)
+                ShowDot(t, BCX + FX.RCOS[m] * rx, BCY + FX.RSIN[m] * ry, warn, a)
+            end
+        end
+    else
+        OffAll(P.ripA); OffAll(P.ripB)
+    end
+    -- BINDING: a fel vortex winds into the cover gem
     if live and cue == "binding" then
-        for i = 0, 9 do
-            local k = (now * 0.9 + i / 10) % 1
+        local gx, gy = bx + Art.GEM_X, by + Art.GEM_Y
+        for i = 0, FX.N_VORTEX - 1 do
+            local k = (now * 0.75 + i / FX.N_VORTEX) % 1
+            local rr = 36 * (1 - k)
+            local a = FX.VA[i] + now * 2.2 + k * 5
+            local t = P.vortex[i + 1]
+            local big = k < 0.55 and 2 or 1
+            DotSize(t, big, big)
+            ShowDot(t, gx + cos(a) * rr, gy + sin(a) * rr * 0.8, (i % 3 == 0) and K.white or K.fel, sin(k * pi) * 0.95)
+        end
+    else
+        OffAll(P.vortex)
+    end
+    if live and cue == "binding" then
+        for i = 0, N_SPARK - 1 do
+            local k = (now * 0.9 + i / N_SPARK) % 1
             ShowDot(P.sparks[i + 1], BCX + SPARK_X[i], BY + Art.BOOK_H - k * 30, (i % 2 ~= 0) and K.fel or K.white, 1 - k)
         end
     else
