@@ -81,6 +81,7 @@ local C = {
     LACERATE_LEN = 15,
     WARN_S = 3,                        -- amber for the last seconds of a drain
     SPARKS = 8, STREAK = 14,
+    TH_LABEL_PX = 10,                  -- the Thorns label's font size in sprite px (player, 2026-11-19: the glyphs were too small)
     TH_HALO = 36, TH_FLIES = 7, TH_RING = 120, TH_SPARKS = 10, TH_GLYPHS = 7,   -- the Thorns px pools (the page's counts)
     TH_LOW = 60,                       -- the last minute: amber
     TH_CAST = 1.3,                     -- s of the cast ring after our own Thorns
@@ -477,6 +478,10 @@ local function Build()
         P.thGlyph[n] = SprT("OVERLAY", 6, top)
         P.thGlyph[n].fsGlyph = true
     end
+    -- the label under the wreath is mono text (the baked 3 x 5 glyphs read too small in game); the glyph sprites stay built
+    -- and hidden
+    P.thLabel = Text("thorns", "CENTER", C.TH_LABEL_PX)
+    P.thLabel.fsGlyph = true
 end
 
 -------------------------------------------------------------------------------
@@ -601,13 +606,59 @@ end
 
 local function IsCaster(kind) return kind == "moon" or kind == "tree" end
 
--- hide every group the look does not use (the caster has no eyes, so it hides the common group too)
+-- FORM LOOKS. The Wildshape Eyes are retired (decision 2026-11-16: one layout per form, no eyes). Bear and Cat each draw from
+-- their own file, registered with `Druid.RegisterForm(kind, spec)` after this one loads: spec = { build(parent) -> frame,
+-- seat(ox, oy, spx), paint(now, data), show(), hide() }. `parent` is the module frame; `ox, oy` the canvas origin in image px
+-- from the host (`Gunsight.Point`), `spx` image px per sprite px. Only the form on show is painted; the others are hidden. A form
+-- with no registered look (travel, aquatic, flight, or a look that failed to build) draws nothing.
+Druid.forms = Druid.forms or {}
+local formFrames = {}
+
+local function BuildForm(kind)
+    local spec = Druid.forms[kind]
+    if not (spec and mod) or formFrames[kind] ~= nil then return end
+    local ok, f = pcall(spec.build, mod)
+    if not ok or not f then
+        LogOnce("form-" .. kind, ok and "build returned nothing" or f)
+        formFrames[kind] = false
+        return
+    end
+    formFrames[kind] = f
+    pcall(spec.seat, OX, OY, C.SPX)
+    pcall(spec.hide)
+end
+
+local function SeatForms()
+    for kind, f in pairs(formFrames) do
+        if f then
+            local ok, err = pcall(Druid.forms[kind].seat, OX, OY, C.SPX)
+            if not ok then LogOnce("form-seat-" .. kind, err) end
+        end
+    end
+end
+
+function Druid.RegisterForm(kind, spec)
+    if type(kind) ~= "string" or type(spec) ~= "table" then return false end
+    Druid.forms[kind] = spec
+    if mod then BuildForm(kind) end
+    return true
+end
+
+-- hide every group the look does not use (the caster has no eyes, so it hides the common group too); a form shows only its
+-- own registered look
 local function Switch(kind)
     shownKind = kind
-    local keep = IsCaster(kind) and "thorns" or kind
+    local keep = IsCaster(kind) and "thorns" or nil
     for name, list in pairs(groups) do
-        if name ~= keep and (name ~= "common" or keep == "thorns") then
+        if name ~= keep then
             for i = 1, #list do Off(list[i]) end
+        end
+    end
+    for k, f in pairs(formFrames) do
+        if f then
+            local fn = Druid.forms[k][k == kind and "show" or "hide"]
+            local ok, err = pcall(fn)
+            if not ok then LogOnce("form-switch-" .. k, err) end
         end
     end
 end
@@ -838,18 +889,28 @@ local function Glyph(i, name, x, c, a)
 end
 
 -- the time under the wreath: "10M" ... "1M", then "59S" ... "1S" in amber; "~" before it for a ledger time
+-- every label string built once, so a paint allocates nothing: LABELS[est][unit][n]
+local LABELS = { [false] = { M = {}, S = {} }, [true] = { M = {}, S = {} } }
+for _, e in ipairs({ false, true }) do
+    for n = 0, 99 do
+        LABELS[e].M[n] = (e and "~" or "") .. n .. "M"
+        LABELS[e].S[n] = (e and "~" or "") .. n .. "S"
+    end
+end
+
+local function Label(word, c, a)
+    for k = 1, C.TH_GLYPHS do Off(P.thGlyph[k]) end
+    On(P.thLabel)
+    TextWord(P.thLabel, word)
+    TextColor(P.thLabel, c, a)
+    TextAt(P.thLabel, TH.CX, TH.LABEL_Y + C.TH_LABEL_PX / 2)
+end
+
 local function ThornsLabel(left, est)
     local low = left < C.TH_LOW
     local n = low and math.ceil(left) or math.ceil(left / 60)
-    local digits = n >= 10 and 2 or 1
-    local x = Round(TH.CX - ((digits + 1) * 4 - 1) / 2)
-    local c = low and K.amber or K.muted
-    local i = 1
-    if est then Glyph(i, TN.glyph.tilde, x - 4, c, 1); i = i + 1 end
-    if digits == 2 then Glyph(i, TN.glyph[floor(n / 10) % 10], x, c, 1); i = i + 1; x = x + 4 end
-    Glyph(i, TN.glyph[n % 10], x, c, 1); i = i + 1; x = x + 4
-    Glyph(i, low and TN.glyph.S or TN.glyph.M, x, c, 1)
-    for k = i + 1, C.TH_GLYPHS do Off(P.thGlyph[k]) end
+    if n > 99 then n = 99 elseif n < 0 then n = 0 end
+    Label(LABELS[est and true or false][low and "S" or "M"][n], low and K.amber or K.muted, 1)
 end
 
 -- everything of the wreath off; `keepGone` keeps the reminder rings and the label for the gone look to paint
@@ -872,9 +933,7 @@ local function PaintThorns(now)
             ThornsHide(true)
             Sprite(P.thGone, "th_gone", 0, 0, K.pure, 1, false)
             local a = red and 0.7 or (0.55 + 0.35 * sin(now * 3))
-            local x = Round(TH.CX - (6 * 4 - 1) / 2)
-            for i = 1, 6 do Glyph(i, TN.word[i], x + (i - 1) * 4, K.amber, a) end
-            Off(P.thGlyph[7])
+            Label("THORNS", K.amber, a)
         else
             ThornsHide(false)
         end
@@ -1012,12 +1071,7 @@ local function Paint(now)
     if kind ~= shownKind then Switch(kind) end
     ComputeCue(now)
     if IsCaster(kind) then PaintThorns(now) return end
-    PaintCommon(now)
-    if kind == "cat" then PaintCat(now)
-    elseif kind == "bear" then PaintBear(now)
-    else
-        ShowDot(P.travelLine, G.MOON_X, G.DRAIN_Y + 3, 92, 1, K.line, 0.6)
-    end
+    if formFrames[kind] then Druid.forms[kind].paint(now, D) end
 end
 Druid.Paint = Paint
 
@@ -1110,6 +1164,7 @@ local function SeatModule(rect)
     OX, OY = x + (w - C.SW * C.SPX) / 2, y + C.DROP
     if mod then
         SeatAll()
+        SeatForms()
         if subscribed then SafePaint(GetTime()) end
     end
 end
@@ -1140,6 +1195,7 @@ local function BuildModule(host)
         return nil
     end
     SeatAll()
+    for kind in pairs(Druid.forms) do BuildForm(kind) end
     Druid.frame, Druid.parts = mod, P
     if State.Start then State.Start() end            -- the ledger listens from here on and never stops
     pcall(ReadAll)

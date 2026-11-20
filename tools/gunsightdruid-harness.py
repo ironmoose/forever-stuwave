@@ -222,6 +222,11 @@ function Sent(target) fire("UNIT_SPELLCAST_SENT", "player", target, "guid", 467)
 function Aura() fire("UNIT_AURA", "player") end
 -- what the wreath shows: the glyph names left to right, the dry and live vine wedges, the shown leaves
 function Label()
+    local l = P().thLabel
+    if l and l.fsOn then return (l.fsWord or ""):gsub("~", "tilde") end
+    return ""
+end
+function OldLabel()
     local out = {}
     for _, g in ipairs(P().thGlyph) do if g.fsOn then out[#out + 1] = g.fsName:gsub("th_glyph_", "") end end
     return table.concat(out)
@@ -235,7 +240,7 @@ function Wedges()
 end
 function AnyThorns()
     for _, t in ipairs(P().thVine) do if t.fsOn then return true end end
-    return P().thGone.fsOn or P().thGlyph[1].fsOn
+    return P().thGone.fsOn or P().thGlyph[1].fsOn or P().thLabel.fsOn
 end
 function Lit(list, key) local n = 0 for _, m in ipairs(list) do if m[key] and m[key].fsOn then n = n + 1 end end return n end
 """
@@ -433,7 +438,7 @@ case("thorns_last_minute_is_amber", """
     Start("caster")
     Aura()
     Paint(1000)
-    assert(Label() == "40S" and P().thGlyph[1].color[1] > 0.9 and P().thGlyph[1].color[3] < 0.4, "seconds, in amber: " .. Label())
+    assert(Label() == "40S" and P().thLabel.fsCol[1] > 0.9 and P().thLabel.fsCol[3] < 0.4, "seconds, in amber: " .. Label())
     assert(P().thLeaf[10].fsName:match("^th_leaf_9_amber_"), "the last leaf pulses amber: " .. tostring(P().thLeaf[10].fsName))
     for i = 1, 9 do assert(not P().thLeaf[i].fsOn, "leaf " .. i .. " fell") end
     assert(P().thBead.color[1] > 0.9 and P().thBead.color[3] < 0.4, "the bead is amber")
@@ -457,27 +462,6 @@ case("a_falling_leaf_drops_for_two_and_a_half_seconds", """
     NoLog()
 """)
 
-case("the_cat_gashes_and_the_flare_are_fed_the_count", """
-    Start("cat")
-    assert(vis(P().slash[1]) and P().slashBar[1].shown and P().flareBar[5].shown)
-    for i = 1, 5 do
-        assert(P().slashBar[i].lo == i - 1 and P().slashBar[i].hi == i, "gash " .. i .. " is a bar from " .. (i - 1) .. " to " .. i)
-        assert(P().flareBar[i].lo == 4 and P().flareBar[i].hi == 5, "the flare is full only at five")
-    end
-    W.power[4] = 3; W.power[3] = 62
-    fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
-    for i = 1, 5 do assert(P().slashBar[i].value == 3 and P().flareBar[i].value == 3) end
-    assert(P().energyBar.value == 62 and P().energyNum.text == "62", "the energy bar and its number")
-    assert(Near(P().energyBar.hi, 100 * Art.GEOM.FILL_BOX_W / Art.GEOM.FILL_W), "the fill's maximum is scaled to the art")
-    local w = Cue()
-    assert(w == "CAT", "three points: nothing to do")
-    W.power[4] = 5
-    fire("UNIT_POWER_FREQUENT", "player")
-    w = Cue()
-    assert(w == "FINISH" and M.cue.hot, "five points: FINISH and hot eyes")
-    NoLog()
-""")
-
 case("a_secret_count_reaches_only_the_bars", """
     Start("cat")
     W.secretPower = true
@@ -491,119 +475,6 @@ case("a_secret_count_reaches_only_the_bars", """
     NoLog()
 """)
 
-case("shift_needs_a_plain_low_energy_and_a_ready_chip", """
-    W.known["Shifting Power"] = true
-    W.cd["Shifting Power"] = false
-    Start("cat")
-    W.power[4] = 1; W.power[3] = 80
-    fire("UNIT_POWER_FREQUENT", "player")
-    local w = Cue()
-    assert(w == "CAT" and P().chipSp.status == "ready", "ready at high energy: still CAT")
-    W.power[3] = 30
-    fire("UNIT_POWER_FREQUENT", "player")
-    w = Cue()
-    assert(w == "SHIFT" and M.cue.hot, "ready and under the notch: SHIFT")
-    W.cd["Shifting Power"] = true
-    CooldownChanged()
-    w = Cue()
-    assert(w == "CAT" and P().chipSp.status == "cool", "cooling")
-    assert(P().chipSp.bar.timer ~= nil, "the engine's duration object drives the fill")
-    -- no timer API: a ledger fraction
-    NO_TIMER = true
-    P().chipSp.status = nil
-    CooldownChanged()
-    Cast("Shifting Power", 1000)
-    Paint(1004)
-    assert(P().chipSp.bar.value and Near(P().chipSp.bar.value, 0.5, 0.06), "a ledger fraction of the 8 s cooldown: " .. tostring(P().chipSp.bar.value))
-    NO_TIMER = false
-    W.known["Shifting Power"] = false
-    CooldownChanged()
-    Paint(1005)
-    assert(P().chipSp.status == "none", "not learned")
-    assert(not (P().chipSp.ring.fsOn or P().chipSp.dark.fsOn or P().chipSp.bar.fsOn), "an unlearned chip is hidden")
-    assert(not P().notch.fsOn and not P().zone.fsOn, "and so is its notch on the energy bar")
-    NoLog()
-""")
-
-case("a_finisher_throws_the_streak", """
-    Start("cat")
-    Cast("Rip", 1000)
-    Paint(1000.2)
-    local n = 0
-    for _, d in ipairs(P().streak) do if d.fsOn then n = n + 1 end end
-    assert(n > 3, "the rake streak is drawn: " .. n)
-    Paint(1001)
-    n = 0
-    for _, d in ipairs(P().streak) do if d.fsOn then n = n + 1 end end
-    assert(n == 0, "and gone")
-    NoLog()
-""")
-
-case("the_bear_rage_bar_ticks_and_cue_priority", """
-    W.known["Primal Bite"], W.known["Lacerate"], W.known["Maul"] = true, true, true
-    W.cd["Primal Bite"] = true
-    Start("bear")
-    W.power[1] = 40
-    fire("UNIT_POWER_FREQUENT", "player")
-    assert(P().rageBar.value == 40 and P().rageNum.text == "40")
-    for i = 1, 3 do assert(P().rageTicks[i].fsOn and P().rageMarks[i].fsOn and P().letters[i].fsOn) end
-    local w = Cue()
-    assert(w == "LACERATE" and not M.cue.hot, "no stacks yet: build them, calmly")
-    for i = 1, 5 do Cast("Lacerate", 1000 + i) end
-    Paint(1006)
-    assert(Lit(P().pipLit and { { l = P().pipLit[1] }, { l = P().pipLit[2] }, { l = P().pipLit[3] }, { l = P().pipLit[4] }, { l = P().pipLit[5] } }, "l") == 5, "five pips")
-    w = Cue()
-    assert(w == "BEAR", "five fresh stacks, Primal Bite cooling: BEAR")
-    W.cd["Primal Bite"] = false
-    CooldownChanged()
-    w = Cue()
-    assert(w == "BITE" and M.cue.hot, "Primal Bite ready: BITE")
-    Paint(1000 + 5 + 13)
-    w = Cue()
-    assert(w == "LACERATE" and M.cue.hot and M.cue.blink, "five stacks about to fall: LACERATE beats BITE")
-    Paint(1005 + 16)
-    local s = St.Lacerate(__now)
-    assert(s == 0, "the stacks fall after 15 s")
-    -- another target: the ledger does not follow
-    Cast("Lacerate", 1100); Cast("Lacerate", 1101)
-    assert(St.Lacerate(1101.5) == 2)
-    W.name = "Wolf"
-    assert(St.Lacerate(1101.5) == 0, "another mob has its own stacks")
-    NoLog()
-""")
-
-case("the_rage_number_is_plain_only_for_the_letters", """
-    W.known["Lacerate"], W.known["Maul"] = true, true
-    Start("bear")
-    W.power[1] = 18
-    fire("UNIT_POWER_FREQUENT", "player")
-    Paint(1000)
-    assert(P().letters[1].color[1] > 0.9, "Lacerate is affordable: its letter is bright")
-    assert(P().letters[3].color[1] < 0.7, "the Maul pool is not: its letter is muted")
-    W.secretPower = true
-    fire("UNIT_POWER_FREQUENT", "player")
-    Paint(1001)
-    assert(M.data.rageNum == nil and P().rageBar.value == SECRET)
-    NoLog()
-""")
-
-case("a_new_bear_sees_only_what_it_has_learned", """
-    W.known["Primal Bite"], W.known["Lacerate"], W.known["Maul"] = false, false, true
-    Start("bear")
-    W.power[1] = 40
-    fire("UNIT_POWER_FREQUENT", "player")
-    Paint(1000)
-    assert(P().rageBar.fsOn ~= false and P().rageNum.fsOn, "the rage bar and number stay")
-    assert(not P().rageTicks[1].fsOn and not P().letters[1].fsOn, "no Lacerate mark")
-    assert(not P().rageTicks[2].fsOn and not P().letters[2].fsOn, "no Primal Bite mark")
-    assert(P().rageTicks[3].fsOn and P().letters[3].fsOn, "the Maul mark")
-    assert(not (P().chipPb.ring.fsOn or P().chipPb.dark.fsOn), "no Primal Bite chip")
-    for i = 1, 5 do assert(not P().pipDark[i].fsOn and not P().pipLit[i].fsOn, "no Lacerate pip " .. i) end
-    local w = Cue()
-    assert(w == "BEAR", "and never told to Lacerate: " .. tostring(w))
-    NoLog()
-""")
-
 case("every_value_secret_at_once_draws_without_an_error", """
     W.secretPower, W.secretName, W.secretLevel, W.secretCd, W.secretForm = true, true, true, true, true
     W.canAttack, W.canAssist = SECRET, SECRET
@@ -614,33 +485,6 @@ case("every_value_secret_at_once_draws_without_an_error", """
         CooldownChanged()
         Paint(1040)
     end
-    NoLog()
-""")
-
-case("travel_has_no_gauge", """
-    Start("travel")
-    Paint(1005)
-    local w = Cue()
-    assert(w == "TRAVEL" and not M.cue.hot)
-    assert(not P().thVine[1].fsOn and not P().slash[1].fsOn and not P().rageTrack.fsOn and P().travelLine.fsOn)
-    assert(P().eye[1].fsName == "eye_moon_half", "the owl eyes are half shut")
-    NoLog()
-""")
-
-case("the_form_switch_shuts_the_eyes_flashes_and_sparks", """
-    Start("bear")
-    Paint(1002)
-    assert(P().eye[1].fsName == "eye_bear_open" or P().eye[1].fsName == "eye_bear_half")
-    __now = 1010
-    Form("cat")
-    Paint(1010.05)
-    assert(P().eye[1].fsName == "eye_cat_shut", "shut while the form changes: " .. tostring(P().eye[1].fsName))
-    assert(P().flash[1].fsOn and P().sparks[1].fsOn, "the flash and the ring of sparks")
-    Paint(1010.2)
-    assert(P().eye[1].fsName == "eye_cat_half")
-    Paint(1010.4)
-    assert(P().eye[1].fsName:match("eye_cat_") and not P().flash[1].fsOn and not P().sparks[1].fsOn, "then open as the new form")
-    assert(P().eye[2].flipped and not P().eye[1].flipped, "the right eye is the left one mirrored")
     NoLog()
 """)
 
@@ -673,13 +517,35 @@ case("reduced_motion_holds_still", """
     NoLog()
 """)
 
-case("a_rescale_rewrites_every_size", """
-    Start("cat")
-    local sizes = P().eye[1].w
+case("forms_draw_only_their_registered_look", """
+    -- the Wildshape Eyes are retired: a form with no look draws nothing of the old module
+    for _, k in ipairs({ "cat", "bear", "travel" }) do
+        Start(k)
+        for i = 0, 10 do Paint(1000 + i * 0.1) end
+        assert(not P().eye[1].fsOn and not P().cue.fsOn and not P().slash[1].fsOn and not P().rageTrack.fsOn,
+            k .. ": no eyes, cue or gauge")
+        assert(not P().thVine[1].fsOn and not P().thLabel.fsOn, k .. ": no caster wreath")
+    end
+    -- a registered look is built with the module, seated, shown only in its form and painted there
+    local calls = { build = 0, seat = 0, show = 0, hide = 0, paint = 0 }
+    local spec = {
+        build = function(parent) calls.build = calls.build + 1; return CreateFrame("Frame", nil, parent) end,
+        seat = function(ox, oy, spx) calls.seat = calls.seat + 1; calls.spx = spx end,
+        show = function() calls.show = calls.show + 1; calls.on = true end,
+        hide = function() calls.hide = calls.hide + 1; calls.on = false end,
+        paint = function(now, data) calls.paint = calls.paint + 1; calls.kind = data.kind end,
+    }
+    assert(M.RegisterForm("bear", spec), "registered")
+    assert(calls.build == 1 and calls.seat >= 1 and calls.spx == M.C.SPX, "built and seated at once on a built module")
+    Form("bear"); Paint(1100)
+    assert(calls.on == true and calls.paint >= 1 and calls.kind == "bear", "shown and painted in its form")
+    local painted = calls.paint
+    Form("cat"); Paint(1101)
+    assert(calls.on == false and calls.paint == painted, "hidden and not painted in another form")
     __scale = 2
+    local seats = calls.seat
     SPEC.seat({ x = 0, y = 0, w = 200, h = 128 })
-    assert(P().eye[1].w == sizes * 2, "the eye was resized: " .. tostring(P().eye[1].w) .. " vs " .. tostring(sizes))
-    assert(P().energyBar.w == M.C.SPX * 2 * Art.GEOM.FILL_BOX_W, "the bars follow")
+    assert(calls.seat > seats, "a rescale seats it again")
     NoLog()
 """)
 
@@ -786,7 +652,7 @@ check(isVisible(host), "a target shows the host")
 local G = FS.GunsightDruid
 check(G.frame and isVisible(G.frame), "the module is built and drawn under the host")
 check(onUpdateFrames() == 1, "ticking: " .. onUpdateFrames())
-check(isVisible(G.parts.eye[1]) and isVisible(G.parts.rageTrack), "the Bear's eyes and rage bar are drawn")
+check(not isVisible(G.parts.eye[1]) and not isVisible(G.parts.rageTrack), "the retired eyes and rage bar are not drawn in Bear form")
 TARGET.exists = false
 fire("PLAYER_TARGET_CHANGED")
 check(not isVisible(host) and not isVisible(G.frame) and not isVisible(G.parts.eye[1]) and not isVisible(G.parts.rageTrack),
@@ -794,7 +660,7 @@ check(not isVisible(host) and not isVisible(G.frame) and not isVisible(G.parts.e
 check(onUpdateFrames() == 0, "and stops the OnUpdate")
 TARGET.exists = true
 fire("PLAYER_TARGET_CHANGED")
-check(isVisible(host) and isVisible(G.parts.eye[1]), "a target brings it back")
+check(isVisible(host) and isVisible(G.frame), "a target brings it back")
 check(onUpdateFrames() == 1, "and the ticker with it")
 for k, v in pairs(DEGRADED) do error("degraded " .. k .. ": " .. tostring(v)) end
 """
