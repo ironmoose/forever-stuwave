@@ -30,6 +30,8 @@ Kit.LAYOUT_SCALE = 1
 local function Weak() return setmetatable({}, { __mode = "k" }) end
 
 local placed, fonts = Weak(), Weak()
+-- regions anchored to both corners of their host, `inset` physical pixels in (Kit.Inset); a later Kit.Place takes one over
+local insets = Weak()
 
 -------------------------------------------------------------------------------
 -- Small safe readers
@@ -107,6 +109,7 @@ end
 -- to w x h when given. `host` is the frame whose pixel scale rules (default `ref`). Recorded, so a change of pixel scale
 -- re-seats everything in one pass.
 function Kit.Place(obj, ref, x, y, w, h, point, relPoint, host)
+    insets[obj] = nil
     placed[obj] = {
         ref = ref, x = x, y = y, w = w, h = h, point = point or "TOPLEFT", relPoint = relPoint or "TOPLEFT",
         host = host or ref,
@@ -132,8 +135,27 @@ function Kit.OnReseat(fn)
     reseaters[#reseaters + 1] = fn
 end
 
+local function ApplyInset(obj)
+    local r = insets[obj]
+    if not r then return end
+    local d = r.inset * Kit.LAYOUT_SCALE / Kit.Ppu(r.host)
+    obj:ClearAllPoints()
+    obj:SetPoint("TOPLEFT", r.host, "TOPLEFT", d, -d)
+    obj:SetPoint("BOTTOMRIGHT", r.host, "BOTTOMRIGHT", -d, d)
+end
+
+-- Seats `obj` over the whole of `host`, `inset` physical pixels in on every side, anchored to the host's corners so it follows
+-- the host's size whatever it was when the skin ran. Recorded, so a change of pixel scale re-seats it.
+function Kit.Inset(obj, host, inset)
+    placed[obj] = nil
+    insets[obj] = { host = host, inset = inset or 0 }
+    ApplyInset(obj)
+    return obj
+end
+
 function Kit.Reseat()
     for obj in pairs(placed) do Apply(obj) end
+    for obj in pairs(insets) do ApplyInset(obj) end
     for fs, f in pairs(fonts) do Theme.ApplyMono(fs, f.px * Kit.LAYOUT_SCALE / Kit.Ppu(f.host), f.color) end
     for _, fn in ipairs(reseaters) do pcall(fn) end
 end
@@ -215,7 +237,9 @@ function Kit.Plate(host, c, w, h)
         local innerPath = Theme.Cut2ButtonSet(inner)
         plate.ring2 = Theme.AddSliceTexture(host, innerPath, { 1, 1, 1, 1 }, "BORDER", 1)
         Theme.ApplyNineSlice(plate.ring2, inner)
-        Kit.Place(plate.ring2, host, 1, 1, w - 2, h - 2)
+        -- one pixel in on the host's corners, never a size read at skin time: a host read before its final scale or size drew
+        -- this ring off the plate (the battleground invite keys' hover ring sat 178 x 33 on a 115 x 22 key)
+        Kit.Inset(plate.ring2, host, 1)
         plate.ring2:Hide()
     end
     return plate
