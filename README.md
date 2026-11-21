@@ -66,7 +66,7 @@ Copy the inner `forever-stuwave/` folder into `Interface/AddOns/`, or use the [d
 - **Stun alert and quest timers:** stuns, fears and silences snap onto the Gunsight with a countdown ring, and quest timers glow under the minimap.
 
 <p align="center">
-  <img src="docs/images/screenshots/02-gunsight.jpg" alt="The Gunsight in a fight" width="49%">
+  <img src="docs/images/screenshots/11-combat-priest.jpg" alt="The Gunsight on a Priest casting Smite" width="49%">
   <img src="docs/images/screenshots/05-action-bars.jpg" alt="Action bars with the quick keys, mana regen timer, Shaman buff tab and totem presets" width="49%">
 </p>
 
@@ -299,10 +299,9 @@ Each prompt can be turned off on the Gunsight HUD page.
 ## Screenshots
 
 <table>
-  <tr><td width="50%" align="center"><img src="docs/images/screenshots/03-gunsight-target-cast.jpg" alt="The Gunsight with the target's cast bar"><br><sub>The Gunsight with the target's cast bar</sub></td><td width="50%" align="center"><img src="docs/images/screenshots/06-chat-minimap.jpg" alt="Chat, minimap and buffs"><br><sub>Chat, minimap and buffs</sub></td></tr>
-  <tr><td width="50%" align="center"><img src="docs/images/screenshots/07-character.jpg" alt="The character window"><br><sub>The character window</sub></td><td width="50%" align="center"><img src="docs/images/screenshots/08-talents.jpg" alt="Talents with a moving scene behind each tree"><br><sub>Talents with a moving scene behind each tree</sub></td></tr>
-  <tr><td width="50%" align="center"><img src="docs/images/screenshots/09-combat-warrior.jpg" alt="A Warrior in a fight"><br><sub>A Warrior in a fight</sub></td><td width="50%" align="center"><img src="docs/images/screenshots/10-bags.jpg" alt="Bags"><br><sub>Bags</sub></td></tr>
-  <tr><td width="50%" align="center"><img src="docs/images/screenshots/11-combat-priest.jpg" alt="A Priest casting"><br><sub>A Priest casting</sub></td><td width="50%" align="center"><img src="docs/images/screenshots/12-fsconfig.jpg" alt="Settings (/fsconfig)"><br><sub>Settings (/fsconfig)</sub></td></tr>
+  <tr><td width="50%" align="center"><img src="docs/images/screenshots/06-chat-minimap.jpg" alt="Chat, minimap and buffs"><br><sub>Chat, minimap and buffs</sub></td><td width="50%" align="center"><img src="docs/images/screenshots/07-character.jpg" alt="The character window"><br><sub>The character window</sub></td></tr>
+  <tr><td width="50%" align="center"><img src="docs/images/screenshots/08-talents.jpg" alt="Talents with a moving scene behind each tree"><br><sub>Talents with a moving scene behind each tree</sub></td><td width="50%" align="center"><img src="docs/images/screenshots/09-combat-warrior.jpg" alt="A Warrior in a fight"><br><sub>A Warrior in a fight</sub></td></tr>
+  <tr><td width="50%" align="center"><img src="docs/images/screenshots/10-bags.jpg" alt="Bags"><br><sub>Bags</sub></td><td width="50%" align="center"><img src="docs/images/screenshots/12-fsconfig.jpg" alt="Settings (/fsconfig)"><br><sub>Settings (/fsconfig)</sub></td></tr>
 </table>
 
 ## Update
