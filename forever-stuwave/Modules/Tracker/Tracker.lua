@@ -680,8 +680,16 @@ MODULE_NAMES = {
 local DIAMOND_PX = 11
 local DIAMOND_X, LABEL_GAP = 9, 13 -- diamond from the panel's inner left edge (units), label after the diamond
 
+-- The quest module's sub-head also carries the count, "quests (12/40)", the same text the collapsed bar shows
+-- (playtest 2026-11-20: the open tracker never showed it). Other modules show their own name only.
 local function SetSubHeadText(skin, text)
-    skin.label:SetText(type(text) == "string" and text:lower() or "")
+    if text ~= nil then skin.stockText = text end
+    local name = type(skin.stockText) == "string" and skin.stockText:lower() or ""
+    if skin.quests and name ~= "" then
+        local ok, n, max = pcall(QuestCount)
+        if ok and n then name = max and ("%s (%d/%d)"):format(name, n, max) or ("%s (%d)"):format(name, n) end
+    end
+    skin.label:SetText(name)
 end
 
 local function SkinSubHead(header)
@@ -705,6 +713,8 @@ local function SkinSubHead(header)
     label:SetPoint("LEFT", holder, "RIGHT", LABEL_GAP, 0)
     label:SetWordWrap(false)
     skin.label = label
+    local questModule = _G.QuestObjectiveTracker
+    skin.quests = type(questModule) == "table" and questModule.Header == header
     headerSkins[header] = skin
     local stock = header.Text
     if stock then
@@ -720,6 +730,7 @@ end
 local function RepaintHeader(header)
     local skin = headerSkins[header]
     if not skin or chrome.collapsed or not chrome.backdrop then return end
+    if skin.quests then SetSubHeadText(skin, nil) end
     local inset = Theme.PanelBandInset()
     local dl, dr = PanelEdges(header)
     if dl then dl = math.min(0, math.max(-80, dl)) end

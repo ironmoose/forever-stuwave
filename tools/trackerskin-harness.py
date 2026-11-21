@@ -374,7 +374,8 @@ case("module headers keep their text as a mono sub-head: diamond, lowercase labe
         local m = _G[name]
         local sk = S.headers[m.Header]
         assert(sk, name .. ' header not skinned')
-        assert(sk.label:IsShown() and sk.label:GetText() == m.Header.Text:GetText():lower(), name .. ' label ' .. tostring(sk.label:GetText()))
+        local want = m.Header.Text:GetText():lower() .. (name == 'QuestObjectiveTracker' and ' (5/40)' or '')
+        assert(sk.label:IsShown() and sk.label:GetText() == want, name .. ' label ' .. tostring(sk.label:GetText()))
         assert(m.Header.Text.alpha == 0, name .. ' stock text visible')
         m.Header.Text:SetAlpha(1)
         assert(m.Header.Text.alpha == 0, name .. ' stock text came back')
@@ -389,6 +390,8 @@ case("module headers keep their text as a mono sub-head: diamond, lowercase labe
     CampaignQuestObjectiveTracker.Header.Text:SetText('Campaign Updates')
     Layout()
     assert(S.headers[CampaignQuestObjectiveTracker.Header].label:GetText() == 'campaign updates', 'label did not follow the text')
+    QuestObjectiveTracker.Header.Text:SetText('Quests')
+    assert(S.headers[QuestObjectiveTracker.Header].label:GetText() == 'quests (5/40)', 'the quest sub-head lost its count: ' .. tostring(S.headers[QuestObjectiveTracker.Header].label:GetText()))
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\n'))
 """)
 

@@ -4,6 +4,10 @@
 
 ### New
 - Ammo tab: Warriors, Hunters and Rogues carrying a bow, crossbow or gun get an LED counter on the Console showing the arrows or bullets left, with a gauge that drains as you shoot. It turns amber at the low ammo count and pink when you are out. Each part can be switched off on the Unit Frames page.
+- The addon list shows the STU logo beside Forever STUwave.
+
+### Fixes
+- The open quest tracker shows the quest count again: "quests (12/40)" on the quests heading, not only on the collapsed bar.
 
 ## 1.0.0-beta.5 (2026-11-20)
 
