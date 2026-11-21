@@ -319,7 +319,7 @@ case("auto_shot_off_in_combat_in_range_nudges_amber_and_says_auto", """
     check(n >= 4, "it breathes: " .. n)
     check(BracketsShown() == 0, "no lock-on yet")
     -- the same fight in melee: no nudge, the skull is on the inner ring
-    __range["Raptor Strike"] = true; __range["Auto Shot"] = false
+    __range["Raptor Strike"] = true; __range["Auto Shot"] = false; __near = true
     Tick(0.2)
     check(Lab() == "MELEE", "melee with Auto Shot off: " .. tostring(Lab()))
     NoLog()
@@ -519,6 +519,9 @@ case("the_range_states_come_from_the_spell_range_checks_and_the_skull_sits_on_it
     check(Shown(p.zones.lit.ranged) and not Shown(p.zones.unlit.ranged), "the shooting range ring is lit")
     __range["Raptor Strike"] = true; __range["Auto Shot"] = false
     Tick(0.5); Tick(0.5)
+    check(Shown(p.zones.lit.far) and not Shown(p.zones.lit.melee), "Raptor Strike alone is not melee: Forever says true at any distance")
+    __near = true
+    Tick(0.5); Tick(0.5)
     check(Shown(p.zones.lit.melee) and Shown(p.zones.unlit.ranged), "melee")
     check(Shown(p.skull.claws) and not Shown(p.skull.strike), "claws on a melee skull")
     local mx, my = at()
@@ -541,7 +544,7 @@ case("the_skull_slides_between_rings_over_a_third_of_a_second", """
     local p = Parts()
     Tick(0.1)
     local _, y0 = p.skull.body.fsX, p.skull.body.fsY
-    __range["Raptor Strike"] = true; __range["Auto Shot"] = false
+    __range["Raptor Strike"] = true; __range["Auto Shot"] = false; __near = true
     Tick(0.12)                                     -- the range re-read lands
     local mid = p.skull.body.fsY
     Tick(0.1)
@@ -568,10 +571,10 @@ case("a_due_shot_out_of_shooting_range_is_held_with_a_striped_rim_and_the_zone_n
     check(differ, "and the stripes run")
     check(BracketsShown() == 4 and p.lock.br.TL.color[1] == KC.pink[1], "open brackets in the zone colour")
     check(not Shown(p.rim.marks) and not Shown(p.rim.flash), "no ticks, no plant line")
-    __range["Raptor Strike"] = true; __near = false
+    __range["Raptor Strike"] = true; __near = true
     Tick(0.5)
     check(Lab() == "MELEE" and p.labels.main.tcolor[1] == KC.melee[1], "melee: " .. tostring(Lab()))
-    __range["Raptor Strike"] = false
+    __range["Raptor Strike"] = false; __near = false
     Tick(0.5)
     check(Lab() == "FAR", "too far: " .. tostring(Lab()))
     __range["Auto Shot"] = true

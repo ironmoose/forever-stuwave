@@ -335,11 +335,14 @@ local function ReadRange()
     local attack = Call(UnitCanAttack, "player", "target")
     if IsSecret(attack) or not attack then return nil end
     local melee, ranged = InRange("raptor"), InRange("autoshot")
-    if melee == true then return "melee" end
+    local near = Call(CheckInteractDistance, "target", TUNING.NEAR_INTERACT)
+    if IsSecret(near) then near = nil end
+    -- Raptor Strike answers true at any distance on Forever (probe 2026-11-20, level 1 Hunter: true for a mob well past
+    -- 10 yd while Auto Shot and the duel distance both said no), so melee also needs the duel distance to agree
+    if melee == true and near ~= false then return "melee" end
     if ranged == true then return "ranged" end
     if melee == nil and ranged == nil then return nil end
-    local near = Call(CheckInteractDistance, "target", TUNING.NEAR_INTERACT)
-    if IsSecret(near) or near == nil then return nil end
+    if near == nil then return nil end
     return near and "dead" or "far"
 end
 
