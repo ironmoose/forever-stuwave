@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.5.1 (2026-11-21)
+
+A Help page with pictures, an ammo counter, quest timers that work again, and STUwave checks on the quest tracker.
 
 ### New
 - Ammo tab: Warriors, Hunters and Rogues carrying a bow, crossbow or gun get an LED counter on the Console showing the arrows or bullets left, in the same style as the mana regen tab: a big four digit count with an arrow or bullet beside it. It turns amber at the low ammo count and pink when you are out. Each part can be switched off on the Unit Frames page.
@@ -11,6 +13,7 @@
 - The open quest tracker shows the quest count again: "quests (12/40)" on the quests heading, not only on the collapsed bar.
 - A finished quest objective gets a cyan STUwave check (amber when the quest is ready to turn in) in place of the game's green one, which sat on top of the tracker's line.
 - Quest timers show in the LED drawer under the minimap again. This client reads timers from each quest's time limit, so the drawer had found none and left the game's own timer box up; it now also shows the quest's name and its full time limit on the gauge.
+- The quest timer drawer moves down below the minimap's addon tray while the tray is open, instead of sitting under it.
 
 ## 1.0.0-beta.5 (2026-11-20)
 
