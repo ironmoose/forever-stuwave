@@ -126,6 +126,12 @@ def set_count(lua, n: int):
     fire(lua, "BAG_UPDATE_DELAYED")
 
 
+def shoot_to(lua, n: int):
+    """The count drops by shooting: a cast just before it, so the full mark holds."""
+    run(lua, "FS.AmmoTab.AT.castAt = GetTime()")
+    set_count(lua, n)
+
+
 def shown(r) -> bool:
     return bool(r._shown)
 
@@ -319,20 +325,20 @@ def check_a_fresh_out_at_login_does_not_blink():
     assert tab(lua).AT.mark._text == "/--", f"no mark yet reads {tab(lua).AT.mark._text}"
     set_count(lua, 200)
     assert tab(lua).AT.mark._text == "/200"
-    set_count(lua, 0)
+    shoot_to(lua, 0)
     assert tab(lua).AT.mark._text == "/200", "the mark forgot the restock"
 
 
 def check_the_gauge_drains_against_the_full_mark():
     lua = boot(klass="ROGUE", n=600)
     assert gauge_lit(lua) == 10
-    set_count(lua, 300)
+    shoot_to(lua, 300)
     assert gauge_lit(lua) == 5, gauge_lit(lua)
-    set_count(lua, 1)
+    shoot_to(lua, 1)
     assert gauge_lit(lua) == 1, "one round left lights no segment"
     set_count(lua, 500)
     assert tab(lua).AT.full == 500 and gauge_lit(lua) == 10, "a restock did not reset the mark"
-    set_count(lua, 0)
+    shoot_to(lua, 0)
     assert gauge_lit(lua) == 0
 
 
@@ -343,6 +349,22 @@ def check_the_ammo_slot_stack_counts_when_the_bags_read_zero():
     run(lua, "__ammo.n = 199")
     fire(lua, "UNIT_INVENTORY_CHANGED", "player")
     assert readout(lua) == "_199", "a spent arrow did not move the count"
+
+
+def check_ammo_deleted_lowers_the_mark_and_shooting_does_not():
+    lua = boot(klass="ROGUE", n=400)
+    AT = tab(lua).AT
+    run(lua, "__now = 100; GetTime = function() return __now end")
+    set_count(lua, 200)
+    assert AT.full == 200 and AT.mark._text == "/200", f"deleting did not lower the mark ({AT.full})"
+    run(lua, "FS.AmmoTab.AT.castAt = __now")
+    set_count(lua, 199)
+    assert AT.full == 200, "a shot lowered the mark"
+    run(lua, "__now = 110")
+    set_count(lua, 150)
+    assert AT.full == 150, "a drop long after the last cast kept the mark"
+    set_count(lua, 0)
+    assert AT.mark._text == "/--", "deleting every arrow left a mark"
 
 
 def check_secret_counts():

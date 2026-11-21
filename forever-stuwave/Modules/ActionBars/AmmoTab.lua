@@ -65,6 +65,7 @@ local AT = {
     -- lands on the same 0.6 and the two gauges match side by side.
     BLINK_ON = 0.45, BLINK_OFF = 0.45, BLINK_LOW = 0.25, BLINKS = 2,
     MAX = 9999,
+    SHOT_WINDOW = 2,                                -- seconds after a cast in which an ammo drop counts as shot
     host = nil, built = false, seated = false, pendingSync = false, hover = false,
     count = nil, kind = nil, full = nil, state = nil, sig = nil,
     warned = {},
@@ -132,7 +133,7 @@ function Tab.Applies()
 end
 
 -- The count and kind from HunterState; the full mark follows: any rise (a restock, a new stack) sets it to the count, a new
--- weapon kind too. A count of nil (no weapon that fires ammo, unreadable) leaves the mark alone.
+-- weapon kind too, and so does a drop with no cast in the SHOT_WINDOW before it (ammo deleted, sold or banked, not shot). A count of nil (no weapon that fires ammo, unreadable) leaves the mark alone.
 function Tab.Read()
     local data = Data()
     local n = data and data.Ammo() or nil
@@ -142,10 +143,20 @@ function Tab.Read()
     if n then
         n = math.max(0, math.floor(n))
         if AT.full == nil or AT.count == nil or n > AT.count or kind ~= AT.kind then AT.full = n end
+        -- a drop with no cast just before it is ammo deleted, sold or banked, not shot: the mark follows it down
+        if AT.count and n < AT.count and not Tab.ShotJustNow() then AT.full = n end
         if n > AT.full then AT.full = n end
     end
     AT.count, AT.kind = n, kind
     return n, kind
+end
+
+-- True within SHOT_WINDOW seconds of the player's last successful cast (a shot spends ammo a moment after it).
+function Tab.ShotJustNow()
+    if not AT.castAt or type(GetTime) ~= "function" then return false end
+    local ok, now = pcall(GetTime)
+    if not ok or IsSecret(now) or type(now) ~= "number" then return true end
+    return now - AT.castAt <= AT.SHOT_WINDOW
 end
 
 function Tab.Warn()
@@ -752,7 +763,13 @@ local function Apply()
     Tab.Read()
     local events = CreateFrame("Frame")
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
-    events:SetScript("OnEvent", function()
+    pcall(events.RegisterUnitEvent, events, "UNIT_SPELLCAST_SUCCEEDED", "player")
+    events:SetScript("OnEvent", function(_, event)
+        if event == "UNIT_SPELLCAST_SUCCEEDED" then
+            local ok, now = pcall(GetTime)
+            if ok and type(now) == "number" and not IsSecret(now) then AT.castAt = now end
+            return
+        end
         if AT.pendingSync then Sync() end
     end)
     if FS.Config and FS.Config.OnChange then
