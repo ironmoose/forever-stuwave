@@ -54,8 +54,8 @@ local DEFS = {
     -- ids: Classic ranks, highest first. length: Classic value in seconds, unmeasured on Forever.
     overpower = { name = "Overpower", label = "OVERPOWER", ids = { 11585, 11584, 7887, 7384 }, length = 5 },
     revenge = { name = "Revenge", label = "REVENGE", ids = { 30357, 25269, 25288, 11601, 11600, 7379, 6574, 6572 }, length = 5 },
-    -- 20 s is the Classic value; shown only while health is at or below hideAboveHealth percent (the player's decision)
-    victoryrush = { name = "Victory Rush", label = "VICTORY RUSH", ids = { 34428 }, length = 20, hideAboveHealth = 90 },
+    -- 402927 is the id on Forever (read off a Warrior's action bar, 2026-11-20). 20 s is the Classic value; shown only while health is at or below hideAboveHealth percent (the player's decision)
+    victoryrush = { name = "Victory Rush", label = "VICTORY RUSH", ids = { 402927, 34428 }, length = 20, hideAboveHealth = 90 },
 }
 local ORDER = { "overpower", "revenge", "victoryrush" }
 Windows.DEFS, Windows.ORDER = DEFS, ORDER
