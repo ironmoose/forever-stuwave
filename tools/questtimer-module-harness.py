@@ -166,6 +166,22 @@ case("the_drawer_hangs_from_the_bezel_and_hides_blizzards_timer", """
     assert(d.shown == false, "drawer stays with no timer")
 """)
 
+case("the_drawer_moves_below_the_addon_tray_while_it_is_open", """
+    local tray = New("Frame"); tray.shown = false; Minimap.fsTray = tray
+    __timers = { 595 }; __names = { "Grace" }
+    Fire("QUEST_LOG_UPDATE")
+    local d = Drawer()
+    assert(d.points[1][2] == Minimap.fsBezel, "closed tray: drawer not under the bezel")
+    assert(tray.hooks and tray.hooks.OnShow and tray.hooks.OnHide, "tray show and hide not watched")
+    tray.shown = true; tray.hooks.OnShow(tray)
+    assert(#d.points == 2, "stale anchors kept: " .. #d.points)
+    assert(d.points[1][1] == "TOPLEFT" and d.points[1][2] == tray and d.points[1][3] == "BOTTOMLEFT", "open tray: drawer not under it")
+    assert(d.points[2][2] == tray and d.points[2][3] == "BOTTOMRIGHT")
+    tray.shown = false; tray.hooks.OnHide(tray)
+    assert(d.points[1][2] == Minimap.fsBezel, "closed again: drawer not back under the bezel")
+    Minimap.fsTray = nil
+""")
+
 case("text_and_gauge_stay_inside_the_drawer", """
     __timers = { 595, 30 }; __names = { "A very long quest name that would never fit in the drawer", "B" }
     Fire("QUEST_LOG_UPDATE")

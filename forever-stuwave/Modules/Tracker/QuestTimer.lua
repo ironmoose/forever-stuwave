@@ -265,15 +265,36 @@ local function NewRow(parent)
     return row
 end
 
+-- The drawer hangs under the minimap's last row: the addon tray while it is open (Minimap.fsTray, which itself hangs
+-- under the key row), else the key row (the bezel). The tray's show and hide re-seat it, so opening the tray pushes the
+-- timer down instead of covering it.
+local function Anchor(f)
+    local bezel = _G.Minimap and _G.Minimap.fsBezel
+    if not (f and bezel) then return end
+    local tray = _G.Minimap.fsTray
+    local host = (tray and tray.IsShown and tray:IsShown()) and tray or bezel
+    if f.fsHost == host then return end
+    f.fsHost = host
+    f:ClearAllPoints()
+    f:SetPoint("TOPLEFT", host, "BOTTOMLEFT", 0, 0)
+    f:SetPoint("TOPRIGHT", host, "BOTTOMRIGHT", 0, 0)
+end
+
+local function WatchTray(f)
+    local tray = _G.Minimap and _G.Minimap.fsTray
+    if not tray or tray.fsQuestTimerWatched or not tray.HookScript then return end
+    tray.fsQuestTimerWatched = true
+    tray:HookScript("OnShow", function() Anchor(f) end)
+    tray:HookScript("OnHide", function() Anchor(f) end)
+end
+
 local function Build()
-    if drawer then return drawer end
+    if drawer then WatchTray(drawer); Anchor(drawer); return drawer end
     local bezel = _G.Minimap and _G.Minimap.fsBezel
     if not bezel then return nil end
     local T = FS.Theme
     local f = CreateFrame("Frame", "ForeverSTUwaveQuestTimer", bezel)
     f:SetFrameLevel(bezel:GetFrameLevel())
-    f:SetPoint("TOPLEFT", bezel, "BOTTOMLEFT", 0, 0)
-    f:SetPoint("TOPRIGHT", bezel, "BOTTOMRIGHT", 0, 0)
     f:SetHeight(1)
     f:Hide()
     f.fill, f.glow, f.border = T.AddPanelChrome(f, { fillColor = T.COLOR_BG, accent = T.COLOR_POWER })
@@ -291,6 +312,8 @@ local function Build()
     end)
     f:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
     drawer = f
+    WatchTray(f)
+    Anchor(f)
     return f
 end
 
