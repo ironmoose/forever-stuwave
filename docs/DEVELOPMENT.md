@@ -44,6 +44,15 @@ The GitHub release asset is named `ForeverSTUwave-<version>.zip`, without the co
 cp dist/ForeverSTUwave-<version>-<commit>-<date>.zip dist/ForeverSTUwave-<version>.zip
 ```
 
+To publish the same release on CurseForge (after the `v<version>` tag exists):
+
+```sh
+tools/upload-curseforge.sh --dry-run   # build and show what would be sent
+tools/upload-curseforge.sh
+```
+
+It packages HEAD with the script above, refuses when `forever-stuwave/` differs from the tag, sends that version's CHANGELOG.md section as the file's changelog, and picks the game version from the `.toc` Interface number. Versions with `beta` or `alpha` upload as that release type. The API token comes from `CURSEFORGE_TOKEN` or the file `CURSEFORGE_TOKEN_FILE` (default `.curseforge` next to the repository), and is never committed.
+
 ## Deploying a development build
 
 Close the game before replacing files. The deploy scripts stage runtime files only and guard against overwriting a source or Git checkout. Keep the source checkout outside `Interface/AddOns`. If you used an earlier clone, move it aside and make a fresh clone outside `AddOns` once; screenshot removal required a history cleanup.
