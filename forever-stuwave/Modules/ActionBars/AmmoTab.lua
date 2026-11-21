@@ -17,7 +17,7 @@
 -- The face is the mana regen module's (FiveSecondTab.lua), so the two read as one family: the led_well.tga hero tile with its
 -- cut ring, four of its fourteen segment cells (led_segments.tga, 10 x 12 texels, n physical pixels a texel, a soft copy from
 -- led_segment_glow.tga under each lit segment), the ten segment gauge in its well, and the bottom line: the FULL MARK
--- ("/600", in the rate's slot, with its bar) and the chip (the retention chip's slot) holding the ammo glyph, an arrow for a
+-- ("/600", in the rate's slot, with its bar; "/--" while no ammo has been seen since login) and the chip (the retention chip's slot) holding the ammo glyph, an arrow for a
 -- bow or crossbow, a cartridge for a gun, both lying level and pointing right, drawn as flat runs on whole pixels. Places
 -- before the number stay unlit; 0 reads 0000. The gauge is the count against the full mark: the biggest count since the
 -- count last went up (a restock or a new stack). The client has no quiver capacity to read, so the mark is ours and resets
@@ -578,7 +578,9 @@ function Tab.Paint()
     AT.body:SetAlpha(rest and AT.IDLE_ALPHA or 1)
 
     -- the full mark and its bar
-    local text = "/" .. tostring(math.min(AT.MAX, AT.full or n))
+    -- no ammo seen since login gives no mark yet: "/--" until the first arrow or bullet shows up
+    local full = AT.full or n
+    local text = full > 0 and ("/" .. tostring(math.min(AT.MAX, full))) or "/--"
     local size = FitPx(text, AT.MARK_PX, AT.MARK_ROOM)
     local fs = AT.mark
     if fs.fsPx ~= size then

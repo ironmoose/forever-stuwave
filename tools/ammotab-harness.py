@@ -316,6 +316,11 @@ def check_a_fresh_out_at_login_does_not_blink():
     lua = boot(klass="ROGUE", n=0)
     assert tab(lua).AT.state == "out"
     assert not blinking(lua), "blinked at login"
+    assert tab(lua).AT.mark._text == "/--", f"no mark yet reads {tab(lua).AT.mark._text}"
+    set_count(lua, 200)
+    assert tab(lua).AT.mark._text == "/200"
+    set_count(lua, 0)
+    assert tab(lua).AT.mark._text == "/200", "the mark forgot the restock"
 
 
 def check_the_gauge_drains_against_the_full_mark():
