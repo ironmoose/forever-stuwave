@@ -130,6 +130,7 @@ Modules/ActionBars/ShamanBuffs.lua
 Modules/ActionBars/BuffTab.lua
 Modules/ActionBars/FiveSecondTab.lua
 Modules/ActionBars/ThunderClapTab.lua
+Modules/ActionBars/AmmoTab.lua
 Modules/CombatHud/CombatHud.lua
 Modules/CombatHud/GunsightClass.lua
 Modules/CombatHud/GunsightShamanShocks.lua

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### New
+- Ammo tab: Warriors, Hunters and Rogues carrying a bow, crossbow or gun get an LED counter on the Console showing the arrows or bullets left, with a gauge that drains as you shoot. It turns amber at the low ammo count and pink when you are out. Each part can be switched off on the Unit Frames page.
+
 ## 1.0.0-beta.5 (2026-11-20)
 
 A new Warlock module, a Help page, mail subjects that fill themselves, and a Revenge fix.

@@ -48,8 +48,12 @@
 -- The Warrior's Thunder Clap tab (ThunderClapTab.lua, 1 x 1, 50 x 49) is the stance tab's `also` the same way, 16 design px
 -- right of it (at 187.6 with the three stances).
 --
--- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua, TotemBar.lua, BuffTab.lua, FiveSecondTab.lua and
--- ThunderClapTab.lua.
+-- The ammo tab (AmmoTab.lua, 2 x 1) stands last, 16 design px right of whatever stands before it (Hunter: the mana regen
+-- module, at 144.8; Warrior: Thunder Clap, at 253.6; Rogue: the first seat, 36), while the ranged slot holds a bow, crossbow
+-- or gun.
+--
+-- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua, TotemBar.lua, BuffTab.lua, FiveSecondTab.lua,
+-- ThunderClapTab.lua and AmmoTab.lua.
 -- Nothing here is verified in game.
 
 local _, FS = ...
@@ -149,7 +153,19 @@ local FIVE = {
         if FS.FiveSecondTab and FS.FiveSecondTab.Sync then FS.FiveSecondTab.Sync() end
     end,
 }
--- every shoulder def, flat: the owner's first, then its `also` list, then the five second rule tab
+-- The ammo tab (AmmoTab.lua, 2 x 1): a Warrior, Hunter or Rogue carrying a bow, crossbow or gun, seated after every other
+-- shoulder (the mana regen module included), like it.
+local AMMO = {
+    key = "ammo", cols = 2, rows = 1, after = 16,
+    wants = function()
+        local tab = FS.AmmoTab
+        return tab and tab.OwnsShoulder and tab.OwnsShoulder()
+    end,
+    changed = function()
+        if FS.AmmoTab and FS.AmmoTab.Sync then FS.AmmoTab.Sync() end
+    end,
+}
+-- every shoulder def, flat: the owner's first, then its `also` list, then the five second rule tab and the ammo tab
 local DEFS = {}
 for _, owner in pairs(OWNERS) do
     owner.dx = owner.dx or C.DX
@@ -164,6 +180,9 @@ end
 FIVE.dx = C.DX
 FIVE.w, FIVE.h = BlockSize(FIVE.cols, FIVE.rows)
 DEFS[FIVE.key] = FIVE
+AMMO.dx = C.DX
+AMMO.w, AMMO.h = BlockSize(AMMO.cols, AMMO.rows)
+DEFS[AMMO.key] = AMMO
 
 local stands = {}      -- key -> { shoulder, shown }: built once per def, never resized (NewShoulder has no resize)
 local primary             -- the def of the player's class's first shoulder (what the key-less calls answer)
@@ -228,6 +247,7 @@ local function Wanted()
         end
     end
     if FIVE.wants() then Seat(FIVE) end
+    if AMMO.wants() then Seat(AMMO) end
     return console, list
 end
 

@@ -20,7 +20,9 @@
 --     plain on the Priest probe for a hostile target; Hunter spells UNPROBED); neither = dead zone or too far, told apart by
 --     CheckInteractDistance (plain, coarse bands). UnitInRange is a secret boolean and is not used.
 --   * Moving is GetUnitSpeed("player") > 0 (expected plain, UNPROBED).
---   * Ammo is GetItemCount of the item in the ammo slot (plain in combat on the Priest), shown only with a ranged weapon.
+--   * Ammo is GetItemCount of the item in the ammo slot (plain in combat on the Priest), counted only while the ranged slot
+--     holds a bow, crossbow or gun (GetItemInfoInstant's class and subclass; AmmoKind), so a wand, a thrown weapon or a
+--     Shaman's totem reads nil, not 0. The Console's ammo tab (AmmoTab.lua) reads the same count.
 --   * Cooldown flags (isActive, isOnGCD) are plain; the seconds are secret, so the trap refill is the engine's own
 --     (C_Spell.GetSpellCooldownDuration, handed out by CooldownDuration()).
 --
@@ -35,7 +37,7 @@
 --
 -- API: Start(), Refresh(), Subscribe(fn), Unsubscribe(fn), Tick(now), Known(key) -> true / false / nil, Shot() (the live shot
 -- table: last, cycle, source, firedAt, lateAmt, resetAt), Fill(now), Late(now), AutoOn(now), Range(now) -> "melee" | "dead" |
--- "ranged" | "far" | nil, Moving() -> true / false / nil, Ammo() -> count | nil, AmmoWarn(), TrapKey(), TrapCooling() -> true /
+-- "ranged" | "far" | nil, Moving() -> true / false / nil, Ammo() -> count | nil, AmmoKind(), AmmoWarn(), TrapKey(), TrapCooling() -> true /
 -- false / nil, TrapDuration(), TrapCastAt(), Traps() -> { fire, frost } (each up, expires, at, key), CastAt(key), DEFS, TUNING,
 -- SETTINGS. A listener is called fn(reason, key) with reason "cast", "shot", "reset", "auto", "trap", "cooldown", "combat",
 -- "ammo", "expire", "change", "learn".
@@ -89,7 +91,7 @@ local auto = { on = nil }              -- nil = no signal yet
 local traps = { fire = { up = false }, frost = { up = false } }
 local castAt = {}
 local trapKey, trapCastAt = nil, nil
-local ammo = { count = nil }
+local ammo = { count = nil, kind = nil, notifiedKind = nil }
 local rangeCache = { at = -1, value = nil }
 local resetInGap = false
 local listeners = {}
@@ -368,8 +370,37 @@ function State.AmmoWarn()
     return v
 end
 
+-- The kind of ammo the item in the ranged slot fires: "arrow" (a bow or crossbow), "bullet" (a gun), false for anything else
+-- in that slot (a thrown weapon, a wand, a relic such as a Shaman's totem, or nothing), nil when the slot holds an item whose
+-- type cannot be read. Forever's item data (Item.db2, build 1.60.1): every bow (weapon subclass 2) and crossbow (18) takes
+-- arrows, every gun (3) takes bullets, thrown (16) and wands (19) take none; Bows, Crossbows and Guns are Warrior, Hunter and
+-- Rogue skills (SkillLineAbility class mask 13).
+local AMMO_OF_SUBCLASS = { [2] = "arrow", [18] = "arrow", [3] = "bullet" }
+TUNING.WEAPON_CLASS = 2
+State.AMMO_OF_SUBCLASS = AMMO_OF_SUBCLASS
+
+local function ItemClassOf(id)
+    local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if type(fn) ~= "function" then return nil end
+    local ok, _, _, _, _, _, classID, subClassID = pcall(fn, id)
+    if not ok then return nil end
+    return PlainOf(classID, "number"), PlainOf(subClassID, "number")
+end
+
+local function ReadKind()
+    local weapon = Call(GetInventoryItemID, "player", TUNING.RANGED_SLOT)
+    if IsSecret(weapon) then return nil end
+    if not weapon then return false end
+    local classID, subClassID = ItemClassOf(weapon)
+    if classID == nil or subClassID == nil then return nil end
+    if classID ~= TUNING.WEAPON_CLASS then return false end
+    return AMMO_OF_SUBCLASS[subClassID] or false
+end
+
 local function ReadAmmo()
-    -- no ranged weapon, nothing to count
+    -- nothing that fires ammo in the ranged slot, nothing to count; a type that cannot be read is counted as before
+    ammo.kind = ReadKind()
+    if ammo.kind == false then return nil end
     if not Call(GetInventoryItemID, "player", TUNING.RANGED_SLOT) then return nil end
     local id = Call(GetInventoryItemID, "player", TUNING.AMMO_SLOT)
     if not id then return 0 end
@@ -378,13 +409,16 @@ local function ReadAmmo()
     return n
 end
 
--- the ammo count (a plain number), nil with no ranged weapon or an unreadable count
+-- the ammo count (a plain number), nil with no weapon that fires ammo or an unreadable count
 function State.Ammo() return ammo.count end
+
+-- "arrow" | "bullet" for a bow, crossbow or gun in the ranged slot, false for anything else (or nothing), nil unreadable
+function State.AmmoKind() return ammo.kind end
 
 function State.RefreshAmmo()
     local n = ReadAmmo()
-    if n ~= ammo.count then
-        ammo.count = n
+    if n ~= ammo.count or ammo.kind ~= ammo.notifiedKind then
+        ammo.count, ammo.notifiedKind = n, ammo.kind
         Notify("ammo")
     end
 end

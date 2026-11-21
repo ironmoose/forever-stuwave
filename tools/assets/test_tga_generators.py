@@ -393,6 +393,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # 10x12 cell), the same atlas blurred for the glow behind each lit segment, and the 64x32 soft box glow of the gauge
     # segments and the pulse.
     "led_segments": {"led_segments": (64, 64), "led_segment_glow": (64, 64), "led_glow": (64, 32), "led_well": (32, 32)},
+    # generate_led_ammo.py: the ammo tab's LED art, a 128x64 atlas of 16x32 slots (seven segments of a 9x18 digit, the
+    # broadhead arrow, the bullet) and the same atlas blurred for the glow under each lit piece.
+    "led_ammo": {"led_ammo": (128, 64), "led_ammo_glow": (128, 64)},
     "tab_slant": {
         "tab_slant": (32, 32),
         "tab_slant_glow": (32, 32),
@@ -3243,3 +3246,74 @@ def test_tab_diag_is_the_selected_tabs_1_px_pink_diagonal_alone(control_tab_outp
 def test_committed_control_tab_textures_match_the_generator(control_tab_outputs: Path) -> None:
     for out in control_tab_outputs.glob("*.tga"):
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# ---------------------------------------------------------------------------
+# generate_led_ammo.py: the ammo tab's LED atlas
+#
+# Hardcoded: slot n of the 128x64 atlas (column n % 8, row n // 8, 16x32 texels) holds segment n of a, b, c, d, e, f, g
+# with this many opaque texels, inside the 9x18 cell, alpha 0 or 255, no texel shared between two segments; slot 7 is the
+# broadhead arrow and slot 8 the bullet (the approved mockup's bitmaps); slots 9..15 are empty. The committed files are the
+# generator's output byte for byte.
+# ---------------------------------------------------------------------------
+
+LED_AMMO_SEGMENT_TEXELS = [10, 12, 12, 10, 12, 12, 10]
+LED_AMMO_ARROW = (
+    "....#....", "...###...", "..#####..", ".#######.", "#########", "....#....", "....#....", "....#....",
+    "....#....", "....#....", "....#....", "....#....", "...###...", "..#.#.#..", ".#..#..#.", "...###...",
+    "..#.#.#..", ".#..#..#.",
+)
+
+
+@pytest.fixture(scope="module")
+def led_ammo_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    work = tmp_path_factory.mktemp("led_ammo")
+    _run_generator(GENERATOR_DIR / "generate_led_ammo.py", work)
+    return work
+
+
+def _led_ammo_slot(path: Path, slot: int) -> set[tuple[int, int]]:
+    ox, oy = (slot % 8) * 16, (slot // 8) * 32
+    return {(x, y) for y in range(32) for x in range(16) if _alpha_at(path, ox + x, oy + y) > 0}
+
+
+def test_led_ammo_atlas_holds_seven_disjoint_segments_the_broadhead_and_the_bullet(led_ammo_outputs: Path) -> None:
+    path = led_ammo_outputs / "led_ammo.tga"
+    union: set[tuple[int, int]] = set()
+    for slot, expected in enumerate(LED_AMMO_SEGMENT_TEXELS):
+        cell = _led_ammo_slot(path, slot)
+        assert len(cell) == expected, f"slot {slot}: {len(cell)} texels, expected {expected}"
+        assert all(x < 9 and y < 18 for x, y in cell), f"slot {slot} leaves the 9 x 18 cell"
+        assert not (union & cell), f"slot {slot} shares texels with an earlier segment"
+        union |= cell
+    arrow = {(x, y) for y, row in enumerate(LED_AMMO_ARROW) for x, ch in enumerate(row) if ch == "#"}
+    assert _led_ammo_slot(path, 7) == arrow, "slot 7 is not the broadhead"
+    bullet = _led_ammo_slot(path, 8)
+    assert bullet and all(x < 9 and y < 18 for x, y in bullet), "slot 8 holds no bullet in the cell"
+    for slot in list(range(7, 9)):
+        ox, oy = (slot % 8) * 16, (slot // 8) * 32
+        assert all(_alpha_at(path, ox + x, oy + y) in (0, 255) for x in range(16) for y in range(32)), f"slot {slot} alpha"
+    for slot in range(9, 16):
+        assert not _led_ammo_slot(path, slot), f"slot {slot} not empty"
+
+
+def test_led_ammo_glow_is_the_atlas_blurred_with_a_two_texel_margin(led_ammo_outputs: Path) -> None:
+    seg = led_ammo_outputs / "led_ammo.tga"
+    glow = led_ammo_outputs / "led_ammo_glow.tga"
+    for slot in range(9):
+        ox, oy = (slot % 8) * 16, (slot // 8) * 32
+        texels = len(_led_ammo_slot(seg, slot))
+        total, outside = 0, 0
+        for y in range(32):
+            for x in range(16):
+                a = _alpha_at(glow, ox + x, oy + y)
+                total += a
+                if x >= 13 or y >= 22:
+                    outside += a
+        assert abs(total / 255 - texels) < 0.08 * texels, f"slot {slot}: mass {total / 255:.1f} vs {texels}"
+        assert outside == 0, f"slot {slot} spills past the 13 x 22 glow rect"
+
+
+def test_committed_led_ammo_art_matches_the_generator(led_ammo_outputs: Path) -> None:
+    for name in ("led_ammo.tga", "led_ammo_glow.tga"):
+        assert (led_ammo_outputs / name).read_bytes() == (MEDIA_DIR / name).read_bytes(), name

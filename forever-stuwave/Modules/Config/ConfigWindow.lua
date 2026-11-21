@@ -1371,6 +1371,17 @@ local function ThunderClapGroup(page)
     end
 end
 
+-- The ammo tab (AmmoTab.lua): the tab, its low ammo colours and its blink, each with its ? tip; Warriors, Hunters and Rogues.
+local function AmmoTabGroup(page)
+    local tab = FS.AmmoTab
+    if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
+    UI.Header(page, "Ammo tab")
+    for _, name in ipairs({ "enabled", "lowwarn", "motion" }) do
+        local def = tab.SETTINGS[name]
+        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
+    end
+end
+
 -- The Shaman totem presets (TotemPresets.lua): a switch for each of the two preset cells, the name plates, and the set 2
 -- write that Preset 2 owns, each with its own ? tip. Out of the list for a client or class without the totem tab.
 local function TotemPresetsGroup(page)
@@ -1592,6 +1603,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     FiveSecondGroup(page)
     BuffTabGroup(page)
     ThunderClapGroup(page)
+    AmmoTabGroup(page)
     TotemPresetsGroup(page)
     IconStyleGroup(page)
 end })
