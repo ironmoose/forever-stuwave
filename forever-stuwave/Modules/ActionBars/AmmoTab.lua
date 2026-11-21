@@ -58,7 +58,7 @@ local AT = {
     GLYPH_W = 10, GLYPH_H = 7,                      -- the chip's glyph, texels, drawn as flat runs on whole pixels
     MIN_PX = 6, ADVANCE = 0.5615,
     IDLE_ALPHA = 0.72, WORD_IDLE = 0.55, GHOST_REST = 0.14, GHOST_LIT = 0.18, GLOW_STEADY = 0.5,
-    -- the unlit segments show as a visible LED pattern behind the digits (Parker, 2026-11-20: the regen module's 0.05 to 0.08
+    -- the unlit segments show as a visible LED pattern behind the digits (playtest 2026-11-20: the regen module's 0.05 to 0.08
     -- ghost was too faint to see on the ammo tab), so they sit brighter than the regen module's
     RING_IDLE = 0.4, RING_WARN = 0.7, GAUGE_REST = 0.83, CHIP_GLOW = 0.4, CHIP_IDLE_TEXT = 0.65, HOVER_GLOW = 0.6,
     GAUGE_OFF = 0.22, HOLLOW_MIX = 0.25,
