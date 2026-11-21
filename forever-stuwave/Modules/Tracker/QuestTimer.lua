@@ -5,9 +5,10 @@
 -- same segment atlas, Media/Textures/led_segments.tga) in a well on the left, and on the right the quest name over a
 -- twenty segment gauge and a small "quest timer" label. Cyan above a minute, amber under it, pink under fifteen seconds.
 --
--- Data: GetQuestTimers() gives the seconds left on each timer, GetQuestIndexForTimer(i) the quest's log index. The
--- seconds are read on quest log events and turned into a deadline, so the readout counts down on its own between events.
--- The game does not say a quest's full limit, so the gauge is the time left out of the most seen for that quest.
+-- Data: each quest in the log is asked for its limit and time used (C_QuestLog.GetTimeAllowed), which gives the title
+-- and the full limit for the gauge; a client without it falls back to the timer list (GetQuestTimers), where the gauge is
+-- the time left out of the most seen. Read on quest log events and turned into a deadline, so the readout counts down
+-- on its own between events.
 --
 -- Plain frames only, no secure templates, so building, painting and hiding Blizzard's timer are legal in combat. Every
 -- size is a whole count of physical pixels; the name is a single line clipped to its room with an ellipsis, so nothing
@@ -105,24 +106,63 @@ local function QuestName(i)
 end
 
 -- Reads the game's timers into deadlines from `now`. Returns the list.
-function QT.Read(now)
-    local list = {}
-    local get = _G.GetQuestTimers
-    if type(get) == "function" then
-        local ok, values = pcall(function() return { get() } end)
-        if ok then
-            for i, secs in ipairs(values) do
-                if type(secs) == "number" and not IsSecret(secs) and secs >= 0 then
-                    local name = QuestName(i)
-                    local key = name or ("#" .. i)
-                    most[key] = math.max(most[key] or 0, secs)
-                    list[#list + 1] = { key = key, name = name or "Quest timer", deadline = now + secs, most = most[key] }
-                elseif IsSecret(secs) and FS.LogDegradeOnce then
-                    FS.LogDegradeOnce("questtimer-secret", "Quest timer: GetQuestTimers gave an unreadable value")
-                end
+local function Plain(v)
+    return type(v) == "number" and not IsSecret(v) and v == v
+end
+
+-- The quest log walk: every quest's time limit and time used (C_QuestLog.GetTimeAllowed), so each timer comes with its
+-- title and its real full limit. This client has no global GetQuestTimers or GetQuestIndexForTimer (API dump 16001:
+-- C_QuestLog.GetQuestTimers and GetTimeAllowed only), which is why the drawer read nothing live and Blizzard's timer
+-- stayed up (state saved 2026-11-20: GetQuestTimers nil, count 0). False when the API is missing.
+local function ReadLog(now, list)
+    local log = _G.C_QuestLog
+    if not (log and type(log.GetNumQuestLogEntries) == "function" and type(log.GetInfo) == "function"
+        and type(log.GetTimeAllowed) == "function") then
+        return false
+    end
+    local okN, n = pcall(log.GetNumQuestLogEntries)
+    if not okN or not Plain(n) then return false end
+    for i = 1, n do
+        local okI, info = pcall(log.GetInfo, i)
+        local id = okI and type(info) == "table" and not info.isHeader and info.questID
+        if Plain(id) then
+            local okT, total, elapsed = pcall(log.GetTimeAllowed, id)
+            if okT and Plain(total) and total > 0 and Plain(elapsed) and elapsed < total then
+                local name = type(info.title) == "string" and not IsSecret(info.title) and info.title or nil
+                local key = "q" .. id
+                most[key] = math.max(most[key] or 0, total)
+                list[#list + 1] = { key = key, name = name or "Quest timer", deadline = now + total - elapsed, most = most[key] }
             end
         end
     end
+    return true
+end
+
+-- The timer list: seconds left per timer, from C_QuestLog.GetQuestTimers (this client) or the classic global. Names come
+-- from GetQuestIndexForTimer where the client has it.
+local function ReadTimers(now, list)
+    local log = _G.C_QuestLog
+    local get = (log and type(log.GetQuestTimers) == "function" and log.GetQuestTimers) or _G.GetQuestTimers
+    if type(get) ~= "function" then return end
+    local ok, values = pcall(function() return { get() } end)
+    if not ok then return end
+    if #values == 1 and type(values[1]) == "table" then values = values[1] end
+    for i, secs in ipairs(values) do
+        if Plain(secs) and secs >= 0 then
+            local name = QuestName(i)
+            local key = name or ("#" .. i)
+            most[key] = math.max(most[key] or 0, secs)
+            list[#list + 1] = { key = key, name = name or "Quest timer", deadline = now + secs, most = most[key] }
+        elseif IsSecret(secs) and FS.LogDegradeOnce then
+            FS.LogDegradeOnce("questtimer-secret", "Quest timer: GetQuestTimers gave an unreadable value")
+        end
+    end
+end
+
+function QT.Read(now)
+    local list = {}
+    ReadLog(now, list)
+    if #list == 0 then ReadTimers(now, list) end
     table.sort(list, function(a, b) return a.deadline < b.deadline end)
     timers = list
     return list
@@ -403,6 +443,7 @@ function QT.Refresh()
     HookBlizzard()
     QT.Read(GetTime())
     local count = math.min(#timers, MAX_ROWS)
+    local stock = _G.QuestTimerFrame
     if count == 0 then
         f:Hide(); StopTicker()
         return
@@ -437,6 +478,7 @@ end
 events:SetScript("OnEvent", function(_, event)
     if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then laidOutFor = nil end
     local ok, err = pcall(QT.Refresh)
+
     if not ok and FS.LogDegradeOnce then FS.LogDegradeOnce("questtimer", "Quest timer: " .. tostring(err)) end
 end)
 

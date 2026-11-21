@@ -5,7 +5,7 @@ QuestTimer draws the quest timer as a drawer under the minimap's control strip a
 QuestTimerFrame. These checks pin:
 
   * MM:SS digits and the cyan / amber / pink ramp at 60 and 15 seconds;
-  * timers are read from GetQuestTimers into deadlines, named from the quest log, soonest first;
+  * timers are read from the quest log's time limits (this client), or GetQuestTimers, into deadlines, soonest first;
   * the drawer hangs from the minimap bezel, shows only while a timer runs, and Blizzard's timer is hidden;
   * every row's name and gauge stay inside the drawer (the name is one clipped line);
   * the switch off hides the drawer and gives Blizzard's timer back.
@@ -126,6 +126,27 @@ case("timers_are_read_named_and_sorted_soonest_first", """
     __timers = { 900, 271 }
     list = QT.Read(300)
     assert(list[2].most == 1100, "the gauge keeps the most seen")
+""")
+
+case("this_client_reads_timers_from_the_quest_log_with_their_full_limit", """
+    -- 16001 has no global GetQuestTimers or GetQuestIndexForTimer: each quest's GetTimeAllowed gives limit and time used
+    local saved, savedLog = GetQuestTimers, C_QuestLog
+    GetQuestTimers, GetQuestIndexForTimer = nil, nil
+    local log = {
+        { isHeader = true, title = "Mulgore" },
+        { questID = 7, title = "Trial at the Field of Giants" },
+        { questID = 8, title = "No timer here" },
+    }
+    C_QuestLog = {
+        GetNumQuestLogEntries = function() return #log, 2 end,
+        GetInfo = function(i) return log[i] end,
+        GetTimeAllowed = function(id) if id == 7 then return 2700, 1000 end end,
+    }
+    local list = QT.Read(100)
+    GetQuestTimers, C_QuestLog = saved, savedLog
+    assert(#list == 1, #list)
+    assert(list[1].name == "Trial at the Field of Giants", list[1].name)
+    assert(list[1].deadline == 1800 and list[1].most == 2700, list[1].deadline .. " " .. list[1].most)
 """)
 
 case("the_drawer_hangs_from_the_bezel_and_hides_blizzards_timer", """
