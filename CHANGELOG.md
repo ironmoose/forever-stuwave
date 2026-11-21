@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### New
-- Ammo tab: Warriors, Hunters and Rogues carrying a bow, crossbow or gun get an LED counter on the Console showing the arrows or bullets left, with a gauge that drains as you shoot. It turns amber at the low ammo count and pink when you are out. Each part can be switched off on the Unit Frames page.
+- Ammo tab: Warriors, Hunters and Rogues carrying a bow, crossbow or gun get an LED counter on the Console showing the arrows or bullets left, in the same style as the mana regen tab, with a gauge that drains as you shoot. It turns amber at the low ammo count and pink when you are out. Each part can be switched off on the Unit Frames page.
 - The addon list shows the STU logo beside Forever STUwave.
 
 ### Fixes

@@ -1,10 +1,10 @@
--- Forever STUwave: the ammo tab (look B, LED COUNTER, with the BROADHEAD arrow, of the design mockups ammo-tab-2026-11-20 and
--- ammo-tab-led-arrow-2026-11-20)
+-- Forever STUwave: the ammo tab (the regen family mockup ammo-tab-regen-family-2026-11-20: look B, GLYPH IN THE CHIP, with
+-- the glyphs LYING LEVEL)
 --
 -- A 2 x 1 shoulder on the Console's top edge (92.8 x 49 design px) that always shows how many arrows or bullets are left.
 -- ClassShoulder.lua seats it like the mana regen module: 16 design px right of the last shoulder that stands, or at the first
 -- seat (36) when none does. DISPLAY ONLY: plain frames, no secure button, no binding, no click action (the mouse is on for the
--- tooltip alone).
+-- tooltip and the hover ring alone).
 --
 -- Who: a Warrior, Hunter or Rogue (Forever's SkillLineAbility gives Bows, Crossbows and Guns to class mask 13) while the ranged
 -- slot holds a bow, crossbow or gun. A wand, a thrown weapon, a relic or nothing there stands no tab and the Console's top
@@ -14,21 +14,24 @@
 -- ammo warning uses, so the two never disagree. It is plain (in combat too on the Priest probe; UNVERIFIED on a Hunter).
 -- Nothing in the ammo slot is 0.
 --
--- The face: led_well.tga as the readout well (the mana regen module's plate) with its cut ring, four tall seven segment cells
--- and a fifth cell with the broadhead arrow (bow, crossbow) or the bullet (gun), all from led_ammo.tga, one texture per
--- segment at n physical pixels a texel (never scaled fractionally), unlit segments drawn faint; a soft copy from
--- led_ammo_glow.tga under each lit one. Positions past the number's own digits stay unlit; 0 reads 0000. Under the readout a
--- ten segment gauge drains from the right against the FULL MARK: the biggest count since the count last went up (a restock
--- or a new stack). The client has no quiver capacity to read, so the mark is ours and resets at login.
+-- The face is the mana regen module's (FiveSecondTab.lua), so the two read as one family: the led_well.tga hero tile with its
+-- cut ring, four of its fourteen segment cells (led_segments.tga, 10 x 12 texels, n physical pixels a texel, a soft copy from
+-- led_segment_glow.tga under each lit segment), the ten segment gauge in its well, and the bottom line: the FULL MARK
+-- ("/600", in the rate's slot, with its bar) and the chip (the retention chip's slot) holding the ammo glyph, an arrow for a
+-- bow or crossbow, a cartridge for a gun, both lying level and pointing right, drawn as flat runs on whole pixels. Places
+-- before the number stay unlit; 0 reads 0000. The gauge is the count against the full mark: the biggest count since the
+-- count last went up (a restock or a new stack). The client has no quiver capacity to read, so the mark is ours and resets
+-- at login.
 --
--- States: PLENTY (cyan digits and gauge, violet ring), LOW at or under the warn count (`gunsight.hunter.ammowarn`, default
--- 60, the scope's setting; amber digits, gauge, ring and underline), OUT at 0 (pink, and the readout blinks twice when it
--- gets there). `ammotab.lowwarn` off keeps the cyan look whatever the count; `ammotab.motion` off drops the blink.
+-- States: PLENTY is the regen module's resting look (muted digits, violet ring, faint cyan gauge, the face dimmed); LOW at or
+-- under the warn count (`gunsight.hunter.ammowarn`, default 60, the scope's setting) lights amber like its countdown; OUT at
+-- 0 lights pink and the readout blinks twice when it gets there. `ammotab.lowwarn` off keeps the resting look whatever the
+-- count; `ammotab.motion` off drops the blink. The ring turns cyan under the mouse, as the regen module's does.
 --
 -- Combat: nothing here is protected, so painting runs in combat; the host's anchor onto the Console and a shoulder that
 -- comes or goes wait for PLAYER_REGEN_ENABLED (ClassShoulder.Refresh parks itself in combat). Loads after ThunderClapTab.lua,
 -- before ConfigWindow.lua (which reads SETTINGS); HunterState.lua loads later and is asked for at PLAYER_LOGIN.
--- tools/ammotab-harness.py pins it against a mock. New TGAs need a full client restart.
+-- tools/ammotab-harness.py pins it against a mock. It uses only textures the regen module ships, so a /reload picks it up.
 
 local _, FS = ...
 
@@ -41,25 +44,32 @@ local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 local AT = {
     KEY = "ammo",
     CLASSES = { WARRIOR = true, HUNTER = true, ROGUE = true },
+    -- the mana regen module's face (FiveSecondTab.lua FT), so the two tabs read as one family
     HOST_W = 92.8, HOST_H = 49,
-    HERO = { x = 6, y = 6, w = 81, h = 38 },       -- the readout well, the 2 x 1 key block
-    LED_CX = 46.5, LED_CY = 20,                    -- the readout's centre, design px from the host's top left
-    LED_W = 66, PITCH = 12, GLYPH_X = 57,          -- texels: four digits on a 12 pitch, the glyph cell at 57
-    CELL_W = 9, CELL_H = 18, SLOT_W = 16, SLOT_H = 32, ATLAS_W = 128, ATLAS_H = 64,
-    GLOW_PAD = 2, GLOW_W = 13, GLOW_H = 22,
-    ARROW_SLOT = 7, BULLET_SLOT = 8,
-    ROOM_H = 28,                                   -- design px above the gauge the readout may fill (y 6..34)
-    GAUGE_N = 10, GAUGE_X = 11, GAUGE_PITCH = 7, GAUGE_SEG_W = 6, GAUGE_Y = 35, GAUGE_H = 4, GAUGE_GLOW_PAD = 1,
-    UL = { x = 11, y = 47, w = 71, h = 1 },
-    GHOST = { 0x22 / 255, 0x16 / 255, 0x3e / 255 },  -- #22163e an unlit segment
-    GAUGE_OFF = { 0x1e / 255, 0x12 / 255, 0x38 / 255 },  -- #1e1238 an empty gauge segment
-    GLOW_LIT = 0.5, GLOW_GAUGE = 0.6,
-    RING_PLENTY = 0.6, HALO_PLENTY = 0.25, HALO_WARN = 0.55,
+    HERO = { x = 6, y = 6, w = 81, h = 16 },        -- the readout tile (chamfer 6)
+    LED_CX = 46,                                    -- the readout is centred here, vertically on the hero tile
+    CELL_W = 10, CELL_H = 12, ATLAS = 64,           -- a cell of led_segments.tga in texels, the atlas side
+    PITCH = 12, COUNT_W = 46,                       -- four cells on a 12 texel pitch: 4 x 10 + 3 x 2
+    SEG_GLOW_PAD = 2, SEG_GLOW_W = 14, SEG_GLOW_H = 16,
+    GAUGE_N = 10, GAUGE_WELL = { x = 6, w = 81 }, GAUGE_Y = 24, GAUGE_H = 5,
+    GAUGE_X = 7, GAUGE_PITCH = 8, GAUGE_SEG_W = 7, GAUGE_SEG_Y = 25, GAUGE_SEG_H = 3, GAUGE_GLOW_PAD = 1,
+    MARK_X = 8, MARK_BASE = 39, MARK_BAR_Y = 41, MARK_ROOM = 35, MARK_PX = 11,   -- the full mark line (the rate's slot)
+    CHIP = { x = 57, y = 31, w = 30, h = 12 }, CHIP_C = 3, CHIP_PAD = 3,         -- the chip (the retention chip's slot)
+    GLYPH_W = 10, GLYPH_H = 7,                      -- the chip's glyph, texels, drawn as flat runs on whole pixels
+    MIN_PX = 6, ADVANCE = 0.5615,
+    IDLE_ALPHA = 0.72, WORD_IDLE = 0.55, GHOST_IDLE = 0.05, GHOST_LIT = 0.07, GLOW_STEADY = 0.5,
+    RING_IDLE = 0.4, RING_WARN = 0.7, GAUGE_REST = 0.83, CHIP_GLOW = 0.4, CHIP_IDLE_TEXT = 0.65, HOVER_GLOW = 0.6,
+    GAUGE_OFF = 0.22, HOLLOW_MIX = 0.25,
+    -- GAUGE_REST: the regen module's resting gauge measured on screen (2026-11-20 capture) is cyan at 0.6 over its well, its
+    -- idle breathing lifting it past its 0.3 vertex alpha; this tab does not breathe, so 0.83 under the 0.72 face dimming
+    -- lands on the same 0.6 and the two gauges match side by side.
     BLINK_ON = 0.45, BLINK_OFF = 0.45, BLINK_LOW = 0.25, BLINKS = 2,
     MAX = 9999,
-    host = nil, built = false, seated = false, pendingSync = false,
+    host = nil, built = false, seated = false, pendingSync = false, hover = false,
     count = nil, kind = nil, full = nil, state = nil, sig = nil,
     warned = {},
+    REC = { 6 / 255, 2 / 255, 16 / 255 },          -- #060210 the gauge well
+    BG = { 13 / 255, 6 / 255, 32 / 255 },          -- #0d0620 a hollow chip
 }
 Tab.AT = AT
 
@@ -71,7 +81,7 @@ local SETTINGS = {
     },
     lowwarn = {
         key = "ammotab.lowwarn", default = true, label = "Low ammo colours",
-        tip = "Turns the tab amber when you are down to the low ammo count and pink when you are out. Off keeps it cyan.",
+        tip = "Turns the tab amber when you are down to the low ammo count and pink when you are out. Off keeps its resting look.",
     },
     motion = {
         key = "ammotab.motion", default = true, label = "Out of ammo blink",
@@ -180,17 +190,16 @@ local function Flat(parent, layer, sub)
     return tex
 end
 
--- The grid: px UI units a physical pixel, n physical pixels a texel (a whole number, the nearest to a design px that still fits
--- the readout over the gauge and inside the well).
+-- The grid, the mana regen module's: px UI units a physical pixel, n physical pixels a texel (a whole number, the nearest to a
+-- design px that still leaves the ring clear of the hero tile).
 local function SeatGrid()
     local s = Scale()
     local FH = FS.FrameHelpers
     local px = FH and FH.PixelUnit and FH.PixelUnit(AT.host) or s
     AT.s, AT.px = s, px
     local ratio = s / px
-    local fitH = math.floor(AT.ROOM_H * ratio / AT.CELL_H)
-    local fitW = math.floor((AT.HERO.w - 3) * ratio / AT.LED_W)
-    AT.n = math.max(1, math.min(math.floor(ratio + 0.5), fitH, fitW))
+    local fit = math.floor((AT.HERO.h * ratio - 2) / AT.CELL_H)
+    AT.n = math.max(1, math.min(math.floor(ratio + 0.5), fit))
 end
 
 local function PixelsOf(d)
@@ -215,50 +224,83 @@ local function PlacePx(region, x, y, w, h)
 end
 
 -------------------------------------------------------------------------------
--- The LED art
+-- The LED art: the mana regen module's fourteen segment cells (led_segments.tga)
 -------------------------------------------------------------------------------
 
-local SEGMENT_ORDER = { "a", "b", "c", "d", "e", "f", "g" }
+-- The atlas slot order (generate_led_segments.py SEGMENT_ORDER): slot n is column n % 4, row n // 4 of 16 x 16 texels.
+local SEGMENT_ORDER = { "a", "b", "c", "d", "e", "f", "g1", "g2", "i", "l", "h", "j", "k", "m" }
 Tab.SEGMENT_ORDER = SEGMENT_ORDER
 local DIGIT_TEXT = {
-    ["0"] = "abcdef", ["1"] = "bc", ["2"] = "abged", ["3"] = "abgcd", ["4"] = "fgbc",
-    ["5"] = "afgcd", ["6"] = "afgedc", ["7"] = "abc", ["8"] = "abcdefg", ["9"] = "abcdfg",
+    ["0"] = "a b c d e f", ["1"] = "b c", ["2"] = "a b g1 g2 e d", ["3"] = "a b c d g1 g2", ["4"] = "f b g1 g2 c",
+    ["5"] = "a f g1 g2 c d", ["6"] = "a f e d c g1 g2", ["7"] = "a b c", ["8"] = "a b c d e f g1 g2",
+    ["9"] = "a b c d f g1 g2",
 }
 Tab.DIGIT_TEXT = DIGIT_TEXT
 local DIGIT = {}
-for ch, text in pairs(DIGIT_TEXT) do
-    local lit = {}
-    for n, name in ipairs(SEGMENT_ORDER) do
-        if text:find(name, 1, true) then lit[n] = true end
+do
+    local index = {}
+    for n, name in ipairs(SEGMENT_ORDER) do index[name] = n end
+    for ch, text in pairs(DIGIT_TEXT) do
+        local lit = {}
+        for name in text:gmatch("%S+") do lit[index[name]] = true end
+        DIGIT[ch] = lit
     end
-    DIGIT[ch] = lit
 end
 
-local function SlotCoords(slot, w, h)
-    local ox, oy = (slot % 8) * AT.SLOT_W, math.floor(slot / 8) * AT.SLOT_H
-    return ox / AT.ATLAS_W, (ox + w) / AT.ATLAS_W, oy / AT.ATLAS_H, (oy + h) / AT.ATLAS_H
-end
+-- The chip's glyph, lying level and pointing right (the regen family mockup, glyph in the chip): "#" lit, 10 x 7 texels.
+local GLYPHS = {
+    arrow = { "#.....#...", ".#....##..", "..#...###.", "##########", "..#...###.", ".#....##..", "#.....#..." },
+    bullet = { "#.........", "#.#####...", "#.#######.", "#.########", "#.#######.", "#.#####...", "#........." },
+}
+Tab.GLYPHS = GLYPHS
 
--- One piece of a cell: the hard texture and its soft copy under it.
-local function NewPiece(frame, slot)
-    local gl = Crisp(frame:CreateTexture(nil, "ARTWORK", nil, 0))
-    gl:SetTexture(MEDIA .. "led_ammo_glow.tga")
-    gl:SetBlendMode("ADD")
-    gl:SetTexCoord(SlotCoords(slot, AT.GLOW_W, AT.GLOW_H))
-    gl:SetVertexColor(1, 1, 1, 0)
-    local tex = Crisp(frame:CreateTexture(nil, "ARTWORK", nil, 1))
-    tex:SetTexture(MEDIA .. "led_ammo.tga")
-    tex:SetTexCoord(SlotCoords(slot, AT.CELL_W, AT.CELL_H))
-    return { tex = tex, gl = gl }
+-- Each glyph as runs { x, y, w } one texel tall.
+local RUNS = {}
+for kind, rows in pairs(GLYPHS) do
+    local runs = {}
+    for y, row in ipairs(rows) do
+        local x = 1
+        while x <= #row do
+            if row:sub(x, x) == "#" then
+                local w = 0
+                while row:sub(x + w, x + w) == "#" do w = w + 1 end
+                runs[#runs + 1] = { x - 1, y - 1, w }
+                x = x + w
+            else
+                x = x + 1
+            end
+        end
+    end
+    RUNS[kind] = runs
 end
+Tab.RUNS = RUNS
 
-local function NewCell(parent, slots)
+local function NewCell(parent, level)
     local frame = CreateFrame("Frame", nil, parent)
     frame:EnableMouse(false)
-    frame:SetFrameLevel(parent:GetFrameLevel() + 1)
-    local cell = { frame = frame, pieces = {} }
-    for i, slot in ipairs(slots) do cell.pieces[i] = NewPiece(frame, slot) end
+    frame:SetFrameLevel(level)
+    local cell = { frame = frame, seg = {}, gl = {} }
+    for n = 1, #SEGMENT_ORDER do
+        local l, t = ((n - 1) % 4) * 0.25, math.floor((n - 1) / 4) * 0.25
+        local gl = Crisp(frame:CreateTexture(nil, "ARTWORK", nil, 0))
+        gl:SetTexture(MEDIA .. "led_segment_glow.tga")
+        gl:SetBlendMode("ADD")
+        gl:SetTexCoord(l, l + AT.SEG_GLOW_W / AT.ATLAS, t, t + AT.SEG_GLOW_H / AT.ATLAS)
+        gl:SetVertexColor(1, 1, 1, 0)
+        cell.gl[n] = gl
+        local tex = Crisp(frame:CreateTexture(nil, "ARTWORK", nil, 1))
+        tex:SetTexture(MEDIA .. "led_segments.tga")
+        tex:SetTexCoord(l, l + AT.CELL_W / AT.ATLAS, t, t + AT.CELL_H / AT.ATLAS)
+        cell.seg[n] = tex
+    end
     return cell
+end
+
+local function NewText(parent, px)
+    local fs = parent:CreateFontString(nil, "OVERLAY")
+    FS.Theme.ApplyMono(fs, px, FS.Theme.COLOR_TEXT_WHITE)
+    fs.fsPx = px
+    return fs
 end
 
 local function Build()
@@ -272,24 +314,27 @@ local function Build()
     local hero = CreateFrame("Frame", nil, host)
     hero:EnableMouse(false)
     hero.fsPlate = T.AddCut2Texture(hero, MEDIA .. "led_well.tga", { 1, 1, 1, 1 }, "BACKGROUND", -8)
-    T.SkinCutButton(hero, { borderColor = T.COLOR_BORDER, glowAlpha = AT.HALO_PLENTY })
+    T.SkinCutButton(hero, { borderColor = T.COLOR_BORDER, glowAlpha = 0 })
     Crisp(hero.fsPlate)
     if hero.fsSkin and hero.fsSkin.border and hero.fsSkin.border.ring then Crisp(hero.fsSkin.border.ring) end
     AT.shine = Flat(hero, "BACKGROUND", -7)
     AT.shine:SetVertexColor(1, 1, 1, 0.08)
     AT.hero = hero
 
+    -- the readout and the gauge (one frame, so the idle dimming and the blink are its alpha)
     local body = CreateFrame("Frame", "FSAmmoTabReadout", host)
     body:EnableMouse(false)
     body:SetFrameLevel(hero:GetFrameLevel() + 3)
     AT.body = body
-    local segs = {}
-    for n = 1, #SEGMENT_ORDER do segs[n] = n - 1 end
-    AT.digits = {}
-    for i = 1, 4 do AT.digits[i] = NewCell(body, segs) end
-    AT.glyph = NewCell(body, { AT.ARROW_SLOT, AT.BULLET_SLOT })
-
-    local gauge = { seg = {}, gl = {} }
+    local gauge = { seg = {}, gl = {}, line = {} }
+    local rec = AT.REC
+    gauge.plate = Flat(body, "BACKGROUND", 2)
+    gauge.plate:SetVertexColor(rec[1], rec[2], rec[3], 0.9)
+    for k = 1, 4 do
+        gauge.line[k] = Flat(body, "BORDER", 0)
+        local v = T.COLOR_BORDER
+        gauge.line[k]:SetVertexColor(v[1], v[2], v[3], 0.4)
+    end
     for i = 1, AT.GAUGE_N do
         local gl = Crisp(body:CreateTexture(nil, "ARTWORK", nil, -1))
         gl:SetTexture(MEDIA .. "led_glow.tga")
@@ -299,10 +344,43 @@ local function Build()
         gauge.seg[i] = Flat(body, "ARTWORK", 0)
     end
     AT.gauge = gauge
+    AT.digits = {}
+    for i = 1, 4 do AT.digits[i] = NewCell(body, body:GetFrameLevel() + 1) end
 
-    AT.underline = Flat(host, "OVERLAY", 0)
+    -- the bottom line: the full mark on the left, the chip with the glyph on the right
+    local zone = CreateFrame("Frame", nil, host)
+    zone:EnableMouse(false)
+    zone:SetFrameLevel(hero:GetFrameLevel() + 3)
+    AT.zone = zone
+    local c = AT.CHIP_C
+    local ringPath, glowPath = MEDIA .. "slice_cut2_outline_c3.tga", MEDIA .. "slice_cut2_glow_c3.tga"
+    if T.Cut2ButtonSet then
+        local ok, ring, glow, used = pcall(T.Cut2ButtonSet, AT.CHIP_C)
+        if ok and type(ring) == "string" and type(glow) == "string" then ringPath, glowPath, c = ring, glow, used or c end
+    end
+    local chip = {}
+    chip.glow = zone:CreateTexture(nil, "BACKGROUND", nil, 0)
+    chip.glow:SetTexture(glowPath)
+    T.ApplyNineSlice(chip.glow, (T.SLICE_CUT2_GLOW_PAD or 4) + c)
+    chip.glow:SetBlendMode("ADD")
+    chip.fill = zone:CreateTexture(nil, "BACKGROUND", nil, 1)
+    chip.fill:SetTexture(MEDIA .. "slice_cut2_fill_c" .. c .. ".tga")
+    T.ApplyNineSlice(chip.fill, c)
+    chip.ring = zone:CreateTexture(nil, "ARTWORK", nil, 0)
+    chip.ring:SetTexture(ringPath)
+    T.ApplyNineSlice(chip.ring, c)
+    chip.glyph = {}
+    for kind, runs in pairs(RUNS) do
+        local set = {}
+        for i = 1, #runs do set[i] = Flat(zone, "OVERLAY", 1) end
+        chip.glyph[kind] = set
+    end
+    AT.chip = chip
+    AT.mark = NewText(zone, AT.MARK_PX)
+    AT.mark:SetJustifyH("LEFT")
+    AT.markBar = Flat(zone, "OVERLAY", 0)
 
-    -- the blink: the readout's alpha held on, low, on, low (BLINKS times), then back to 1
+    -- the blink: the readout's alpha held low, on (BLINKS times)
     if body.CreateAnimationGroup then
         local group = body:CreateAnimationGroup()
         local order = 0
@@ -321,8 +399,18 @@ local function Build()
         AT.blink = group
     end
 
-    host:SetScript("OnEnter", function(self) Tab.ShowTooltip(self) end)
-    host:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    host:SetScript("OnEnter", function(self)
+        AT.hover = true
+        AT.sig = nil
+        Tab.Paint()
+        Tab.ShowTooltip(self)
+    end)
+    host:SetScript("OnLeave", function()
+        AT.hover = false
+        AT.sig = nil
+        Tab.Paint()
+        if GameTooltip then GameTooltip:Hide() end
+    end)
     AT.built = true
 end
 
@@ -334,36 +422,60 @@ local function Layout()
     local H = AT.HERO
     AT.host:SetSize(AT.HOST_W * s, AT.HOST_H * s)
     Place(AT.hero, H.x, H.y, H.w, H.h)
-    Place(AT.body, H.x, H.y, H.w, H.h)
+    Place(AT.body, H.x, H.y, H.w, AT.GAUGE_Y + AT.GAUGE_H - H.y)
+    Place(AT.zone, H.x, AT.CHIP.y - AT.CHIP_PAD, H.w, AT.HOST_H - AT.CHIP.y + AT.CHIP_PAD)
     Place(AT.shine, H.x + 6, H.y + 1, H.w - 7, 1)
-    local U = AT.UL
-    Place(AT.underline, U.x, U.y, U.w, U.h)
+
+    local G = AT.gauge
+    local wx, wy, ww, wh = AT.GAUGE_WELL.x, AT.GAUGE_Y, AT.GAUGE_WELL.w, AT.GAUGE_H
+    Place(G.plate, wx, wy, ww, wh)
+    Place(G.line[1], wx, wy, ww, 1)
+    Place(G.line[2], wx, wy + wh - 1, ww, 1)
+    Place(G.line[3], wx, wy + 1, 1, wh - 2)
+    Place(G.line[4], wx + ww - 1, wy + 1, 1, wh - 2)
+    local gp = AT.GAUGE_GLOW_PAD
     for i = 1, AT.GAUGE_N do
         local x = AT.GAUGE_X + (i - 1) * AT.GAUGE_PITCH
-        Place(AT.gauge.seg[i], x, AT.GAUGE_Y, AT.GAUGE_SEG_W, AT.GAUGE_H)
-        local gp = AT.GAUGE_GLOW_PAD
-        Place(AT.gauge.gl[i], x - gp, AT.GAUGE_Y - gp, AT.GAUGE_SEG_W + 2 * gp, AT.GAUGE_H + 2 * gp)
+        Place(G.seg[i], x, AT.GAUGE_SEG_Y, AT.GAUGE_SEG_W, AT.GAUGE_SEG_H)
+        Place(G.gl[i], x - gp, AT.GAUGE_SEG_Y - gp, AT.GAUGE_SEG_W + 2 * gp, AT.GAUGE_SEG_H + 2 * gp)
     end
-    local left = PixelsOf(AT.LED_CX) - math.floor(AT.LED_W * n / 2)
-    local top = PixelsOf(AT.LED_CY) - math.floor(AT.CELL_H * n / 2)
-    local gm = AT.GLOW_PAD * n
-    local function seat(cell, x)
-        PlacePx(cell.frame, x, top, AT.CELL_W * n, AT.CELL_H * n)
-        for _, piece in ipairs(cell.pieces) do
-            piece.tex:ClearAllPoints()
-            piece.tex:SetAllPoints(cell.frame)
-            piece.gl:ClearAllPoints()
-            piece.gl:SetPoint("TOPLEFT", cell.frame, "TOPLEFT", -gm * px, gm * px)
-            piece.gl:SetSize(AT.GLOW_W * n * px, AT.GLOW_H * n * px)
+
+    -- the four cells, centred on the hero tile, every number a whole count of physical pixels
+    local left = PixelsOf(AT.LED_CX) - math.floor(AT.COUNT_W * n / 2)
+    local top = PixelsOf(H.y + H.h / 2) - math.floor(AT.CELL_H * n / 2)
+    local gm = AT.SEG_GLOW_PAD * n
+    for i, cell in ipairs(AT.digits) do
+        PlacePx(cell.frame, left + (i - 1) * AT.PITCH * n, top, AT.CELL_W * n, AT.CELL_H * n)
+        for _, tex in ipairs(cell.seg) do
+            tex:ClearAllPoints()
+            tex:SetAllPoints(cell.frame)
+        end
+        for _, gl in ipairs(cell.gl) do
+            gl:ClearAllPoints()
+            gl:SetPoint("TOPLEFT", cell.frame, "TOPLEFT", -gm * px, gm * px)
+            gl:SetSize(AT.SEG_GLOW_W * n * px, AT.SEG_GLOW_H * n * px)
         end
     end
-    for i, cell in ipairs(AT.digits) do seat(cell, left + (i - 1) * AT.PITCH * n) end
-    seat(AT.glyph, left + AT.GLYPH_X * n)
+
+    -- the chip and its glyph (centred, n pixels a texel)
+    local C, chip = AT.CHIP, AT.chip
+    Place(chip.fill, C.x, C.y, C.w, C.h)
+    Place(chip.ring, C.x, C.y, C.w, C.h)
+    local cp = AT.CHIP_PAD
+    Place(chip.glow, C.x - cp, C.y - cp, C.w + 2 * cp, C.h + 2 * cp)
+    local gx = PixelsOf(C.x + C.w / 2) - math.floor(AT.GLYPH_W * n / 2)
+    local gy = PixelsOf(C.y + C.h / 2) - math.floor(AT.GLYPH_H * n / 2)
+    for kind, set in pairs(chip.glyph) do
+        for i, run in ipairs(RUNS[kind]) do
+            PlacePx(set[i], gx + run[1] * n, gy + run[2] * n, run[3] * n, n)
+        end
+    end
+    AT.mark.fsY = nil
     AT.sig = nil
 end
 
 -------------------------------------------------------------------------------
--- Painting (texture writes only)
+-- Painting (texture and font writes only)
 -------------------------------------------------------------------------------
 
 local function Color(name, fallback)
@@ -371,10 +483,12 @@ local function Color(name, fallback)
     return (theme and theme[name]) or fallback
 end
 
+-- The resting look is the mana regen module's at rest (muted digits, violet ring, a faint cyan gauge, the face dimmed); low
+-- and out light up like its countdown, in amber and pink.
 local LOOKS = {
-    plenty = { lit = "COLOR_POWER", ring = "COLOR_BORDER", ringA = AT.RING_PLENTY, halo = AT.HALO_PLENTY, ul = "COLOR_BORDER" },
-    low = { lit = "COLOR_AMBER", ring = "COLOR_AMBER", ringA = 1, halo = AT.HALO_WARN, ul = "COLOR_AMBER" },
-    out = { lit = "COLOR_HEALTH", ring = "COLOR_HEALTH", ringA = 1, halo = AT.HALO_WARN, ul = "COLOR_HEALTH" },
+    plenty = { lit = "COLOR_MUTED", gauge = "COLOR_POWER", rest = true },
+    low = { lit = "COLOR_AMBER", gauge = "COLOR_AMBER" },
+    out = { lit = "COLOR_HEALTH", gauge = "COLOR_HEALTH" },
 }
 Tab.LOOKS = LOOKS
 
@@ -398,14 +512,22 @@ function Tab.GaugeLit(n, full)
     return math.max(1, math.min(AT.GAUGE_N, math.ceil(n / full * AT.GAUGE_N - 1e-9)))
 end
 
-local function PaintPiece(piece, on, c)
-    if on then
-        piece.tex:SetVertexColor(c[1], c[2], c[3], 1)
-        piece.gl:SetVertexColor(c[1], c[2], c[3], AT.GLOW_LIT)
-    else
-        local g = AT.GHOST
-        piece.tex:SetVertexColor(g[1], g[2], g[3], 1)
-        piece.gl:SetVertexColor(c[1], c[2], c[3], 0)
+-- The font size for `text`: MARK_PX, or smaller so it stays inside `room` design px; half pixels, never below MIN_PX.
+local function FitPx(text, px, room)
+    local fit = math.floor(room * Scale() / (#text * AT.ADVANCE) * 2) / 2
+    return math.max(math.min(fit, px), AT.MIN_PX)
+end
+
+local function PaintCell(cell, ch, c, litA, ghostA, glow)
+    local lit = ch and DIGIT[ch]
+    for k = 1, #SEGMENT_ORDER do
+        if lit and lit[k] then
+            cell.seg[k]:SetVertexColor(c[1], c[2], c[3], litA)
+            cell.gl[k]:SetVertexColor(c[1], c[2], c[3], glow * litA)
+        else
+            cell.seg[k]:SetVertexColor(c[1], c[2], c[3], ghostA)
+            cell.gl[k]:SetVertexColor(c[1], c[2], c[3], 0)
+        end
     end
 end
 
@@ -414,43 +536,99 @@ function Tab.Paint()
     local n, kind = AT.count, AT.kind
     local state = Tab.StateOf(n)
     if not state then return end
-    local sig = state .. ":" .. n .. ":" .. tostring(AT.full) .. ":" .. tostring(kind)
+    local sig = state .. ":" .. n .. ":" .. tostring(AT.full) .. ":" .. tostring(kind) .. ":" .. tostring(AT.hover)
     local was = AT.state
     AT.state = state
     if sig == AT.sig then return end
     AT.sig = sig
+    local T = FS.Theme
     local look = LOOKS[state]
+    local rest = look.rest and true or false
     local c = Color(look.lit, { 1, 1, 1, 1 })
+    local violet, cyan, muted = T.COLOR_BORDER, T.COLOR_POWER, T.COLOR_MUTED
+
+    -- the readout
+    local litA = rest and AT.WORD_IDLE or 1
+    local ghostA = rest and AT.GHOST_IDLE or AT.GHOST_LIT
+    local glow = rest and 0 or AT.GLOW_STEADY
     local chars = Tab.Digits(n)
-    for i, cell in ipairs(AT.digits) do
-        local lit = chars[i] and DIGIT[chars[i]]
-        for k, piece in ipairs(cell.pieces) do PaintPiece(piece, lit and lit[k], c) end
-    end
-    local arrow = kind ~= "bullet"
-    local a, b = AT.glyph.pieces[1], AT.glyph.pieces[2]
-    PaintPiece(a, true, c)
-    PaintPiece(b, true, c)
-    a.tex:SetShown(arrow)
-    a.gl:SetShown(arrow)
-    b.tex:SetShown(not arrow)
-    b.gl:SetShown(not arrow)
+    for i, cell in ipairs(AT.digits) do PaintCell(cell, chars[i], c, litA, ghostA, glow) end
+
+    -- the rim: violet at rest, the state's colour when low or out, cyan under the mouse
+    local ring, ringA, glowA = rest and violet or c, rest and AT.RING_IDLE or AT.RING_WARN, 0
+    if AT.hover then ring, ringA, glowA = cyan, 1, AT.HOVER_GLOW end
+    local skin = AT.hero.fsSkin
+    if skin and skin.border and skin.border.ring then skin.border.ring:SetVertexColor(ring[1], ring[2], ring[3], ringA) end
+    if skin and skin.glow then skin.glow:SetVertexColor(ring[1], ring[2], ring[3], glowA) end
+
+    -- the gauge: the count over the full mark
     local on = Tab.GaugeLit(n, AT.full)
-    local off = AT.GAUGE_OFF
+    local gc = Color(look.gauge, c)
     for i = 1, AT.GAUGE_N do
+        local seg, gl = AT.gauge.seg[i], AT.gauge.gl[i]
         if i <= on then
-            AT.gauge.seg[i]:SetVertexColor(c[1], c[2], c[3], 1)
-            AT.gauge.gl[i]:SetVertexColor(c[1], c[2], c[3], AT.GLOW_GAUGE)
+            local a = rest and AT.GAUGE_REST or 1
+            seg:SetVertexColor(gc[1], gc[2], gc[3], a)
+            gl:SetVertexColor(gc[1], gc[2], gc[3], rest and 0 or a)
         else
-            AT.gauge.seg[i]:SetVertexColor(off[1], off[2], off[3], 1)
-            AT.gauge.gl[i]:SetVertexColor(c[1], c[2], c[3], 0)
+            seg:SetVertexColor(violet[1], violet[2], violet[3], AT.GAUGE_OFF)
+            gl:SetVertexColor(violet[1], violet[2], violet[3], 0)
         end
     end
-    local ring = Color(look.ring, c)
-    local skin = AT.hero.fsSkin
-    if skin and skin.border and skin.border.ring then skin.border.ring:SetVertexColor(ring[1], ring[2], ring[3], look.ringA) end
-    if skin and skin.glow then skin.glow:SetVertexColor(ring[1], ring[2], ring[3], look.halo) end
-    local ul = Color(look.ul, ring)
-    AT.underline:SetVertexColor(ul[1], ul[2], ul[3], 0.9)
+    AT.body:SetAlpha(rest and AT.IDLE_ALPHA or 1)
+
+    -- the full mark and its bar
+    local text = "/" .. tostring(math.min(AT.MAX, AT.full or n))
+    local size = FitPx(text, AT.MARK_PX, AT.MARK_ROOM)
+    local fs = AT.mark
+    if fs.fsPx ~= size then
+        fs.fsPx = size
+        T.ApplyMono(fs, size, T.COLOR_TEXT_WHITE)
+    end
+    fs:SetText(text)
+    fs:SetTextColor(muted[1], muted[2], muted[3], 1)
+    local cy = math.floor((AT.MARK_BASE - size * 0.36) + 0.5)
+    if fs.fsY ~= cy then
+        fs.fsY = cy
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", AT.host, "TOPLEFT", PixelsOf(AT.MARK_X) * AT.px, -PixelsOf(cy) * AT.px)
+    end
+    local wd = math.floor(#text * size * AT.ADVANCE / Scale() + 0.5)
+    Place(AT.markBar, AT.MARK_X, AT.MARK_BAR_Y, wd, 2)
+    if rest then
+        AT.markBar:SetVertexColor(muted[1], muted[2], muted[3], 0.45)
+    else
+        AT.markBar:SetVertexColor(c[1], c[2], c[3], 0.95)
+    end
+
+    -- the chip and the glyph of the weapon's ammo
+    local chip = AT.chip
+    local gcol, gA
+    if rest then
+        local h = AT.HOLLOW_MIX
+        local r, g, b = muted[1] + (1 - muted[1]) * h, muted[2] + (1 - muted[2]) * h, muted[3] + (1 - muted[3]) * h
+        local bg = AT.BG
+        chip.fill:SetVertexColor(bg[1], bg[2], bg[3], 0.75)
+        chip.ring:SetVertexColor(r, g, b, 0.5)
+        chip.glow:SetVertexColor(r, g, b, 0)
+        gcol, gA = { r, g, b }, AT.CHIP_IDLE_TEXT
+    else
+        local bg = AT.BG
+        chip.fill:SetVertexColor(bg[1] + (c[1] - bg[1]) * 0.3, bg[2] + (c[2] - bg[2]) * 0.3, bg[3] + (c[3] - bg[3]) * 0.3, 1)
+        chip.ring:SetVertexColor(c[1], c[2], c[3], 1)
+        chip.glow:SetVertexColor(c[1], c[2], c[3], AT.CHIP_GLOW)
+        gcol, gA = { 1, 1, 1 }, 1
+    end
+    if AT.hover then chip.ring:SetVertexColor(cyan[1], cyan[2], cyan[3], 1) end
+    local which = kind == "bullet" and "bullet" or "arrow"
+    for k, set in pairs(chip.glyph) do
+        for _, run in ipairs(set) do
+            run:SetShown(k == which)
+            run:SetVertexColor(gcol[1], gcol[2], gcol[3], gA)
+        end
+    end
+    AT.zone:SetAlpha(rest and AT.IDLE_ALPHA or 1)
+
     if state == "out" and was ~= nil and was ~= "out" and Setting(SETTINGS.motion) and AT.blink then
         AT.blink:Stop()
         AT.blink:Play()

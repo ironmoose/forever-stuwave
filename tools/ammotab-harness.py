@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the real AmmoTab.lua and HunterState.lua headless on the class shoulder world (sealbar and classshoulder harness
-mocks) and pins the ammo tab (look B, LED COUNTER, with the BROADHEAD arrow, of the design mockups ammo-tab-2026-11-20 and
-ammo-tab-led-arrow-2026-11-20).
+mocks) and pins the ammo tab (the regen family mockup ammo-tab-regen-family-2026-11-20: look B, the glyph in the chip, the
+glyphs lying level).
 
 What is pinned here:
 
@@ -10,10 +10,12 @@ What is pinned here:
     nothing; the setting off frees the seat;
   * the seat: 16 design px right of the last shoulder (Hunter: after the mana regen module, 144.8; Warrior: after Thunder
     Clap, 253.6; Rogue: the first seat, 36), a 2 x 1 block;
-  * the readout: four seven segment cells, the number right aligned with the places before it unlit, 0000 at zero, 9999 at
-    most; the broadhead for a bow or crossbow, the bullet for a gun; cells on whole pixels at the layout's texel size;
-  * the states: plenty (cyan), low at the shared warn count (amber), out (pink, the blink plays once on the way in); the low
-    colours switch and the motion switch;
+  * the face is the mana regen module's: four of its fourteen segment cells (10 x 12 texels on a 12 pitch, centred on the
+    16 px hero tile), its gauge and its bottom line slots; the number right aligned with the places before it unlit, 0000 at
+    zero, 9999 at most; the full mark as "/600"; the chip holds the level arrow for a bow or crossbow, the level cartridge
+    for a gun; cells and glyph runs on whole pixels at the layout's texel size;
+  * the states: plenty (the regen module's resting look, muted), low at the shared warn count (amber), out (pink, the blink
+    plays once on the way in); the low colours switch and the motion switch; the hover ring;
   * the gauge: the count over the full mark (the biggest count since it last rose), a restock resets the mark;
   * secrets and combat: a secret count falls back to the plain slot count, both secret is no tab; a paint in combat touches
     nothing protected and the seat waits for regen;
@@ -147,27 +149,23 @@ def theme(lua, name):
     return (round(c[1], 3), round(c[2], 3), round(c[3], 3))
 
 
-def lit_segments(lua, i: int) -> str:
-    """The segment names lit in digit cell i (1..4): a piece is lit when its glow is on."""
+def lit_names(lua, i: int) -> list:
+    """The segment names lit in digit cell i (1..4): lit segments carry the lit alpha, unlit ones the faint ghost."""
     AT = tab(lua).AT
     cell = AT.digits[i]
-    names = "abcdefg"
-    out = ""
-    for k in range(1, 8):
-        if cell.pieces[k].gl._vertex[4] > 0:
-            out += names[k - 1]
-    return out
+    order = tab(lua).SEGMENT_ORDER
+    return sorted(order[k] for k in range(1, 15) if cell.seg[k]._vertex[4] > 0.2)
 
 
 def digit_of(lua, i: int):
-    lit = lit_segments(lua, i)
+    lit = lit_names(lua, i)
     if not lit:
         return None
     text = tab(lua).DIGIT_TEXT
     for ch in "0123456789":
-        if sorted(text[ch]) == sorted(lit):
+        if sorted(text[ch].split()) == lit:
             return ch
-    return "?" + lit
+    return "?" + " ".join(lit)
 
 
 def readout(lua) -> str:
@@ -175,19 +173,20 @@ def readout(lua) -> str:
 
 
 def lit_colour(lua):
-    """The colour of the first lit digit piece."""
+    """The colour of the first lit digit segment."""
     AT = tab(lua).AT
     for i in range(1, 5):
-        for k in range(1, 8):
-            p = AT.digits[i].pieces[k]
-            if p.gl._vertex[4] > 0:
-                return rgb(p.tex._vertex)
+        for k in range(1, 15):
+            seg = AT.digits[i].seg[k]
+            if seg._vertex[4] > 0.2:
+                return rgb(seg._vertex)
     return None
 
 
 def gauge_lit(lua) -> int:
     AT = tab(lua).AT
-    return sum(1 for i in range(1, 11) if AT.gauge.gl[i]._vertex[4] > 0)
+    violet = theme(lua, "COLOR_BORDER")
+    return sum(1 for i in range(1, 11) if rgb(AT.gauge.seg[i]._vertex) != violet)
 
 
 def blinking(lua) -> bool:
@@ -195,9 +194,12 @@ def blinking(lua) -> bool:
 
 
 def glyph(lua) -> str:
-    p = tab(lua).AT.glyph.pieces
-    a, b = shown(p[1].tex), shown(p[2].tex)
-    return "arrow" if a and not b else "bullet" if b and not a else f"both? {a} {b}"
+    G = tab(lua).AT.chip.glyph
+    a = all(shown(r) for r in G.arrow.values())
+    b = all(shown(r) for r in G.bullet.values())
+    na = not any(shown(r) for r in G.arrow.values())
+    nb = not any(shown(r) for r in G.bullet.values())
+    return "arrow" if a and nb else "bullet" if b and na else f"both? {a} {b}"
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -213,7 +215,8 @@ def check_a_hunter_with_a_bow_gets_the_count_after_the_mana_regen_module():
     assert readout(lua) == "_412", readout(lua)
     assert glyph(lua) == "arrow"
     assert tab(lua).AT.state == "plenty"
-    assert lit_colour(lua) == theme(lua, "COLOR_POWER"), "plenty is not cyan"
+    assert lit_colour(lua) == theme(lua, "COLOR_MUTED"), "plenty is not the resting muted look"
+    assert g(lua).FS.AmmoTab.AT.mark._text == "/412", g(lua).FS.AmmoTab.AT.mark._text
 
 
 def check_a_warrior_with_a_bow_stands_after_thunder_clap():
@@ -281,7 +284,8 @@ def check_low_is_amber_at_the_shared_warn_count_and_out_is_pink_with_one_blink()
     assert AT.state == "plenty"
     set_count(lua, 60)
     assert AT.state == "low" and lit_colour(lua) == theme(lua, "COLOR_AMBER"), f"{AT.state} {lit_colour(lua)}"
-    assert rgb(AT.underline._vertex) == theme(lua, "COLOR_AMBER"), "underline not amber"
+    assert rgb(AT.markBar._vertex) == theme(lua, "COLOR_AMBER"), "mark bar not amber"
+    assert rgb(AT.chip.ring._vertex) == theme(lua, "COLOR_AMBER"), "chip ring not amber"
     run(lua, 'FS.Config.Set("gunsight.hunter.ammowarn", 30)')
     assert AT.state == "plenty", "the shared warn count did not move the tab"
     run(lua, 'FS.Config.Set("gunsight.hunter.ammowarn", 60)')
@@ -300,7 +304,7 @@ def check_the_switches():
     lua = boot(klass="ROGUE", n=20)
     AT = tab(lua).AT
     run(lua, 'FS.Config.Set("ammotab.lowwarn", false)')
-    assert AT.state == "plenty" and lit_colour(lua) == theme(lua, "COLOR_POWER"), "low colours off still warns"
+    assert AT.state == "plenty" and lit_colour(lua) == theme(lua, "COLOR_MUTED"), "low colours off still warns"
     run(lua, 'FS.Config.Set("ammotab.lowwarn", true)')
     assert AT.state == "low"
     run(lua, 'FS.Config.Set("ammotab.motion", false)')
@@ -351,29 +355,61 @@ def check_combat_paints_and_the_seat_waits():
     assert not tab(lua).AT.pendingSync, "regen did not replay the seat"
 
 
-def check_cells_on_whole_pixels_in_a_row():
+def check_cells_and_glyph_on_whole_pixels():
     for scale in (1.0, 0.8, 1.5):
         lua = boot(klass="ROGUE", scale=scale)
         AT = tab(lua).AT
         n = AT.n
         assert n >= 1
-        xs = []
-        for i in range(1, 5):
-            d = csh.D(lua, AT.digits[i].frame)
-            xs.append(d["x"])
-            px = AT.px / scale
+        px = AT.px / scale
+
+        def whole(r, what):
+            d = csh.D(lua, r)
             for v in (d["x"], d["y"], d["w"], d["h"]):
                 k = v / px
-                assert abs(k - round(k)) < 1e-6, f"scale {scale}: digit {i} off the pixel grid ({v})"
-            sb.approx(d["w"] * scale / AT.px, 9 * n, f"digit width at {scale}")
-            sb.approx(d["h"] * scale / AT.px, 18 * n, f"digit height at {scale}")
+                assert abs(k - round(k)) < 1e-6, f"scale {scale}: {what} off the pixel grid ({v})"
+            return d
+
+        xs = []
+        for i in range(1, 5):
+            d = whole(AT.digits[i].frame, f"digit {i}")
+            xs.append(d["x"])
+            sb.approx(d["w"] * scale / AT.px, 10 * n, f"digit width at {scale}")
+            sb.approx(d["h"] * scale / AT.px, 12 * n, f"digit height at {scale}")
         pitch = [round((xs[i + 1] - xs[i]) * scale / AT.px, 6) for i in range(3)]
         assert pitch == [12 * n] * 3, f"pitch {pitch}"
         hero = csh.D(lua, AT.hero)
-        glyph_d = csh.D(lua, AT.glyph.frame)
-        assert xs[0] >= hero["x"] and glyph_d["x"] + glyph_d["w"] <= hero["x"] + hero["w"], "readout leaves the well"
-        gauge = csh.D(lua, AT.gauge.seg[1])
-        assert glyph_d["y"] + glyph_d["h"] <= gauge["y"] + 1e-6 or -glyph_d["y"] + glyph_d["h"] <= -gauge["y"], "readout over the gauge"
+        last = csh.D(lua, AT.digits[4].frame)
+        assert xs[0] >= hero["x"] and last["x"] + last["w"] <= hero["x"] + hero["w"], "readout leaves the tile"
+        chip = csh.D(lua, AT.chip.fill)
+        for kind in ("arrow", "bullet"):
+            for k, r in AT.chip.glyph[kind].items():
+                d = whole(r, f"{kind} run {k}")
+                assert chip["x"] <= d["x"] and d["x"] + d["w"] <= chip["x"] + chip["w"] + 1e-6, f"{kind} leaves the chip"
+
+
+def check_the_face_matches_the_mana_regen_module():
+    lua = boot(klass="HUNTER")
+    AT, FT = tab(lua).AT, g(lua).FS.FiveSecondTab.FT
+    for key in ("HOST_W", "HOST_H", "CELL_W", "CELL_H", "GAUGE_N", "GAUGE_Y", "GAUGE_H", "GAUGE_X", "GAUGE_PITCH",
+                "GAUGE_SEG_W", "GAUGE_SEG_Y", "GAUGE_SEG_H", "LED_CX", "IDLE_ALPHA", "WORD_IDLE", "GHOST_IDLE"):
+        assert AT[key] == FT[key], f"{key}: {AT[key]} vs {FT[key]}"
+    for key in ("x", "y", "w", "h"):
+        assert AT.HERO[key] == FT.HERO[key] and AT.CHIP[key] == FT.CHIP[key], key
+    assert tuple(tab(lua).SEGMENT_ORDER.values()) == tuple(g(lua).FS.FiveSecondTab.SEGMENT_ORDER.values())
+    for ch in "0123456789":
+        assert tab(lua).DIGIT_TEXT[ch] == g(lua).FS.FiveSecondTab.GLYPH_TEXT[ch], ch
+    src = TAB.read_text(encoding="utf-8")
+    assert "led_ammo" not in src and "led_segments.tga" in src, "not the regen module's art"
+
+
+def check_hover_rings_cyan():
+    lua = boot(klass="ROGUE")
+    AT = tab(lua).AT
+    run(lua, 'FSAmmoTab:GetScript("OnEnter")(FSAmmoTab)')
+    assert rgb(AT.hero.fsSkin.border.ring._vertex) == theme(lua, "COLOR_POWER"), "no hover ring"
+    run(lua, 'FSAmmoTab:GetScript("OnLeave")(FSAmmoTab)')
+    assert rgb(AT.hero.fsSkin.border.ring._vertex) == theme(lua, "COLOR_BORDER"), "hover ring stuck"
 
 
 def check_display_only():
