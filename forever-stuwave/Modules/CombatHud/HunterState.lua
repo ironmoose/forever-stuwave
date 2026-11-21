@@ -404,9 +404,12 @@ local function ReadAmmo()
     if not Call(GetInventoryItemID, "player", TUNING.RANGED_SLOT) then return nil end
     local id = Call(GetInventoryItemID, "player", TUNING.AMMO_SLOT)
     if not id then return 0 end
-    local n = PlainOf(Call(GetItemCount, id), "number")
-    if n == nil then n = PlainOf(Call(GetInventoryItemCount, "player", TUNING.AMMO_SLOT), "number") end
-    return n
+    -- Forever keeps the equipped stack in the ammo slot itself, where GetItemCount (bags) reads 0 while the slot holds 200
+    -- (live, 2026-11-20, a Warrior's Sharp Arrows); the slot count is what the stock ammo slot shows. Take the larger plain one.
+    local slot = PlainOf(Call(GetInventoryItemCount, "player", TUNING.AMMO_SLOT), "number")
+    local bags = PlainOf(Call(GetItemCount, id), "number")
+    if slot and bags then return math.max(slot, bags) end
+    return slot or bags
 end
 
 -- the ammo count (a plain number), nil with no weapon that fires ammo or an unreadable count
@@ -502,6 +505,8 @@ end
 
 local function OnCast(spellID)
     if IsSecret(spellID) or type(spellID) ~= "number" then return end
+    -- any shot spends ammo (a Warrior's or Rogue's Shoot Bow too, which has no key here): read the count again just after
+    if ammo.count ~= nil and C_Timer and C_Timer.After then C_Timer.After(0.2, State.RefreshAmmo) end
     local spell = SpellNameOf(spellID)
     local key = KeyOfSpell(spell)
     if not key then return end
@@ -575,6 +580,7 @@ function State.Start()
     Register(frame, "SPELL_UPDATE_COOLDOWN")
     Register(frame, "UNIT_ATTACK_SPEED", "player")
     Register(frame, "UNIT_RANGEDDAMAGE", "player")
+    Register(frame, "UNIT_INVENTORY_CHANGED", "player")   -- the ammo slot's stack spent or filled
     for _, e in ipairs(EVENTS) do Register(frame, e) end
     Guard("refresh", State.Refresh)
 end

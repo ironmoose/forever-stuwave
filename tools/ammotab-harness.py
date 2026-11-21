@@ -64,7 +64,7 @@ BOW, XBOW, GUN, THROWN, WAND, TOTEM = 3036, 15808, 2508, 2947, 11287, 263412
 SUBCLASS = {BOW: (2, 2), XBOW: (2, 18), GUN: (2, 3), THROWN: (2, 16), WAND: (2, 19), TOTEM: (4, 0)}
 
 AMMO_WORLD = r"""
-__ammo = { weapon = %(weapon)s, item = 2512, n = %(n)d, secretCount = false, secretSlot = false }
+__ammo = { weapon = %(weapon)s, item = 2512, n = %(n)d, bags = nil, secretCount = false, secretSlot = false }
 __sub = %(sub)s
 C_Item = C_Item or {}
 C_Item.GetItemInfoInstant = function(id)
@@ -78,7 +78,7 @@ function GetInventoryItemID(unit, slot)
 end
 function GetItemCount(id)
     if __ammo.secretCount then return __SECRET end
-    return __ammo.n
+    return __ammo.bags or __ammo.n
 end
 function GetInventoryItemCount(unit, slot)
     if __ammo.secretSlot then return __SECRET end
@@ -334,6 +334,15 @@ def check_the_gauge_drains_against_the_full_mark():
     assert tab(lua).AT.full == 500 and gauge_lit(lua) == 10, "a restock did not reset the mark"
     set_count(lua, 0)
     assert gauge_lit(lua) == 0
+
+
+def check_the_ammo_slot_stack_counts_when_the_bags_read_zero():
+    # live 2026-11-20: Forever keeps the equipped stack in the slot, GetItemCount (bags) says 0, the slot says 200
+    lua = boot(klass="WARRIOR", n=200, pre="__tc.known = { [6343] = true }\n__ammo.bags = 0\n")
+    assert readout(lua) == "_200", readout(lua)
+    run(lua, "__ammo.n = 199")
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    assert readout(lua) == "_199", "a spent arrow did not move the count"
 
 
 def check_secret_counts():
