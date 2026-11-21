@@ -2711,6 +2711,9 @@ TALENTBG_MANIFEST = MEDIA_DIR.parent.parent / "Modules/Skins/TalentBgArt.lua"
 # The character window backdrop: the same kind of procedural scene in tools/assets/charbg/scenes/*.js, baked by its bake.mjs
 # (charbg-harness.py checks it). Its manifest names the one sheet.
 CHARBG_MANIFEST = MEDIA_DIR.parent.parent / "Modules/Skins/CharBgArt.lua"
+# The Help page picture atlas: our own module art cut from the showcase renders (tools/assets/help_frames/), baked by
+# help_pictures.py (helppage-harness.py checks the committed atlas equals a fresh bake). Its manifest names the file.
+HELP_MANIFEST = MEDIA_DIR.parent.parent / "Modules/Config/HelpPicturesArt.lua"
 
 
 def _generated_stems() -> set[str]:
@@ -2726,7 +2729,8 @@ def test_every_shipped_texture_is_our_own_art() -> None:
     shipped = {p.stem for p in MEDIA_DIR.glob("*.tga")}
     talentbg = set(re.findall(r'"(talentbg_[a-z_]+)"', TALENTBG_MANIFEST.read_text(encoding="utf-8")))
     charbg = set(re.findall(r'"(charbg_[a-z_]+)"', CHARBG_MANIFEST.read_text(encoding="utf-8")))
-    unknown = sorted(shipped - _generated_stems() - OWN_BAKED - talentbg - charbg)
+    helppics = set(re.findall(r'file = "([a-z_]+)"', HELP_MANIFEST.read_text(encoding="utf-8")))
+    unknown = sorted(shipped - _generated_stems() - OWN_BAKED - talentbg - charbg - helppics)
     assert not unknown, f"textures with no own-art source (a generator or the own-art bake): {unknown[:10]} ({len(unknown)})"
     assert OWN_BAKED <= shipped
 

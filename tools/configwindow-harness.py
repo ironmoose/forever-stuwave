@@ -56,6 +56,8 @@ GUNSIGHT_FILE = ADDON / "Modules/CombatHud/Gunsight.lua"
 BOXES_FILE = ADDON / "Modules/CombatHud/GunsightBoxes.lua"
 AREAS_FILE = ADDON / "Modules/CombatHud/GunsightAreas.lua"
 TOC_FILE = ADDON / "forever-stuwave.toc"
+HELP_FILE = ADDON / "Modules/Config/HelpModules.lua"
+HELP_ART_FILE = ADDON / "Modules/Config/HelpPicturesArt.lua"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "config-window-2026-10-07.html"
 
 MOCK = r"""
@@ -140,6 +142,7 @@ function Obj:IsVisible()
     return true
 end
 function Obj:SetSize(w, h) self.w, self.h = w, h end
+function Obj:SetTexture(path, wrapH, wrapV, filter) self.texture, self.filter = path, filter; return true end
 function Obj:SetWidth(w) self.w = w end
 function Obj:SetHeight(h) self.h = h end
 function Obj:GetWidth() return self.w end
@@ -225,7 +228,7 @@ end
 """
 
 SESSION = r"""
-function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc, areasSrc)
+function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc, areasSrc, helpSrc, helpArtSrc)
     opts = opts or {}
     ALL, __printed, __errors, __combat, BLOCKED = {}, {}, {}, false, {}
     ALL[1], ALL[2] = UIParent, GameTooltip
@@ -289,6 +292,10 @@ function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc, areasSrc)
         assert(load(areasSrc, "@GunsightAreas.lua"))("forever-stuwave", FS)
     end
     if opts.preWindow then opts.preWindow() end
+    if opts.noHelp ~= true then
+        assert(load(helpSrc, "@HelpModules.lua"))("forever-stuwave", FS)
+        assert(load(helpArtSrc, "@HelpPicturesArt.lua"))("forever-stuwave", FS)
+    end
     assert(load(windowSrc, "@ConfigWindow.lua"))("forever-stuwave", FS)
     if opts.beforeLogin then opts.beforeLogin() end
     if opts.noLogin ~= true then
@@ -307,7 +314,7 @@ local function yes(v, msg) if not v then error(msg or "expected true", 2) end en
 local function no(v, msg) if v then error(msg or "expected false", 2) end end
 
 local function boot(opts)
-    __session(__configSrc, __gunsightSrc, __windowSrc, opts, __boxesSrc, __areasSrc)
+    __session(__configSrc, __gunsightSrc, __windowSrc, opts, __boxesSrc, __areasSrc, __helpSrc, __helpArtSrc)
     return FS.ConfigWindow
 end
 
@@ -1023,34 +1030,97 @@ local function menuTexts()
     return table.concat(out, ",")
 end
 
--- ---- the Help page: commands, then one class's module text picked from a dropdown ----
+-- ---- the Help page: commands, then class tabs, form or spec tabs, the picture with pins and the numbered lines ----
+
+local function helpBlock()
+    for _, o in ipairs(ALL) do if o.fsTabs and o.fsState then return o end end
+end
+local function clickTab(text)
+    for _, o in ipairs(ALL) do
+        if o.kind == "FontString" and o:IsVisible() and o:GetText() == text then
+            local b = owner(o)
+            if b and b.scripts.OnClick then b.scripts.OnClick(b, "LeftButtonUp") return true end
+        end
+    end
+    error("no visible tab " .. text)
+end
+local function visiblePictures()
+    local out = {}
+    for _, o in ipairs(ALL) do
+        if o.kind == "Texture" and o:IsVisible() and type(o.texture) == "string" and o.texture:find("help_pictures") then
+            out[#out + 1] = o
+        end
+    end
+    return out
+end
 
 function T.help_page_opens_on_the_players_class_and_switches_class()
-    UnitClass = function() return "Druid", "DRUID" end
+    UnitClass = function() return "Warrior", "WARRIOR" end
     local W = boot()
     W.Open("help")
     yes(hasText(win(), "/fsconfig"), "the commands are listed")
-    yes(hasText(win(), "Demoralizing Roar"), "opens on the player's own class")
-    no(hasText(win(), "Battle Shout"), "one class at a time")
-    openMenu("Class")
-    local m = menu()
-    for _, o in ipairs(ALL) do
-        if o.kind == "FontString" and o:IsVisible() and under(m, o) and o:GetText() == "Warrior" then
-            local b = owner(o)
-            b.scripts.OnClick(b, "LeftButton")
-            break
-        end
+    yes(hasText(win(), "|cffff2e97Red helm:|r Battle Shout. The runes around it go dark as the shout runs out."), "opens on the player's own class, name in pink")
+    no(hasText(win(), "Demoralizing Roar. Bright and snarling while it is on the enemies, grey when it is not."), "one class at a time")
+    for _, token in ipairs(FS.HelpModules.ORDER) do
+        yes(hasText(win(), LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token] or (token:sub(1, 1) .. token:sub(2):lower())), "a tab per class: " .. token)
     end
-    yes(hasText(win(), "Battle Shout"), "picking Warrior shows the Warrior text")
-    no(hasText(win(), "Demoralizing Roar"), "and drops the Druid text")
+    clickTab("Druid")
+    yes(hasText(win(), "|cffff2e97Rose:|r Rejuvenation. It greys out as the time runs down."), "the Druid tab opens on caster form")
+    no(hasText(win(), "|cffff2e97Red helm:|r Battle Shout. The runes around it go dark as the shout runs out."), "and drops the Warrior lines")
+    clickTab("Bear form")
+    yes(hasText(win(), "|cffff2e97Bear head:|r Demoralizing Roar. Bright and snarling while it is on the enemies, grey when it is not."), "the form tabs switch the page")
+    no(hasText(win(), "|cffff2e97Rose:|r Rejuvenation. It greys out as the time runs down."), "one form at a time")
+    clickTab("Warrior")
+    no(hasText(win(), "Bear form"), "the form row belongs to the Druid tab")
 end
 
-function T.help_class_pick_works_while_settings_are_read_only()
+function T.help_page_draws_the_picture_pins_and_arrows_from_the_shared_layout()
+    UnitClass = function() return "Warlock", "WARLOCK" end
+    local W = boot()
+    W.Open("help")
+    local page = FS.HelpModules.CLASSES.WARLOCK.pages[1]
+    local pics = visiblePictures()
+    eq(#pics, 1 + #page.extras, "the main picture and one per extra")
+    local art = FS.HelpPicturesArt
+    local main = pics[1]
+    local r = art.rects[page.picture]
+    eq(main.w, r[3] * FS.HelpModules.SCALE, "the main picture at its scale")
+    eq(main.filter, "NEAREST", "pixel crisp")
+    local L = FS.HelpModules.Layout(page, 550, function(n) return art.rects[n][3], art.rects[n][4] end)
+    local cyan = 0
+    for _, o in ipairs(ALL) do
+        if o.kind == "Texture" and o:IsVisible() and o.color and o.color[1] == FS.Theme.COLOR_POWER[1] and o.color[2] == FS.Theme.COLOR_POWER[2] then cyan = cyan + 1 end
+    end
+    yes(cyan >= #L.arrows, "every arrow rectangle is drawn (" .. cyan .. " of " .. #L.arrows .. ")")
+    local seen = {}
+    for _, t in ipairs(texts(win())) do seen[t] = (seen[t] or 0) + 1 end
+    for n = 1, #page.lines do yes(seen[tostring(n)], "number " .. n .. " is shown") end
+    for _, pin in ipairs(page.pins) do eq(seen[tostring(pin[1])], 2, "pin " .. pin[1] .. " on the picture and its line") end
+    yes(hasText(win(), page.note), "the note follows the numbered lines")
+end
+
+function T.help_tabs_work_while_settings_are_read_only()
     local W = boot({ db = "junk" })
     yes(FS.Config.IsReadOnly(), "settings are read-only")
     W.Open("help")
-    local b = row("Class").control
-    yes(b.enabled, "the class picker is a view, not a setting")
+    clickTab("Mage")
+    yes(hasText(win(), "Frost Nova. The ring around it fills back up as the cooldown comes back."), "the class tabs are a view, not a setting")
+end
+
+function T.the_gunsight_class_tip_reads_the_shared_help_words()
+    UnitClass = function() return "Druid", "DRUID" end
+    boot()
+    local tip = FS.ClassModuleHelp.DRUID
+    yes(tip:find("Caster form, Rose: Rejuvenation. It greys out as the time runs down.", 1, true), "pages prefix their label")
+    yes(tip:find("Cat form, Ring of thorns: your Thorns time.", 1, true), "every page is in the tip")
+    eq(FS.ClassModuleHelp.NOPE, nil, "no tip for an unknown class")
+end
+
+function T.the_window_builds_without_the_help_data()
+    local W = boot({ noHelp = true })
+    W.Open("help")
+    yes(hasText(win(), "/fsconfig"), "the commands still show")
+    eq(FS.ClassModuleHelp.WARRIOR, nil, "and no class tip")
 end
 
 -- ---- the mana regen group on the Unit Frames page (FiveSecondTab.lua's SETTINGS) ----
@@ -3193,6 +3263,8 @@ def boot() -> "LuaRuntime":
     lua.globals().MC = to_lua(lua, mockup_target_bars())
     lua.globals().__boxesSrc = BOXES_FILE.read_text(encoding="utf-8")
     lua.globals().__areasSrc = AREAS_FILE.read_text(encoding="utf-8")
+    lua.globals().__helpSrc = HELP_FILE.read_text(encoding="utf-8")
+    lua.globals().__helpArtSrc = HELP_ART_FILE.read_text(encoding="utf-8")
     lua.globals().__windowSrc = WINDOW_FILE.read_text(encoding="utf-8") if WINDOW_FILE.exists() else "error('ConfigWindow.lua is missing')"
     lua.execute(CHECKS)
     return lua
@@ -3223,11 +3295,15 @@ def source_checks() -> list[tuple[str, str | None]]:
             if later in toc and toc.index(later) < at:
                 problems.append(f"{later} registers a category, so it must load after {want}")
     out.append(("toc_order", "; ".join(problems) or None))
-    help_src = src[src.find("local CLASS_MODULE_HELP = {"):src.find("FS.ClassModuleHelp")]
-    have = set(re.findall(r"^    ([A-Z]+) = \"", help_src, re.M))
+    help_src = HELP_FILE.read_text(encoding="utf-8")
+    have = set(re.findall(r"^    ([A-Z]+) = \{ pages = ", help_src, re.M))
     want_classes = {"ROGUE", "DRUID", "WARLOCK", "SHAMAN", "WARRIOR", "PALADIN", "PRIEST", "MAGE", "HUNTER"}
     out.append(("every_class_module_has_an_explanation",
                 f"missing: {sorted(want_classes - have)}" if want_classes - have else None))
+    out.append(("help_words_have_no_em_dash", "an em dash in HelpModules.lua" if "\u2014" in help_src else None))
+    want = ["Modules/Config/HelpModules.lua", "Modules/Config/HelpPicturesArt.lua", "Modules/Config/ConfigWindow.lua"]
+    at = [toc.index(w) if w in toc else -1 for w in want]
+    out.append(("help_files_load_before_the_window", None if -1 not in at and at == sorted(at) else f"toc order {at}"))
     return out
 
 

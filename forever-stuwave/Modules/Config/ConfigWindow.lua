@@ -1721,65 +1721,12 @@ local function DruidGroup(page)
     UI.Toggle(page, { label = CC.SETTING.label, key = CC.SETTING.key, tip = CC.SETTING.tip })
 end
 
--- What each class module shows, one "Name: what it means" line per piece. The Gunsight HUD page shows the player's
--- own class as the ? tip of a header; the Help page lists every class. Keep it short and player facing.
-local CLASS_MODULE_HELP = {
-    WARRIOR = "Red helm: Battle Shout. The runes around it go dark as the shout runs out.\n"
-        .. "Violet helm: Demoralizing Shout, same idea.\n"
-        .. "Amber, pulsing helm: your shout is down. Shout again. Click a helm to cast it.\n"
-        .. "Bar under the helms: Overpower, Revenge or Victory Rush is up. Use it before the bar runs out.\n"
-        .. "Big alert over your character: the same chances, big enough to catch from the corner of your eye. Each one can be turned off.",
-    PALADIN = "Wax seal: your seal. The colour tells you which one, and the wax drains as it runs out.\n"
-        .. "Cracked amber seal: about to drop. Recast it.\n"
-        .. "Warhammer: Judgement. It fills up as the cooldown comes back and glows when ready.\n"
-        .. "The slam: cast Judgement and the hammer smashes down.\n"
-        .. "Rune on the ground: the Judgement on your target and how long it has left.",
-    PRIEST = "Shield: Power Word: Shield on your friendly target, or on you. The light inside is how much it can still absorb, and the number is the amount.\n"
-        .. "Shield rim: violet means Weakened Soul, cyan means you can shield again.\n"
-        .. "Amber dashed shield in a fight: nobody has a shield. Put one up.\n"
-        .. "Skull: Spirit Tap after a kill, with its time. Pull the next mob while it lasts.\n"
-        .. "Gold flame: Inner Fire and its charges. It pulses amber when it is missing.\n"
-        .. "In a group the right side can show Prayer of Mending instead. Pick it under Right side shows.",
-    SHAMAN = "Four totem poles: Fire, Earth, Water and Air. The pole shrinks as your totem runs out.\n"
-        .. "Amber top block: your totem is nearly gone. Drop it again.\n"
-        .. "DROP: no totem in that element. Click the pole to drop one.\n"
-        .. "FAR: you walked away from your totem.\n"
-        .. "Lightning disc: your shock cooldown. RDY means shock now.\n"
-        .. "Flame disc: Fire Nova, shown while you have a Fire totem down.",
-    ROGUE = "Dagger fan: your combo points, one dagger per point.\n"
-        .. "Gold fan and FINISH: five points. Spend them.\n"
-        .. "Shadow fan and OPENER: you are in stealth.\n"
-        .. "Spinning star: Slice and Dice and its time. It pulses amber in a fight when it is down.\n"
-        .. "Gold bar: your energy. The two gems light up when you can afford your builder and your finisher.",
-    DRUID = "Caster form, rose: Rejuvenation. It greys out as the time runs down.\n"
-        .. "Caster form, seven petals: Regrowth. One petal wilts each time it heals.\n"
-        .. "Caster form, pink and teal numbers: time left on Rejuvenation and Regrowth.\n"
-        .. "Bramble wreath or ring of thorns: your Thorns. It dries out as Thorns runs down.\n"
-        .. "Bear form, bear head: Demoralizing Roar. Bright and snarling while it is on the enemies, grey when it is not.\n"
-        .. "Bear form, sound arcs: the roar's time, turning amber near the end.\n"
-        .. "Cat form, hide with five slots: your combo points. The paw rakes a gash for each one.\n"
-        .. "Cat form, gold gashes and FINISH: five points. Spend them.",
-    MAGE = "You see the piece for your talents.\n"
-        .. "Frost: the snowflake is Frost Nova, the ice ring is your target staying frozen, and the ice spike shines when Ice Lance hits hardest.\n"
-        .. "Arcane: the eye opens as Arcane Blast stacks up, with the cost of your next Blast under it.\n"
-        .. "Fire: the flame grows with Fire Vulnerability stacks, and the comet is Fire Blast.\n"
-        .. "Ice oval: Ice Barrier (or Mana Shield) and how much it can still absorb. Click it to cast.",
-    WARLOCK = "The book: your demon's pact book. The cover lights up from the bottom with your demon's health.\n"
-        .. "Dark, smoking book: your demon is gone. SUMMON names the demon and what it costs.\n"
-        .. "Five crystals: your soul shards, one per crystal. +2 means you carry two more.\n"
-        .. "Lightning into the gem: BOLT, your next Shadow Bolt is instant.\n"
-        .. "Burning pages: FIRE, Soul Fire is free and fast.\n"
-        .. "Blood dripping: TAP, use Life Tap before your next Shadow Bolt.\n"
-        .. "Souls flying into the book: REAPING, keep channeling Drain Soul.\n"
-        .. "Each prompt can be turned off on the Gunsight HUD page.",
-    HUNTER = "Scope: you are the dot, the skull is your target. The rings show melee, dead zone, shooting range and too far.\n"
-        .. "Rim: your Auto Shot timer. Walk while it fills.\n"
-        .. "PLANT: stand still, the shot is coming.\n"
-        .. "Pink rim: you moved and the shot was late.\n"
-        .. "Jaws: your traps. Open and READY means you can lay one.",
-}
--- The Help page's class order.
-local HELP_CLASSES = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
+-- What each class module shows, "Name: what it means" per piece, as the Gunsight HUD page's class ? tip. The words live in
+-- HelpModules.lua, the one source the Help page and the listing pictures also read.
+local HelpModules = FS.HelpModules
+local CLASS_MODULE_HELP = setmetatable({}, { __index = function(_, token)
+    return HelpModules and HelpModules.Tip(token) or nil
+end })
 FS.ClassModuleHelp = CLASS_MODULE_HELP
 
 local function ClassModuleHelpGroup(page)
@@ -1946,18 +1893,209 @@ end
 
 CW.RegisterCategory({ key = "profiles", label = "Profiles", order = 9, build = ProfilesPage })
 
--- The Help page: the commands, then what each class module shows. Opens on the player's own class.
-local function HelpLines(text)
-    local out = {}
-    for line in tostring(text or ""):gmatch("[^\n]+") do
-        local name, rest = line:match("^([^:]+:)( .*)$")
-        if name and #name < 48 then
-            out[#out + 1] = "|cffff2e97" .. name .. "|r" .. rest
-        else
-            out[#out + 1] = line
+-- The Help page: the commands, then the class modules. A row of class tabs (opens on the player's own class), a second row
+-- for the Druid forms and Mage specs, then the module's picture with numbered pins and the numbered lines. Pictures, pins,
+-- words and the layout come from HelpModules.lua; the art is help_pictures.tga (HelpPicturesArt.lua says where).
+local HELP_TEX = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
+local HELP_TAB_H, HELP_SUB_H, HELP_GAP = 24, 20, 10
+
+local function HelpClassName(token)
+    return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]) or Capitalize(token:lower())
+end
+
+local function PictureSize(name)
+    local r = FS.HelpPicturesArt and FS.HelpPicturesArt.rects[name]
+    if r then return r[3], r[4] end
+    return 0, 0
+end
+
+local function HelpPicture(parent, name, x, y, scale)
+    local art = FS.HelpPicturesArt
+    local r = art and art.rects[name]
+    local t = parent:CreateTexture(nil, "ARTWORK")
+    if not r then return t end
+    t:SetTexture(HELP_TEX .. art.file, "CLAMP", "CLAMP", "NEAREST")
+    t:SetTexCoord(r[1] / art.width, (r[1] + r[3]) / art.width, r[2] / art.height, (r[2] + r[4]) / art.height)
+    t:SetSize(r[3] * scale, r[4] * scale)
+    t:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
+    return t
+end
+
+local function HelpRect(parent, x, y, w, h, color, layer)
+    local t = parent:CreateTexture(nil, layer or "OVERLAY")
+    t:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
+    t:SetSize(w, h)
+    t:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
+    return t
+end
+
+-- A pink square with the line number in ink; `dashed` draws only a muted outline (a part with no picture).
+local function HelpBadge(parent, n, x, y, dashed)
+    local size = HelpModules.PIN
+    local holder = CreateFrame("Frame", nil, parent)
+    holder:SetSize(size, size)
+    holder:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
+    if dashed then
+        Outline(holder, C.muted, 1)
+    else
+        HelpRect(holder, 0, 0, size, size, C.pink, "ARTWORK")
+    end
+    local fs = Label(holder, tostring(n), 11, dashed and C.muted or C.ink)
+    fs:SetPoint("CENTER", holder, "CENTER", 0, 0)
+    holder.fsNumber = fs
+    return holder
+end
+
+-- One page (a class, or one form or spec): the picture block, then the numbered lines. Returns the frame and its height.
+local function BuildHelpModulePage(parent, page)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetWidth(CONTENT_W)
+    local L = HelpModules.Layout(page, CONTENT_W, PictureSize)
+    local bx, by, bw, bh = L.box[1], L.box[2], L.box[3], L.box[4]
+    local box = CreateFrame("Frame", nil, f)
+    box:SetSize(bw, bh)
+    box:SetPoint("TOPLEFT", f, "TOPLEFT", bx, -by)
+    HelpRect(box, 0, 0, bw, bh, C.track, "BACKGROUND")
+    Outline(box, C.line, 1)
+    f.fsPicture = HelpPicture(f, L.picture[1], L.picture[2], L.picture[3], HelpModules.SCALE)
+    f.fsArrows = {}
+    for _, r in ipairs(L.arrows) do f.fsArrows[#f.fsArrows + 1] = HelpRect(f, r[1], r[2], r[3], r[4], C.cyan) end
+    f.fsPins = {}
+    for _, p in ipairs(L.pins) do f.fsPins[#f.fsPins + 1] = HelpBadge(f, p[1], p[2], p[3]) end
+    if L.caption then
+        local cap = Label(f, "OTHER STATES", 9, C.muted)
+        cap:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -(L.caption + 4))
+    end
+    for _, e in ipairs(L.extras) do
+        local n, name, x, y, w, h = e[1], e[2], e[3], e[4], e[5], e[6]
+        local holder = CreateFrame("Frame", nil, f)
+        holder:SetSize(w, h)
+        holder:SetPoint("TOPLEFT", f, "TOPLEFT", x, -y)
+        HelpPicture(holder, name, 0, 0, 1)
+        Outline(holder, C.line, 1)
+        HelpBadge(holder, n, 0, 0)
+    end
+    local shown = {}
+    for _, p in ipairs(page.pins or {}) do shown[p[1]] = true end
+    for _, e in ipairs(page.extras or {}) do shown[e.n] = true end
+    local y = L.h + HELP_GAP
+    local textW = CONTENT_W - HelpModules.PIN - 8
+    local function line(text, color, badge, dashed)
+        local fs = Label(f, text, 11, color)
+        fs:SetWidth(textW)
+        fs:SetJustifyH("LEFT")
+        fs:SetJustifyV("TOP")
+        fs:SetSpacing(3)
+        fs:SetPoint("TOPLEFT", f, "TOPLEFT", HelpModules.PIN + 8, -(y + 3))
+        if badge then HelpBadge(f, badge, 0, y, dashed) end
+        y = y + math.max(HelpModules.PIN, math.ceil(fs:GetStringHeight() or 0) + 4) + 6
+        return fs
+    end
+    for n, ln in ipairs(page.lines) do
+        line("|cffff2e97" .. ln[1] .. ":|r " .. ln[2], C.text, n, not shown[n])
+    end
+    if page.note then line(page.note, C.muted) end
+    f:SetHeight(y)
+    return f, y
+end
+
+-- A tab row: one MakeButton per item, `widths` given, the selected one pink.
+local function HelpTabs(parent, items, height, size, onPick)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(CONTENT_W, height)
+    row.fsButtons = {}
+    local x = 0
+    for i, it in ipairs(items) do
+        local b = MakeButton(row, { width = it.width, height = height, ring = C.line, text = it.text, size = size, textColor = C.muted })
+        b:SetPoint("TOPLEFT", row, "TOPLEFT", x, 0)
+        b.fsValue = it.value
+        HoverStyle(b, C.cyan)
+        b:SetScript("OnClick", function() onPick(it.value) end)
+        row.fsButtons[i] = b
+        x = x + it.width + 3
+    end
+    function row.Mark(value)
+        for _, b in ipairs(row.fsButtons) do
+            local on = b.fsValue == value
+            b.fsSelected = on
+            if on then Restyle(b, C.pink, C.text, Mix(C.ink, C.pink, 0.22), 0.5) else Restyle(b, C.line, C.muted, C.ink, 0) end
         end
     end
-    return table.concat(out, "\n\n")
+    return row
+end
+
+-- The page the player most likely needs: a Druid in bear or cat form sees that form.
+local function OwnPageIndex(token)
+    if token == "DRUID" and type(GetShapeshiftFormID) == "function" then
+        local form = GetShapeshiftFormID()
+        if form == 5 or form == 8 then return 2 end
+        if form == 1 then return 3 end
+    end
+    return 1
+end
+
+-- The class modules block. Like UI.Text it must be the last row on its page: it resizes with the class shown.
+function UI.HelpModules(content)
+    local block = CreateFrame("Frame", nil, content)
+    block:SetHeight(HELP_TAB_H)
+    UI.Stack(content, block)
+    local c = Cursor(content)
+    local base = c.y - block:GetHeight()
+    local own
+    if type(UnitClass) == "function" then own = select(2, UnitClass("player")) end
+    local state = { token = HelpModules.CLASSES[own or ""] and own or HelpModules.ORDER[1] }
+    state.page = state.token == own and OwnPageIndex(own) or 1
+    local built, subRows = {}, {}
+    local render
+    local n = #HelpModules.ORDER
+    local tabW = math.floor((CONTENT_W - 3 * (n - 1)) / n)
+    local items = {}
+    for i, token in ipairs(HelpModules.ORDER) do items[i] = { value = token, text = HelpClassName(token), width = tabW } end
+    local tabs = HelpTabs(block, items, HELP_TAB_H, 10, function(token)
+        if token ~= state.token then state.token, state.page = token, 1 end
+        render()
+    end)
+    tabs:SetPoint("TOPLEFT", block, "TOPLEFT", 0, 0)
+    block.fsTabs = tabs
+    local rule = HelpRect(block, 0, HELP_TAB_H, CONTENT_W, 1, C.pink, "ARTWORK")
+    block.fsRule = rule
+    render = function()
+        tabs.Mark(state.token)
+        local pages = HelpModules.CLASSES[state.token].pages
+        local y = HELP_TAB_H + 1 + HELP_GAP
+        for token, sub in pairs(subRows) do sub:SetShown(token == state.token) end
+        if #pages > 1 then
+            local sub = subRows[state.token]
+            if not sub then
+                local list = {}
+                for i, page in ipairs(pages) do list[i] = { value = i, text = page.label, width = #page.label * 7 + 24 } end
+                sub = HelpTabs(block, list, HELP_SUB_H, 10, function(i) state.page = i; render() end)
+                sub:SetPoint("TOPLEFT", block, "TOPLEFT", 0, -y)
+                subRows[state.token] = sub
+            end
+            sub:Show()
+            sub.Mark(state.page)
+            y = y + HELP_SUB_H + HELP_GAP
+        end
+        local key = state.token .. state.page
+        for k, entry in pairs(built) do entry.frame:SetShown(k == key) end
+        local entry = built[key]
+        if not entry then
+            local frame, h = BuildHelpModulePage(block, pages[state.page])
+            entry = { frame = frame, h = h }
+            built[key] = entry
+        end
+        entry.frame:ClearAllPoints()
+        entry.frame:SetPoint("TOPLEFT", block, "TOPLEFT", 0, -y)
+        entry.frame:Show()
+        local h = y + entry.h
+        block:SetHeight(h)
+        c.y = base + h
+        CW.RefreshScroll()
+    end
+    block.fsState = state
+    Track(render)
+    return block
 end
 
 local function HelpPage(page)
@@ -1967,28 +2105,8 @@ local function HelpPage(page)
     UI.Value(page, function() return "|cff22e0ff/fsgun on|r or |cff22e0ffoff|r  the Gunsight HUD" end)
     UI.Value(page, function() return "|cff22e0ff/fsbug|r  what went wrong: saves a bug report to paste into a GitHub issue" end)
     UI.Value(page, function() return "A |cff22e0ff~|r in front of a timer means it is counted from your own cast." end)
-    local own
-    if type(UnitClass) == "function" then own = select(2, UnitClass("player")) end
-    local shown = CLASS_MODULE_HELP[own or ""] and own or HELP_CLASSES[1]
-    local function ClassName(token)
-        return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]) or Capitalize(token:lower())
-    end
     UI.Header(page, "Class modules")
-    UI.Dropdown(page, {
-        label = "Class", free = true,
-        get = function() return shown end,
-        text = ClassName,
-        items = function()
-            local items = {}
-            for i, token in ipairs(HELP_CLASSES) do items[i] = { value = token, text = ClassName(token) } end
-            return items
-        end,
-        set = function(value)
-            shown = value
-            CW.RefreshAll()
-        end,
-    })
-    UI.Text(page, function() return HelpLines(CLASS_MODULE_HELP[shown]) end)
+    if HelpModules and FS.HelpPicturesArt then UI.HelpModules(page) end
 end
 
 CW.RegisterCategory({ key = "help", label = "Help", order = 10, build = HelpPage })
