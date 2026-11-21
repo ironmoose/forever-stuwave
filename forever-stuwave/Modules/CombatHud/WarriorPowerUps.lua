@@ -25,7 +25,7 @@
 -- FRAME. A plain frame on UIParent (never a secure one, so Show and Hide are legal in combat), seated by FS.Layout as
 -- `warriorpowerup` (movable in /fsedit, which shows the Overpower held frame as a static preview). One OnUpdate on a driver frame,
 -- only while an alert plays (30 Hz) or a held back window waits (POLL); nothing allocates per tick.
--- UNVERIFIED in game: the NEAREST filter, the layering of 182 textures, the position over the character, every window event.
+-- UNVERIFIED in game: the NEAREST filter, the layering of 174 textures, the position over the character, every window event.
 
 local _, FS = ...
 

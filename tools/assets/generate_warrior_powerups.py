@@ -97,7 +97,6 @@ TUNE = dict(
     vc_shine=TAU / 2.4,
     vc_plus_drift=1 / 2.4,
     vc_plus_wobble=TAU / 2.4,
-    vc_glow_beat=0.3,
     vc_spark_ci=True,
     flame_hot=dict(tip=16 / FLAME_PASS, lick=11 / FLAME_PASS, wave=2 * TAU / FLAME_PASS, mod=(16, 11)),
     flame_amber=dict(tip=24 / FLAME_PASS, lick=17 / FLAME_PASS, wave=3 * TAU / FLAME_PASS, mod=(24, 17)),
@@ -108,7 +107,6 @@ MOCKUP_TUNE = dict(
     vc_shine=1.6,
     vc_plus_drift=0.45,
     vc_plus_wobble=3.0,
-    vc_glow_beat=1 / 3,
     vc_spark_ci=False,
     flame_hot=dict(tip=13.0, lick=13 * 0.7, wave=13 * 0.9, mod=None),
     flame_amber=dict(tip=20.0, lick=20 * 0.7, wave=20 * 0.9, mod=None),
@@ -1285,10 +1283,8 @@ def draw_vic(p, st):
         sx_, sy_ = ([3, -3, 2, -2, 1], [-2, 2, -1, 1, 0]) if big else ([1, -1, 1, 0, 0], [0, 1, 0, 0, 0])
         p.tx = sx_[k] if k < 5 else 0
         p.ty = sy_[k] if k < 5 else 0
-    # green heal glow behind everything, breathing
-    if e >= 0.2 and not (out == "cast" and ot > 0.2) and not (out == "exp" and ot > 0.1):
-        pu = 0.08 if int(math.floor(e * 2.5)) % 2 else 0.13
-        obj(p, "vc.glow", lambda: p.glow(pu, lambda: p.disc(CX, CY - 3, 36, heal)), ("glow", pu, heal, p.alpha, p.tx, p.ty), PIECES_DISC)
+    # no backdrop: the mockup's green heal disc behind the sunburst and box behind the title were dropped (2026-11-20) so
+    # Victory Rush sits on the world like Overpower and Revenge
     # the sunburst: irises open, then a light wedge sweeps round it
     iris = None if out else (jround(ease_out(e / 0.12) * 34) if e < 0.12 else None)
     c_a = q4(1 - clamp(ot / 0.35)) if out == "cast" else 1
@@ -1399,9 +1395,6 @@ def draw_vic(p, st):
     # title: rises in (the approved v1 title), hops on each clang
     base = PAL["dim"] if out == "exp" else PAL["helA"] if am else PAL["hel"]
     W = layout("VICTORY RUSH")[1]
-    if not out and e > 0.45:
-        obj(p, "vc.tglow", lambda: p.glow(0.1 if int(math.floor(e / TUNE["vc_glow_beat"])) % 2 else 0.16, lambda: p.P(MX - W / 2 - 6, WY - 4, W + 12, 22, heal)),
-            ("tglow", int(math.floor(e / TUNE["vc_glow_beat"])) % 2, heal, p.alpha, p.tx, p.ty), PIECES_DISC)
 
     def fn(i, ch, x, y, lw):
         d = 0.2 + 0.035 * i
