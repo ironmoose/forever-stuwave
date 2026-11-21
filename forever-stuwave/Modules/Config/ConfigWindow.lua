@@ -1955,7 +1955,9 @@ local function BuildHelpModulePage(parent, page)
     local box = CreateFrame("Frame", nil, f)
     box:SetSize(bw, bh)
     box:SetPoint("TOPLEFT", f, "TOPLEFT", bx, -by)
-    HelpRect(box, 0, 0, bw, bh, C.track, "BACKGROUND")
+    -- The fill goes on the page, under the picture and arrows: the box is a child frame, so anything it draws covers
+    -- the page's own textures. The box keeps only its outline.
+    HelpRect(f, bx, by, bw, bh, C.track, "BACKGROUND")
     Outline(box, C.line, 1)
     f.fsPicture = HelpPicture(f, L.picture[1], L.picture[2], L.picture[3], HelpModules.SCALE)
     f.fsArrows = {}
