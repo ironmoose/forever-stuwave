@@ -3,6 +3,7 @@
 ## Notes: Custom UI for WoW Forever.
 ## Version: 1.0.0-beta.5
 ## Author: ironmoose
+## IconTexture: Interface\AddOns\forever-stuwave\Media\Textures\addon_icon
 ## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog, ForeverSTUwaveExport
 
 Core/ErrorLog.lua
