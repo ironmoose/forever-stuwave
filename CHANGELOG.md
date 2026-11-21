@@ -9,6 +9,7 @@
 
 ### Fixes
 - The open quest tracker shows the quest count again: "quests (12/40)" on the quests heading, not only on the collapsed bar.
+- A finished quest objective gets a cyan STUwave check (amber when the quest is ready to turn in) in place of the game's green one, which sat on top of the tracker's line.
 
 ## 1.0.0-beta.5 (2026-11-20)
 

@@ -154,6 +154,8 @@ local moduleRules = setmetatable({}, { __mode = "k" }) -- module header -> our c
 local headerSkins = setmetatable({}, { __mode = "k" }) -- module header -> our diamond and label
 local blockSkins = setmetatable({}, { __mode = "k" }) -- quest block -> our spine, fill, wash and scanline
 local lineSkins = setmetatable({}, { __mode = "k" }) -- objective line -> our tick
+local lineChecks = setmetatable({}, { __mode = "k" }) -- objective line -> our check, shown on a finished objective
+local CHECK_TEX = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\ctl_tick.tga" -- the settings checkbox tick
 local poiSkins = setmetatable({}, { __mode = "k" }) -- POI button -> our marker pieces (see Quest markers)
 local MARKER_GAP = 8 -- panel edge to the quest markers
 
@@ -1027,6 +1029,19 @@ local function SkinLine(line)
     tick:SetSize(Phys(line, 1), Phys(line, 1))
     lineSkins[line] = tick
     HoldZero(line.Dash)
+    -- The stock green check on a finished objective (ObjectiveTrackerAnimLineTemplate's Icon, and the CheckGlow its
+    -- CheckAnim flashes) sat over our tick and spine in Blizzard's art. Both are held hidden and our own check (the
+    -- settings checkbox tick) stands in, painted per state in PaintBlock. CheckAnim drives the glow's alpha without
+    -- SetAlpha, so both also get a vertex alpha of 0, which an Alpha animation only multiplies.
+    for _, art in ipairs({ line.Icon, line.CheckGlow }) do
+        HoldZero(art)
+        if type(art) == "table" and type(art.SetVertexColor) == "function" then art:SetVertexColor(1, 1, 1, 0) end
+    end
+    local check = line:CreateTexture(nil, "OVERLAY")
+    check:SetTexture(CHECK_TEX)
+    Snap(check)
+    check:Hide()
+    lineChecks[line] = check
     return tick
 end
 
@@ -1084,6 +1099,7 @@ local function HideRail(block, r)
     for _, line in pairs(type(block.usedLines) == "table" and block.usedLines or {}) do
         local tick = lineSkins[line]
         if tick then tick:Hide() end
+        if lineChecks[line] then lineChecks[line]:Hide() end
     end
 end
 
@@ -1131,6 +1147,19 @@ PaintBlock = function(block)
             tick:SetPoint("RIGHT", line, "TOPLEFT", -3, -TICK_ROW)
             tick:SetColorTexture(c[1], c[2], c[3], c[4])
             tick:Show()
+            -- the check sits in the stock dash's space (held invisible, still sized) on the tick's row, before the text,
+            -- at the texture's own 16 physical pixels so its 2 px stroke stays crisp
+            local check = lineChecks[line]
+            if check and done and not failed then
+                local cc = ready and TickColor("ready") or COLOR_POWER
+                check:ClearAllPoints()
+                check:SetSize(Phys(line, 16), Phys(line, 16))
+                check:SetPoint("CENTER", line, "TOPLEFT", Whole(line, 5), -TICK_ROW)
+                check:SetVertexColor(cc[1], cc[2], cc[3], 1)
+                check:Show()
+            elseif check then
+                check:Hide()
+            end
             if done and type(key) == "number" and (not doneKey or key > doneKey) then doneLine, doneKey = line, key end
         end
     end
