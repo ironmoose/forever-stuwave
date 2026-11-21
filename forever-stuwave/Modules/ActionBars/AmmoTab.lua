@@ -57,7 +57,9 @@ local AT = {
     CHIP = { x = 57, y = 31, w = 30, h = 12 }, CHIP_C = 3, CHIP_PAD = 3,         -- the chip (the retention chip's slot)
     GLYPH_W = 10, GLYPH_H = 7,                      -- the chip's glyph, texels, drawn as flat runs on whole pixels
     MIN_PX = 6, ADVANCE = 0.5615,
-    IDLE_ALPHA = 0.72, WORD_IDLE = 0.55, GHOST_IDLE = 0.05, GHOST_LIT = 0.07, GLOW_STEADY = 0.5,
+    IDLE_ALPHA = 0.72, WORD_IDLE = 0.55, GHOST_REST = 0.14, GHOST_LIT = 0.18, GLOW_STEADY = 0.5,
+    -- the unlit segments show as a visible LED pattern behind the digits (Parker, 2026-11-20: the regen module's 0.05 to 0.08
+    -- ghost was too faint to see on the ammo tab), so they sit brighter than the regen module's
     RING_IDLE = 0.4, RING_WARN = 0.7, GAUGE_REST = 0.83, CHIP_GLOW = 0.4, CHIP_IDLE_TEXT = 0.65, HOVER_GLOW = 0.6,
     GAUGE_OFF = 0.22, HOLLOW_MIX = 0.25,
     -- GAUGE_REST: the regen module's resting gauge measured on screen (2026-11-20 capture) is cyan at 0.6 over its well, its
@@ -560,7 +562,7 @@ function Tab.Paint()
 
     -- the readout
     local litA = rest and AT.WORD_IDLE or 1
-    local ghostA = rest and AT.GHOST_IDLE or AT.GHOST_LIT
+    local ghostA = rest and AT.GHOST_REST or AT.GHOST_LIT
     local glow = rest and 0 or AT.GLOW_STEADY
     local chars = Tab.Digits(n)
     for i, cell in ipairs(AT.digits) do PaintCell(cell, chars[i], c, litA, ghostA, glow) end

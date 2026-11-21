@@ -428,7 +428,7 @@ def check_the_face_matches_the_mana_regen_module():
     lua = boot(klass="HUNTER")
     AT, FT = tab(lua).AT, g(lua).FS.FiveSecondTab.FT
     for key in ("HOST_W", "HOST_H", "CELL_W", "CELL_H", "GAUGE_N", "GAUGE_Y", "GAUGE_H", "GAUGE_X", "GAUGE_PITCH",
-                "GAUGE_SEG_W", "GAUGE_SEG_Y", "GAUGE_SEG_H", "LED_CX", "IDLE_ALPHA", "WORD_IDLE", "GHOST_IDLE"):
+                "GAUGE_SEG_W", "GAUGE_SEG_Y", "GAUGE_SEG_H", "LED_CX", "IDLE_ALPHA", "WORD_IDLE"):
         assert AT[key] == FT[key], f"{key}: {AT[key]} vs {FT[key]}"
     for key in ("x", "y", "w", "h"):
         assert AT.HERO[key] == FT.HERO[key] and AT.CHIP[key] == FT.CHIP[key], key
