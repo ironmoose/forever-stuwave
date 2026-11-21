@@ -395,6 +395,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # 10x12 cell), the same atlas blurred for the glow behind each lit segment, and the 64x32 soft box glow of the gauge
     # segments and the pulse.
     "led_segments": {"led_segments": (64, 64), "led_segment_glow": (64, 64), "led_glow": (64, 32), "led_well": (32, 32)},
+    # generate_led_segments_tall.py: the ammo tab's tall LED, the same fourteen segments in an 11x22 cell, a 128x128 atlas of
+    # 32x32 slots and the same atlas blurred.
+    "led_segments_tall": {"led_segments_tall": (128, 128), "led_segment_glow_tall": (128, 128)},
     "tab_slant": {
         "tab_slant": (32, 32),
         "tab_slant_glow": (32, 32),
@@ -2712,6 +2715,56 @@ OWN_BAKED = {"glyphart_character", "glyphart_legacy"}
 TALENTBG_MANIFEST = MEDIA_DIR.parent.parent / "Modules/Skins/TalentBgArt.lua"
 # The character window backdrop: the same kind of procedural scene in tools/assets/charbg/scenes/*.js, baked by its bake.mjs
 # (charbg-harness.py checks it). Its manifest names the one sheet.
+# ---------------------------------------------------------------------------
+# generate_led_segments_tall.py: the ammo tab's tall LED atlas
+#
+# Hardcoded: slot n of the 128x128 atlas (column n % 4, row n // 4, 32x32 texels) holds segment n of a, b, c, d, e, f,
+# g1, g2, i, l, h, j, k, m with this many opaque texels, inside the 11x22 cell, alpha 0 or 255, no texel shared.
+# ---------------------------------------------------------------------------
+
+LED_TALL_TEXELS = [14, 16, 16, 14, 16, 16, 6, 6, 6, 6, 8, 8, 8, 8]
+
+
+@pytest.fixture(scope="module")
+def led_tall_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    work = tmp_path_factory.mktemp("led_segments_tall")
+    _run_generator(GENERATOR_DIR / "generate_led_segments_tall.py", work)
+    return work
+
+
+def test_led_tall_atlas_slots_hold_the_fourteen_disjoint_segments(led_tall_outputs: Path) -> None:
+    path = led_tall_outputs / "led_segments_tall.tga"
+    union: set[tuple[int, int]] = set()
+    for slot, expected in enumerate(LED_TALL_TEXELS):
+        ox, oy = (slot % 4) * 32, (slot // 4) * 32
+        cell = {(x, y) for y in range(32) for x in range(32) if _alpha_at(path, ox + x, oy + y) > 0}
+        assert len(cell) == expected, f"slot {slot}: {len(cell)} opaque texels, expected {expected}"
+        assert all(x < 11 and y < 22 for x, y in cell), f"slot {slot} leaves the 11 x 22 cell"
+        assert all(_alpha_at(path, ox + x, oy + y) == 255 for x, y in cell), f"slot {slot} has partial alpha"
+        assert not (union & cell), f"slot {slot} shares texels with an earlier segment"
+        union |= cell
+    for slot in (14, 15):
+        ox, oy = (slot % 4) * 32, (slot // 4) * 32
+        assert all(_alpha_at(path, ox + x, oy + y) == 0 for x in range(32) for y in range(32)), f"slot {slot} not empty"
+
+
+def test_led_tall_glow_is_the_segments_blurred_inside_a_15_by_26_rect(led_tall_outputs: Path) -> None:
+    glow = led_tall_outputs / "led_segment_glow_tall.tga"
+    for slot, texels in enumerate(LED_TALL_TEXELS):
+        ox, oy = (slot % 4) * 32, (slot // 4) * 32
+        total = outside = peak = 0
+        for y in range(32):
+            for x in range(32):
+                a = _alpha_at(glow, ox + x, oy + y)
+                total += a
+                peak = max(peak, a)
+                if x >= 15 or y >= 26:
+                    outside += a
+        assert abs(total / 255 - texels) < 0.08 * texels, f"slot {slot}: mass {total / 255:.1f} vs {texels} texels"
+        assert 0.3 * 255 < peak < 0.95 * 255, f"slot {slot}: peak {peak}"
+        assert outside == 0, f"slot {slot} spills past the 15 x 26 glow rect"
+
+
 CHARBG_MANIFEST = MEDIA_DIR.parent.parent / "Modules/Skins/CharBgArt.lua"
 # The Help page picture atlas: our own module art cut from the showcase renders (tools/assets/help_frames/), baked by
 # help_pictures.py (helppage-harness.py checks the committed atlas equals a fresh bake). Its manifest names the file.

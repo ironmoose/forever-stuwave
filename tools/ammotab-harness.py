@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Runs the real AmmoTab.lua and HunterState.lua headless on the class shoulder world (sealbar and classshoulder harness
-mocks) and pins the ammo tab (the regen family mockup ammo-tab-regen-family-2026-11-20: look B, the glyph in the chip, the
-glyphs lying level).
+mocks) and pins the ammo tab (mockup ammo-tab-glyph-right-2026-11-20, look B: the count twice as tall, the glyph on the right).
 
 What is pinned here:
 
@@ -10,13 +9,12 @@ What is pinned here:
     nothing; the setting off frees the seat;
   * the seat: 16 design px right of the last shoulder (Hunter: after the mana regen module, 144.8; Warrior: after Thunder
     Clap, 253.6; Rogue: the first seat, 36), a 2 x 1 block;
-  * the face is the mana regen module's: four of its fourteen segment cells (10 x 12 texels on a 12 pitch, centred on the
-    16 px hero tile), its gauge and its bottom line slots; the number right aligned with the places before it unlit, 0000 at
-    zero, 9999 at most; the full mark as "/600"; the chip holds the level arrow for a bow or crossbow, the level cartridge
-    for a gun; cells and glyph runs on whole pixels at the layout's texel size;
+  * the face: one tile filling it, four of the regen module's fourteen segment cells redrawn twice as tall (11 x 22 texels
+    on a 13 pitch, led_segments_tall.tga) and the glyph right of them, the line centred on the tile; the number right
+    aligned with the places before it unlit, 0000 at zero, 9999 at most; the level arrow for a bow or crossbow, the level
+    cartridge for a gun; cells and glyph runs on whole pixels at the layout's texel size;
   * the states: plenty (the regen module's resting look, muted), low at the shared warn count (amber), out (pink, the blink
     plays once on the way in); the low colours switch and the motion switch; the hover ring;
-  * the gauge: the count over the full mark (the biggest count since it last rose), a restock resets the mark;
   * secrets and combat: a secret count falls back to the plain slot count, both secret is no tab; a paint in combat touches
     nothing protected and the seat waits for regen;
   * display only, the config group, the .toc order.
@@ -126,12 +124,6 @@ def set_count(lua, n: int):
     fire(lua, "BAG_UPDATE_DELAYED")
 
 
-def shoot_to(lua, n: int):
-    """The count drops by shooting: a cast just before it, so the full mark holds."""
-    run(lua, "FS.AmmoTab.AT.castAt = GetTime()")
-    set_count(lua, n)
-
-
 def shown(r) -> bool:
     return bool(r._shown)
 
@@ -189,18 +181,12 @@ def lit_colour(lua):
     return None
 
 
-def gauge_lit(lua) -> int:
-    AT = tab(lua).AT
-    violet = theme(lua, "COLOR_BORDER")
-    return sum(1 for i in range(1, 11) if rgb(AT.gauge.seg[i]._vertex) != violet)
-
-
 def blinking(lua) -> bool:
     return bool(lua.eval("FS.AmmoTab.AT.blink:IsPlaying()"))
 
 
 def glyph(lua) -> str:
-    G = tab(lua).AT.chip.glyph
+    G = tab(lua).AT.glyph
     a = all(shown(r) for r in G.arrow.values())
     b = all(shown(r) for r in G.bullet.values())
     na = not any(shown(r) for r in G.arrow.values())
@@ -222,7 +208,6 @@ def check_a_hunter_with_a_bow_gets_the_count_after_the_mana_regen_module():
     assert glyph(lua) == "arrow"
     assert tab(lua).AT.state == "plenty"
     assert lit_colour(lua) == theme(lua, "COLOR_MUTED"), "plenty is not the resting muted look"
-    assert g(lua).FS.AmmoTab.AT.mark._text == "/412", g(lua).FS.AmmoTab.AT.mark._text
 
 
 def check_a_warrior_with_a_bow_stands_after_thunder_clap():
@@ -290,8 +275,8 @@ def check_low_is_amber_at_the_shared_warn_count_and_out_is_pink_with_one_blink()
     assert AT.state == "plenty"
     set_count(lua, 60)
     assert AT.state == "low" and lit_colour(lua) == theme(lua, "COLOR_AMBER"), f"{AT.state} {lit_colour(lua)}"
-    assert rgb(AT.markBar._vertex) == theme(lua, "COLOR_AMBER"), "mark bar not amber"
-    assert rgb(AT.chip.ring._vertex) == theme(lua, "COLOR_AMBER"), "chip ring not amber"
+    assert rgb(AT.glyph.bullet[1]._vertex) == theme(lua, "COLOR_AMBER"), "glyph not amber"
+    assert rgb(AT.hero.fsSkin.border.ring._vertex) == theme(lua, "COLOR_AMBER"), "ring not amber"
     run(lua, 'FS.Config.Set("gunsight.hunter.ammowarn", 30)')
     assert AT.state == "plenty", "the shared warn count did not move the tab"
     run(lua, 'FS.Config.Set("gunsight.hunter.ammowarn", 60)')
@@ -322,24 +307,7 @@ def check_a_fresh_out_at_login_does_not_blink():
     lua = boot(klass="ROGUE", n=0)
     assert tab(lua).AT.state == "out"
     assert not blinking(lua), "blinked at login"
-    assert tab(lua).AT.mark._text == "/--", f"no mark yet reads {tab(lua).AT.mark._text}"
-    set_count(lua, 200)
-    assert tab(lua).AT.mark._text == "/200"
-    shoot_to(lua, 0)
-    assert tab(lua).AT.mark._text == "/200", "the mark forgot the restock"
-
-
-def check_the_gauge_drains_against_the_full_mark():
-    lua = boot(klass="ROGUE", n=600)
-    assert gauge_lit(lua) == 10
-    shoot_to(lua, 300)
-    assert gauge_lit(lua) == 5, gauge_lit(lua)
-    shoot_to(lua, 1)
-    assert gauge_lit(lua) == 1, "one round left lights no segment"
-    set_count(lua, 500)
-    assert tab(lua).AT.full == 500 and gauge_lit(lua) == 10, "a restock did not reset the mark"
-    shoot_to(lua, 0)
-    assert gauge_lit(lua) == 0
+    assert readout(lua) == "0000"
 
 
 def check_the_ammo_slot_stack_counts_when_the_bags_read_zero():
@@ -349,22 +317,6 @@ def check_the_ammo_slot_stack_counts_when_the_bags_read_zero():
     run(lua, "__ammo.n = 199")
     fire(lua, "UNIT_INVENTORY_CHANGED", "player")
     assert readout(lua) == "_199", "a spent arrow did not move the count"
-
-
-def check_ammo_deleted_lowers_the_mark_and_shooting_does_not():
-    lua = boot(klass="ROGUE", n=400)
-    AT = tab(lua).AT
-    run(lua, "__now = 100; GetTime = function() return __now end")
-    set_count(lua, 200)
-    assert AT.full == 200 and AT.mark._text == "/200", f"deleting did not lower the mark ({AT.full})"
-    run(lua, "FS.AmmoTab.AT.castAt = __now")
-    set_count(lua, 199)
-    assert AT.full == 200, "a shot lowered the mark"
-    run(lua, "__now = 110")
-    set_count(lua, 150)
-    assert AT.full == 150, "a drop long after the last cast kept the mark"
-    set_count(lua, 0)
-    assert AT.mark._text == "/--", "deleting every arrow left a mark"
 
 
 def check_secret_counts():
@@ -410,33 +362,41 @@ def check_cells_and_glyph_on_whole_pixels():
         for i in range(1, 5):
             d = whole(AT.digits[i].frame, f"digit {i}")
             xs.append(d["x"])
-            sb.approx(d["w"] * scale / AT.px, 10 * n, f"digit width at {scale}")
-            sb.approx(d["h"] * scale / AT.px, 12 * n, f"digit height at {scale}")
+            sb.approx(d["w"] * scale / AT.px, 11 * n, f"digit width at {scale}")
+            sb.approx(d["h"] * scale / AT.px, 22 * n, f"digit height at {scale}")
         pitch = [round((xs[i + 1] - xs[i]) * scale / AT.px, 6) for i in range(3)]
-        assert pitch == [12 * n] * 3, f"pitch {pitch}"
+        assert pitch == [13 * n] * 3, f"pitch {pitch}"
         hero = csh.D(lua, AT.hero)
         last = csh.D(lua, AT.digits[4].frame)
-        assert xs[0] >= hero["x"] and last["x"] + last["w"] <= hero["x"] + hero["w"], "readout leaves the tile"
-        chip = csh.D(lua, AT.chip.fill)
+        first = csh.D(lua, AT.digits[1].frame)
+        assert xs[0] >= hero["x"] and first["y"] >= hero["y"], "readout leaves the tile"
+        assert first["y"] + first["h"] <= hero["y"] + hero["h"] + 1e-6, "cells leave the tile"
         for kind in ("arrow", "bullet"):
-            for k, r in AT.chip.glyph[kind].items():
-                d = whole(r, f"{kind} run {k}")
-                assert chip["x"] <= d["x"] and d["x"] + d["w"] <= chip["x"] + chip["w"] + 1e-6, f"{kind} leaves the chip"
+            runs = [whole(r, f"{kind} run {k}") for k, r in AT.glyph[kind].items()]
+            x0 = min(d["x"] for d in runs)
+            x1 = max(d["x"] + d["w"] for d in runs)
+            assert x0 >= last["x"] + last["w"] + 1e-6, f"{kind} overlaps the cells"
+            assert x1 <= hero["x"] + hero["w"] + 1e-6, f"{kind} leaves the tile"
+            sb.approx((x1 - x0) * scale / AT.px, 20 * n, f"{kind} width at {scale}")
+            left_gap = xs[0] - hero["x"]
+            right_gap = hero["x"] + hero["w"] - x1
+            assert abs(left_gap - right_gap) <= 2 * px + 1e-6, f"not centred at {scale}: {left_gap} vs {right_gap}"
 
 
 def check_the_face_matches_the_mana_regen_module():
     lua = boot(klass="HUNTER")
     AT, FT = tab(lua).AT, g(lua).FS.FiveSecondTab.FT
-    for key in ("HOST_W", "HOST_H", "CELL_W", "CELL_H", "GAUGE_N", "GAUGE_Y", "GAUGE_H", "GAUGE_X", "GAUGE_PITCH",
-                "GAUGE_SEG_W", "GAUGE_SEG_Y", "GAUGE_SEG_H", "LED_CX", "IDLE_ALPHA", "WORD_IDLE"):
+    for key in ("HOST_W", "HOST_H", "IDLE_ALPHA", "WORD_IDLE"):
         assert AT[key] == FT[key], f"{key}: {AT[key]} vs {FT[key]}"
-    for key in ("x", "y", "w", "h"):
-        assert AT.HERO[key] == FT.HERO[key] and AT.CHIP[key] == FT.CHIP[key], key
     assert tuple(tab(lua).SEGMENT_ORDER.values()) == tuple(g(lua).FS.FiveSecondTab.SEGMENT_ORDER.values())
     for ch in "0123456789":
         assert tab(lua).DIGIT_TEXT[ch] == g(lua).FS.FiveSecondTab.GLYPH_TEXT[ch], ch
     src = TAB.read_text(encoding="utf-8")
-    assert "led_ammo" not in src and "led_segments.tga" in src, "not the regen module's art"
+    assert "led_segments_tall.tga" in src and "led_well.tga" in src, "not the tall LED art"
+    gen = _load("generate_led_segments_tall", "assets/generate_led_segments_tall.py")
+    assert tuple(gen.SEGMENT_ORDER) == tuple(tab(lua).SEGMENT_ORDER.values())
+    assert (gen.CELL_W, gen.CELL_H, gen.ATLAS, gen.SLOT, gen.GLOW_W, gen.GLOW_H) == (
+        AT.CELL_W, AT.CELL_H, AT.ATLAS, AT.SLOT, AT.SEG_GLOW_W, AT.SEG_GLOW_H), "the tab and the atlas disagree"
 
 
 def check_hover_rings_cyan():
