@@ -1,0 +1,6 @@
+[Unit]
+Description=Check the Forever STUwave CurseForge page for new comments
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/workspaces/forever-stuwave/tools/watch-curseforge-comments.py
