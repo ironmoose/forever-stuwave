@@ -202,24 +202,40 @@ end
 -- Caret
 -------------------------------------------------------------------------------
 
-local function StartBlink(p)
+local UpdateCaret
+
+-- Where the cursor is, read the way UpdateCaret reads it: the position clamped to the text.
+local function CursorKey(widget)
+    local text = TextOf(widget)
+    local pos = Kit.Plain(Kit.Try(widget.GetUTF8CursorPosition, widget))
+    if type(pos) ~= "number" or pos > #text then pos = #text end
+    return pos .. ":" .. text, pos, text
+end
+
+-- The blink also re-reads the cursor each frame: the live client does not fire OnCursorChanged for every move (a click
+-- or an arrow key inside the text left the block at the end of the line, seen in Auctionator's search box), so the block
+-- follows the cursor by looking, not only by being told.
+local function StartBlink(widget, p)
     if Kit.IsAnimating(p.over, "blink") then return end
     Kit.Animate(p.over, "blink", function(_, elapsed)
+        if CursorKey(widget) ~= p.caretKey then
+            UpdateCaret(widget, p)
+            if not p.caret:IsShown() then return end
+        end
         local on = (elapsed % K.CARET_BLINK) < K.CARET_BLINK / 2
         p.caret:SetAlpha(on and p.caretAlpha or 0)
     end)
 end
 
-local function UpdateCaret(widget, p)
+function UpdateCaret(widget, p)
     if not (p.built and p.w) then return end
     if not (Kit.IsEnabled(widget) and HasFocus(widget)) then
         p.caret:Hide()
         Kit.StopAnimate(p.over, "blink")
         return
     end
-    local text = TextOf(widget)
-    local pos = Kit.Plain(Kit.Try(widget.GetUTF8CursorPosition, widget))
-    if type(pos) ~= "number" or pos > #text then pos = #text end
+    local key, pos, text = CursorKey(widget)
+    p.caretKey = key
     local ppu = Kit.Ppu(widget)
     p.measure:SetText(text:sub(1, pos))
     local before = Round(p.measure:GetStringWidth() * ppu)
@@ -243,7 +259,7 @@ local function UpdateCaret(widget, p)
     p.caretAlpha = atEnd and 1 or K.CARET_DIM
     p.caret:SetAlpha(p.caretAlpha)
     p.caret:Show()
-    StartBlink(p)
+    StartBlink(widget, p)
 end
 
 -------------------------------------------------------------------------------

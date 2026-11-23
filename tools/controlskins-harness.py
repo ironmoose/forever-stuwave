@@ -2294,6 +2294,18 @@ case("edit_box_caret_follows_the_cursor_dims_mid_text_and_hides_when_the_text_sc
     assert(not p.caret:IsShown(), "no caret drawn where the text scrolls under the engine's own")
 """)
 
+case("edit_box_caret_follows_a_cursor_move_the_client_never_announced", PRELUDE + """
+    local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    Skin(P)
+    local p = Fld().Parts(b)
+    b:SetFocus()
+    b:SetText("stu")
+    Expect(p.caret, b, 34 + 20 + 2, 7, 7, 14, "caret at the end of the text")
+    b.cursor = 1 -- a click inside the text, with no OnCursorChanged
+    Step(0.05)
+    Expect(p.caret, b, 34 + 7, 7, 7, 14, "the blink found the cursor after the first glyph")
+""")
+
 case("edit_box_disabled_is_the_darkest_ink_and_dims_its_text", PRELUDE + """
     local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
     Skin(P)
