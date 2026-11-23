@@ -98,7 +98,9 @@ function FieldSkins.CrossParts(button) return crossParts[button] end
 
 local function TextOf(widget)
     local text = Kit.Plain(Kit.Try(widget.GetDisplayText or widget.GetText, widget))
-    if type(text) ~= "string" then
+    -- GetDisplayText reads "" on the 16001 client whatever the box holds (seen 2026-11-23 in Auctionator's search box),
+    -- which parked the caret at the start of the line, so an empty one falls back to GetText
+    if type(text) ~= "string" or text == "" then
         text = Kit.Plain(Kit.Try(widget.GetText, widget))
     end
     return type(text) == "string" and text or ""

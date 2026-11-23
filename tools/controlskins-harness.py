@@ -2306,6 +2306,16 @@ case("edit_box_caret_follows_a_cursor_move_the_client_never_announced", PRELUDE 
     Expect(p.caret, b, 34 + 7, 7, 7, 14, "the blink found the cursor after the first glyph")
 """)
 
+case("edit_box_caret_reads_the_text_when_the_display_text_reads_empty", PRELUDE + """
+    local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    b.GetDisplayText = function() return "" end -- what the 16001 client returns
+    Skin(P)
+    local p = Fld().Parts(b)
+    b:SetFocus()
+    b:SetText("stu")
+    Expect(p.caret, b, 34 + 20 + 2, 7, 7, 14, "caret after the text, not at the start of an empty line")
+""")
+
 case("edit_box_disabled_is_the_darkest_ink_and_dims_its_text", PRELUDE + """
     local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
     Skin(P)
