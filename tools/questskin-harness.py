@@ -948,6 +948,9 @@ case("quest text: the headers and texts are mono, the money and XP lines wear th
     local rf = QuestInfoRewardsFrame
     assert(rf.Header.fontPath ~= 'stock.ttf' and rf.ItemChooseText.fontPath ~= 'stock.ttf' and rf.XPFrame.ReceiveText.fontPath ~= 'stock.ttf', 'rewards texts')
     assert(QuestInfoMoneyFrameGoldButtonText.fontPath ~= 'stock.ttf', 'money not styled')
+    rf.XPFrame.ReceiveText:SetTextColor(0.2, 0.1, 0.05) -- QuestInfo's parchment colour, written on every show
+    local xc = rf.XPFrame.ReceiveText.textColor or rf.XPFrame.ReceiveText.color
+    assert(xc and xc[1] > 0.6, 'Experience: label left dark')
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 

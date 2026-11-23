@@ -491,6 +491,9 @@ local function SkinQuestTexts()
         S.done["text:xp"] = true
         Mono(rf.XPFrame.ReceiveText, win or rf, 13, C.text)
         Mono(rf.XPFrame.ValueText, win or rf, 13, C.text)
+        -- QuestInfo writes the parchment's dark brown into "Experience:" on every show, and Panels' retint list does not
+        -- reach it, so it is pinned light
+        Char.PinColor(rf.XPFrame.ReceiveText, C.text)
     end
     for i = 1, QUEST_OBJECTIVE_MAX do
         local o = _G["QuestInfoObjective" .. i]
