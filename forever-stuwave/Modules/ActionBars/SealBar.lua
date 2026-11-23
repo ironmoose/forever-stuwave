@@ -292,11 +292,8 @@ local function ShowTooltip(self)
     if not tip then return end
     local byForm = self.fsFormIndex and tip.SetShapeshift
     if not (byForm or (self.fsSpellID and tip.SetSpellByID)) then return end
-    if _G.GameTooltip_SetDefaultAnchor then
-        _G.GameTooltip_SetDefaultAnchor(tip, self)
-    else
-        tip:SetOwner(self, "ANCHOR_TOP")
-    end
+    -- Over the button, like the stance bar: the default anchor parks it in the far corner.
+    tip:SetOwner(self, "ANCHOR_TOP")
     if byForm then
         tip:SetShapeshift(self.fsFormIndex)
     else

@@ -498,11 +498,9 @@ local function ShowStanceTooltip(self)
         return
     end
 
-    if _G.GameTooltip_SetDefaultAnchor then
-        _G.GameTooltip_SetDefaultAnchor(GameTooltip, self)
-    else
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    end
+    -- Over the button, like the Thunder Clap tab beside it: the default anchor
+    -- parks the tooltip in the far corner, away from the shoulder.
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:SetShapeshift(self.index)
     GameTooltip:Show()
 end
