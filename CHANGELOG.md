@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-beta.5.1.1 (2026-11-23)
+
+Two small fixes: tooltips over the stance and seal buttons, and the text cursor in search boxes.
+
+### Fixes
+- Warrior stance and Paladin seal and aura tooltips now open above the button, like the Thunder Clap tab's, instead of in the far corner of the screen.
+- The block cursor in edit and search boxes (Auctionator's search box among them) now sits where you click or arrow to, instead of staying at the start of the line.
+
 ## 1.0.0-beta.5.1 (2026-11-21)
 
 A Help page with pictures, an ammo counter, quest timers that work again, and STUwave checks on the quest tracker.
