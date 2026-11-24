@@ -1214,6 +1214,9 @@ local function InitSlot(m)
             local num = slot:CreateFontString(nil, "OVERLAY")
             num.cur = { m.def.num[1], m.def.num[2], m.def.num[3], 1 }
             num:SetJustifyH("CENTER")
+            -- The bind writes text at once, so the font goes on first (as BuffTab does): unfonted, the bind threw
+            -- "FontString:SetText(): Font not set" and the medallion never armed (a level 60 Priest's report, 2026-11-24).
+            FS.Theme.ApplyMono(num, ui(C.NUM_SIZE), num.cur)
             if m.def.text == "duration" then slot:SetDurationText(num, {}) else slot:SetApplicationCount(num) end
             part.num = num
             SeatPart(m, part)
