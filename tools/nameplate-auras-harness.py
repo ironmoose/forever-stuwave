@@ -1357,17 +1357,17 @@ local function icon(i) return FS.framesByUnit["nameplate" .. i].questIcon:IsShow
 check(icon(1) and not icon(2) and icon(3) and not icon(4) and not icon(5), "initial icons wrong")
 -- a header entry never counts, even when the unit claims its questID
 onQuest.nameplate4 = { [1] = true, [13] = true }
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(not icon(4), "a quest-log header made a quest icon")
 -- a new quest is accepted: its objective unit gains the icon at the next update
 log[#log + 1] = { questID = 15 }
 onQuest.nameplate2 = { [15] = true }
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(icon(2), "an accepted quest's unit got no icon")
 -- the quest completes and leaves the log: the icon goes with it
 table.remove(log, 3)
 onQuest.nameplate1 = nil
-fire("QUEST_WATCH_UPDATE")
+fire("QUEST_WATCH_UPDATE"); drain()
 check(not icon(1), "a completed quest's unit kept its icon")
 check(icon(3) and icon(2), "an unrelated icon was lost")
 -- a plate added later reads the same log
@@ -1376,7 +1376,7 @@ addPlate("nameplate6")
 check(icon(6), "a late plate got no icon")
 -- a throwing quest API hides the icons and the handler survives
 C_QuestLog.GetInfo = function() error("boom") end
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(not icon(2) and not icon(3) and not icon(6), "a failed scan left icons shown")
 """),
 
@@ -1415,12 +1415,12 @@ check(not plate(4):IsShown(), "a header title counted as a quest")
 check(not plate(5):IsShown(), "a line that is not a quest title counted")
 -- the quest turns complete: the marker goes at the next quest update
 complete[11] = true
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(not plate(1):IsShown(), "a complete quest kept its marker")
 -- a tooltip read that throws hides the marker and the handler survives
 complete[11] = nil
 C_TooltipInfo.GetUnit = function() error("boom") end
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(not plate(1):IsShown(), "a throwing tooltip read left a marker")
 C_TooltipInfo = nil
 """),
@@ -1438,14 +1438,14 @@ boot()
 for i = 1, 8 do addPlate("nameplate" .. i) end
 check(getInfo == #log, "8 plates added: GetInfo called " .. getInfo .. " times, wanted " .. #log)
 getInfo = 0
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(getInfo == #log, "QUEST_LOG_UPDATE over 8 plates: GetInfo called " .. getInfo .. " times, wanted " .. #log)
 getInfo = 0
-fire("QUEST_WATCH_UPDATE")
+fire("QUEST_WATCH_UPDATE"); drain()
 check(getInfo == #log, "QUEST_WATCH_UPDATE over 8 plates: GetInfo called " .. getInfo .. " times, wanted " .. #log)
 getInfo = 0
-fire("QUEST_LOG_UPDATE"); fire("QUEST_LOG_UPDATE")
-check(getInfo == 2 * #log, "two updates: GetInfo called " .. getInfo .. " times, wanted " .. 2 * #log)
+fire("QUEST_LOG_UPDATE"); fire("QUEST_LOG_UPDATE"); drain()
+check(getInfo == #log, "two updates in a burst fold into one pass: GetInfo called " .. getInfo .. " times, wanted " .. #log)
 -- ordinary health ticks leave the quest icon alone: no scan, no per-quest test
 getInfo, onQuestCalls = 0, 0
 for _ = 1, 25 do
@@ -1467,13 +1467,14 @@ dead.nameplate3 = false
 fire("UNIT_HEALTH", "nameplate3")
 check(onQuestCalls == #log, "a plate coming back alive: IsUnitOnQuest called " .. onQuestCalls .. " times, wanted " .. #log)
 check(getInfo == 0, "a death flip scanned the quest log")
--- a faction or flag change re-tests the quests of the plate it names; the player's own token re-tests every plate
+-- a faction or flag change re-tests the quests of the plate it names; the player's own token (it flips on every
+-- combat enter and exit) re-tests no plate: the player's flags do not change which mobs are on a quest
 onQuestCalls = 0
 fire("UNIT_FACTION", "nameplate3")
 check(onQuestCalls == #log, "UNIT_FACTION on one plate: IsUnitOnQuest called " .. onQuestCalls .. " times, wanted " .. #log)
 onQuestCalls = 0
 fire("UNIT_FLAGS", "player")
-check(onQuestCalls == 8 * #log, "UNIT_FLAGS on the player: IsUnitOnQuest called " .. onQuestCalls .. " times, wanted " .. 8 * #log)
+check(onQuestCalls == 0, "UNIT_FLAGS on the player: IsUnitOnQuest called " .. onQuestCalls .. " times, wanted 0")
 check(getInfo == 0, "faction/flag events scanned the quest log")
 """),
 
@@ -1869,7 +1870,7 @@ local function bang(i) return FS.framesByUnit["nameplate" .. i].questIcon:IsShow
 check(not bang(1), "a friendly player on the same quest got a !")
 check(bang(2), "a quest mob lost its !")
 check(bang(3), "a unit the player check says nothing about lost its !")
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(not bang(1) and bang(2) and bang(3), "a quest refresh changed who gets a !")
 -- the unit becomes a player (a mind control, a faction flip): the next test says no
 isPlayer.nameplate2 = true
@@ -1899,29 +1900,29 @@ boot()
 addPlate("nameplate1")
 local function bang() return FS.framesByUnit.nameplate1.questIcon:IsShown() end
 check(not bang(), "our ! drawn beside Questie's icon")
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(not bang(), "a quest refresh brought our ! back over Questie's icon")
-profile.nameplateEnabled = false; fire("QUEST_LOG_UPDATE")
+profile.nameplateEnabled = false; fire("QUEST_LOG_UPDATE"); drain()
 check(bang(), "Questie's plate icons are off but our ! is too")
-profile.nameplateEnabled = true; fire("QUEST_LOG_UPDATE")
+profile.nameplateEnabled = true; fire("QUEST_LOG_UPDATE"); drain()
 check(not bang(), "Questie's plate icons are back on but our ! stayed")
-loaded = false; fire("QUEST_LOG_UPDATE")
+loaded = false; fire("QUEST_LOG_UPDATE"); drain()
 check(bang(), "Questie is not loaded but our ! is hidden")
 loaded = true
-FS.QuestieCompat.Profile = function() return nil end; fire("QUEST_LOG_UPDATE")
+FS.QuestieCompat.Profile = function() return nil end; fire("QUEST_LOG_UPDATE"); drain()
 check(bang(), "Questie's settings are unreadable: our ! should stay")
 profile = { nameplateEnabled = true }
-FS.QuestieCompat.Profile = function() return profile end; fire("QUEST_LOG_UPDATE")
+FS.QuestieCompat.Profile = function() return profile end; fire("QUEST_LOG_UPDATE"); drain()
 check(not bang(), "setup")
 -- Questie draws no plate icons inside instances on this client
 Questie = { IsForever = true }
 IsInInstance = function() return true, "party" end
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(bang(), "inside an instance Questie draws nothing, but our ! is hidden")
 IsInInstance = function() return false, "none" end
-fire("QUEST_LOG_UPDATE")
+fire("QUEST_LOG_UPDATE"); drain()
 check(not bang(), "outside an instance our ! came back over Questie's icon")
-FS.QuestieCompat = nil; fire("QUEST_LOG_UPDATE")
+FS.QuestieCompat = nil; fire("QUEST_LOG_UPDATE"); drain()
 check(bang(), "no Questie helper at all: our ! should show")
 """),
 

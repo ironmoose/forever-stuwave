@@ -204,7 +204,7 @@ function T.a_cooldown_runs_the_fill_from_the_gcd_less_object_and_the_swipe_shows
     local b = actionButton(1, 1)
     __gcdAsks = 0
     __now = __now + 1   -- a frame after the login refresh
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     local t = b.fsCdFill._timer
     eq(t ~= nil, true, "the fill was handed a duration object")
     eq(t.obj.slot, b.action, "the button's own slot")
@@ -215,24 +215,24 @@ function T.a_cooldown_runs_the_fill_from_the_gcd_less_object_and_the_swipe_shows
     eq(b.cooldown._cdObj.gcd, true, "the swipe is the global cooldown alone")
     eq(__gcdAsks, 1, "the GCD marker is asked once per frame time, not once per button")
     __now = __now + 1
-    __fire_event("SPELL_UPDATE_COOLDOWN")
+    __fire_event("SPELL_UPDATE_COOLDOWN"); __next_frame()
     eq(__gcdAsks, 2, "and again on a later frame")
 end
 
 function T.an_empty_slot_hides_its_fill()
     local b = actionButton(1, 1)
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(b.fsCdFill:IsShown(), true, "running")
     local slot = b.action
     HasAction = function(s) return s ~= slot end
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(b.fsCdFill:IsShown(), false, "an empty slot shows no fill")
 end
 
 function T.a_throwing_set_timer_duration_keeps_the_swipe_of_everything()
     local b = actionButton(1, 1)
     __timerThrows = true
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(b.fsCdFill:IsShown(), false, "no fill")
     eq(b.cooldown._cdObj.slot, b.action, "the swipe has the slot's cooldown")
     eq(b.cooldown._cdObj.ignoreGCD, nil, "GCD included, as before")
@@ -241,7 +241,7 @@ end
 function T.a_client_without_the_timer_direction_keeps_the_swipe_of_everything()
     local b = actionButton(1, 1)
     __timerCalls = 0
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(__timerCalls, 0, "a bar that would fill up is never started")
     eq(b.fsCdFill:IsShown(), false, "no fill")
     eq(b.cooldown._cdObj.ignoreGCD, nil, "the swipe has the whole cooldown")
@@ -249,7 +249,7 @@ end
 
 function T.a_client_without_set_timer_duration_keeps_the_swipe_of_everything()
     local b = actionButton(1, 1)
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(b.fsCdFill:IsShown(), false, "no fill")
     eq(b.cooldown._cdObj.slot, b.action, "the swipe has the slot's cooldown")
 end
@@ -257,7 +257,7 @@ end
 function T.a_client_without_clipping_gets_the_fill_and_no_edge()
     local b = actionButton(1, 1)
     eq(b.fsCdFill.fsEdge, nil, "no edge that could hang at the top of an empty bar")
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(b.fsCdFill:IsShown(), true, "the fill still runs")
 end
 
@@ -273,7 +273,7 @@ function T.a_client_with_no_status_bar_builds_no_fill_and_never_retries()
     local n = #__frames
     FS.FrameHelpers.SeatButtonCooldown(b)
     eq(#__frames, n, "no frame made on a re-seat")
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(b.cooldown._cdObj ~= nil, true, "the swipe still runs")
 end
 
@@ -336,7 +336,7 @@ function T.the_fill_is_legal_in_combat()
     local b = actionButton(1, 1)
     __combat = true
     __blocked, __protectedTouch = 0, 0
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(b.fsCdFill:IsShown(), true, "runs in combat")
     eq(__blocked, 0, "no protected operation refused")
     eq(__protectedTouch, 0, "nothing built, anchored or re-levelled under the secure button in combat")

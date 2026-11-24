@@ -2,7 +2,7 @@
 """Keeps every WoW taint log that records a blocked action, before a /reload wipes it.
 
 The client writes Logs/taint.log while taintLog is on (ErrorLog.lua turns it on at
-every login) and truncates the file each time the UI loads, so a block recorded
+every login when ForeverSTUwaveDB.taintLog is true) and truncates the file each time the UI loads, so a block recorded
 before a /reload is gone a second later. This polls the file once a second, keeps
 the current contents in memory, and whenever they contain a blocked or forbidden
 action line, writes them to debug/taint/taint-<start>.log (one file per UI load,

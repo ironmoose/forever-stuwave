@@ -41,7 +41,10 @@ if FS.Config and FS.Config.RegisterDefault then
     FS.Config.RegisterDefault(Export.RELOAD_KEY, false)
 end
 
-local DELAY = 2           -- seconds between the first event of a burst and the write
+-- Seconds between the first event of a burst and the write. A snapshot reads the whole character and is a
+-- frame-sized cost, so it runs at most once per DELAY (2 s made it fire after nearly every kill and loot, a hitch);
+-- logout, bank close and /reload still write at once, so nothing on disk is staler.
+local DELAY = 30
 local LOGIN_DELAY = 4     -- stats and item data settle a few seconds after the loading screen
 local MAX_TREES, MAX_NODES = 4, 400
 

@@ -1024,7 +1024,13 @@ local watcher = CreateFrame("Frame")
 for _, event in ipairs({ "TRAIT_CONFIG_UPDATED", "TRAIT_TREE_CURRENCY_INFO_UPDATED", "PLAYER_TALENT_UPDATE", "ACTIVE_PLAYER_SPECIALIZATION_CHANGED" }) do
     pcall(watcher.RegisterEvent, watcher, event)
 end
-watcher:SetScript("OnEvent", function() if S.done then Kit.Later(Tal.Refresh) end end)
+watcher:SetScript("OnEvent", function()
+    if not S.done then return end
+    -- A closed window catches up in its OnShow hook; the refresh walks every talent node (2026-11-24 hitch audit).
+    local win = _G.PlayerSpellsFrame
+    if not (win and win:IsShown()) then return end
+    Kit.Later(Tal.Refresh)
+end)
 
 PanelSkins.RegisterInspect("Talents", { { name = "PlayerSpellsFrame", guard = "fsTalentsSkin" } })
 

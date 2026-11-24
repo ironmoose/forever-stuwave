@@ -410,12 +410,15 @@ end
 -- our writes made a protected call fail, and the client drops the taintLog CVar
 -- on restart, so a block that happens before someone remembers to type
 -- /console taintLog 2 is lost (2026-11-10: three bag-click blocks at the bank, no
--- log). Level 2 names the tainted variable read before the block. It is set on
--- every login while ForeverSTUwaveDB.taintLog is not false; the readback is kept
--- in ForeverSTUwaveDB.taintLogCVar so a client that refuses the write shows it.
+-- log). Level 2 names the tainted variable read before the block. It is OPT-IN:
+-- set on every login only while ForeverSTUwaveDB.taintLog is true
+-- (/run ForeverSTUwaveDB.taintLog=true, then /reload), because level 2 has the
+-- client write a line for every tainted read all through play, a hitch source
+-- (2026-11-24: about 1000 lines in 8 minutes). The readback is kept in
+-- ForeverSTUwaveDB.taintLogCVar so a client that refuses the write shows it.
 -- tools/taint-watch.py copies the file off disk before a /reload truncates it.
 local function EnableTaintLog()
-    if type(ForeverSTUwaveDB) ~= "table" or ForeverSTUwaveDB.taintLog == false then return end
+    if type(ForeverSTUwaveDB) ~= "table" or ForeverSTUwaveDB.taintLog ~= true then return end
     local set = (C_CVar and C_CVar.SetCVar) or SetCVar
     local get = (C_CVar and C_CVar.GetCVar) or GetCVar
     if type(set) ~= "function" then return end

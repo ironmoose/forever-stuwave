@@ -1705,6 +1705,8 @@ local function Build()
     HookScript(win, "OnShow", function()
         Relayout()
         RefreshInbox()
+        Step("send", RefreshSend)
+        Step("letter", RefreshLetter)
         Later(function() PanelSkins.SweepScrollBars(win) end)
     end)
     RefreshInbox()
@@ -1721,6 +1723,10 @@ watcher:SetScript("OnEvent", function(_, event)
         Step("relayout", Relayout)
         return
     end
+    -- A closed mailbox catches up in its OnShow hook; PLAYER_MONEY fires on every coin loot and vendor sale
+    -- (2026-11-24 hitch audit).
+    local win = _G.MailFrame
+    if not (win and win:IsShown()) then return end
     Step("refresh", function()
         RefreshInbox()
         RefreshSend()

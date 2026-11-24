@@ -2311,6 +2311,15 @@ local function UpdateQuestIcon(unit)
     end
 end
 
+-- Fields on Plates, not file-scope locals: the parse gate caps locals per file.
+Plates.QUEST_REFRESH_DELAY = 0.5
+Plates.questRefreshQueued = false
+function Plates.RefreshAllQuestIcons()
+    for otherUnit in pairs(FS.framesByUnit) do
+        UpdateQuestIcon(otherUnit)
+    end
+end
+
 -------------------------------------------------------------------------------
 -- Aura dots
 -------------------------------------------------------------------------------
@@ -2720,11 +2729,21 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     -- (accepting/completing/abandoning a quest, or toggling its watch, changes
     -- which units are quest-relevant addon-wide) -- refresh every live plate's
     -- quest icon the same unitless way as the two events above.
+    -- QUEST_LOG_UPDATE comes in bursts and the pass asks every plate about every
+    -- quest (a tooltip read for each plate that is on none), so a burst is folded
+    -- into one pass QUEST_REFRESH_DELAY later (2026-11-24 hitch audit).
     if event == "QUEST_LOG_UPDATE" or event == "QUEST_WATCH_UPDATE" then
         questCacheDirty = true
-        for otherUnit in pairs(FS.framesByUnit) do
-            UpdateQuestIcon(otherUnit)
+        if Plates.questRefreshQueued then return end
+        if not (C_Timer and C_Timer.After) then
+            Plates.RefreshAllQuestIcons()
+            return
         end
+        Plates.questRefreshQueued = true
+        C_Timer.After(Plates.QUEST_REFRESH_DELAY, function()
+            Plates.questRefreshQueued = false
+            Plates.RefreshAllQuestIcons()
+        end)
         return
     end
 
@@ -2783,7 +2802,8 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
                 UpdateFillColor(otherUnit)
                 UpdateGlowState(otherUnit)
                 UpdateName(otherUnit)
-                UpdateQuestIcon(otherUnit)
+                -- No quest icon pass: the player's own flags (they flip on every
+                -- combat enter and exit) do not change which mobs are on a quest.
             end
         elseif FS.framesByUnit[unit] then
             UpdateHealth(unit)

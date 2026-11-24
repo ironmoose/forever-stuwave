@@ -974,6 +974,23 @@ local function UpdateAllLive(withCooldown)
     end
 end
 
+-- Blizzard sends ACTIONBAR_UPDATE_COOLDOWN and SPELL_UPDATE_COOLDOWN together (and the usable/state events in bursts)
+-- on every global cooldown, so refreshing on each event ran the full 72-button pass several times in one frame, each
+-- asking for fresh cooldown objects, and the garbage came back as hitches (2026-11-24). Events only mark the work;
+-- it runs once on the next frame. The OnUpdate exists only while a pass is pending, so an idle bar costs no frames.
+local liveFlush = CreateFrame("Frame")
+local cooldownWanted = false
+local function FlushLive(self)
+    self:SetScript("OnUpdate", nil)
+    local withCooldown = cooldownWanted
+    cooldownWanted = false
+    UpdateAllLive(withCooldown)
+end
+local function RequestLive(withCooldown)
+    if withCooldown then cooldownWanted = true end
+    liveFlush:SetScript("OnUpdate", FlushLive)
+end
+
 -- Hotkey text only: the cheap refresh Quick Keybind mode asks for after a
 -- rebind, without redoing icon/cooldown/usable for all 72 buttons.
 local function UpdateAllHotkeys()
@@ -1778,10 +1795,10 @@ local function OnEvent(_, event, arg1)
         or event == "PLAYER_LEAVE_COMBAT" then
         UpdateAllState()
     elseif event == "ACTIONBAR_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_COOLDOWN" then
-        UpdateAllLive(true)
+        RequestLive(true)
     elseif event == "ACTIONBAR_UPDATE_USABLE" or event == "SPELL_UPDATE_USABLE"
         or event == "ACTIONBAR_UPDATE_STATE" or event == "PLAYER_TARGET_CHANGED" then
-        UpdateAllLive(false)
+        RequestLive(false)
     else
         UpdateAll()
     end

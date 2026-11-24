@@ -309,6 +309,14 @@ function __fire_event(event, ...)
     end
 end
 
+-- One client frame with no time passing: runs every OnUpdate installed right now once, which is
+-- when ActionBars runs the refresh its high-rate events only queue.
+function __next_frame()
+    local due = {}
+    for _, f in ipairs(__frames) do if f._scripts.OnUpdate then due[#due + 1] = f end end
+    for _, f in ipairs(due) do if f._scripts.OnUpdate then f._scripts.OnUpdate(f, 0) end end
+end
+
 -- ---- WoW API surface the three files touch -----------------------------
 __combat = false
 __bindings = {}
@@ -733,8 +741,8 @@ end
 
 function T.action_cooldown_geometry_survives_updates()
     local b = __button(3, 4)
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
-    __fire_event("SPELL_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
+    __fire_event("SPELL_UPDATE_COOLDOWN"); __next_frame()
     allEdges(__insets(b.cooldown, b), { ICON_INSET, ICON_INSET, ICON_INSET, ICON_INSET }, "after update")
     eq(b.cooldown._cdObj ~= nil, true, "duration object still applied")
 end
@@ -887,11 +895,11 @@ function T.queued_state_follows_is_current_action_and_clears()
     eq(b.fsQueuedWash ~= nil, true, "queued wash built")
     eq(queued(b), false, "idle button shows nothing")
     __current[b.action] = true
-    __fire_event("ACTIONBAR_UPDATE_STATE")
+    __fire_event("ACTIONBAR_UPDATE_STATE"); __next_frame()
     eq(queued(b), true, "queued spell lights its button")
     eq(queued(other), false, "a neighbour stays dark")
     __current[b.action] = nil
-    __fire_event("ACTIONBAR_UPDATE_STATE")
+    __fire_event("ACTIONBAR_UPDATE_STATE"); __next_frame()
     eq(queued(b), false, "state clears when the spell fires")
 end
 
@@ -931,7 +939,7 @@ end
 function T.queued_state_never_leaves_the_checkbutton_checked()
     local b = __button(1, 1)
     b:SetChecked(true)   -- what a click does to a CheckButton
-    __fire_event("ACTIONBAR_UPDATE_STATE")
+    __fire_event("ACTIONBAR_UPDATE_STATE"); __next_frame()
     eq(b:GetChecked(), false, "click toggle does not linger")
 end
 
@@ -1130,14 +1138,14 @@ function T.gcd_swipe_is_asked_for_with_the_gcd_included_and_applied()
     local seen   -- recorded by the variant's API stand-in, installed before the addon loads
     __gcdSeen[b.action] = nil
     b.cooldown._cdObj = nil
-    __fire_event("SPELL_UPDATE_COOLDOWN")
+    __fire_event("SPELL_UPDATE_COOLDOWN"); __next_frame()
     seen = __gcdSeen[b.action]
     eq(seen ~= nil, true, "cooldown duration requested for the slot on SPELL_UPDATE_COOLDOWN")
     eq(seen.ignore == nil or seen.ignore == false, true, "GCD is not ignored")
     eq(b.cooldown._cdObj ~= nil and b.cooldown._cdObj.gcd, true, "object reaches the cooldown frame")
     eq(b.cooldown:IsShown(), true, "cooldown frame shown")
     b.cooldown._cdObj = nil
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(b.cooldown._cdObj ~= nil, true, "ACTIONBAR_UPDATE_COOLDOWN refreshes it too")
 end
 
@@ -1148,11 +1156,11 @@ function T.idle_usable_and_state_events_skip_hotkeys_and_cooldown_objects()
     __cdAsked, __keyAsked = 0, 0
     for _, ev in ipairs({ "ACTIONBAR_UPDATE_USABLE", "SPELL_UPDATE_USABLE", "ACTIONBAR_UPDATE_STATE",
                           "PLAYER_TARGET_CHANGED" }) do
-        __fire_event(ev)
+        __fire_event(ev); __next_frame()
     end
     eq(__cdAsked, 0, "usable/state events request no cooldown duration objects")
     eq(__keyAsked, 0, "usable/state events resolve no hotkeys")
-    __fire_event("SPELL_UPDATE_COOLDOWN")
+    __fire_event("SPELL_UPDATE_COOLDOWN"); __next_frame()
     eq(__cdAsked > 0, true, "a cooldown event still refreshes the swipe")
     eq(__keyAsked, 0, "a cooldown event resolves no hotkeys")
     __fire_event("UPDATE_BINDINGS")
@@ -1162,28 +1170,50 @@ end
 -- The cheaper path must still do its job: a usable change reaches the icon tint.
 function T.usable_event_still_retints_the_icon()
     local icon = __button(1, 1).icon
-    __fire_event("ACTIONBAR_UPDATE_USABLE")
+    __fire_event("ACTIONBAR_UPDATE_USABLE"); __next_frame()
     eq(icon._vertex[1], 1, "usable slot is untinted")
     IsUsableAction = function() return false, false end
-    __fire_event("ACTIONBAR_UPDATE_USABLE")
+    __fire_event("ACTIONBAR_UPDATE_USABLE"); __next_frame()
     eq(icon._vertex[1], 0.4, "unusable slot is greyed by the usable event")
     IsUsableAction = function() return true, false end
     IsActionInRange = function() return false end
-    __fire_event("PLAYER_TARGET_CHANGED")
+    __fire_event("PLAYER_TARGET_CHANGED"); __next_frame()
     eq(icon._vertex[1], 0.8, "out of range is reddened by a target change")
+end
+
+-- Blizzard sends both cooldown events (and the usable/state ones) together on every global cooldown:
+-- a burst in one frame queues one pass, run on the next frame, and leaves no OnUpdate behind.
+function T.a_burst_of_bar_events_in_one_frame_runs_one_pass()
+    __button(1, 1)
+    __cdAsked = 0
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("SPELL_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_USABLE")
+    __fire_event("ACTIONBAR_UPDATE_STATE")
+    eq(__cdAsked, 0, "nothing runs inside the burst")
+    __next_frame()
+    local one = __cdAsked
+    eq(one > 0, true, "the next frame runs the pass with cooldowns")
+    __cdAsked = 0
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __next_frame()
+    eq(__cdAsked, one, "the burst cost the same as one event")
+    __cdAsked = 0
+    __next_frame()
+    eq(__cdAsked, 0, "an idle frame runs no pass")
 end
 
 function T.cooldown_refresh_skips_empty_slots()
     local b = __button(1, 1)
     local emptySlot = b.action
     __cdAsked = 0
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     local all = __cdAsked
     eq(all > 1, true, "every filled slot asks for its duration object")
     HasAction = function(slot) return slot ~= emptySlot end
     b.cooldown._cdObj = "stale"
     __cdAsked = 0
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(__cdAsked, all - 1, "the empty slot asks for no duration object")
     eq(b.cooldown._cdObj, nil, "the empty slot's swipe was cleared")
     eq(__button(1, 2).cooldown._cdObj ~= nil, true, "a filled slot still gets its duration object")
@@ -1191,7 +1221,7 @@ end
 
 function T.slot_change_to_an_empty_slot_clears_its_cooldown()
     local b = __button(1, 1)
-    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN"); __next_frame()
     eq(b.cooldown._cdObj ~= nil, true, "swipe shown while the slot is filled")
     local slot = b.action
     HasAction = function(s) return s ~= slot end
@@ -3244,6 +3274,7 @@ VARIANTS = {
     """,
     "idle_usable_and_state_events_skip_hotkeys_and_cooldown_objects": COUNT_APIS,
     "cooldown_refresh_skips_empty_slots": COUNT_APIS,
+    "a_burst_of_bar_events_in_one_frame_runs_one_pass": COUNT_APIS,
     "keybind_press_pushes_our_button_and_release_clears_it": PRESS_HOOKS,
     "keybind_press_is_released_when_the_release_never_arrives": PRESS_HOOKS,
     "keybind_press_survives_the_start_of_combat": PRESS_HOOKS,

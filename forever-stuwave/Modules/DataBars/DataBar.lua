@@ -495,8 +495,17 @@ local BAGS_COLOR_FULL = { 1, 0.180, 0.592 }  -- --pink
 -- hint rather than silently reading zero.
 local ADDON_NAME = addonName
 
+-- UpdateAddOnMemoryUsage walks every loaded addon's heap in one frame, so calling
+-- it on the 1 s bar tick made a hitch every second (2026-11-24). It reads at most
+-- every MEMORY_INTERVAL and never in combat; the readout holds the last value.
+local MEMORY_INTERVAL = 30
+local lastMemoryAt
+
 local function UpdateMemory(segment)
     if not UpdateAddOnMemoryUsage then return end
+    local now = GetTime()
+    if lastMemoryAt and (InCombatLockdown() or now - lastMemoryAt < MEMORY_INTERVAL) then return end
+    lastMemoryAt = now
     UpdateAddOnMemoryUsage()
 
     local kb = GetAddOnMemoryUsage(ADDON_NAME) or 0
