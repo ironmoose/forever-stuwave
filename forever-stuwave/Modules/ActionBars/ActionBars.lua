@@ -979,15 +979,24 @@ end
 -- asking for fresh cooldown objects, and the garbage came back as hitches (2026-11-24). Events only mark the work;
 -- it runs once on the next frame. The OnUpdate exists only while a pass is pending, so an idle bar costs no frames.
 local liveFlush = CreateFrame("Frame")
-local cooldownWanted = false
+-- The usable/state events (and a target change, for range) only move the tint and the lit state, and with a target
+-- they fire nearly every frame, so they ask for that light pass; a cooldown event still gets the full one.
+local cooldownWanted, fullWanted = false, false
 local function FlushLive(self)
     self:SetScript("OnUpdate", nil)
-    local withCooldown = cooldownWanted
-    cooldownWanted = false
-    UpdateAllLive(withCooldown)
+    local withCooldown, full = cooldownWanted, fullWanted
+    cooldownWanted, fullWanted = false, false
+    if full then
+        UpdateAllLive(withCooldown)
+        return
+    end
+    for _, button in ipairs(allButtons) do
+        UpdateUsable(button)
+        UpdateState(button)
+    end
 end
 local function RequestLive(withCooldown)
-    if withCooldown then cooldownWanted = true end
+    if withCooldown then cooldownWanted, fullWanted = true, true end
     liveFlush:SetScript("OnUpdate", FlushLive)
 end
 

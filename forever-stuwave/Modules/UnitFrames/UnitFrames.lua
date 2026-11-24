@@ -1027,6 +1027,9 @@ nameWatcher:SetScript("OnEvent", RefreshWatchedNames)
 -- Events
 -------------------------------------------------------------------------------
 
+local HEALTH_ONLY = { UNIT_HEALTH = true, UNIT_MAXHEALTH = true, UNIT_HEAL_PREDICTION = true, UNIT_ABSORB_AMOUNT_CHANGED = true }
+local POWER_ONLY = { UNIT_POWER_UPDATE = true, UNIT_MAXPOWER = true }
+
 local function WireEvents(frame)
     local events = CreateFrame("Frame")
     events:RegisterUnitEvent("UNIT_HEALTH", frame.unit)
@@ -1081,8 +1084,19 @@ local function WireEvents(frame)
     -- whether UNIT_CONNECTION is present on this interface-16001 client, so
     -- pcall-guarded like the two registrations above.
     pcall(events.RegisterUnitEvent, events, "UNIT_CONNECTION", frame.unit)
-    events:SetScript("OnEvent", function()
-        UpdateAll(frame)
+    -- Health and power ticks fire many times a second on a target in a fight; a full UpdateAll per tick rebuilt the
+    -- name, re-measured the level text and reset every alpha (2026-11-24: hitches only while something was targeted).
+    -- They redraw their own bar; every other event still takes the full pass. The health step owns the dead/offline
+    -- look, so a death or disconnect still lands on a health event.
+    events:SetScript("OnEvent", function(_, event)
+        if not UnitExists(frame.unit) then return end
+        if HEALTH_ONLY[event] then
+            TryStep(frame, "health", UpdateHealthBar)
+        elseif POWER_ONLY[event] then
+            TryStep(frame, "power", UpdatePowerBar)
+        else
+            UpdateAll(frame)
+        end
     end)
     frame.events = events
 end

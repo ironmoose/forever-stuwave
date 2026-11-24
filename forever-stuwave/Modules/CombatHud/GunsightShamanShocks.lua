@@ -998,6 +998,14 @@ local function OnViewEvent(s, event)
     if BOOK_EVENTS[event] then
         ResolveAll(s)
         Reread(s, true)
+    elseif event == "SPELL_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_USABLE" then
+        -- These fire on every GCD and every mana change (many a second in a fight, and only while a target is up):
+        -- a burst folds into one re-read on the next frame instead of a cooldown read and two timer re-feeds per event
+        -- (2026-11-24 target hitch audit).
+        if s.rereadQueued then return end
+        if not (C_Timer and C_Timer.After) then Reread(s, true) return end
+        s.rereadQueued = true
+        C_Timer.After(0, s.rereadFn)
     elseif COOLDOWN_EVENTS[event] then
         Reread(s, true)
     end
@@ -1192,6 +1200,7 @@ local function BuildSection(frame)
     local s = { ox = 0, oy = 0, live = false, ticking = false, lastRead = 0, lastAnim = 0, groups = NewGroups(), fireUp = nil,
         parts = {}, pool = {} }
     s.shock, s.nova = s.groups.shock, s.groups.nova
+    s.rereadFn = function() s.rereadQueued = false; Reread(s, true) end
     s.colors = {
         cyan = Tok("COLOR_POWER", { 0.133, 0.878, 1, 1 }),
         muted = Tok("COLOR_MUTED", { 0.6157, 0.5765, 0.7686, 1 }), white = Tok("COLOR_TEXT_WHITE", { 1, 1, 1, 1 }),
