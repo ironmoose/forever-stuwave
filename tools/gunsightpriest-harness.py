@@ -616,6 +616,39 @@ case("out_of_combat_mending_reads_the_holder_and_a_move_sparks_a_jump", """
     NoLog()
 """)
 
+case("a_mending_on_someone_outside_the_party_stays_out_with_no_seat_framed", """
+    -- 2026-11-24, seen live: cast on an ungrouped friend (or a raid member outside the subgroup) the beads lit and went dark
+    -- 0.2 s later, because the follow-up read looked at the five seats only.
+    SetTarget("friend")
+    Build()
+    Cast(401859, "Ally")
+    Aura("target", "Prayer of Mending", { applications = 5, expirationTime = __now + 30, sourceUnit = "player" })
+    RunTimers()
+    Tick(0.05)
+    local m = D.Mending()
+    check(m.out and m.holder == nil and m.away == "target" and m.charges == 5 and not m.est, "out, on the target, no seat")
+    local p = Parts()
+    local lit = 0
+    for i = 1, 5 do if p.beads[i].fsCell == M.MCELL.beadLit then lit = lit + 1 end end
+    check(lit == 5, "five lit beads, got " .. lit)
+    for i = 1, 5 do check(not Shown(p.seats[i].heart), "no seat framed") end
+    -- a raid member outside the subgroup, read on the regen refresh
+    SetTarget(nil)
+    __raid = true
+    __units.raid7 = { guid = "R7", name = "Far", friend = true, class = "MAGE" }
+    function GetNumGroupMembers() return 10 end
+    Aura("target", "Prayer of Mending", nil)
+    Aura("raid7", "Prayer of Mending", { applications = 2, expirationTime = __now + 12, sourceUnit = "player" })
+    fire("PLAYER_REGEN_ENABLED")
+    Tick(0.05)
+    check(m.out and m.away == "raid7" and m.charges == 2, "found on a raid member")
+    Aura("raid7", "Prayer of Mending", nil)
+    fire("PLAYER_REGEN_ENABLED")
+    Tick(0.05)
+    check(not m.out, "gone when nobody carries it")
+    NoLog()
+""")
+
 case("mending_locked_cooling_and_nudging", """
     __known[401859] = nil
     SetTarget("friend")

@@ -36,7 +36,7 @@
 -- cast), "break" (a plain read saw a shield vanish before its time), "jump" (a plain read saw the Mending holder move),
 -- "mending" (the player cast Prayer of Mending), "cooldown", "combat" (combat began), "change", "learn".
 -- Shield record: up, expires, est, mine, ws (Weakened Soul up), wsExpires, wsDuration, wsEst, wsMine.
--- Mending record: known, out, holder (seat 1..5 or nil), charges, expires, est, cooling, from, jumpAt.
+-- Mending record: known, out, holder (seat 1..5 or nil), away (the unit read when the holder is no seat), charges, expires, est, cooling, from, jumpAt.
 
 local _, FS = ...
 
@@ -256,10 +256,37 @@ local function ReadUnit(unit)
     return changed, broke
 end
 
--- Out of combat: who carries the player's Prayer of Mending.
-local function ReadMending()
+-- Out of combat: who carries the player's Prayer of Mending. The seats come first (the strip draws them); a Mending on anyone
+-- else (an ungrouped friend, a raid member outside the player's subgroup, or one it jumped to) is still the player's Mending
+-- out: the beads and heart stay lit with no seat framed (m.holder nil, m.away the unit it was read on). Before 2026-11-24 only
+-- the seats were read, so the read 0.2 s after a cast on anyone else wiped the ledger and the beads went dark at once.
+-- `wide` (or a Mending already out) also reads the last holder, the target, the focus and, in a raid, every raid unit; while
+-- nothing is out and nothing asks, an aura event reads only the seats, so a raid pays nothing for it.
+local function MendingOn(unit)
+    if not Exists(unit) then return nil end
+    local aura = ReadAura(unit, DEFS.mending, "HELPFUL")
+    if aura == nil then return nil end
+    if aura and Mine(aura) then return aura end
+    return false
+end
+
+local function WideUnits(m)
+    local units = {}
+    if m.away then units[#units + 1] = m.away end
+    units[#units + 1] = "target"
+    units[#units + 1] = "focus"
+    local inRaid = Call(IsInRaid)
+    local n = Call(GetNumGroupMembers)
+    if inRaid == true and type(n) == "number" and not IsSecret(n) then
+        for i = 1, n do units[#units + 1] = "raid" .. i end
+    end
+    return units
+end
+
+local function ReadMending(wide)
     if not mending.known or not Readable() then return false end
-    local holder, charges, exp
+    local m = mending
+    local holder, away, charges, exp
     for i = 1, #SEATS do
         local unit = SEATS[i]
         if Exists(unit) then
@@ -268,22 +295,32 @@ local function ReadMending()
             if aura and Mine(aura) then
                 holder = i
                 charges = PlainOf(aura.applications, "number")
-                if not charges or charges < 1 then charges = 1 end
                 exp = PlainOf(aura.expirationTime, "number")
                 break
             end
         end
     end
-    local m = mending
+    if not holder and (wide or m.out) then
+        for _, unit in ipairs(WideUnits(m)) do
+            local aura = MendingOn(unit)
+            if aura then
+                away = unit
+                charges = PlainOf(aura.applications, "number")
+                exp = PlainOf(aura.expirationTime, "number")
+                break
+            end
+        end
+    end
+    if not charges or charges < 1 then charges = 1 end
     local was = m.out and m.holder
-    if holder then
+    if holder or away then
         local changed = not m.out or m.holder ~= holder or m.charges ~= charges or m.expires ~= exp or m.est
-        if was and was ~= holder then m.from, m.jumpAt = was, Now() end
-        m.out, m.holder, m.charges, m.expires, m.est = true, holder, charges, (exp and exp > 0) and exp or nil, false
-        return changed, was and was ~= holder
+        if was and holder and was ~= holder then m.from, m.jumpAt = was, Now() end
+        m.out, m.holder, m.away, m.charges, m.expires, m.est = true, holder, away, charges, (exp and exp > 0) and exp or nil, false
+        return changed, was and holder and was ~= holder
     end
     if m.out then
-        m.out, m.holder, m.charges, m.expires, m.est = false, nil, 0, nil, false
+        m.out, m.holder, m.away, m.charges, m.expires, m.est = false, nil, nil, 0, nil, false
         return true, false
     end
     return false, false
@@ -393,7 +430,7 @@ local function ReadAll()
             if b then breaks = breaks or u end
         end
     end
-    local mc, jumped = ReadMending()
+    local mc, jumped = ReadMending(true)
     return changed or mc, breaks, jumped
 end
 
@@ -418,7 +455,7 @@ function Shields.Tick(now)
     end
     local m = mending
     if m.out and m.expires and m.expires <= now then
-        m.out, m.holder, m.charges, m.expires, m.est = false, nil, 0, nil, false
+        m.out, m.holder, m.away, m.charges, m.expires, m.est = false, nil, nil, 0, nil, false
         changed = true
     end
     if changed then Notify("change") end
@@ -499,11 +536,11 @@ local function OnCast(spellID)
         local _, key = CastUnit(now)
         mending.known = true
         local m = mending
-        m.out, m.holder, m.charges, m.expires, m.est = true, SeatOfKey(key), DEFS.mending.charges, now + DEFS.mending.duration, true
+        m.out, m.holder, m.away, m.charges, m.expires, m.est = true, SeatOfKey(key), nil, DEFS.mending.charges, now + DEFS.mending.duration, true
         m.from, m.jumpAt = nil, nil
         Notify("mending")
         if C_Timer and C_Timer.After then
-            C_Timer.After(0.2, function() if ReadMending() then Notify("change") end end)
+            C_Timer.After(0.2, function() if ReadMending(true) then Notify("change") end end)
         end
     end
 end
