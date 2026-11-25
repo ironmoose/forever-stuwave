@@ -133,6 +133,13 @@ local function TrackerOpen()
     local ok, collapsed = pcall(tracker.IsCollapsed, tracker)
     return not (ok and collapsed == true)
 end
+-- Module power (m.chat): with the Chat module off there is no STUwave chat to minimise, so its key is not drawn and does
+-- nothing (the game's own chat is not ours to hide). Read at login or later only; before the saved switches are known it
+-- reads as on.
+local function ChatModuleOff()
+    return FS.Chat ~= nil and type(FS.Chat.ModuleOff) == "function" and FS.Chat.ModuleOff()
+end
+
 -- The chat key is the STUwave chat's minimise: open = not minimised (maximised counts as open).
 local function ChatOpen()
     local Chat = FS.Chat
@@ -152,6 +159,7 @@ function Switch.Set(piece, on)
     if piece == "chat" then
         local Chat = FS.Chat
         if type(Chat) ~= "table" or type(Chat.ApplyWindowState) ~= "function" then return end
+        if ChatModuleOff() then return end
         if on == ChatOpen() then return end
         Chat.windowState = on and "normal" or "min"
         return Chat.ApplyWindowState()
@@ -180,7 +188,7 @@ function Switch.HookLate()
         hookedTracker = pcall(hooksecurefunc, tracker, "SetCollapsed", function() Notify("quests", TrackerOpen()) end)
     end
     local Chat = FS.Chat
-    if not hookedChat and type(Chat) == "table" and type(Chat.ApplyWindowState) == "function" then
+    if not hookedChat and not ChatModuleOff() and type(Chat) == "table" and type(Chat.ApplyWindowState) == "function" then
         local wasOpen = ChatOpen()
         hookedChat = pcall(hooksecurefunc, Chat, "ApplyWindowState", function()
             local open = ChatOpen()
@@ -650,6 +658,7 @@ local function IsHudKey(piece) return not NOT_HUD[piece] end
 -- show for the class. The Console's tab is sized for the number of keys this lets through; with the party key
 -- always among them the tab never goes away.
 local function KeyDrawn(piece, profile)
+    if piece == "chat" and ChatModuleOff() then return false end
     if not IsHudKey(piece) then return true end
     return loginEnabled and not inactive and ConsoleKeys.KeyShown(piece, profile)
 end

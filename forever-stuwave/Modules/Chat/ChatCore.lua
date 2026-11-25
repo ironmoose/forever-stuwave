@@ -23,6 +23,16 @@ local _, FS = ...
 FS.Chat = FS.Chat or {}
 local Chat = FS.Chat
 
+-- Module power (Core/ModuleSwitch.lua). With the Chat switch off nothing of this module is built, hooked or listened for:
+-- the game's own chat windows, tabs, edit boxes and message filters stay exactly as the game made them. Every entry point
+-- another file can reach (the window state, the seat, the size, the line format, the commands) asks Chat.ModuleOff() first.
+-- The tables and functions stay defined, so a reader that asks (the Chat page, the layout editor, the console key) gets an
+-- answer and no error. Before this addon's ADDON_LOADED the switch is not known yet and reads as on.
+local MS = FS.ModuleSwitch
+function Chat.ModuleOff()
+    return MS ~= nil and not MS.On("m.chat")
+end
+
 -------------------------------------------------------------------------------
 -- Theme (shared chrome + palette; see Theme.lua for signatures)
 -------------------------------------------------------------------------------
@@ -185,6 +195,12 @@ Chat.pendingSelectedTab = ForeverSTUwaveDB and ForeverSTUwaveDB.chatSelectedTab
 -- discipline as Chat.pendingSelectedTab above.
 Chat.pendingDefaultComms = not (ForeverSTUwaveDB and ForeverSTUwaveDB.chatSelectedTab)
 
+-- The window state saved last session ("normal", "min" or "max"), read here for the same reason and with the same result as
+-- the tab above: ChatSlashCommands' Apply() restores it before the first paint. Apply() now runs at this addon's ADDON_LOADED
+-- (the Chat switch is only known then), where the saved variables ARE readable; it reads this capture and not the saved
+-- table, so the login behaves exactly as it did when Apply() ran at file scope.
+Chat.pendingWindowState = ForeverSTUwaveDB and ForeverSTUwaveDB.chatWindowState
+
 -------------------------------------------------------------------------------
 -- THE CHAT TERMINAL COMPONENT.
 --
@@ -209,12 +225,20 @@ Chat.pendingDefaultComms = not (ForeverSTUwaveDB and ForeverSTUwaveDB.chatSelect
 -- not a visible panel, and it must not eat clicks meant for the world.
 -------------------------------------------------------------------------------
 
-local termPanel = CreateFrame("Frame", "ForeverSTUwaveChatTerminal", UIParent)
-termPanel:SetAllPoints(UIParent)
-termPanel:SetFrameStrata("LOW")
-termPanel:EnableMouse(false)
-Chat.termPanel = termPanel
-FS.chatTerminal = termPanel
+-- Made at this addon's ADDON_LOADED, and only while the Chat switch is on (see Chat.ModuleOff above): with it off there is no
+-- terminal, Chat.termPanel and FS.chatTerminal stay nil, and nothing is reparented onto it.
+local termPanel
+function Chat.BuildTerminal()
+    if termPanel then return termPanel end
+    termPanel = CreateFrame("Frame", "ForeverSTUwaveChatTerminal", UIParent)
+    termPanel:SetAllPoints(UIParent)
+    termPanel:SetFrameStrata("LOW")
+    termPanel:EnableMouse(false)
+    Chat.termPanel = termPanel
+    FS.chatTerminal = termPanel
+    return termPanel
+end
+if MS then MS.WhenOn("m.chat", Chat.BuildTerminal) else Chat.BuildTerminal() end
 
 -------------------------------------------------------------------------------
 -- Shared line restyle point
@@ -397,6 +421,7 @@ end
 -- They sit in the band the backdrop reserves ABOVE the chat frame (PAD_TOP), so
 -- nothing here moves or resizes Blizzard's frame or its message area.
 function Chat.SeatTerminalChrome(frame)
+    if not termPanel then return end
     local target = frame or Chat.activeChatFrame or Chat.ActiveChatFrame()
     local backdrop = target and target.fsBackdrop
     if not backdrop then return end

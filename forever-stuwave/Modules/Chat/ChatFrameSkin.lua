@@ -150,10 +150,15 @@ if FS.Config and FS.Config.RegisterDefault then
     FS.Config.OnChange(Chat.BG.key, Chat.ApplyBackground)
 end
 
--- The windows are skinned while the files run, before the saved settings are readable: paint the fill again at login.
-local backgroundWatcher = CreateFrame("Frame")
-backgroundWatcher:RegisterEvent("PLAYER_LOGIN")
-backgroundWatcher:SetScript("OnEvent", function() Chat.ApplyBackground() end)
+-- The windows are skinned before the saved settings are readable: paint the fill again at login. Made at this addon's
+-- ADDON_LOADED, and only while the Chat switch is on, so an off module listens for nothing.
+local function WatchBackground()
+    local backgroundWatcher = CreateFrame("Frame")
+    backgroundWatcher:RegisterEvent("PLAYER_LOGIN")
+    backgroundWatcher:SetScript("OnEvent", function() Chat.ApplyBackground() end)
+end
+local MS = FS.ModuleSwitch
+if MS then MS.WhenOn("m.chat", WatchBackground) else WatchBackground() end
 
 -- The fill texture of a backdrop skinned by Theme.SkinPanel: the first region of the chrome it returns.
 local function FillOf(chrome)

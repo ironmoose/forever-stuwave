@@ -10,6 +10,12 @@
 
 local _, FS = ...
 local Chat = FS.Chat
+local MS = FS.ModuleSwitch
+
+-- True while the Chat switch is off (ChatCore.lua owns the answer); a missing ChatCore reads as on.
+local function ChatOff()
+    return type(Chat.ModuleOff) == "function" and Chat.ModuleOff()
+end
 
 -------------------------------------------------------------------------------
 -- Cycle-tabs affordance
@@ -20,6 +26,7 @@ local Chat = FS.Chat
 -- Exposed globally so the user can bind a key to it later; also wired to
 -- /fschat and /fstab below.
 function ForeverSTUwave_CycleChatTab()
+    if ChatOff() then return end
     if type(FCFDock_GetChatFrames) ~= "function" then return end
     if type(FCF_SelectDockFrame) ~= "function" then return end
     if not GeneralDockManager then return end
@@ -53,6 +60,13 @@ SLASH_FSCHAT1 = "/fschat"
 SLASH_FSCHAT2 = "/fstab"
 SlashCmdList["FSCHAT"] = function(msg)
     msg = (msg or ""):lower():gsub("%s", "")
+
+    -- Module power: with the Chat switch off there is no terminal to cycle, measure or paint, and the game's own windows
+    -- are none of this command's business.
+    if ChatOff() then
+        print("|cff22e0ffstuwave://chat|r  the Chat module is off")
+        return
+    end
 
     -- `/fschat paint` outlines EVERY drawable in the chat stack in a different
     -- colour; `/fschat spill` outlines only the ones that hang outside the
@@ -675,7 +689,8 @@ local function Apply()
     -- minimised chat does not flash full size on every reload. Validated
     -- against the three known values rather than trusted: this is saved
     -- variables, which anything can have written.
-    local saved = ForeverSTUwaveDB and ForeverSTUwaveDB.chatWindowState
+    local saved = Chat.pendingWindowState
+    Chat.pendingWindowState = nil
     if saved == "min" or saved == "max" or saved == "normal" then
         Chat.windowState = saved
     end
@@ -699,6 +714,9 @@ local function Apply()
     HookLateWindowCreation()
     Chat.HookEditBoxArrowKeys()
     Chat.HookPromptSeating()
+
+    -- Marked here, not where the gate starts: a login in a fight waits for it below, and the module is built when this ran.
+    if MS then MS.MarkBuilt("m.chat") end
 end
 
 -- The size has to be asserted again after load, not just at skin time. The
@@ -709,21 +727,27 @@ end
 -- frames are plain non-secure frames, so none of this is combat-gated, and
 -- ApplyFontSize writes nothing when the size already matches, so the
 -- writes it makes cannot feed back through these events.
-local fontWatcher = CreateFrame("Frame")
-for _, event in ipairs({ "PLAYER_LOGIN", "UPDATE_CHAT_WINDOWS", "UPDATE_FLOATING_CHAT_WINDOWS" }) do
-    pcall(fontWatcher.RegisterEvent, fontWatcher, event)
-end
-fontWatcher:SetScript("OnEvent", function()
-    Chat.ApplyAllFontSizes()
-end)
-
-if InCombatLockdown() then
-    local regen = CreateFrame("Frame")
-    regen:RegisterEvent("PLAYER_REGEN_ENABLED")
-    regen:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-        Apply()
+--
+-- Module power: all of it starts at this addon's ADDON_LOADED, and only with the Chat switch on, so an off module makes no
+-- frame, listens to no event and touches no game chat window.
+local function Start()
+    local fontWatcher = CreateFrame("Frame")
+    for _, event in ipairs({ "PLAYER_LOGIN", "UPDATE_CHAT_WINDOWS", "UPDATE_FLOATING_CHAT_WINDOWS" }) do
+        pcall(fontWatcher.RegisterEvent, fontWatcher, event)
+    end
+    fontWatcher:SetScript("OnEvent", function()
+        Chat.ApplyAllFontSizes()
     end)
-else
-    Apply()
+
+    if InCombatLockdown() then
+        local regen = CreateFrame("Frame")
+        regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        regen:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            Apply()
+        end)
+    else
+        Apply()
+    end
 end
+if MS then MS.WhenOn("m.chat", Start) else Start() end

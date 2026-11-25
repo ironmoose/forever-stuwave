@@ -8,6 +8,11 @@
 local _, FS = ...
 local Chat = FS.Chat
 
+-- True while the Chat switch is off (ChatCore.lua owns the answer); a missing ChatCore reads as on.
+local function ChatOff()
+    return type(Chat.ModuleOff) == "function" and Chat.ModuleOff()
+end
+
 -- How close the maximised panel's top edge comes to the top of the screen.
 local MAX_TOP_MARGIN = 24
 -- Frame level the maximised panel sits at within its strata. High enough to
@@ -134,7 +139,7 @@ end
 -- FS.Layout "chat" anchor. No-ops if FS.Layout hasn't loaded or lacks Apply.
 -- `why` only labels the chatSeatLog entry.
 function Chat.SeatPrimaryChat(frame, why)
-    if not frame then return end
+    if not frame or ChatOff() then return end
     if not FS.Layout or type(FS.Layout.Apply) ~= "function" then return end
     Chat.SyncSize()
     FS.Layout.Apply(frame, "chat")
@@ -176,7 +181,7 @@ end
 -- guarded so nothing our own seat triggers can re-enter it.
 function Chat.ReassertPrimaryChat()
     local frame = ChatFrame1
-    if not frame or reasserting then return end
+    if not frame or reasserting or ChatOff() then return end
     deferPending = false
     if HeldInCombat(frame) then
         reassertPending = true
@@ -206,8 +211,11 @@ local function DeferReassert()
 end
 
 -- A size change seats the window again at once (out of combat; ReassertPrimaryChat holds a protected frame back and
--- finishes at PLAYER_REGEN_ENABLED). Nothing to do before the window exists: the first seat reads the settings.
+-- finishes at PLAYER_REGEN_ENABLED). Nothing to do before the window exists: the first seat reads the settings, and nothing
+-- while the Chat switch is off (the registrations below stay at file scope so their order against the layout editor's own
+-- callback on the same keys is kept; the guard is here).
 local function ApplySize()
+    if ChatOff() then return end
     if not Chat.SyncSize() then return end
     if ChatFrame1 then Chat.ReassertPrimaryChat() end
 end
@@ -318,7 +326,7 @@ end
 -- shorter and correct after a UI rescale, which a captured rect would not be.
 function Chat.ApplyWindowState()
     local frame = ChatFrame1
-    if not frame then return end
+    if not frame or ChatOff() then return end
 
     if Chat.windowState == "min" then
         -- The chat itself goes; the term bar is all that is left, and it is
@@ -430,6 +438,7 @@ end
 -- window control does everywhere else: the minimise button on a minimised
 -- window restores it.
 function Chat.ToggleWindowState(target)
+    if ChatOff() then return end
     Chat.windowState = (Chat.windowState == target) and "normal" or target
     Chat.ApplyWindowState()
 end
