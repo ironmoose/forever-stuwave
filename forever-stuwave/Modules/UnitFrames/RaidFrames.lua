@@ -416,6 +416,8 @@ local function ApplyEdge(cell)
     local parts = cell.parts
     local down = cell.down and true or false
     local lit = cell.dispelColor
+    -- in a fight the engine's edge strips are the signal; the held colour stays out while they draw it
+    if lit and cell.engine and Extras and Extras.Engine and Extras.Engine.Covers(cell.engine, "edge") then lit = nil end
     local color = (down and COLOR_STEEL) or lit or COLOR_POWER
     if parts.edgeDown == down and parts.edgeColor == color then return end
     parts.edgeDown, parts.edgeColor = down, color
@@ -497,6 +499,7 @@ local function PaintHealthState(cell, offline, dead)
     local parts = cell.parts
     local down = (offline or dead) and true or false
     cell.down = down
+    if cell.engine and Extras and Extras.Engine then Extras.Engine.SetDown(cell.engine, down) end
     local health = parts.health
     local a = parts.look == "A"
     local alpha = down and STATE_ALPHA or 1
@@ -626,7 +629,29 @@ end
 
 -- Event driven only (UNIT_AURA, the regen rescan and FS.OnAurasReadable), never on a ticker, and never under lockdown:
 -- a refused read leaks, so the last known edge holds through the fight.
+-- The in combat layer (FrameExtras.Engine): the squares and the edge are engine drawn containers in a fight. Built out of
+-- combat for a cell whose member exists; a no-op in a fight and once settled.
+local function EngineEnsure(cell)
+    local eng = cell.engine
+    if eng and not eng.settled and Extras and Extras.Engine and UnitExists(cell.unit) then
+        local m = cell.parts and cell.parts.markers
+        if m then m.eng = eng end
+        Extras.Engine.Ensure(eng)
+    end
+end
+
+-- A fight began or ended: the held edge colour and the held squares come out or go back, and the engine's alpha follows.
+local function EngineMode(cell)
+    local parts = cell.parts
+    if not parts then return end
+    if parts.markers and cell.engine then parts.markers.eng = cell.engine end
+    parts.edgeColor = nil   -- the edge repaints even when its colour did not change
+    ApplyEdge(cell)
+    if parts.markers and Extras then Extras.PaintMarkers(parts.markers, "raid", parts.markers.list, parts.markers.shown) end
+end
+
 local function UpdateAuras(cell)
+    EngineEnsure(cell)
     if not FS.AurasReadable() then return end
     local cleansable, harmful = ScanDebuffs(cell.unit)
     local color = nil
@@ -827,6 +852,11 @@ local function ApplyCellStyle(cell)
                 id == "A" and -26 or 0, id == "A" and -7.5 or 3)
             if not Style.Get("raid", "threat") then parts.aggro.ring:Hide(); parts.aggro.pct:Hide() end
         end
+    end
+    if cell.engine and next(cell.engine.parts) and Extras and Extras.Engine then
+        local m = cell.parts and cell.parts.markers
+        if m then m.eng = cell.engine end
+        Extras.Engine.Restyle(cell.engine)   -- built ones only; the rest are made on first use
     end
     -- the Debuff border switch: the colour the last read found shows or goes
     local want = Style.Get("raid", "dispelEdge") == true and cell.dispelRaw or nil
@@ -1525,6 +1555,9 @@ local function BuildCell(i)
     local visual = CreateFrame("Frame", nil, cell)
     visual:SetAllPoints(cell)
     cell.visual = visual
+    if Extras and Extras.Engine then
+        cell.engine = Extras.Engine.New(visual, unit, "raid", { onMode = function() EngineMode(cell) end })
+    end
     RegisterUnitWatch(cell)
     -- Unit events for this token only; a name this client does not know is skipped quietly.
     local events = CreateFrame("Frame")

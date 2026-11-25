@@ -401,16 +401,25 @@ function Extras.SeatMarkers(m, key)
     end
 end
 
--- Paints `list[1..n]` (plain colours): the squares beyond n hide.
+-- Paints `list[1..n]` (plain colours): the squares beyond n hide. While the engine layer covers this frame's squares
+-- (a fight, the markers container armed: `m.eng`), the held heal over time and debuff squares stay out (the engine draws
+-- those) and what is left (the missing buff square) sits after the engine's lanes.
 function Extras.PaintMarkers(m, key, list, n)
     Extras.SeatMarkers(m, key)
-    for i, t in ipairs(m.tex) do
-        local e = i <= n and list[i] or nil
-        if e then
-            t:SetColorTexture(e[1], e[2], e[3], e[4])
-            t:Show()
-        else
-            t:Hide()
+    local engine = Extras.Engine
+    local covered = m.eng and engine and engine.Covers(m.eng, "markers")
+    local offset = covered and m.eng.parts.markers.lanes or 0
+    for _, t in ipairs(m.tex) do t:Hide() end
+    local used = 0
+    for i = 1, n do
+        local e = list[i]
+        if e and not (covered and (e.kind == "hot" or e.kind:sub(1, 3) == "deb")) then
+            used = used + 1
+            local t = m.tex[used + offset]
+            if t then
+                t:SetColorTexture(e[1], e[2], e[3], e[4])
+                t:Show()
+            end
         end
     end
     m.shown = n
@@ -593,3 +602,563 @@ function Extras.UpdateGroupRow(f)
     if not a or not f.groupKey then return end
     Extras.UpdateGroupAggro(a, f.unit, f.groupKey)
 end
+
+-------------------------------------------------------------------------------
+-- Engine drawn group auras (the in combat layer)
+-------------------------------------------------------------------------------
+-- In combat lockdown no addon aura read works (refused or secret), so the squares, the dispel edge and the party tray
+-- above can only HOLD what they showed. The engine can draw them: an AuraContainer (CustomAuraContainerTemplate, the
+-- recipe the nameplates and the player buffs use) reads the unit's auras itself and draws buttons, and no aura data
+-- ever enters Lua. Per group frame (party row, raid cell) there are up to three containers:
+--   markers  one SLOT per wanted kind: my heal over time (candidateFilters.includeSpellIDs) and each dispel type
+--            (includeDispelTypes). A slot draws one flat square in its kind's colour; the engine shows it exactly
+--            while such an aura is on the unit. Squares sit in fixed lanes (hots first, then the types), so a lane
+--            stays empty while its aura is absent: presence is secret, there is no compacting.
+--   edge     one SLOT per dispel type I can remove: four strips round the frame in the type's colour.
+--   tray     (party) one GROUP per dispel type I can remove: the aura's own icon in a ring of the type's colour,
+--            flowed by the engine out from the tray origin.
+-- Colours are baked when a button is built (the engine runs initializeFrame once), and every per feature choice is made
+-- with the container's alpha and the slot's candidate filters, never by writing to an engine button's regions.
+--
+-- MODE: the engine layer is the IN COMBAT layer. Out of combat the Lua scans above draw as they always did (plain
+-- reads, always right) and the containers sit at alpha 0; REGEN_DISABLED flips to the engine, REGEN_ENABLED back. So a
+-- client that refuses any call here only loses the in combat layer: today's held-state behaviour is the fallback.
+-- Everything is feature detected and pcall'd; containers are built, enabled and shown OUT of combat only (a group frame
+-- that first exists in a fight gets its containers when it ends). UNVERIFIED in game: see debug/lanes-2026-11-25/g.md.
+
+local Engine = {}
+Extras.Engine = Engine
+Engine.TEMPLATE = "CustomAuraContainerTemplate"
+Engine.list = {}
+Engine.fight = false
+Engine.BUILD_TRIES = 3
+local EDGE_PX = 2
+local TRAY_GAP = 3
+local TRAY_CAP_MAX = 5
+local SENTINEL_TYPE, SENTINEL_ID = "FS_none", 0
+
+-- Rank ids of the heal over time spells (an aura reports the rank id that was cast). The id the NAME resolves to
+-- today is added at build time, which covers ids this list lacks.
+Engine.HOT_RANKS = {
+    Renew = { 139, 6074, 6075, 6076, 6077, 6078, 10927, 10928, 10929, 25315, 25221, 25222 },
+    Rejuvenation = { 774, 1058, 1430, 2090, 2091, 3627, 8910, 9839, 9840, 9841, 25299, 26981, 26982 },
+    Regrowth = { 8936, 8938, 8939, 8940, 8941, 9750, 9856, 9857, 9858, 26980 },
+    Lifebloom = { 33763 },
+    ["Earth Shield"] = { 974, 32593, 32594 },
+}
+
+local function Quiet(obj, method, ...)
+    if type(obj) ~= "table" or type(obj[method]) ~= "function" then return false end
+    return (pcall(obj[method], obj, ...))
+end
+
+-- InCombatLockdown, fail closed: a throwing check reads as "in combat".
+local function Locked()
+    if type(InCombatLockdown) ~= "function" then return true end
+    local ok, v = pcall(InCombatLockdown)
+    return not ok or v and true or false
+end
+
+local degraded = {}
+local function Degrade(key, text)
+    if degraded[key] then return end   -- LogDegradeOnce does not dedupe: this file latches its own
+    degraded[key] = true
+    if FS.LogDegradeOnce then pcall(FS.LogDegradeOnce, key, "|cffff4488Forever STUwave|r: " .. text) end
+end
+
+local supported
+-- The client can build the container: the template exists and the option enums are there. Cached once true or false.
+function Engine.Supported()
+    if supported == nil then
+        supported = false
+        if type(CreateFrame) == "function" and type(_G.AuraContainerSortMethod) == "table"
+            and type(_G.AuraContainerSortDirection) == "table" then
+            local info = type(C_XMLUtil) == "table" and C_XMLUtil.GetTemplateInfo or nil
+            if type(info) == "function" then
+                local ok, template = pcall(info, Engine.TEMPLATE)
+                supported = ok and template ~= nil and template ~= false
+            end
+        end
+    end
+    return supported
+end
+
+-- The kill switch: ForeverSTUwaveDB.groupAuras = { engine = false } keeps today's held-state behaviour.
+function Engine.Enabled()
+    local db = _G.ForeverSTUwaveDB
+    local g = type(db) == "table" and db.groupAuras or nil
+    if type(g) == "table" and g.engine == false then return false end
+    return Engine.Supported()
+end
+
+local function MineSet()
+    local shared = Shared()
+    local ok, set = pcall(function() return shared and shared.DISPELS and shared.DISPELS.Set() or {} end)
+    return ok and type(set) == "table" and set or {}
+end
+
+local function RoleOff(key)
+    if not (FS.Role and FS.Role.Disabled) then return false end
+    local ok, off = pcall(FS.Role.Disabled, key)
+    return ok and off == true
+end
+
+-- What the switches want right now: { hots = { [name] = true }, debs = { [type] = true }, edge = { [type] = true },
+-- tray = { [type] = true } } (a missing table key is off).
+function Engine.Wanted(key)
+    local w = { hots = {}, debs = {}, edge = {}, tray = {} }
+    local mine = MineSet()
+    if On(key, "mkHot") then
+        for _, hot in ipairs(Extras.HOTS[PlayerClassToken() or ""] or {}) do w.hots[hot[1]] = true end
+    end
+    if key == "raid" and On(key, "mkDebuff") then
+        local onlyMine = Style.Get(key, "mkDebuffWho") ~= "all"
+        for _, kind in ipairs(Extras.DEBUFF_TYPES) do
+            if On(key, "mk" .. kind) and (not onlyMine or mine[kind]) then w.debs[kind] = true end
+        end
+    end
+    local edgeOn = key == "raid" and On(key, "dispelEdge") or key == "party" and not RoleOff("heal.dispel")
+    if edgeOn then for kind in pairs(mine) do w.edge[kind] = true end end
+    if key == "party" and On(key, "alerts") and On(key, "alertCleanse") and not RoleOff("heal.dispel") then
+        for kind in pairs(mine) do w.tray[kind] = true end
+    end
+    return w
+end
+
+local function HotIds(name)
+    local set = {}
+    for _, id in ipairs(Engine.HOT_RANKS[name] or {}) do set[id] = true end
+    local info = type(C_Spell) == "table" and C_Spell.GetSpellInfo or nil
+    if type(info) == "function" then
+        local ok, data = pcall(info, name)
+        if ok and type(data) == "table" and not IsSecret(data) then
+            local id = data.spellID
+            if type(id) == "number" and not IsSecret(id) then set[id] = true end
+        end
+    end
+    return set
+end
+
+local function SortOptions()
+    local method = type(_G.AuraContainerSortMethod) == "table" and _G.AuraContainerSortMethod.Default or nil
+    local direction = type(_G.AuraContainerSortDirection) == "table" and _G.AuraContainerSortDirection.Normal or nil
+    return method, direction
+end
+
+local function NewContainer(host, level)
+    local c = CreateFrame("AuraContainer", nil, host, Engine.TEMPLATE)
+    c:SetSize(1, 1)
+    c:SetFrameLevel(level)
+    c:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+    c:SetAlpha(0)
+    c:SetEnabled(false)
+    c:Hide()
+    return c
+end
+
+local function Colour(kind)
+    local c = Theme and Theme.DISPEL_COLORS and Theme.DISPEL_COLORS[kind]
+    return c or { 1, 1, 1, 1 }
+end
+
+-- A square: flat colour over the whole slot button, mouse off. Runs before the engine restricts the button.
+local function InitSquare(proxy, color)
+    return function(button)
+        Quiet(button, "SetMouseMotionEnabled", false)
+        Quiet(button, "SetMouseClickEnabled", false)
+        Quiet(button, "SetHideTooltipInCombat", true)
+        pcall(function() button:SetAllPoints(proxy) end)
+        pcall(function()
+            local t = button:CreateTexture(nil, "OVERLAY")
+            t:SetAllPoints(button)
+            t:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
+        end)
+    end
+end
+
+-- Four strips round the slot button, mouse off.
+local function InitEdge(proxy, color)
+    return function(button)
+        Quiet(button, "SetMouseMotionEnabled", false)
+        Quiet(button, "SetMouseClickEnabled", false)
+        Quiet(button, "SetHideTooltipInCombat", true)
+        pcall(function() button:SetAllPoints(proxy) end)
+        pcall(function()
+            for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+                local t = button:CreateTexture(nil, "OVERLAY")
+                t:SetColorTexture(color[1], color[2], color[3], 1)
+                if side == "TOP" or side == "BOTTOM" then
+                    t:SetPoint(side .. "LEFT", button, side .. "LEFT"); t:SetPoint(side .. "RIGHT", button, side .. "RIGHT")
+                    t:SetHeight(EDGE_PX)
+                else
+                    t:SetPoint("TOP" .. side, button, "TOP" .. side); t:SetPoint("BOTTOM" .. side, button, "BOTTOM" .. side)
+                    t:SetWidth(EDGE_PX)
+                end
+            end
+        end)
+    end
+end
+
+-- A tray icon: the aura's own icon in a ring of the type's colour. The mouse stays on so the engine's own tooltip works.
+local function InitTrayIcon(color, size)
+    return function(button)
+        Quiet(button, "SetSize", size, size)
+        Quiet(button, "SetHideTooltipInCombat", true)
+        pcall(function()
+            local icon = button:CreateTexture(nil, "ARTWORK")
+            icon:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
+            icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
+            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            button:SetIcon(icon)
+        end)
+        pcall(function()
+            for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+                local t = button:CreateTexture(nil, "OVERLAY")
+                t:SetColorTexture(color[1], color[2], color[3], 1)
+                if side == "TOP" or side == "BOTTOM" then
+                    t:SetPoint(side .. "LEFT", button, side .. "LEFT"); t:SetPoint(side .. "RIGHT", button, side .. "RIGHT")
+                    t:SetHeight(1)
+                else
+                    t:SetPoint("TOP" .. side, button, "TOP" .. side); t:SetPoint("BOTTOM" .. side, button, "BOTTOM" .. side)
+                    t:SetWidth(1)
+                end
+            end
+        end)
+    end
+end
+
+local function Proxy(host, level)
+    local p = CreateFrame("Frame", nil, host)
+    p:SetFrameLevel(level)
+    p:EnableMouse(false)
+    p:SetSize(1, 1)
+    return p
+end
+
+local function Arm(c, unit)
+    c:SetUnit(unit)
+    c:SetEnabled(true)
+    c:Show()
+end
+
+-- eng: { host, unit, key, level, parts = { markers, edge, tray }, tries, wanted }.
+--   opts.edgeAnchor(proxy)  seats the edge host over the frame's rect (called once)
+--   opts.trayOrigin         (party) a plain Frame seated where the first tray icon goes (PartyFrames.SeatTray)
+--   opts.onMode(eng)        called when the in combat mode flips, so the owner can hide or show its Lua layer
+function Engine.New(host, unit, key, opts)
+    if not (host and unit and key) then return nil end
+    opts = opts or {}
+    local eng = {
+        host = host, unit = unit, key = key, level = host:GetFrameLevel() or 1, parts = {}, tries = {},
+        edgeAnchor = opts.edgeAnchor, trayOrigin = opts.trayOrigin, onMode = opts.onMode, down = false, owed = false,
+    }
+    Engine.list[#Engine.list + 1] = eng
+    return eng
+end
+
+function Engine.Fighting() return Engine.fight end
+
+-- True when a built part exists and was armed.
+function Engine.Live(eng, part)
+    local p = eng and eng.parts[part]
+    return p ~= nil and p.armed == true
+end
+
+local function BuildMarkers(eng)
+    local host, level = eng.host, eng.level + 8
+    local container = NewContainer(host, level)
+    local part = { container = container, slots = {}, order = {}, proxies = {}, armed = false }
+    local method, direction = SortOptions()
+    local function add(slotKey, filter, candidate, color, init)
+        local proxy = Proxy(host, level)
+        local ok = pcall(container.AddAuraSlot, container, slotKey, filter, {
+            initializeFrame = init(proxy, color), candidateFilters = candidate,
+            sortMethod = method, sortDirection = direction,
+        })
+        if not ok then error("AddAuraSlot " .. slotKey, 0) end
+        local slot = { key = slotKey, proxy = proxy, candidate = candidate, off = false }
+        part.slots[slotKey] = slot
+        part.order[#part.order + 1] = slot
+        return slot
+    end
+    for _, hot in ipairs(Extras.HOTS[PlayerClassToken() or ""] or {}) do
+        local ids = HotIds(hot[1])
+        if next(ids) then
+            local s = add("hot:" .. hot[1], "HELPFUL|PLAYER", { includeSpellIDs = ids },
+                { hot[2], hot[3], hot[4], 1 }, InitSquare)
+            s.kind, s.name, s.ids = "hot", hot[1], ids
+        end
+    end
+    if eng.key == "raid" then
+        for _, kind in ipairs(Extras.DEBUFF_TYPES) do
+            local types = { [kind] = true }
+            local s = add("deb:" .. kind, "HARMFUL", { includeDispelTypes = types }, Colour(kind), InitSquare)
+            s.kind, s.name, s.types = "deb", kind, types
+        end
+    end
+    Arm(container, eng.unit)
+    part.armed = true
+    return part
+end
+
+local function BuildEdge(eng)
+    local host, level = eng.host, eng.level + 6
+    local container = NewContainer(host, level)
+    local part = { container = container, slots = {}, order = {}, armed = false }
+    local anchor = Proxy(host, level)
+    if eng.edgeAnchor then eng.edgeAnchor(anchor) else anchor:SetAllPoints(host) end
+    part.anchor = anchor
+    local method, direction = SortOptions()
+    for _, kind in ipairs(Extras.DEBUFF_TYPES) do
+        local types = { [kind] = true }
+        local ok = pcall(container.AddAuraSlot, container, "edge:" .. kind, "HARMFUL", {
+            initializeFrame = InitEdge(anchor, Colour(kind)), candidateFilters = { includeDispelTypes = types },
+            sortMethod = method, sortDirection = direction,
+        })
+        if not ok then error("AddAuraSlot edge:" .. kind, 0) end
+        local slot = { key = "edge:" .. kind, kind = "deb", name = kind, types = types }
+        part.slots[slot.key] = slot
+        part.order[#part.order + 1] = slot
+    end
+    Arm(container, eng.unit)
+    part.armed = true
+    return part
+end
+
+local function BuildTray(eng)
+    local origin = eng.trayOrigin
+    if not origin then error("no tray origin", 0) end
+    local level = eng.level + 3
+    local container = NewContainer(eng.host, level)
+    local part = { container = container, groups = {}, order = {}, armed = false }
+    local size = Style.Number("party", "alertSize")
+    local method, direction = SortOptions()
+    local cap = math.max(1, math.min(TRAY_CAP_MAX, Style.Number("party", "alertMax")) - 1)
+    for _, kind in ipairs(Extras.DEBUFF_TYPES) do
+        local types = { [kind] = true }
+        local ok = pcall(container.AddAuraGroup, container, "tray:" .. kind, "HARMFUL", {
+            maxFrameCount = cap, sortMethod = method, sortDirection = direction,
+            candidateFilters = { includeDispelTypes = types },
+            initializeFrame = InitTrayIcon(Colour(kind), size),
+            layout = { elementSpacing = TRAY_GAP, lineSpacing = TRAY_GAP, groupSpacing = 0, groupLineSpacing = 0,
+                elementWidth = size, elementHeight = size },
+        })
+        if not ok then error("AddAuraGroup tray:" .. kind, 0) end
+        local group = { key = "tray:" .. kind, kind = "deb", name = kind, types = types }
+        part.groups[group.key] = group
+        part.order[#part.order + 1] = group
+    end
+    part.origin = origin
+    Arm(container, eng.unit)
+    part.armed = true
+    return part
+end
+
+local BUILDERS = { markers = BuildMarkers, edge = BuildEdge, tray = BuildTray }
+
+-- Builds the containers the switches ask for and the client allows. Out of combat only (fail closed). Each part gets
+-- Engine.BUILD_TRIES attempts; a failed one is logged once and leaves that part to the Lua layer.
+function Engine.Ensure(eng)
+    if not eng or not Engine.Enabled() or Locked() then return false end
+    if eng.settled then return true end
+    local w = Engine.Wanted(eng.key)
+    local want = {
+        markers = next(w.hots) ~= nil or next(w.debs) ~= nil,
+        edge = next(w.edge) ~= nil,
+        tray = eng.key == "party" and next(w.tray) ~= nil,
+    }
+    for part, wanted in pairs(want) do
+        if wanted and not eng.parts[part] and (eng.tries[part] or 0) < Engine.BUILD_TRIES then
+            eng.tries[part] = (eng.tries[part] or 0) + 1
+            local ok, result = pcall(BUILDERS[part], eng)
+            if ok then
+                eng.parts[part] = result
+            else
+                Degrade("group_aura_engine_" .. part,
+                    "the " .. part .. " aura container could not be built for group frames, "
+                    .. "they keep the out of combat display (" .. tostring(result) .. ")")
+            end
+        end
+    end
+    -- Settled once every wanted part is built or out of tries: the per update step then costs one flag read.
+    eng.settled = true
+    for part, wanted in pairs(want) do
+        if wanted and not eng.parts[part] and (eng.tries[part] or 0) < Engine.BUILD_TRIES then eng.settled = false end
+    end
+    Engine.Apply(eng)
+    return true
+end
+
+-- The switches changed (or the dispel set did): build what is newly wanted and seat everything again. In a fight only the
+-- plain parts of that run; the rest is owed to the end of it.
+function Engine.Restyle(eng)
+    if not eng then return end
+    eng.settled = false
+    if Locked() then Engine.Apply(eng) else Engine.Ensure(eng) end
+end
+
+local function SeatMarkerProxies(eng, part, w)
+    local key = eng.key
+    local size, corner = Style.Number(key, "mkSize"), Style.Get(key, "mkPos")
+    if not CORNER_SIDE[corner] then corner = Style.Default(key, "mkPos") end
+    local v, s = CORNER_VERTICAL[corner], CORNER_SIDE[corner]
+    local sign = s == "RIGHT" and -1 or 1
+    local y = v == "TOP" and -2 or 2
+    local lane = 0
+    for _, slot in ipairs(part.order) do
+        local on = (slot.kind == "hot" and w.hots[slot.name]) or (slot.kind == "deb" and w.debs[slot.name]) or false
+        slot.wanted = on and true or false
+        if on then
+            lane = lane + 1
+            slot.proxy:SetSize(size, size)
+            slot.proxy:ClearAllPoints()
+            slot.proxy:SetPoint(v .. s, eng.host, v .. s, sign * (3 + (lane - 1) * (size + 1)), y)
+        end
+    end
+    part.lanes = lane
+end
+
+-- Switches a slot's candidate filter between its real one and one nothing matches.
+local function SetSlotWanted(container, slot, on)
+    if slot.off == not on then return true end
+    local candidate
+    if on then
+        candidate = slot.ids and { includeSpellIDs = slot.ids } or { includeDispelTypes = slot.types }
+    elseif slot.ids then
+        candidate = { includeSpellIDs = { [SENTINEL_ID] = true } }
+    else
+        candidate = { includeDispelTypes = { [SENTINEL_TYPE] = true } }
+    end
+    local ok = pcall(container.SetAuraSlotCandidateFilters, container, slot.key, candidate)
+    if ok then slot.off = not on end
+    return ok
+end
+
+local function SetGroupWanted(container, group, on)
+    if group.off == not on then return true end
+    local candidate = { includeDispelTypes = on and group.types or { [SENTINEL_TYPE] = true } }
+    local ok = pcall(container.SetAuraGroupCandidateFilters, container, group.key, candidate)
+    if ok then group.off = not on end
+    return ok
+end
+
+local function SeatTray(eng, part)
+    local origin = part.origin
+    local side = Style.Get("party", "alertSide")
+    local size = Style.Number("party", "alertSize")
+    local cap = math.max(1, math.min(TRAY_CAP_MAX, Style.Number("party", "alertMax")) - 1)
+    local rightSide = side == "right"
+    local anchor = rightSide and "TOPLEFT" or "TOPRIGHT"
+    local flow = type(_G.AnchorUtil) == "table" and _G.AnchorUtil.FlowDirection or nil
+    local c = part.container
+    local ok = true
+    local function step(fn) if not pcall(fn) then ok = false end end
+    step(function()
+        c:ClearAllPoints()
+        c:SetPoint(anchor, origin, anchor, 0, 0)
+    end)
+    if part.seat ~= (side .. size .. cap) then
+        step(function()
+            c:SetFlowLayoutAnchorPoint(anchor)
+            c:SetFlowLayoutGrowthDirection(rightSide and (flow and flow.Right or 1) or (flow and flow.Left or -1),
+                flow and flow.Down or -1)
+            Quiet(c, "SetFlowLayoutMaximumLineSize", cap * (size + TRAY_GAP) + 1)
+        end)
+        for _, group in ipairs(part.order) do
+            step(function()
+                c:SetAuraGroupMaxFrameCount(group.key, cap)
+                c:SetAuraGroupLayout(group.key, { elementSpacing = TRAY_GAP, lineSpacing = TRAY_GAP, groupSpacing = 0,
+                    groupLineSpacing = 0, elementWidth = size, elementHeight = size })
+            end)
+        end
+        if ok then part.seat = side .. size .. cap end
+    end
+    return ok
+end
+
+local function Alpha(part, a)
+    if part and part.container and part.alpha ~= a then
+        if Quiet(part.container, "SetAlpha", a) then part.alpha = a end
+    end
+end
+
+-- Seats the proxies and filters for the current switches and sets each container's alpha for the mode. Plain frames and
+-- alpha run in combat; the engine's own setters (filters, layout) are tried everywhere and, when one is refused, the
+-- change is owed to REGEN_ENABLED (eng.owed).
+function Engine.Apply(eng)
+    if not eng then return end
+    local w = Engine.Wanted(eng.key)
+    eng.owed = false
+    local fight = Engine.fight
+    local markers, edge, tray = eng.parts.markers, eng.parts.edge, eng.parts.tray
+    local anyMarker, anyEdge, anyTray = false, false, false
+    if markers then
+        SeatMarkerProxies(eng, markers, w)
+        for _, slot in ipairs(markers.order) do
+            if not SetSlotWanted(markers.container, slot, slot.wanted) then eng.owed = true end
+            if slot.wanted then anyMarker = true end
+        end
+    end
+    if edge then
+        for _, slot in ipairs(edge.order) do
+            local on = w.edge[slot.name] == true
+            if not SetSlotWanted(edge.container, slot, on) then eng.owed = true end
+            if on then anyEdge = true end
+        end
+    end
+    if tray then
+        if not SeatTray(eng, tray) then eng.owed = true end
+        for _, group in ipairs(tray.order) do
+            local on = w.tray[group.name] == true
+            if not SetGroupWanted(tray.container, group, on) then eng.owed = true end
+            if on then anyTray = true end
+        end
+    end
+    local live = fight and not eng.down
+    Alpha(markers, live and anyMarker and 1 or 0)
+    Alpha(edge, live and anyEdge and 1 or 0)
+    Alpha(tray, live and anyTray and 1 or 0)
+end
+
+-- The member is down (dead or offline): nothing of theirs shows in a fight.
+function Engine.SetDown(eng, down)
+    if not eng or eng.down == (down and true or false) then return end
+    eng.down = down and true or false
+    Engine.Apply(eng)
+end
+
+-- The engine layer is showing for this frame: a fight is on and the part (or any part) is armed and wanted.
+function Engine.Covers(eng, part)
+    if not (eng and Engine.fight) then return false end
+    local p = eng.parts[part]
+    return p ~= nil and p.armed == true and (p.alpha == 1)
+end
+
+local function SetFight(on)
+    if Engine.fight == on then return end
+    Engine.fight = on
+    for _, eng in ipairs(Engine.list) do
+        pcall(Engine.Apply, eng)
+        if eng.onMode then pcall(eng.onMode, eng, on) end
+    end
+end
+
+do   -- a reload in a fight starts in the engine mode
+    local ok, v = pcall(function() return type(InCombatLockdown) == "function" and InCombatLockdown() end)
+    Engine.fight = ok and v and true or false
+end
+
+local events = CreateFrame("Frame")
+Engine.events = events
+events:RegisterEvent("PLAYER_REGEN_DISABLED")
+events:RegisterEvent("PLAYER_REGEN_ENABLED")
+events:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_DISABLED" then
+        SetFight(true)
+    else
+        SetFight(false)
+        for _, eng in ipairs(Engine.list) do
+            if eng.unit then pcall(Engine.Restyle, eng) end   -- builds what a fight kept from building, retries what was owed
+        end
+    end
+end)

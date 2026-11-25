@@ -680,6 +680,10 @@ end
 
 -- The dispel colour for a row (nil = none): the health rail's halo and the box edge both read it.
 local function SetRowDispel(frame, color)
+    frame.dispelRaw = color
+    -- In a fight the engine's edge strips are the signal (FrameExtras.Engine): the held Lua halo stays out.
+    local engine = FS.FrameExtras and FS.FrameExtras.Engine
+    if color and frame.engine and engine and engine.Covers(frame.engine, "edge") then color = nil end
     TintHealthDispel(frame.health, color)
     frame.dispelColor = color
     ApplyBoxEdge(frame)
@@ -1569,6 +1573,21 @@ local function BuildPartyRow(unit, frameName, parent, preview)
     if fx and fx.BuildMarkers then
         f.markers = fx.BuildMarkers(visual, health:GetFrameLevel() + 4, f.box)
     end
+    -- The in combat layer (engine drawn aura containers, built out of combat on first use). A preview row has no unit.
+    if fx and fx.Engine and not preview and unit then
+        local origin = CreateFrame("Frame", nil, visual)
+        origin:SetSize(1, 1)
+        f.trayOrigin = origin
+        f.engine = fx.Engine.New(visual, unit, "party", {
+            trayOrigin = origin,
+            edgeAnchor = function(anchor)
+                anchor:SetPoint("TOPLEFT", f.health.shell, "TOPLEFT", 0, 0)
+                anchor:SetPoint("BOTTOMRIGHT", f.power.shell, "BOTTOMRIGHT", 0, 0)
+            end,
+            onMode = function() FS.PartyFrames.EngineMode(f) end,
+        })
+        if f.markers then f.markers.eng = f.engine end
+    end
 
     -- The laser rail runs the full width of health.shell, no inset.
     local power = CreateLaserRail(visual, RAIL_POWER_SPEC)
@@ -2113,6 +2132,7 @@ end
 -- event handlers, not called directly by them. Early-returns on a
 -- nonexistent unit (e.g. an empty party slot) instead of scanning auras for it.
 local function UpdateAuras(frame)
+    FS.PartyFrames.EngineStep(frame)
     if not UnitExists(frame.unit) then
         for _, icon in ipairs(frame.alertIcons) do icon:Hide() end
         SetRowDispel(frame, nil)
@@ -2801,6 +2821,56 @@ do
     end
 end
 
+-- The in combat layer's per update step: builds the containers when they are due (out of combat only, a no-op in a
+-- fight) and tells them whether the member is down. Runs in combat too: it reads no aura.
+function PartyFrames.EngineStep(frame)
+    local engine = FS.FrameExtras and FS.FrameExtras.Engine
+    local eng = frame.engine
+    if not (engine and eng) then return end
+    if not eng.settled and UnitExists(frame.unit) then engine.Ensure(eng) end
+    local offline, deadOrGhost = RowDownState(frame.unit)
+    engine.SetDown(eng, (offline or deadOrGhost) and true or false)
+end
+
+-- The engine layer took over (a fight began) or gave back (it ended). Plain frames only, so it runs in combat: the held
+-- halo and cleansable tiles come out while the engine draws them; the missing buff tiles stay, seated after the engine's
+-- tray so the two never overlap; at the end of the fight the tray is seated as always and the rescan repaints.
+function PartyFrames.EngineMode(row)
+    local fx = FS.FrameExtras
+    local engine = fx and fx.Engine
+    if not (engine and row.engine) then return end
+    SetRowDispel(row, row.dispelRaw)
+    if row.markers then fx.PaintMarkers(row.markers, "party", row.markers.list, row.markers.shown) end
+    if engine.Covers(row.engine, "tray") then
+        local side = FS.FrameStyle and FS.FrameStyle.Get("party", "alertSide")
+        local container = row.engine.parts.tray.container
+        local prev
+        for _, icon in ipairs(row.alertIcons) do
+            if icon.auraIndex ~= nil then
+                icon:Hide()   -- a held cleansable tile: the engine draws those now
+            elseif icon:IsShown() then
+                icon:ClearAllPoints()
+                if not prev then
+                    pcall(function()   -- refused: the tile stays unseated until the fight ends, no worse than a hold
+                        if side == "right" then
+                            icon:SetPoint("TOPLEFT", container, "TOPRIGHT", ALERT_GAP, 0)
+                        else
+                            icon:SetPoint("TOPRIGHT", container, "TOPLEFT", -ALERT_GAP, 0)
+                        end
+                    end)
+                elseif side == "right" then
+                    icon:SetPoint("LEFT", prev, "RIGHT", ALERT_GAP, 0)
+                else
+                    icon:SetPoint("RIGHT", prev, "LEFT", -ALERT_GAP, 0)
+                end
+                prev = icon
+            end
+        end
+    else
+        PartyFrames.SeatTray(row)
+    end
+end
+
 -- What the party style settings (FrameStyle frame "party") change on one built row. The non-secure parts (opacity, fill,
 -- bar looks and heights, bar text, markers, aggro) follow at once, in combat too; the secure size and the tray seat are
 -- separate (SizeRow, SeatTray).
@@ -2838,21 +2908,30 @@ function PartyFrames.SeatTray(row)
     local height = row.heightNow or ROW_HEIGHT
     local iconY = rowY - ((height - size) / 2)
     local petFrame = row.petFrame
+    local origin = row.trayOrigin   -- where the engine's tray starts: exactly where the first icon sits
+    if origin then origin:SetSize(size, size); origin:ClearAllPoints() end
     for slot, icon in ipairs(row.alertIcons) do
         icon:SetSize(size, size)
         icon:ClearAllPoints()
         if side == "right" and (petFrame or row.preview) then
             if slot == 1 then
                 icon:SetPoint("TOPLEFT", petFrame or row, "TOPRIGHT", PANEL_PAD + ALERT_TRAY_INSET, -((height - size) / 2))
+                if origin then origin:SetPoint("TOPLEFT", petFrame or row, "TOPRIGHT", PANEL_PAD + ALERT_TRAY_INSET, -((height - size) / 2)) end
             else
                 icon:SetPoint("LEFT", row.alertIcons[slot - 1], "RIGHT", ALERT_GAP, 0)
             end
         elseif slot == 1 then
             icon:SetPoint("TOPRIGHT", content, "TOPLEFT", -ALERT_TRAY_INSET, iconY)
+            if origin then origin:SetPoint("TOPRIGHT", content, "TOPLEFT", -ALERT_TRAY_INSET, iconY) end
         else
             icon:SetPoint("RIGHT", row.alertIcons[slot - 1], "LEFT", -ALERT_GAP, 0)
         end
         if S.Get("party", "alerts") ~= true or slot > S.Number("party", "alertMax") then icon:Hide() end
+    end
+    -- The engine tray follows the origin; in a fight the missing buff tiles sit after it.
+    local engine = FS.FrameExtras and FS.FrameExtras.Engine
+    if engine and row.engine and row.engine.parts.tray then
+        if engine.Covers(row.engine, "tray") then PartyFrames.EngineMode(row) end
     end
 end
 
@@ -2911,6 +2990,9 @@ function PartyFrames.ApplyStyle()
         PartyFrames.StyleRow(row)
         if not PartyFrames.SizeRow(row) then PartyFrames.sizeOwed = true end
         PartyFrames.SeatTray(row)   -- after SizeRow: it centres on the row height the row has now
+        if row.engine and next(row.engine.parts) and FS.FrameExtras and FS.FrameExtras.Engine then
+            FS.FrameExtras.Engine.Restyle(row.engine)   -- built ones only; the rest are made on first use
+        end
         if row.unit and UnitExists(row.unit) then
             -- the bars and their text read again: a format, a bar height of 0 or the healer's pick may have changed
             TryStep(row, "health", UpdateRowHealth)
