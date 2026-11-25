@@ -79,11 +79,39 @@ local function FrameCPU()
     return out
 end
 
+-- Events an unnamed frame may listen to, to tell one handler from another.
+H.NAMED_EVENTS = { "QUEST_LOG_UPDATE", "QUEST_WATCH_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN",
+    "UNIT_QUEST_LOG_CHANGED", "ITEM_DATA_LOAD_RESULT", "GET_ITEM_INFO_RECEIVED", "BAG_UPDATE", "BAG_UPDATE_DELAYED",
+    "UNIT_AURA", "UNIT_HEALTH", "UNIT_POWER_UPDATE", "UNIT_POWER_FREQUENT", "PLAYER_TARGET_CHANGED", "NAME_PLATE_UNIT_ADDED",
+    "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "ACTIONBAR_UPDATE_COOLDOWN", "ACTIONBAR_SLOT_CHANGED", "UNIT_FLAGS",
+    "PLAYER_REGEN_ENABLED", "LOOT_OPENED", "CHAT_MSG_LOOT", "ZONE_CHANGED", "UPDATE_FACTION", "SKILL_LINES_CHANGED",
+    "PLAYER_MONEY", "UNIT_SPELLCAST_SUCCEEDED", "GROUP_ROSTER_UPDATE", "UPDATE_MOUSEOVER_UNIT", "CURSOR_CHANGED" }
+
 local function FrameName(f)
     local ok, name = pcall(f.GetDebugName, f)
-    if ok and type(name) == "string" and name ~= "" then return name end
-    ok, name = pcall(f.GetName, f)
-    return ok and type(name) == "string" and name or tostring(f)
+    if not (ok and type(name) == "string" and name ~= "") then
+        ok, name = pcall(f.GetName, f)
+        name = ok and type(name) == "string" and name or tostring(f)
+    end
+    if not (type(f.GetName) == "function" and f:GetName()) and type(f.IsEventRegistered) == "function" then
+        local hit = {}
+        for _, e in ipairs(H.NAMED_EVENTS) do
+            local okE, on = pcall(f.IsEventRegistered, f, e)
+            if okE and on then hit[#hit + 1] = e end
+        end
+        if #hit > 0 then name = name .. " [" .. table.concat(hit, " ") .. "]" end
+    end
+    return name
+end
+
+-- A named piece of work timed by its owner while a sample runs (the data bar's segments): total and worst ms.
+function H.Time(key, ms)
+    local s = H.run
+    if not s then return end
+    local t = s.timed[key]
+    if not t then t = { n = 0, total = 0, worst = 0 }; s.timed[key] = t end
+    t.n, t.total = t.n + 1, t.total + ms
+    if ms > t.worst then t.worst = ms end
 end
 
 local function TopFrames(before)
@@ -119,7 +147,7 @@ local function Finish()
     ForeverSTUwaveDB.hitch = {
         at = date and date("%Y-%m-%d %H:%M:%S") or nil, seconds = seconds, frames = s.frames, slowCount = s.slowCount,
         worstMs = s.worstMs, gcSteps = s.gcSteps, slowWithGc = s.slowWithGc, addons = list, slow = s.slow,
-        moving = s.moving, spikes = s.spikes, frameCpu = TopFrames(s.frameCpu or {}),
+        moving = s.moving, spikes = s.spikes, frameCpu = TopFrames(s.frameCpu or {}), timed = s.timed,
     }
     local top = list[1]
     Say(("sample saved: %d frames, %d slow (worst %.0f ms, %d with a heap drop); most CPU in slow frames: %s. Type /fsbug to send it.")
@@ -204,7 +232,7 @@ function H.Start(seconds)
         return
     end
     local names = LoadedNames()
-    local s = { names = names, last = {}, total = {}, max = {}, inSlow = {}, deltas = {}, slow = {}, spikes = {}, frames = 0,
+    local s = { names = names, last = {}, total = {}, max = {}, inSlow = {}, deltas = {}, slow = {}, spikes = {}, timed = {}, frames = 0,
         slowCount = 0, worstMs = 0, gcSteps = 0, slowWithGc = 0, moving = 0 }
     for i = 1, #names do s.total[i], s.max[i], s.inSlow[i], s.deltas[i] = 0, 0, 0, 0 end
     s.frameCpu = FrameCPU()

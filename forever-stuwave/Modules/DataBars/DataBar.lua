@@ -871,7 +871,11 @@ end
 -- rather than spamming the tick, printing once so the cause is visible.
 local function TryUpdate(segment)
     if not segment.available then return end
+    -- while /fsperf samples, each segment's refresh is timed (Hitch.lua `Time`)
+    local hitch = FS.Hitch
+    local t0 = hitch and hitch.run and debugprofilestop and debugprofilestop()
     local ok, err = pcall(segment.update, segment)
+    if t0 then hitch.Time("databar " .. segment.key, debugprofilestop() - t0) end
     if not ok then
         segment.available = false
         segment.frame:Hide()

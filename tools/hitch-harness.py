@@ -75,11 +75,13 @@ check(H.events.all, "listening to every event while sampling")
 local row = H.run.slow[1]
 check(row[1] == "A 30.00" and row[2] == "B 2.00" and row.gc, "the slow frame names A first: " .. tostring(row[1]))
 __fcpu[__fa] = 200                      -- the tracker's handler did the work
+H.Time("databar fps", 3); H.Time("databar fps", 5)
 frame(10, 0, 0)
 check(H.run == nil and H.frame.scripts.OnUpdate == nil, "ends on time and removes its OnUpdate")
 check(not H.events.all and H.events.scripts.OnEvent == nil, "and stops listening")
 local saved = ForeverSTUwaveDB.hitch
 check(#saved.frameCpu == 1 and saved.frameCpu[1]:find("190.0 ms TrackerEvents OnEvent", 1, true), "names the busy frame: " .. tostring(saved.frameCpu[1]))
+check(saved.timed["databar fps"].n == 2 and saved.timed["databar fps"].total == 8 and saved.timed["databar fps"].worst == 5, "timed work kept")
 check(saved.addons[1].name == "A" and saved.addons[1].slowMs == 30, "saved, sorted by CPU in slow frames")
 check(saved.worstMs >= 119 and saved.moving == saved.frames, "worst frame and moving frames counted")
 check(__said[#__said]:find("most CPU in slow frames: A", 1, true) and __said[#__said]:find("/fsbug", 1, true), "summed up in chat")
