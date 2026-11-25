@@ -10,6 +10,11 @@
 -- deck's bag slots are secure buttons, so this bar is RESTRICTED in combat (see
 -- Rescale below). Hovering the TIME segment shows a GameTooltip with the local and the realm time; hovering DUR
 -- lists each equipped piece's durability.
+--
+-- Which segments show, in what order and under what title are settings (databar.order, databar.seg.<key>,
+-- databar.title.<seg>), read at layout time and re-laid out live when one changes. Every available segment is built
+-- once at login; a hidden one is only hidden and parked, and stops updating. FS.DataBarSegments is what the /fsconfig
+-- Data bar page calls (the order, the switches, the titles, the model of rows to draw).
 
 local addonName, FS = ...
 
@@ -35,19 +40,17 @@ end
 -------------------------------------------------------------------------------
 
 local BAR_HEIGHT = 20 -- mock: full-ui-layout.html databar h:20
--- Derived, never hardcoded: it was a literal 7 and adding the two perf
--- segments silently pushed DUR and BAGS off the right edge of the screen,
--- because the slot width was still being divided nine ways into seven slots'
--- worth of room. Set from #SEGMENT_DEFS at build time instead (see Build).
+-- The slot width is derived from the segments shown at layout time, never typed: it was once a literal 7 and adding
+-- the two perf segments silently pushed DUR and BAGS off the right edge of the screen.
 -- Existing shipped asset (Chat.lua declares the same path for its termbar
 -- status dots): a radial soft-glow disc, ADD blend, white with a cosine
 -- falloff -- tinted here per currency.
 local GLOW_ROUND_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glow_round.tga"
 
-local SEGMENT_COUNT
--- Built once by Init; resized/repositioned in place by LayoutSegments on
--- every rescale rather than recreated.
+-- Built once by Init (every available segment, shown or not); resized/repositioned in place by LayoutSegments on
+-- every rescale or settings change rather than recreated. `segments` is in SEGMENT_DEFS order, `segmentByKey` finds one.
 local segments = {}
+local segmentByKey = {}
 local DIVIDER_WIDTH = 1
 local PAD_X = 8
 local LABEL_GAP = 6
@@ -656,44 +659,305 @@ local METER_FILL_RADIUS = METER_FILL_HEIGHT / 2
 -- caps (not erase quads) because the track alpha is 0.90 and erase quads would replace
 -- the 10% bleed.
 
+-- One entry per segment, in the order the bar has always had them (the default order). `label` is the default
+-- title; `tip` and `missing` are the /fsconfig row's ? text and the reason shown when `available` is false; `off`
+-- marks a segment that is off until the player turns it on.
 local SEGMENT_DEFS = {
-    { key = "fps", label = "FPS", available = HAS_GET_FRAMERATE, update = UpdateFPS },
-    { key = "mem", label = "FS MEM", available = (UpdateAddOnMemoryUsage ~= nil), update = UpdateMemory, meter = true },
-    { key = "cpu", label = "FS CPU", available = (GetAddOnCPUUsage ~= nil), update = UpdateCPU },
-    { key = "latency", label = "MS", available = HAS_GET_NET_STATS, update = UpdateLatency },
-    { key = "rested", label = "REST", available = HAS_XP_EXHAUSTION, update = UpdateRested, meter = true },
+    { key = "fps", label = "FPS", available = HAS_GET_FRAMERATE, update = UpdateFPS,
+      tip = "Frames per second.",
+      missing = "This client does not report frames per second." },
+    { key = "mem", label = "FS MEM", available = (UpdateAddOnMemoryUsage ~= nil), update = UpdateMemory, meter = true,
+      off = true,
+      tip = "Memory this addon uses. For bug reports; most players leave it off.",
+      missing = "This client does not report addon memory." },
+    { key = "cpu", label = "FS CPU", available = (GetAddOnCPUUsage ~= nil), update = UpdateCPU, off = true,
+      tip = "Share of one CPU core this addon uses. For bug reports.",
+      missing = "This client does not report addon CPU use." },
+    { key = "latency", label = "MS", available = HAS_GET_NET_STATS, update = UpdateLatency,
+      tip = "Home and world latency.",
+      missing = "This client does not report latency." },
+    { key = "rested", label = "REST", available = HAS_XP_EXHAUSTION, update = UpdateRested, meter = true,
+      tip = "Rested XP as a meter.",
+      missing = "This client does not report rested XP." },
     { key = "durability", label = "DUR", available = HAS_DURABILITY, update = UpdateDurability, meter = true,
-      tooltip = ShowDurabilityTooltip, tooltipHide = HideTimeTooltip },
-    { key = "bags", label = "BAGS", available = (GetFreeSlotsForBag ~= nil), update = UpdateBags, meter = true },
+      tooltip = ShowDurabilityTooltip, tooltipHide = HideTimeTooltip,
+      tip = "Durability across all your gear, as one percent. Hover for each piece.",
+      missing = "This client does not report gear durability." },
+    { key = "bags", label = "BAGS", available = (GetFreeSlotsForBag ~= nil), update = UpdateBags, meter = true,
+      tip = "Free bag slots.",
+      missing = "This client does not report bag slots." },
     { key = "time", label = "TIME", available = HAS_DATE or HAS_GET_GAME_TIME, update = UpdateTime,
-      tooltip = ShowTimeTooltip, tooltipHide = HideTimeTooltip },
+      tooltip = ShowTimeTooltip, tooltipHide = HideTimeTooltip,
+      tip = "Realm and local time.",
+      missing = "This client does not report the time." },
     { key = "gold", label = "GOLD", available = HAS_GET_MONEY, update = UpdateGold, coins = true,
-      tooltip = ShowGoldTooltip, tooltipHide = HideTimeTooltip },
+      tooltip = ShowGoldTooltip, tooltipHide = HideTimeTooltip,
+      tip = "Gold on this character; the tooltip lists your other characters.",
+      missing = "This client does not report your gold." },
 }
+
+-------------------------------------------------------------------------------
+-- Settings: which segments show, in what order, under what title
+--
+--   databar.order        list of segment keys, left to right (default: SEGMENT_DEFS order)
+--   databar.seg.<key>    the segment is on (default true; false for the `off` ones)
+--   databar.title.<key>  the title on the bar (default: the segment's label; "" shows only the value)
+--
+-- Reads fall back to those defaults without FS.Config, and tolerate whatever a hand edited save holds: unknown or
+-- repeated keys in the order are dropped and a segment the list misses goes last. At least one available segment
+-- always shows. FS.DataBarSegments below is the one door the config page uses to change them.
+-------------------------------------------------------------------------------
+
+local KEY_ORDER = "databar.order"
+local KEY_SEG = "databar.seg."
+local KEY_TITLE = "databar.title."
+local TITLE_MAX = 10   -- characters, counted the way a player counts them (an accented letter is one)
+local LOCK_TEXT = "At least one segment stays on."
+
+local DEF_BY_KEY = {}
+local DEFAULT_ORDER = {}
+for _, def in ipairs(SEGMENT_DEFS) do
+    DEF_BY_KEY[def.key] = def
+    DEFAULT_ORDER[#DEFAULT_ORDER + 1] = def.key
+end
+
+if FS.Config and FS.Config.RegisterDefault then
+    FS.Config.RegisterDefault(KEY_ORDER, DEFAULT_ORDER)   -- shared, never written to: readers copy
+    for _, def in ipairs(SEGMENT_DEFS) do
+        FS.Config.RegisterDefault(KEY_SEG .. def.key, not def.off)
+        FS.Config.RegisterDefault(KEY_TITLE .. def.key, def.label)
+    end
+end
+
+local function ConfigGet(key, fallback)
+    local config = FS.Config
+    if config and config.Get then
+        local value = config.Get(key)
+        if value ~= nil then return value end
+    end
+    return fallback
+end
+
+-- `list` as an order over every known segment: first mentions win, unknown entries go, missing segments follow in
+-- default order. Always a fresh table.
+local function CleanOrder(list)
+    local out, seen = {}, {}
+    if type(list) == "table" then
+        for _, key in ipairs(list) do
+            if type(key) == "string" and DEF_BY_KEY[key] and not seen[key] then
+                seen[key] = true
+                out[#out + 1] = key
+            end
+        end
+    end
+    for _, key in ipairs(DEFAULT_ORDER) do
+        if not seen[key] then out[#out + 1] = key end
+    end
+    return out
+end
+
+local function EffectiveOrder()
+    return CleanOrder(ConfigGet(KEY_ORDER, nil))
+end
+
+local function SameOrder(a, b)
+    if #a ~= #b then return false end
+    for i = 1, #a do
+        if a[i] ~= b[i] then return false end
+    end
+    return true
+end
+
+local function SettingOn(def)
+    local value = ConfigGet(KEY_SEG .. def.key, nil)
+    if type(value) == "boolean" then return value end
+    return not def.off
+end
+
+-- False for an API this client lacks, and for a segment whose read threw (TryUpdate hides those for the session).
+local function SegmentAvailable(def)
+    local segment = segmentByKey[def.key]
+    if segment and segment.failed then return false end
+    return def.available and true or false
+end
+
+-- The keys on the bar, left to right: available and switched on, in order. Never empty while any segment is
+-- available, so a save with every switch off still shows the first one rather than a blank bar.
+local function ShownKeys()
+    local order, shown = EffectiveOrder(), {}
+    for _, key in ipairs(order) do
+        local def = DEF_BY_KEY[key]
+        if SegmentAvailable(def) and SettingOn(def) then shown[#shown + 1] = key end
+    end
+    if #shown == 0 then
+        for _, key in ipairs(order) do
+            if SegmentAvailable(DEF_BY_KEY[key]) then
+                shown[1] = key
+                break
+            end
+        end
+    end
+    return shown
+end
+
+-- A title the bar can show: no escape bars or control characters, at most TITLE_MAX characters, and nothing but
+-- spaces counts as empty. Not trimmed otherwise, so a box being typed in keeps its trailing space.
+local function CleanTitle(text)
+    if type(text) ~= "string" then return nil end
+    text = text:gsub("|", ""):gsub("%c", "")
+    if text:match("^%s*$") then return "" end
+    local count, cut = 0, #text
+    for position in text:gmatch("()[^\128-\191]") do
+        count = count + 1
+        if count > TITLE_MAX then
+            cut = position - 1
+            break
+        end
+    end
+    return text:sub(1, cut)
+end
+
+local function EffectiveTitle(def)
+    return CleanTitle(ConfigGet(KEY_TITLE .. def.key, def.label)) or def.label
+end
+
+-- The door the /fsconfig Data bar page uses. Every setter goes through FS.Config (so a change fires the bar's own
+-- re-layout, and a profile switch does too) and answers true, or false and a reason.
+local Segments = {
+    TITLE_MAX = TITLE_MAX,
+    ORDER_KEY = KEY_ORDER,
+}
+FS.DataBarSegments = Segments
+
+function Segments.SwitchKey(key) return KEY_SEG .. tostring(key) end
+function Segments.TitleKey(key) return KEY_TITLE .. tostring(key) end
+Segments.CleanTitle = CleanTitle
+
+-- Every segment key in the order the bar uses, hidden and unavailable ones included. A fresh list.
+function Segments.Order()
+    return EffectiveOrder()
+end
+
+-- One row per segment, in order, for the page to draw:
+--   key, label (the default title), title (the title now on the bar, "" for none), titleIsDefault,
+--   on (it is on the bar), available, reason (why it is not available), tip (the row's ? text),
+--   canUp / canDown (a neighbour to swap with), lock (nil, or why the switch cannot be used: the segment is not
+--   available, or it is the last one on).
+function Segments.Model()
+    local order = EffectiveOrder()
+    local onCount = 0
+    for _, key in ipairs(order) do
+        local def = DEF_BY_KEY[key]
+        if SegmentAvailable(def) and SettingOn(def) then onCount = onCount + 1 end
+    end
+    local rows = {}
+    for index, key in ipairs(order) do
+        local def = DEF_BY_KEY[key]
+        local available = SegmentAvailable(def)
+        local on = available and SettingOn(def)
+        local title = EffectiveTitle(def)
+        local lock
+        if not available then
+            lock = def.missing
+        elseif on and onCount <= 1 then
+            lock = LOCK_TEXT
+        end
+        rows[index] = {
+            key = key,
+            label = def.label,
+            title = title,
+            titleIsDefault = title == def.label,
+            on = on,
+            available = available,
+            reason = (not available) and def.missing or nil,
+            tip = def.tip .. (def.clickTip and (" " .. def.clickTip) or ""),
+            canUp = index > 1,
+            canDown = index < #order,
+            lock = lock,
+        }
+    end
+    return rows
+end
+
+-- Stores `list` (cleaned, see CleanOrder) as the order; the default order is stored as nothing.
+function Segments.SetOrder(list)
+    local config = FS.Config
+    if not (config and config.Set) then return false, "settings are not available" end
+    local order = CleanOrder(list)
+    if SameOrder(order, DEFAULT_ORDER) then order = nil end
+    if not config.Set(KEY_ORDER, order) then return false, "settings are read-only" end
+    return true
+end
+
+-- Swaps `key` with its neighbour: delta -1 moves it left on the bar, +1 right. False at either end.
+function Segments.Move(key, delta)
+    local order = EffectiveOrder()
+    local from
+    for index, other in ipairs(order) do
+        if other == key then from = index end
+    end
+    if not from then return false, "no such segment" end
+    local to = from + (delta < 0 and -1 or 1)
+    if to < 1 or to > #order then return false, "already at the end" end
+    order[from], order[to] = order[to], order[from]
+    return Segments.SetOrder(order)
+end
+
+-- Switches a segment on or off. Refuses a segment this client cannot show, and the last one on.
+function Segments.SetEnabled(key, on)
+    local def = DEF_BY_KEY[key]
+    if not def then return false, "no such segment" end
+    local config = FS.Config
+    if not (config and config.Set) then return false, "settings are not available" end
+    if not SegmentAvailable(def) then return false, def.missing end
+    on = on and true or false
+    if not on and SettingOn(def) then
+        local others = 0
+        for _, other in ipairs(DEFAULT_ORDER) do
+            local otherDef = DEF_BY_KEY[other]
+            if other ~= key and SegmentAvailable(otherDef) and SettingOn(otherDef) then others = others + 1 end
+        end
+        if others == 0 then return false, LOCK_TEXT end
+    end
+    if not config.Set(KEY_SEG .. key, on) then return false, "settings are read-only" end
+    return true
+end
+
+-- Sets a segment's title (cleaned, see CleanTitle: at most TITLE_MAX characters, "" for none). Typing the default
+-- label back stores nothing. Answers true and the title as stored.
+function Segments.SetTitle(key, text)
+    local def = DEF_BY_KEY[key]
+    if not def then return false, "no such segment" end
+    local config = FS.Config
+    if not (config and config.Set) then return false, "settings are not available" end
+    local clean = CleanTitle(text)
+    if not clean then return false, "the title must be text" end
+    if not config.Set(KEY_TITLE .. key, clean) then return false, "settings are read-only" end
+    return true, clean
+end
 
 -------------------------------------------------------------------------------
 -- Frame assembly
 -------------------------------------------------------------------------------
 
--- One equal-width slot: an optional left divider (skipped on the first
--- segment, which sits flush against the panel's own border), an Orbitron
--- label, and a Mononoki value anchored to its right. Size and position are
--- applied separately by LayoutSegments, so a rescale can redo them without
--- recreating these regions.
-local function CreateSegment(bar, index, def)
+-- One equal-width slot: a left divider (shown on every segment but the first one on the bar, which sits flush against
+-- the panel's own border), an Orbitron label, and a Mononoki value anchored to its right. Size and position are
+-- applied separately by LayoutSegments, so a rescale or a settings change can redo them without recreating these
+-- regions.
+local function CreateSegment(bar, def)
     local seg = CreateFrame("Frame", nil, bar)
 
-    if index > 1 then
-        local divider = seg:CreateTexture(nil, "OVERLAY")
-        divider:SetColorTexture(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.5)
-        divider:SetPoint("TOPLEFT", seg, "TOPLEFT", 0, 0)
-        divider:SetPoint("BOTTOMLEFT", seg, "BOTTOMLEFT", 0, 0)
-        divider:SetWidth(DIVIDER_WIDTH)
-    end
+    local divider = seg:CreateTexture(nil, "OVERLAY")
+    divider:SetColorTexture(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.5)
+    divider:SetPoint("TOPLEFT", seg, "TOPLEFT", 0, 0)
+    divider:SetPoint("BOTTOMLEFT", seg, "BOTTOMLEFT", 0, 0)
+    divider:SetWidth(DIVIDER_WIDTH)
 
     local labelText = seg:CreateFontString(nil, "OVERLAY")
     labelText:SetPoint("LEFT", seg, "LEFT", PAD_X, 0)
     ApplyOrbitron(labelText, 9, COLOR_POWER)
+    -- One line, clipped (never wrapped) when SeatTitle gives it less room than its text.
+    if labelText.SetWordWrap then labelText:SetWordWrap(false) end
     labelText:SetText(def.label)
 
     local valueText = seg:CreateFontString(nil, "OVERLAY")
@@ -782,8 +1046,11 @@ local function CreateSegment(bar, index, def)
     local segment = {
         key = def.key,
         frame = seg,
+        divider = divider,
         labelText = labelText,
         valueText = valueText,
+        -- What sits right of the title (or at PAD_X when there is none): see SeatTitle.
+        first = meter and meter.track or (coins and coins.gold.icon) or valueText,
         meter = meter,
         coins = coins,
         available = def.available,
@@ -874,9 +1141,11 @@ end
 
 -- Runs one segment's update under pcall; a throwing call (a present-but-
 -- differently-shaped API on this client) disables and hides that segment
--- rather than spamming the tick, printing once so the cause is visible.
+-- rather than spamming the tick, printing once so the cause is visible. A segment the settings hide is not read at
+-- all (`shown` is false once a layout has parked it; nil before the first layout).
 local function TryUpdate(segment)
-    if not segment.available then return end
+    segment.fresh = false
+    if not segment.available or segment.shown == false then return end
     -- while /fsperf samples, each segment's refresh is timed (Hitch.lua `Time`)
     local hitch = FS.Hitch
     local t0 = hitch and hitch.run and debugprofilestop and debugprofilestop()
@@ -884,21 +1153,91 @@ local function TryUpdate(segment)
     if t0 then hitch.Time("databar " .. segment.key, debugprofilestop() - t0) end
     if not ok then
         segment.available = false
+        segment.failed = true
         segment.frame:Hide()
         print("|cff22e0ffForever STUwave|r databar segment '" .. segment.key ..
             "' failed: " .. tostring(err) .. " (hidden)")
     end
 end
 
+-- The widest the value part (what sits right of the title) can get, so a long title is clipped to what is left of
+-- the segment instead of running into it. Estimates at the font sizes above: a value of a few characters, the
+-- meter, or the three coin pairs.
+local VALUE_RESERVE = 40
+local COIN_TEXT_RESERVE = 28
+local TITLE_END_PAD = 4
+local TITLE_MIN_W = 6   -- less room than this and the title is dropped (the value moves up to PAD_X)
+
+local function BodyReserve(segment)
+    if segment.coins then
+        return 3 * (COIN_SIZE + COIN_TEXT_GAP + COIN_TEXT_RESERVE) + 2 * COIN_GROUP_GAP
+    end
+    if segment.meter then return METER_WIDTH + LABEL_GAP + VALUE_RESERVE end
+    return VALUE_RESERVE
+end
+
+-- Seats the title and what follows it. A segment with a title keeps the original anchors (label at PAD_X, the body
+-- LABEL_GAP right of it); with an empty title, or too little room for one, the label hides and the body starts at
+-- PAD_X. A title wider than the room left in the segment (its width less the body) is cut to that, with the label's
+-- own width, so it ends before the value rather than over it. Only regions of the segment's own frame are touched.
+local function SeatTitle(segment)
+    local label = segment.labelText
+    local visible = segment.title ~= nil and segment.title ~= ""
+    if visible and segment.width then
+        local room = segment.width - PAD_X - LABEL_GAP - BodyReserve(segment) - TITLE_END_PAD
+        if room < TITLE_MIN_W then
+            visible = false
+        else
+            local natural = label:GetStringWidth()
+            if type(natural) == "number" and natural > room then
+                label:SetWidth(room)
+            else
+                label:SetWidth(0)
+            end
+        end
+    elseif visible then
+        label:SetWidth(0)
+    end
+    label:SetShown(visible)
+    if segment.titleSeated == visible then return end
+    segment.titleSeated = visible
+    local first = segment.first
+    first:ClearAllPoints()
+    if visible then
+        first:SetPoint("LEFT", label, "RIGHT", LABEL_GAP, 0)
+    else
+        first:SetPoint("LEFT", segment.frame, "LEFT", PAD_X, 0)
+    end
+end
+
+-- Puts the title the settings give on the label, then seats it.
+local function ApplyTitle(segment)
+    segment.title = EffectiveTitle(DEF_BY_KEY[segment.key])
+    segment.labelText:SetText(segment.title)
+    SeatTitle(segment)
+end
+
+-- The segments on the bar, left to right.
+local function ShownSegments()
+    local list = {}
+    for _, key in ipairs(ShownKeys()) do
+        local segment = segmentByKey[key]
+        if segment then list[#list + 1] = segment end
+    end
+    return list
+end
+
 -- Re-seats every segment across `bar`. Called once from Init, right after the segments are
--- built, and again from Rescale and whenever the strip is shown or hidden, so the build-time
--- and rescale-time formulas can never drift apart. Without a STATUS slot every segment gets an
--- equal share, exactly as before; with one, STATUS takes its fixed width just before TIME (so
--- between BAGS and TIME) and the others share the remainder equally.
+-- built, and again from Rescale (a screen change, the strip shown or hidden, a settings change), so the build-time
+-- and rescale-time formulas can never drift apart. The shown segments (see ShownKeys) get an equal share; a hidden
+-- one is parked (hidden, no anchors) and not read. Without a STATUS slot that is the whole width, exactly as before;
+-- with one, STATUS takes its fixed width just before TIME, or at the end when TIME is not on the bar, and the others
+-- share the remainder equally.
 local function LayoutSegments(bar, screenWidth)
     if #segments == 0 then return end
+    local shown = ShownSegments()
     local linkWidth, recessWidth = LinkSize(bar)
-    local segWidth = (screenWidth - (linkWidth or 0)) / SEGMENT_COUNT
+    local segWidth = (screenWidth - (linkWidth or 0)) / math.max(#shown, 1)
     local x = 0   -- running offset, used only while a STATUS slot is being seated
     local function placeLink()
         link.frame:SetSize(linkWidth, BAR_HEIGHT)
@@ -909,7 +1248,9 @@ local function LayoutSegments(bar, screenWidth)
         x = x + linkWidth
     end
     local linkPlaced = linkWidth == nil
-    for index, segment in ipairs(segments) do
+    local onBar = {}
+    for index, segment in ipairs(shown) do
+        onBar[segment] = true
         if not linkPlaced and segment.key == "time" then
             placeLink()
             linkPlaced = true
@@ -920,9 +1261,37 @@ local function LayoutSegments(bar, screenWidth)
         -- only exists to step past the STATUS slot.
         segment.frame:SetPoint("TOPLEFT", bar, "TOPLEFT", linkWidth and x or (index - 1) * segWidth, 0)
         x = x + segWidth
+        segment.divider:SetShown(index > 1)
+        segment.width = segWidth
+        SeatTitle(segment)
+        if not segment.shown then
+            segment.shown = true
+            segment.fresh = true
+            segment.frame:Show()
+        end
     end
     if not linkPlaced then placeLink() end
     if linkWidth == nil and link then link.frame:Hide() end
+    for _, segment in ipairs(segments) do
+        if not onBar[segment] and segment.shown ~= false then
+            segment.shown = false
+            segment.frame:ClearAllPoints()
+            segment.frame:Hide()
+        end
+    end
+end
+
+-- A segment just put on the bar reads its value at once instead of waiting for the next tick.
+local function UpdateFresh()
+    for _, segment in ipairs(segments) do
+        if segment.fresh then TryUpdate(segment) end
+    end
+end
+
+local function UpdateAllSegments()
+    for _, segment in ipairs(segments) do
+        TryUpdate(segment)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -975,35 +1344,22 @@ local function Init()
         rail:SetHeight(1)
     end
 
-    -- Only segments this client can actually populate get a slot, so an
-    -- unavailable API leaves the others wider rather than leaving a gap.
-    SEGMENT_COUNT = 0
-    for _, def in ipairs(SEGMENT_DEFS) do
-        if def.available then SEGMENT_COUNT = SEGMENT_COUNT + 1 end
-    end
-    if SEGMENT_COUNT < 1 then SEGMENT_COUNT = #SEGMENT_DEFS end
-
-    -- Slots are handed out by POSITION AMONG THE SHOWN segments, not by index
-    -- in SEGMENT_DEFS. Using the def index meant an unavailable API still
-    -- reserved its slot and left a hole in the bar; this way the segments that
-    -- do exist simply divide the full width between them.
-    segments = {}
-    local slot = 0
+    -- Only segments this client can actually populate get built, so an unavailable API leaves the others wider
+    -- rather than leaving a gap. Slots are handed out by POSITION AMONG THE SHOWN segments (see LayoutSegments), not
+    -- by index in SEGMENT_DEFS: an unavailable or switched off segment reserves nothing, and the ones on the bar
+    -- simply divide the full width between them.
+    segments, segmentByKey = {}, {}
     for _, def in ipairs(SEGMENT_DEFS) do
         if def.available then
-            slot = slot + 1
-            segments[#segments + 1] = CreateSegment(bar, slot, def)
+            local segment = CreateSegment(bar, def)
+            segments[#segments + 1] = segment
+            segmentByKey[def.key] = segment
+            ApplyTitle(segment)
         end
     end
     link = CreateLink(bar)
     bar.linkSlot = link.frame
     LayoutSegments(bar, screenWidth)
-
-    local function UpdateAllSegments()
-        for _, segment in ipairs(segments) do
-            TryUpdate(segment)
-        end
-    end
 
     UpdateAllSegments()
 
@@ -1045,6 +1401,7 @@ local function Rescale()
     end
     FS.dataBar:SetSize(screenWidth, BAR_HEIGHT)
     LayoutSegments(FS.dataBar, screenWidth)
+    UpdateFresh()
 end
 
 -- /fsstrip hide|show flips the strip frame; relayout so STATUS appears or goes and the other
@@ -1058,6 +1415,28 @@ local function HookStrip()
     strip:HookScript("OnHide", Rescale)
 end
 
+-- A settings change: the order or a switch re-lays the bar out at once (deferred in combat like any other re-seat); a
+-- title only retitles its segment. Registered at file scope, so a profile switch before the bar exists does nothing.
+if FS.Config and FS.Config.OnChange then
+    FS.Config.OnChange(KEY_ORDER, function() Rescale() end)
+    for _, def in ipairs(SEGMENT_DEFS) do
+        FS.Config.OnChange(KEY_SEG .. def.key, function() Rescale() end)
+        FS.Config.OnChange(KEY_TITLE .. def.key, function()
+            local segment = segmentByKey[def.key]
+            if segment then ApplyTitle(segment) end
+        end)
+    end
+end
+
+-- The GOLD segment is also what records this character's gold for the other characters' tooltips. With it off the
+-- bar there is no tick, so the same record is kept from PLAYER_MONEY (and once at login).
+local function RecordGoldOffBar()
+    local gold = segmentByKey.gold
+    if not (gold and gold.shown == false and HAS_GET_MONEY) then return end
+    local copper = GetMoney()
+    if type(copper) == "number" and not (FS.IsSecret and FS.IsSecret(copper)) then RecordGold(copper) end
+end
+
 -- PLAYER_LOGIN, not file scope: UIParent:GetWidth() is the whole point of the
 -- fix above, and at load it still reports the pre-settle value. PLAYER_ENTERING_WORLD
 -- is the second look for a strip that was not there (or not yet shown) at login.
@@ -1065,12 +1444,16 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:RegisterEvent("PLAYER_ENTERING_WORLD")
 loader:RegisterEvent("PLAYER_REGEN_ENABLED")
+loader:RegisterEvent("PLAYER_MONEY")
 loader:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_REGEN_ENABLED" then
         if pendingRescale then Rescale() end
+    elseif event == "PLAYER_MONEY" then
+        RecordGoldOffBar()
     elseif event == "PLAYER_LOGIN" then
         Init()
         HookStrip()
+        RecordGoldOffBar()
 
         if FS.Layout.OnRescale then
             FS.Layout.OnRescale(Rescale)
