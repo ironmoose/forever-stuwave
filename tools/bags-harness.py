@@ -2267,8 +2267,8 @@ def check_special_window() -> None:
     secure = w.ev(f"(function() for _, b in ipairs({rec}.buttons) do if not (b._template or ''):find('SecureActionButtonTemplate', 1, true) then return false end end return true end)()")
     check("solo.every_slot_is_a_secure_action_button", secure)
     attrs = w.ev(f"(function() for i, b in ipairs({rec}.buttons) do "
-                 f"if b:GetAttribute('type2') ~= 'item' or b:GetAttribute('item2') ~= '2 ' .. i then return false end end return true end)()")
-    check("solo.right_click_uses_the_item_through_the_secure_path", attrs)
+                 f"if b:GetAttribute('type2') ~= 'macro' or b:GetAttribute('macrotext2') ~= '/use 2 ' .. i then return false end end return true end)()")
+    check("solo.right_click_uses_the_item_through_the_secure_use_macro", attrs)
     noop = w.ev(f"(function() for _, b in ipairs({rec}.buttons) do for _, m in ipairs({{{', '.join(repr(m) for m in MODS)}}}) do "
                 f"if b:GetAttribute(m .. 'type2') ~= '' then return false end end end return true end)()")
     check("solo.a_modified_right_click_is_the_secure_noop", noop)

@@ -1766,13 +1766,15 @@ end
 -- the call that taints the container state, so a window of the game's own is out. This one is ours: a plain frame with a
 -- SECURE item button per slot, built from the bag's own API (C_Container.GetContainerNumSlots, GetContainerItemInfo).
 --
--- Item use is the secure path, not a script of ours: each button is a SecureActionButtonTemplate whose `type2` is "item" and
--- `item2` is "<bag> <slot>", so a right click runs UseContainerItem inside the secure environment, the way a stock slot's
--- click does, in and out of combat. The modified right clicks are the secure no-op (the empty string) and the left button
--- has no secure action, so what is left is a PostClick hook (insecure, after the secure step): the left click picks up or
--- drops through C_Container.PickupContainerItem, a modified click hands the link to HandleModifiedItemClick (chat link,
--- dress up). Nothing here calls a stock bag opener or UseContainerItem, and nothing clicks a stock button (a source scan in
--- tools/bags-harness.py pins both).
+-- Item use is the secure path, not a script of ours: each button is a SecureActionButtonTemplate whose `type2` is "macro"
+-- and `macrotext2` is "/use <bag> <slot>", so a right click runs the game's own /use inside the secure environment (which
+-- ends in UseContainerItem), the way a stock slot's click does, in and out of combat. The "item" action type would do the
+-- same, but it asks IsEquippableItem about the slot's link first, and an empty slot has none (the argument is not nilable);
+-- /use goes straight to the bag and slot. The modified right clicks are the secure no-op (the empty string) and the left
+-- button has no secure action, so what is left is a PostClick hook (insecure, after the secure step): the left click picks
+-- up or drops through C_Container.PickupContainerItem, a modified click hands the link to HandleModifiedItemClick (chat
+-- link, dress up). Nothing here calls a stock bag opener or UseContainerItem, and nothing clicks a stock button (a source
+-- scan in tools/bags-harness.py pins both).
 --
 -- Not done, on purpose: no stack split (the stock split frame needs the stock item button), no new-item glow, no search,
 -- sort or money (a one bag window has none), and no UISpecialFrames entry (Esc would Hide a protected frame in combat).
@@ -1892,8 +1894,8 @@ do
         button.Cooldown = cooldown
 
         button:SetAttribute("useOnKeyDown", false)
-        button:SetAttribute("type2", "item")
-        button:SetAttribute("item2", bagID .. " " .. i)
+        button:SetAttribute("type2", "macro")
+        button:SetAttribute("macrotext2", "/use " .. bagID .. " " .. i)
         for _, prefix in ipairs(NOOP_MODIFIERS) do button:SetAttribute(prefix .. "type2", "") end
 
         button:HookScript("PostClick", function(self, mouseButton) SlotPostClick(bagID, self, mouseButton) end)
