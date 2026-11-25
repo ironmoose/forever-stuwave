@@ -297,6 +297,12 @@ local pendingSeat = false
 local seatedSig            -- shown-set signature of the last applied layout ("1" shown, "0" hidden, per DEFS)
 local shownCount = 0
 local inactive = false       -- the Gunsight is switched off (or waiting to come back): the HUD keys are hidden
+-- Module power (m.gs): with the Gunsight HUD module off its OnReady never runs and no HUD key is drawn (loginEnabled stays
+-- false), so the party, quests and chat keys are built without waiting for it. Read at login or later only.
+local function HudModuleOff()
+    local MS = FS.ModuleSwitch
+    return MS ~= nil and not MS.On("m.gs")
+end
 local gunsightReady = false  -- the Gunsight's OnReady has run: its state at login is final
 local loginEnabled = false   -- Gunsight.IsEnabled() as of login, never re-read (see WHAT EXISTS IS READ ONCE)
 
@@ -717,7 +723,7 @@ end
 -- Builds the keys once the Gunsight state is final AND the Console has made its tab. All eight are built whatever
 -- the Gunsight is doing (the party key is wanted with the HUD off), and KeyDrawn decides which of them are drawn.
 local function Ensure()
-    if built or not gunsightReady or not Console.tab then return end
+    if built or not (gunsightReady or HudModuleOff()) or not Console.tab then return end
     local ok, err = pcall(function()
         host = CreateFrame("Frame", nil, Console.tab)
         host:SetAllPoints(Console.tab)

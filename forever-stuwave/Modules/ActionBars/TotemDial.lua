@@ -1529,4 +1529,7 @@ local function Init()
         FS.Config.OnChange(PS.SETTINGS.set2.key, function() Dial.Refresh() end)
     end
 end
-Init()
+
+-- Module power (m.class): the dial's listeners and its ticker are part of the totem tab; off, none of them is made.
+local MS = FS.ModuleSwitch
+if MS then MS.WhenOn("m.class", Init) else Init() end

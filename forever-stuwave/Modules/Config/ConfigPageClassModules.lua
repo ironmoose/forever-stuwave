@@ -145,4 +145,29 @@ local tabs = {
     end },
 }
 
+-- Module power (m.gs): the class modules are part of the Gunsight HUD module, which has no page of its own here, so the
+-- off card never covers this one. With the module off for this session none of them is built and a row would change nothing:
+-- every tab says so in place of its rows. Decided from the session value (what was built); the wording follows the switch.
+local function GunsightOff()
+    local MS = FS.ModuleSwitch
+    return MS ~= nil and not MS.On("m.gs")
+end
+
+local function OffNote(content)
+    local MS = FS.ModuleSwitch
+    local label = MS.Label("m.gs") or "Gunsight HUD"
+    UI.Note(content, { text = function()
+        if MS.Wanted("m.gs") then return label .. " turns on at the next Reload UI." end
+        return label .. " is off. Turning it on takes a Reload UI."
+    end })
+end
+
+for _, tab in ipairs(tabs) do
+    local build = tab.build
+    tab.build = function(content)
+        if GunsightOff() then return OffNote(content) end
+        return build(content)
+    end
+end
+
 CW.RegisterCategory({ key = "classmod", label = "Class modules", group = "SCREEN", order = 5, tabs = tabs })

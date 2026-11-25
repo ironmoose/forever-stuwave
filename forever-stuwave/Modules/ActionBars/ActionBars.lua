@@ -189,6 +189,12 @@ end
 local ActionBars = { SPINE_DESIGN = 20 }
 FS.ActionBars = ActionBars
 
+-- Module power (m.ab): with the switch off nothing below builds, hooks, dims or restores a stock bar; the API stays defined
+-- and the commands that act on the stack say so. Read at login or later only (before ADDON_LOADED every switch answers on).
+local MS = FS.ModuleSwitch
+local function ModuleOn() return MS == nil or MS.On("m.ab") end
+local barsUp = false          -- Apply built the stack (false while off, or when the build failed and the stock bars stayed)
+
 local consoleActive = false   -- what is applied right now
 local pendingConsole          -- a SetConsoleActive made in combat, applied on regen
 local pendingSeat = false     -- a rescale that arrived in combat
@@ -470,7 +476,14 @@ local function RedimBlizzardBar(name)
     for k in pairs(redimKnown) do redimKnown[k] = nil end
 end
 
+-- The stock totem bar is dimmed only because the Addon tabs module draws the totem tab in its place; with that module off
+-- the game's own bar stays as it is.
+local TOTEM_BAR_SET = {}
+for _, name in ipairs(TOTEM_BARS) do TOTEM_BAR_SET[name] = true end
+local function TotemTabOurs() return MS == nil or MS.On("m.class") end
+
 local function RedimTotemBars()
+    if not TotemTabOurs() then return end
     if not PlayerIsShaman() then
         local bar = _G.MultiCastActionBarFrame
         if not (bar and bar:IsShown()) then return end
@@ -482,7 +495,10 @@ local function ForEachBlizzardBar(fn)
     for _, spec in ipairs(BARS) do
         if spec.blizzard then fn(spec.blizzard) end
     end
-    for _, name in ipairs(EXTRA_BLIZZARD_BARS) do fn(name) end
+    local totems = TotemTabOurs()
+    for _, name in ipairs(EXTRA_BLIZZARD_BARS) do
+        if totems or not TOTEM_BAR_SET[name] then fn(name) end
+    end
 end
 
 -- Switch strategy live: restore everything with the OLD method, then re-hide
@@ -490,6 +506,10 @@ end
 -- rather than two sessions.
 local function SetHideStrategy(which)
     if which ~= "stash" and which ~= "dim" then return false end
+    if not barsUp then
+        print("|cff22e0ffForever STUwave|r: the synthwave action bars are not up, so no stock bar is hidden.")
+        return true
+    end
     if InCombatLockdown() then
         print("|cff22e0ffForever STUwave|r: not while in combat -- hiding secure "
             .. "frames is protected during lockdown.")
@@ -1864,6 +1884,10 @@ local function SetMode(mode)
         print("|cff22e0ffForever STUwave|r: cannot switch action bars in combat.")
         return
     end
+    if not barsUp then
+        print("|cff22e0ffForever STUwave|r: the synthwave action bars are not up (off, or they failed to build); the stock bars stay as they are.")
+        return
+    end
 
     if mode == "blizz" then
         if stack then stack:Hide() end
@@ -2039,6 +2063,8 @@ local function Apply()
             .. tostring(err) .. "); Blizzard bars left in place.")
         return
     end
+    barsUp = true
+    if MS then MS.MarkBuilt("m.ab") end
 
     -- Re-seating restores the raw layout size, so re-run our own sizing after
     -- the watcher has had its turn.
@@ -2074,6 +2100,7 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+    if not ModuleOn() then return end
     pcall(Mouseover.Hint)
     if InCombatLockdown() then
         self:RegisterEvent("PLAYER_REGEN_ENABLED")

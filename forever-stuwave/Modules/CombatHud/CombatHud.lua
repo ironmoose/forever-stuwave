@@ -2343,6 +2343,13 @@ local function StopTicker()
     if ui.root then ui.root:SetScript("OnUpdate", nil) end
 end
 
+-- Module power (m.gs): the combat HUD, in either view, is part of the Gunsight HUD module; off, nothing of it is built and
+-- /fshud on says so. Read after ADDON_LOADED only (TryStart and Enable run at login or later).
+local function ModuleOff()
+    local MS = FS.ModuleSwitch
+    return MS ~= nil and not MS.On("m.gs")
+end
+
 function CombatHud.IsEnabled() return enabled end
 
 -- True once the UI was built as the Gunsight view (false for Stack A, and before the first build).
@@ -2350,6 +2357,7 @@ function CombatHud.IsGunsight() return ui.gunsight == true end
 
 function CombatHud.Enable()
     if enabled then return true end
+    if ModuleOff() then return false end
     local Hud = FS.Hud
     if type(Hud) ~= "table" or type(Hud.Subscribe) ~= "function" or type(Hud.Unsubscribe) ~= "function" then
         LogOnce("no_hud", "FS.Hud is missing; there is nothing to display.")
@@ -2418,7 +2426,7 @@ end
 local started, idleLoaded = false, false
 
 local function TryStart()
-    if started then return end
+    if started or ModuleOff() then return end
     local Hud = FS.Hud
     if type(Hud) ~= "table" or type(Hud.GetProfile) ~= "function" then
         LogOnce("no_hud", "FS.Hud is missing; there is nothing to display.")

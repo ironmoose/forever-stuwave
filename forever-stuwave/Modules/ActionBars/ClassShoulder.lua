@@ -62,6 +62,10 @@ local _, FS = ...
 local ClassShoulder = {}
 FS.ClassShoulder = ClassShoulder
 
+-- Module power: every addon tab stands on a shoulder of the Console's top edge, so the Addon tabs module has nothing to
+-- stand on without the Action bars module (turning the bars off asks once, then turns the tabs off with them).
+if FS.ModuleSwitch then FS.ModuleSwitch.Register({ key = "m.class", requires = { "m.ab" } }) end
+
 local C = {
     OWNER = "classshoulder",
     DX = 36,      -- LS_X 755 less the chassis left 719, design px
@@ -256,8 +260,12 @@ end
 local PET_CLASSES = { WARLOCK = true, HUNTER = true }
 local PET_AFTER = 16
 
+-- With the Pet bar module off there is no pet panel on the Console, so nothing is reserved for it. The switch is read, not
+-- the built flag: the first draw comes with the stack's geometry, before the pet panel's own login build has run.
 local function PetReserved()
     local dock = FS.PetDock
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.pet") then return false end
     return PET_CLASSES[PlayerClass()] == true and type(dock) == "table" and type(dock.DockRight) == "function"
         and type(dock.GapSpan) == "function"
 end

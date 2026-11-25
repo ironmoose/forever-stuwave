@@ -587,6 +587,10 @@ end
 SLASH_FSPET1 = "/fspet"
 SlashCmdList["FSPET"] = function(msg)
     msg = (msg or ""):lower():gsub("%s", "")
+    if not container then
+        print("|cff22e0ffForever STUwave|r: the pet panel is not up (the Pet bar module is off, or it failed to build).")
+        return
+    end
     if msg == "lock" then
         SetLocked(true)
     elseif msg == "unlock" then
@@ -1502,6 +1506,7 @@ local function Build()
     -- already exists at login shows correct values immediately rather than
     -- waiting on the first UNIT_HEALTH/UNIT_POWER_UPDATE/etc. event.
     RefreshStatus()
+    if FS.ModuleSwitch then FS.ModuleSwitch.MarkBuilt("m.pet") end
 end
 
 -- Mirrors PetActionBar.lua's Apply(): a construction-time failure degrades
@@ -1521,6 +1526,10 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+    -- Module power (m.pet): off, no pet panel is built and the stock pet bar is never hidden. The pet cast bar and the pet
+    -- action bar stand on the panel's slots, so their own loaders read the same switch.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.pet") then return end
     if InCombatLockdown() then
         self:RegisterEvent("PLAYER_REGEN_ENABLED")
         self:SetScript("OnEvent", function(inner)

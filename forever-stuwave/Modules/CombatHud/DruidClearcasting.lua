@@ -670,6 +670,9 @@ local boot = CreateFrame("Frame")
 boot:RegisterEvent("PLAYER_LOGIN")
 boot:SetScript("OnEvent", function(self)
     self:UnregisterAllEvents()
+    -- Module power (m.gs): the Gunsight HUD module off, this piece starts nothing.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.gs") then return end
     local ok, err = pcall(CC.Init)
     if not ok then LogOnce("init", err) end
 end)

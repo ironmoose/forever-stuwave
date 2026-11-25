@@ -1329,5 +1329,8 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+    -- Module power (m.pet): the cast bar builds into the pet panel's top slot; off, there is no slot and nothing is built.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.pet") then return end
     Init()
 end)

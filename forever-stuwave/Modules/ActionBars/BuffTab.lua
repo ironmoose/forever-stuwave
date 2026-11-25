@@ -1779,6 +1779,7 @@ local function Build()
         button:Hide()
     end
     BT.built = true
+    if FS.ModuleSwitch then FS.ModuleSwitch.MarkBuilt("m.class") end
 end
 
 -- Whether a tile's seat disagrees with its view: a Lightning Shield learned (locked -> live), an imbue learned or
@@ -1904,6 +1905,9 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+    -- Module power (m.class): off, this tab builds nothing and listens for nothing.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.class") then return end
     if InCombatLockdown() then
         self:RegisterEvent("PLAYER_REGEN_ENABLED")
         self:SetScript("OnEvent", function(inner)

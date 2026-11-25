@@ -140,26 +140,19 @@ local PINK = { 1, 0.180, 0.592, 1 }       -- #ff2e97
 local BORDER_ALPHA = 0.8
 
 -------------------------------------------------------------------------------
--- Frames (built at file load so the consumers can parent at PLAYER_LOGIN)
+-- Frames (built at ADDON_LOADED, so the consumers can parent at PLAYER_LOGIN)
 -------------------------------------------------------------------------------
 
 local function Scale()
     return FS.Layout.Scale()
 end
 
-local chassis = CreateFrame("Frame", "ForeverSTUwaveDeck", UIParent)
-chassis:SetFrameStrata("HIGH")
-chassis:SetFrameLevel(LEVEL_CHASSIS)
-chassis:SetSize(DeckWidth() * Scale(), DECK_H * Scale())
-
-local microSlot = CreateFrame("Frame", "ForeverSTUwaveDeckMicroSlot", chassis)
-microSlot:SetFrameLevel(LEVEL_SLOT)
-local bagSlot = CreateFrame("Frame", "ForeverSTUwaveDeckBagSlot", chassis)
-bagSlot:SetFrameLevel(LEVEL_SLOT)
-
-Deck.frame = chassis
-Deck.microSlot = microSlot
-Deck.bagSlot = bagSlot
+-- Module power: the deck is the shared plate under the micro menu (Action bars) and the bag slots (Bags). It is made, at this
+-- addon's ADDON_LOADED, only when one of those two is on; with both off nothing of it exists and FS.Deck keeps its numbers
+-- and functions, with no frame fields.
+local MS = FS.ModuleSwitch
+local chassis, microSlot, bagSlot
+local deckBuilt = false
 
 -------------------------------------------------------------------------------
 -- Degrade handling
@@ -227,43 +220,11 @@ local function Seat(region, point, rel, relPoint, x, y)
 end
 
 -------------------------------------------------------------------------------
--- Chassis art
--------------------------------------------------------------------------------
-
--- PetFrame.lua's panel: the two-corner cut outline and, behind it, the nine-sliced
--- two-corner cut fill at inset 0 so it meets the stroke flush. The fill is the
--- Gunsight panel scrim, the same as the pet panel; the outline is
--- COLOR_POWER at BORDER_ALPHA, the data bar's edge, with no glow texture.
-Try("fill", function()
-    FS.Theme.AddCut2Texture(chassis, FS.Theme.SLICE_CUT2_FILL_TEXTURE, FS.Theme.COLOR_HUD_SCRIM, "BACKGROUND", nil, 0)
-end)
-
-Try("border", function()
-    FS.Theme.AddCut2Texture(chassis, FS.Theme.SLICE_CUT2_OUTLINE_TEXTURE,
-        { CYAN[1], CYAN[2], CYAN[3], BORDER_ALPHA }, "BORDER", nil, 0)
-end)
-
--- The `//` between the two slots, seated from the right edge with the slots.
-Try("divider", function()
-    local mark = chassis:CreateTexture(nil, "ARTWORK", nil, 1)
-    mark:SetTexture(TEX_DIVIDER)
-    Seat(mark, "CENTER", chassis, "RIGHT", -DIVIDER_RIGHT, 0)
-    Sized(mark, DIVIDER_ICON, DIVIDER_ICON)
-    Gradient(mark, "VERTICAL", { VIOLET[1], VIOLET[2], VIOLET[3], 0.95 }, { PINK[1], PINK[2], PINK[3], 0.95 })
-end)
-
--------------------------------------------------------------------------------
 -- Geometry and anchoring
 -------------------------------------------------------------------------------
 
--- Slots are seated like the decoration (design px replayed scaled), so they go
--- through the same Seat registry from here on. All three are seated from the
--- RIGHT edge; only the chassis and the micro slot change width (ApplyGeometry).
-Sized(bagSlot, BAG_W, SLOT_H)
-Seat(bagSlot, "RIGHT", chassis, "RIGHT", -BAG_RIGHT, 0)
-Seat(microSlot, "RIGHT", chassis, "RIGHT", -MICRO_RIGHT, 0)
-
 local function ApplyGeometry(scale)
+    if not chassis then return end
     chassis:SetSize(DeckWidth() * scale, DECK_H * scale)
     microSlot:SetSize(microW * scale, SLOT_H * scale)
     for _, entry in ipairs(sized) do
@@ -283,6 +244,7 @@ end
 -- is parked at the screen bottom in the meantime (a rescale or the PLAYER_LOGIN
 -- retry below picks the real anchor up once XPBar.lua has built).
 local function AnchorChassis(scale)
+    if not chassis then return true end   -- no deck this session (Action bars and Bags both off): nothing to seat
     local xp = _G["ForeverSTUwaveXPBar"]
     chassis:ClearAllPoints()
     if xp then
@@ -327,6 +289,7 @@ end
 -- micro buttons, so MicroBars.lua only calls this out of combat, from the reseat
 -- that also seats the keys: the deck and the keys always agree.
 function Deck.SetMicroWidth(w)
+    if not chassis then return false end
     if type(w) ~= "number" or FS.IsSecret(w) or w ~= w or w < 0 then return false end
     if w > MICRO_W_MAX then w = MICRO_W_MAX end
     if w == microW then return true end
@@ -381,8 +344,67 @@ events:SetScript("OnEvent", function(_, event)
     end
 end)
 
--- Seat once at file scope too, so consumers that read the slots' size before
--- PLAYER_LOGIN get a sane value (UIParent is not final yet, which is why the
--- real seating waits for the event above).
-pcall(ApplyGeometry, Scale())
-AnchorChassis(Scale())
+-- The chassis, built once whichever of the two modules that stand on it is on first (see the Frames section). Seated at
+-- ADDON_LOADED too, so consumers that read the slots' size before PLAYER_LOGIN get a sane value (UIParent is not final yet,
+-- which is why the real seating waits for the event above).
+local function BuildChassis()
+    if deckBuilt then return end
+    deckBuilt = true
+    -- With the micro menu not ours (Action bars off) the plate is the bag half only: no micro run, no divider mark.
+    local microOn = MS == nil or MS.On("m.ab")
+    if not microOn then microW = 0 end
+
+    chassis = CreateFrame("Frame", "ForeverSTUwaveDeck", UIParent)
+    chassis:SetFrameStrata("HIGH")
+    chassis:SetFrameLevel(LEVEL_CHASSIS)
+    chassis:SetSize(DeckWidth() * Scale(), DECK_H * Scale())
+
+    microSlot = CreateFrame("Frame", "ForeverSTUwaveDeckMicroSlot", chassis)
+    microSlot:SetFrameLevel(LEVEL_SLOT)
+    bagSlot = CreateFrame("Frame", "ForeverSTUwaveDeckBagSlot", chassis)
+    bagSlot:SetFrameLevel(LEVEL_SLOT)
+
+    Deck.frame = chassis
+    Deck.microSlot = microSlot
+    Deck.bagSlot = bagSlot
+
+    -- PetFrame.lua's panel: the two-corner cut outline and, behind it, the nine-sliced
+    -- two-corner cut fill at inset 0 so it meets the stroke flush. The fill is the
+    -- Gunsight panel scrim, the same as the pet panel; the outline is
+    -- COLOR_POWER at BORDER_ALPHA, the data bar's edge, with no glow texture.
+    Try("fill", function()
+        FS.Theme.AddCut2Texture(chassis, FS.Theme.SLICE_CUT2_FILL_TEXTURE, FS.Theme.COLOR_HUD_SCRIM, "BACKGROUND", nil, 0)
+    end)
+
+    Try("border", function()
+        FS.Theme.AddCut2Texture(chassis, FS.Theme.SLICE_CUT2_OUTLINE_TEXTURE,
+            { CYAN[1], CYAN[2], CYAN[3], BORDER_ALPHA }, "BORDER", nil, 0)
+    end)
+
+    -- The `//` between the two slots, seated from the right edge with the slots.
+    Try("divider", function()
+        if not microOn then return end
+        local mark = chassis:CreateTexture(nil, "ARTWORK", nil, 1)
+        mark:SetTexture(TEX_DIVIDER)
+        Seat(mark, "CENTER", chassis, "RIGHT", -DIVIDER_RIGHT, 0)
+        Sized(mark, DIVIDER_ICON, DIVIDER_ICON)
+        Gradient(mark, "VERTICAL", { VIOLET[1], VIOLET[2], VIOLET[3], 0.95 }, { PINK[1], PINK[2], PINK[3], 0.95 })
+    end)
+
+    -- Slots are seated like the decoration (design px replayed scaled), so they go
+    -- through the same Seat registry from here on. All three are seated from the
+    -- RIGHT edge; only the chassis and the micro slot change width (ApplyGeometry).
+    Sized(bagSlot, BAG_W, SLOT_H)
+    Seat(bagSlot, "RIGHT", chassis, "RIGHT", -BAG_RIGHT, 0)
+    Seat(microSlot, "RIGHT", chassis, "RIGHT", -MICRO_RIGHT, 0)
+
+    pcall(ApplyGeometry, Scale())
+    AnchorChassis(Scale())
+end
+
+if MS then
+    MS.WhenOn("m.ab", BuildChassis)
+    MS.WhenOn("m.bags", BuildChassis)
+else
+    BuildChassis()
+end

@@ -2026,8 +2026,13 @@ local function Setup()
     RequestTalentRead()
 end
 
+-- Module power (m.gs): the state engine behind the Gunsight HUD (its events, its tick) starts only with the module on. Read at
+-- ADDON_LOADED or later only, so the file scope start below waits for it.
+local MS = FS.ModuleSwitch
+
 eventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then
+        if MS and not MS.On("m.gs") then return end
         local ok, err = pcall(Setup)
         if not ok then LogOnce("setup", err) end
         return
@@ -2040,4 +2045,4 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     end
 end)
 
-pcall(Setup)
+if MS then MS.WhenOn("m.gs", function() pcall(Setup) end) else pcall(Setup) end

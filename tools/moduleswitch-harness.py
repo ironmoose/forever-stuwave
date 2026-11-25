@@ -687,6 +687,53 @@ function T.a_window_without_the_switch_store_still_opens()
     eq(#__errors, 0)
 end
 
+local CLASSMOD_TABS = { "general", "druid", "hunter", "mage", "paladin", "priest", "rogue", "shaman", "warlock", "warrior" }
+
+-- the rows the window holds for a Class modules tab (page, tab) as a list of their kinds
+local function classmodKinds(W, tab)
+    W.Open("classmod", tab)
+    local kinds = {}
+    for _, e in ipairs(W.Rows()) do
+        if e.page == "classmod" and e.tab == tab then kinds[#kinds + 1] = e.kind end
+    end
+    return kinds
+end
+
+function T.with_the_gunsight_off_every_class_modules_tab_says_so_in_place_of_its_rows()
+    local W = msboot({ db = { modules = { ["m.gs"] = false } } })
+    for _, tab in ipairs(CLASSMOD_TABS) do
+        local kinds = classmodKinds(W, tab)
+        eq(table.concat(kinds, ","), "note", "the " .. tab .. " tab holds the note and nothing else")
+    end
+    W.Open("classmod", "general")
+    yes(anyText("Gunsight HUD is off. Turning it on takes a Reload UI."), "the off text")
+    errorsClean()
+end
+
+function T.the_class_modules_note_follows_the_switch_turned_back_on_before_the_reload()
+    local W = msboot({ db = { modules = { ["m.gs"] = false } } })
+    W.Open("classmod", "general")
+    yes(anyText("Gunsight HUD is off."))
+    MS().Set("m.gs", true)
+    W.RefreshAll()
+    yes(anyText("Gunsight HUD turns on at the next Reload UI."), "switched back on, waiting for the reload")
+    no(anyText("Gunsight HUD is off."), "the old line is gone")
+    errorsClean()
+end
+
+function T.with_the_gunsight_on_the_class_modules_tabs_hold_their_rows()
+    -- this window loads no class module, so only the General tab (the plate, which needs the Gunsight areas file) has rows
+    local W = msboot()
+    local kinds = classmodKinds(W, "general")
+    yes(#kinds > 0, "the General tab has rows")
+    for _, kind in ipairs(kinds) do no(kind == "note", "no off note on General") end
+    for _, tab in ipairs(CLASSMOD_TABS) do
+        W.Open("classmod", tab)
+        no(anyText("Gunsight HUD is off."), "no off text on " .. tab .. " while the module is on")
+    end
+    errorsClean()
+end
+
 function T.zz_unused() end
 """
 
@@ -1469,6 +1516,472 @@ function T.the_layout_editor_gives_the_tooltip_and_professions_no_handle_while_w
     if type(LE) == "table" and type(LE.HasHandle) == "function" then
         eq(LE.HasHandle("tooltip"), false); eq(LE.HasHandle("professions"), false)
     end
+end
+
+
+-- ---- B5b: action bars (m.ab), addon tabs (m.class), Gunsight HUD (m.gs), pet bar (m.pet) -----------------------------------
+--
+-- The same tolerant client, with the stand-ins these four modules need to run to the end on: the action button fields, the
+-- unit and action APIs. Every row then plays the events the modules answer (a fight, a form change, a pet, a rescale) and the
+-- slash commands that act on the stock bars, so an "off" module has to stay silent through all of them, not only at load.
+
+local B5B = {
+    ["m.ab"] = {
+        files = { "Modules/ActionBars/ActionBars.lua", "Modules/ActionBars/Console.lua", "Modules/ActionBars/ConsoleKeys.lua",
+            "Modules/ActionBars/StanceBar.lua", "Modules/ActionBars/MicroBars.lua", "Modules/ActionBars/ClassShoulder.lua" },
+        named = { "FSActionBarStack", "FSConsole", "FSConsoleTab", "FSStanceBar" },
+        blizzard = { "MainActionBar", "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft", "MultiBar5",
+            "MultiBar6", "MultiBar7", "OverrideActionBar", "MultiCastActionBarFrame", "StanceBar", "MicroMenu", "MicroMenuContainer" },
+    },
+    ["m.pet"] = {
+        files = { "Modules/Pet/PetFrame.lua", "Modules/Pet/PetActionBar.lua", "Modules/Pet/PetCastBar.lua" },
+        named = { "FSPetContainer" },
+        blizzard = { "PetActionBar" },
+    },
+    ["m.class"] = {
+        files = { "Modules/ActionBars/SealBar.lua", "Modules/ActionBars/ShapeshiftTab.lua", "Modules/ActionBars/CallPetTab.lua",
+            "Modules/ActionBars/PortalsTab.lua", "Modules/ActionBars/ConjureTab.lua", "Modules/ActionBars/PoisonsTab.lua",
+            "Modules/ActionBars/DemonTab.lua", "Modules/ActionBars/TotemBar.lua", "Modules/ActionBars/TotemDial.lua",
+            "Modules/ActionBars/ShamanBuffs.lua", "Modules/ActionBars/BuffTab.lua", "Modules/ActionBars/FiveSecondTab.lua",
+            "Modules/ActionBars/ThunderClapTab.lua", "Modules/ActionBars/AmmoTab.lua" },
+        named = { "FSShapeshiftTab", "FSCallPetTab", "FSPortalsTab", "FSConjureTab", "FSPoisonsTab", "FSDemonTab", "FSSealBar",
+            "FSTotemBar", "FSBuffTab", "FSFiveSecondTab", "FSThunderClapTab", "FSAmmoTab", "FSTotemDialTicker" },
+        blizzard = {},
+    },
+}
+local B5B_HOOKED = { "ActionButtonDown", "ActionButtonUp", "MultiActionButtonDown", "MultiActionButtonUp", "MicroButtonPulse",
+    "MicroButtonPulseStop" }
+local B5B_EVENTS = {
+    { "UI_SCALE_CHANGED" }, { "DISPLAY_SIZE_CHANGED" }, { "UPDATE_BINDINGS" }, { "ACTIONBAR_SLOT_CHANGED", 0 },
+    { "ACTIONBAR_PAGE_CHANGED" }, { "UPDATE_BONUS_ACTIONBAR" }, { "UPDATE_SHAPESHIFT_FORM" }, { "UPDATE_SHAPESHIFT_FORMS" },
+    { "PET_BAR_UPDATE" }, { "UNIT_PET", "player" }, { "UNIT_AURA", "player" }, { "PLAYER_TOTEM_UPDATE", 1 }, { "SPELLS_CHANGED" },
+    { "PLAYER_TARGET_CHANGED" }, { "UNIT_HEALTH", "pet" }, { "UNIT_POWER_UPDATE", "player" }, { "PLAYER_ENTERING_WORLD", false, false },
+}
+local B5B_SLASH = { { "FSBARS", "blizz" }, { "FSBARS", "fs" }, { "FSTAINT", "stash" }, { "FSCONSOLE", "off" }, { "FSCONSOLE", "on" },
+    { "FSPET", "unlock" }, { "FSPET", "reset" }, { "FSPET", "lock" } }
+
+local function b5bStubs()
+    date = os.date
+    __combat = false
+    InCombatLockdown = function() return __combat end
+    for name, value in pairs({ UnitXP = 0, UnitXPMax = 100, UnitHealth = 100, UnitHealthMax = 100, UnitPower = 0, UnitPowerMax = 100,
+        UnitLevel = 12, GetBindingText = "" }) do
+        _G[name] = function() return value end
+    end
+    UnitPowerType = function() return 0, "MANA" end
+    GetBindingKey = function() end
+    Watch("Minimap")
+    for _, n in ipairs({ "HasAction", "GetActionTexture", "GetActionInfo", "IsUsableAction", "IsActionInRange", "IsCurrentAction",
+        "IsAutoRepeatAction", "IsAttackAction", "GetActionCooldown", "GetActionCount", "GetActionText", "IsConsumableAction",
+        "IsStackableAction", "IsEquippedAction", "GetActionCharges", "GetActionLossOfControlCooldown", "IsPlayerSpell",
+        "IsSpellKnown", "GetSpellInfo", "GetSpellTexture", "GetSpellCooldown", "GetNumShapeshiftForms", "GetShapeshiftForm",
+        "GetShapeshiftFormInfo", "GetShapeshiftFormCooldown", "GetActionBarPage", "GetBonusBarOffset", "GetOverrideBarIndex",
+        "HasOverrideActionBar", "HasVehicleActionBar", "HasBonusActionBar", "GetPetActionInfo", "GetPetActionCooldown",
+        "GetPetActionsUsable", "PetHasActionBar", "UnitAffectingCombat", "GetTotemInfo", "GetItemCount", "GetItemInfo",
+        "GetInventoryItemID", "GetInventorySlotInfo" }) do
+        if _G[n] == nil then _G[n] = function() end end
+    end
+    for _, n in ipairs(B5B_HOOKED) do _G[n] = function() end end
+    -- the pieces of an action button the stock template brings and the code reads as fields
+    local base = CreateFrame
+    CreateFrame = function(kind, name, parent, template)
+        local f = base(kind, name, parent, template)
+        rawset(f, "TextOverlayContainer", false)
+        if template and tostring(template):find("ActionButtonTemplate") then
+            for _, k in ipairs({ "NormalTexture", "PushedTexture", "HighlightTexture", "CheckedTexture", "QuickKeybindHighlightTexture" }) do
+                rawset(f, k, f:CreateTexture())
+            end
+            for _, k in ipairs({ "HotKey", "Count", "Name" }) do rawset(f, k, f:CreateFontString()) end
+            rawset(f, "UpdateFlyout", false)
+        end
+        return f
+    end
+end
+
+-- every Blizzard frame any of the four modules may touch is watched; `off` is the saved store
+local function b5bWorld(off, extra)
+    local watch = {}
+    for _, module in pairs(B5B) do
+        for _, name in ipairs(module.blizzard) do watch[#watch + 1] = name end
+    end
+    Boot({ off = off, watch = watch, pre = function() b5bStubs(); if extra then extra() end end })
+    for _, ev in ipairs(B5B_EVENTS) do Fire(unpack(ev)) end
+    __combat = true
+    Fire("PLAYER_REGEN_DISABLED"); Fire("UPDATE_SHAPESHIFT_FORM"); Fire("PET_BAR_UPDATE"); Fire("UNIT_PET", "player")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED")
+    for _, pair in ipairs(B5B_SLASH) do
+        local fn = SlashCmdList[pair[1]]
+        if fn then pcall(fn, pair[2]) end
+    end
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+local function b5bClean(key)
+    local module = B5B[key]
+    for _, f in ipairs(module.files) do loaded(f) end
+end
+
+local function b5bNotBuilt(key)
+    local module = B5B[key]
+    eq(FS.ModuleSwitch.On(key), false)
+    eq(FS.ModuleSwitch.Built(key), false, key .. " built nothing")
+    for _, f in ipairs(module.files) do eq(BuiltBy(f), 0, f .. " made no frame after the files loaded") end
+    for _, name in ipairs(module.named) do no(MadeNamed(name), name .. " exists") end
+    for _, f in ipairs(module.files) do
+        for _, name in ipairs(module.blizzard) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+        eq(TouchesOn("hooksecurefunc", f), "", f .. " hooked nothing")
+    end
+end
+
+function T.action_bars_off_builds_nothing_and_leaves_every_stock_bar_alone()
+    b5bWorld({ "m.ab" })
+    b5bClean("m.ab")
+    b5bNotBuilt("m.ab")
+end
+
+function T.action_bars_off_keeps_the_api_and_the_slash_commands_answer_without_touching_the_stock_bars()
+    b5bWorld({ "m.ab" })
+    local A = FS.ActionBars
+    eq(type(A), "table", "FS.ActionBars stays defined")
+    eq(type(A.OnGeometry), "function"); eq(type(A.SetConsoleActive), "function"); eq(type(A.LivePage), "function")
+    eq(A.geometry, nil, "no stack, no geometry: the Console has nothing to follow")
+    eq(type(FS.Console), "table"); eq(type(FS.StanceBar), "table"); eq(type(FS.ConsoleKeys), "table")
+    eq(type(SlashCmdList["FSBARS"]), "function")
+    yes(#__printed > 0)
+    for _, f in ipairs(B5B["m.ab"].files) do
+        for _, name in ipairs(B5B["m.ab"].blizzard) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+end
+
+function T.action_bars_on_builds_the_stack_dims_the_stock_bars_and_marks_itself_built()
+    b5bWorld({})
+    b5bClean("m.ab")
+    eq(FS.ModuleSwitch.Built("m.ab"), true)
+    for _, name in ipairs(B5B["m.ab"].named) do yes(MadeNamed(name), name .. " exists") end
+    for _, name in ipairs({ "MainActionBar", "MultiBarBottomLeft", "StanceBar", "MicroMenu" }) do
+        yes(TouchesOn(name) ~= "", name .. " dimmed")
+    end
+end
+
+function T.pet_bar_off_builds_nothing_and_leaves_the_stock_pet_bar_alone()
+    b5bWorld({ "m.pet" })
+    b5bClean("m.pet")
+    b5bNotBuilt("m.pet")
+    eq(BuiltBy("Modules/Pet/PetDock.lua", "Modules/ActionBars/ClassShoulder.lua"), 0, "no dock chrome")
+    eq(FS.PetFrame.container, nil)
+    eq(FS.PetFrame.barSlot, nil)
+end
+
+function T.pet_bar_off_keeps_its_api_defined_and_the_pet_commands_say_so()
+    b5bWorld({ "m.pet" })
+    eq(type(FS.PetFrame), "table"); eq(type(FS.PetCastBar), "table"); eq(type(FS.PetDock), "table")
+    eq(FS.PetFrame.SeatDocked(UIParent, 0), false, "nothing to dock")
+    eq(FS.PetFrame.SeatFloat(), false)
+    eq(FS.PetFrame.IsDocked(), false)
+    eq(type(SlashCmdList["FSPET"]), "function")
+    __printed = {}
+    SlashCmdList["FSPET"]("reset")
+    yes(#__printed > 0, "the command answers")
+    eq(ErrorsFrom("Modules/Pet/PetFrame.lua"), "")
+end
+
+function T.pet_bar_on_builds_the_panel_dims_the_stock_pet_bar_and_marks_itself_built()
+    b5bWorld({})
+    b5bClean("m.pet")
+    eq(FS.ModuleSwitch.Built("m.pet"), true)
+    yes(MadeNamed("FSPetContainer"), "the pet panel")
+    yes(FS.PetFrame.container and FS.PetFrame.barSlot and FS.PetFrame.castSlot, "exported")
+    yes(TouchesOn("PetActionBar", "Modules/Pet/PetFrame.lua") ~= "", "the stock pet bar is hidden")
+end
+
+-- a Warlock's class tabs stand right of the pet panel's span; with the pet bar off there is no panel to clear
+local function standingFrom(off)
+    b5bWorld(off, function() UnitClass = function() return "Warlock", "WARLOCK", 9 end end)
+    local least
+    if FS.ClassShoulder and FS.ClassShoulder.EachStanding then
+        FS.ClassShoulder.EachStanding(function(dx) if least == nil or dx < least then least = dx end end)
+    end
+    return least
+end
+
+function T.the_class_tabs_stand_close_to_the_console_edge_when_there_is_no_pet_bar_to_clear()
+    local with = standingFrom({})
+    local without = standingFrom({ "m.pet" })
+    yes(with ~= nil, "a tab stands in this world")
+    yes(without ~= nil, "a tab stands with the pet bar off")
+    yes(without < with, "the tabs moved left by the pet span: " .. tostring(without) .. " against " .. tostring(with))
+end
+
+-- the tabs by class: what each class's tab is called when it stands (the mock client has no spells, so the host frame is the
+-- evidence), and the class numbers
+local B5B_CLASSES = {
+    DRUID = { id = 11, host = "FSShapeshiftTab" }, HUNTER = { id = 3, host = "FSCallPetTab" }, MAGE = { id = 8, host = "FSPortalsTab" },
+    PALADIN = { id = 2, host = "FSSealBar" }, ROGUE = { id = 4, host = "FSPoisonsTab" }, SHAMAN = { id = 7, host = "FSTotemBar" },
+    WARLOCK = { id = 9, host = "FSDemonTab" }, WARRIOR = { id = 1, host = "FSThunderClapTab" },
+}
+local function classWorld(off, token)
+    b5bWorld(off, function() UnitClass = function() return token, token, B5B_CLASSES[token].id end end)
+end
+
+local function tabsOffRow(token)
+    classWorld({ "m.class" }, token)
+    b5bClean("m.class")
+    b5bNotBuilt("m.class")
+    local standing = 0
+    FS.ClassShoulder.EachStanding(function() standing = standing + 1 end)
+    eq(standing, 0, "no class shoulder stands")
+    eq(FS.ShapeshiftTab.OwnsForms(), false, "the Druid forms stay with the stance bar")
+    eq(FS.SealBar.OwnsForms(), false, "the Paladin forms stay with the stance bar")
+    eq(type(FS.TotemBar), "table"); eq(type(FS.BuffTab), "table"); eq(type(FS.FiveSecondTab), "table")
+    eq(type(FS.AmmoTab), "table"); eq(type(FS.ThunderClapTab), "table"); eq(type(FS.TotemPresets), "table")
+end
+
+local function tabsOnRow(token)
+    classWorld({}, token)
+    b5bClean("m.class")
+    eq(FS.ModuleSwitch.Built("m.class"), true)
+    yes(MadeNamed(B5B_CLASSES[token].host), token .. " tab " .. B5B_CLASSES[token].host)
+end
+
+function T.addon_tabs_off_draw_nothing_for_a_druid() tabsOffRow("DRUID") end
+function T.addon_tabs_off_draw_nothing_for_a_hunter() tabsOffRow("HUNTER") end
+function T.addon_tabs_off_draw_nothing_for_a_mage() tabsOffRow("MAGE") end
+function T.addon_tabs_off_draw_nothing_for_a_paladin() tabsOffRow("PALADIN") end
+function T.addon_tabs_off_draw_nothing_for_a_rogue() tabsOffRow("ROGUE") end
+function T.addon_tabs_off_draw_nothing_for_a_shaman() tabsOffRow("SHAMAN") end
+function T.addon_tabs_off_draw_nothing_for_a_warlock() tabsOffRow("WARLOCK") end
+function T.addon_tabs_off_draw_nothing_for_a_warrior() tabsOffRow("WARRIOR") end
+
+function T.addon_tabs_on_draw_the_druid_tab() tabsOnRow("DRUID") end
+function T.addon_tabs_on_draw_the_hunter_tab() tabsOnRow("HUNTER") end
+function T.addon_tabs_on_draw_the_mage_tabs() tabsOnRow("MAGE"); yes(MadeNamed("FSConjureTab")) end
+function T.addon_tabs_on_draw_the_paladin_seal_bar() tabsOnRow("PALADIN") end
+function T.addon_tabs_on_draw_the_rogue_tab() tabsOnRow("ROGUE") end
+function T.addon_tabs_on_draw_the_shaman_totem_and_buff_tabs() tabsOnRow("SHAMAN"); yes(MadeNamed("FSBuffTab")); yes(MadeNamed("FSTotemDialTicker")) end
+function T.addon_tabs_on_draw_the_warlock_tab() tabsOnRow("WARLOCK") end
+function T.addon_tabs_on_draw_the_warrior_tab() tabsOnRow("WARRIOR") end
+
+function T.the_mana_regen_and_ammo_tabs_follow_the_same_switch()
+    classWorld({ "m.class" }, "HUNTER")
+    no(MadeNamed("FSFiveSecondTab")); no(MadeNamed("FSAmmoTab"))
+end
+
+function T.the_stock_totem_bar_is_dimmed_only_while_the_totem_tab_stands_in_for_it()
+    local AB = "Modules/ActionBars/ActionBars.lua"
+    classWorld({ "m.class" }, "SHAMAN")
+    eq(TouchesOn("MultiCastActionBarFrame", AB), "", "the stock totem bar stays as the game has it")
+    eq(TouchesOn("MultiBarBottomLeft", AB) ~= "", true, "the other stock bars are still dimmed (Action bars are on)")
+end
+
+function T.the_stock_totem_bar_is_dimmed_when_the_totem_tab_is_on()
+    classWorld({}, "SHAMAN")
+    yes(TouchesOn("MultiCastActionBarFrame", "Modules/ActionBars/ActionBars.lua") ~= "", "dimmed, as before")
+end
+
+function T.addon_tabs_need_the_action_bars_because_every_tab_stands_on_the_console()
+    Boot({})
+    local list = FS.ModuleSwitch.Requires("m.class")
+    eq(#list, 1); eq(list[1], "m.ab")
+    local deps = FS.ModuleSwitch.Dependents("m.ab")
+    local found = false
+    for _, k in ipairs(deps) do if k == "m.class" then found = true end end
+    yes(found, "turning the action bars off lists the tabs")
+end
+
+-- The Gunsight HUD is every file of Modules/CombatHud except HunterState, which the Hunter's ammo tab (Addon tabs) also runs.
+local function hudFiles()
+    local list = {}
+    for _, rel in ipairs(__toc) do
+        if rel:find("^Modules/CombatHud/") and rel ~= "Modules/CombatHud/HunterState.lua" then list[#list + 1] = rel end
+    end
+    return list
+end
+local B5B_GS_HOST = {
+    DRUID = "ForeverSTUwaveGunsightDruid", HUNTER = "ForeverSTUwaveGunsightHunter", MAGE = "ForeverSTUwaveGunsightMage",
+    PALADIN = "ForeverSTUwaveGunsightSeals", PRIEST = "ForeverSTUwaveGunsightPriest", ROGUE = "ForeverSTUwaveGunsightRogue",
+    SHAMAN = "ForeverSTUwaveGunsightShaman", WARLOCK = "ForeverSTUwaveGunsightWarlock", WARRIOR = "ForeverSTUwaveGunsightWarrior",
+}
+B5B_CLASSES.PRIEST = { id = 5 }
+
+local function gunsightNotBuilt()
+    eq(FS.ModuleSwitch.On("m.gs"), false)
+    eq(FS.ModuleSwitch.Built("m.gs"), false, "nothing was built")
+    for _, f in ipairs(hudFiles()) do
+        loaded(f)
+        eq(BuiltBy(f, "Modules/ActionBars/AmmoTab.lua"), 0, f .. " made no frame after the files loaded")
+    end
+    for _, name in pairs(B5B_GS_HOST) do no(MadeNamed(name), name .. " exists") end
+    for _, name in ipairs({ "ForeverSTUwaveCombatHud", "ForeverSTUwaveWarriorPowerUps", "ForeverSTUwaveDruidClearcasting",
+        "ForeverSTUwaveGunsightTargetSide", "ForeverSTUwaveGunsightTargetMenu", "ForeverSTUwaveGunsightMyBuffs" }) do
+        no(MadeNamed(name), name .. " exists")
+    end
+end
+
+local function gunsightOffRow(token)
+    classWorld({ "m.gs" }, token)
+    gunsightNotBuilt()
+end
+
+function T.gunsight_off_builds_nothing_for_a_druid() gunsightOffRow("DRUID") end
+function T.gunsight_off_builds_nothing_for_a_hunter() gunsightOffRow("HUNTER") end
+function T.gunsight_off_builds_nothing_for_a_mage() gunsightOffRow("MAGE") end
+function T.gunsight_off_builds_nothing_for_a_paladin() gunsightOffRow("PALADIN") end
+function T.gunsight_off_builds_nothing_for_a_priest() gunsightOffRow("PRIEST") end
+function T.gunsight_off_builds_nothing_for_a_rogue() gunsightOffRow("ROGUE") end
+function T.gunsight_off_builds_nothing_for_a_shaman() gunsightOffRow("SHAMAN") end
+function T.gunsight_off_builds_nothing_for_a_warlock() gunsightOffRow("WARLOCK") end
+function T.gunsight_off_builds_nothing_for_a_warrior() gunsightOffRow("WARRIOR") end
+
+function T.gunsight_off_keeps_the_api_and_says_it_is_not_the_display()
+    classWorld({ "m.gs" }, "SHAMAN")
+    local G = FS.Gunsight
+    eq(type(G), "table", "FS.Gunsight stays defined")
+    eq(G.IsActive(), false, "the stack A cast bars are the display")
+    eq(G.IsEnabled(), false)
+    eq(type(G.OnReady), "function"); eq(type(G.OnActiveChanged), "function"); eq(type(G.SetPiece), "function")
+    eq(type(FS.Hud), "table"); eq(type(FS.CombatHud), "table")
+    eq(FS.CombatHud.IsEnabled(), false, "the classic combat HUD is part of the module and stays off too")
+    eq(type(SlashCmdList["FSGUN"]), "function")
+    __printed = {}
+    SlashCmdList["FSGUN"]("on")
+    SlashCmdList["FSHUD"]("on")
+    yes(#__printed > 0, "the commands answer")
+    eq(FS.CombatHud.IsEnabled(), false, "/fshud on does not build it")
+    no(MadeNamed("ForeverSTUwaveCombatHud"))
+end
+
+function T.gunsight_off_leaves_the_console_keys_that_are_not_the_hud_standing()
+    classWorld({ "m.gs" }, "PRIEST")
+    yes(FS.ConsoleKeys.IsBuilt(), "the party, quest and chat keys are built")
+    eq(FS.ConsoleKeys.ShownCount(), 3, "party, quests and chat: no HUD key is drawn")
+    for _, k in ipairs(FS.ConsoleKeys.keys) do
+        local hud = k.key ~= "party" and k.key ~= "quests" and k.key ~= "chat"
+        if hud then no(k.shown, k.key .. " is a HUD key") end
+    end
+end
+
+local function gunsightOnRow(token)
+    classWorld({}, token)
+    for _, f in ipairs(hudFiles()) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.gs"), true)
+    eq(FS.Gunsight.IsEnabled(), true)
+    yes(MadeNamed("ForeverSTUwaveGunsight"))
+    yes(MadeNamed(B5B_GS_HOST[token]), B5B_GS_HOST[token])
+end
+
+function T.gunsight_on_builds_the_druid_pieces() gunsightOnRow("DRUID") end
+function T.gunsight_on_builds_the_hunter_pieces() gunsightOnRow("HUNTER") end
+function T.gunsight_on_builds_the_mage_pieces() gunsightOnRow("MAGE") end
+function T.gunsight_on_builds_the_paladin_pieces() gunsightOnRow("PALADIN") end
+function T.gunsight_on_builds_the_priest_pieces() gunsightOnRow("PRIEST") end
+function T.gunsight_on_builds_the_rogue_pieces() gunsightOnRow("ROGUE") end
+function T.gunsight_on_builds_the_shaman_pieces() gunsightOnRow("SHAMAN"); yes(BuiltBy("Modules/CombatHud/GunsightTape.lua") > 0, "the tapes") end
+function T.gunsight_on_builds_the_warlock_pieces() gunsightOnRow("WARLOCK") end
+function T.gunsight_on_builds_the_warrior_pieces() gunsightOnRow("WARRIOR"); yes(MadeNamed("ForeverSTUwaveWarriorPowerUps")) end
+
+function T.the_hunter_ammo_tab_still_has_its_state_with_the_gunsight_off()
+    classWorld({ "m.gs" }, "HUNTER")
+    yes(MadeNamed("FSAmmoTab"), "the ammo tab is the Addon tabs module's, not the HUD's")
+    eq(type(FS.HunterState), "table")
+end
+
+-- ---- every pair of the four off together ------------------------------------------------------------------------------
+-- The two that are off build nothing, the two that are on build as they do alone, and no module file raises an error through
+-- the fight, the shapeshift, the pet summon and the slash commands. A Hunter (pet, ammo tab) and a Shaman (totems, the drop)
+-- are the two classes that reach the most of the four.
+local B5B_PAIR_HOST = { m_ab = "FSActionBarStack", m_pet = "FSPetContainer", m_gs = "ForeverSTUwaveGunsight" }
+
+local function pairRow(a, b, token)
+    classWorld({ a, b }, token)
+    local MS = FS.ModuleSwitch
+    local function isOff(key) return key == a or key == b end
+    for _, key in ipairs({ "m.ab", "m.class", "m.gs", "m.pet" }) do eq(MS.On(key), not isOff(key), key .. " switch") end
+    b5bClean("m.ab"); b5bClean("m.class"); b5bClean("m.pet")
+    for _, f in ipairs(hudFiles()) do loaded(f) end
+    -- what is off is not built
+    for _, key in ipairs({ "m.ab", "m.class", "m.pet" }) do
+        if isOff(key) then b5bNotBuilt(key) end
+    end
+    if isOff("m.gs") then gunsightNotBuilt() end
+    -- what is on is built as it is alone
+    if not isOff("m.ab") then
+        eq(MS.Built("m.ab"), true, "action bars built"); yes(MadeNamed("FSActionBarStack"), "the stack")
+    end
+    if not isOff("m.pet") then
+        eq(MS.Built("m.pet"), true, "pet bar built"); yes(MadeNamed("FSPetContainer"), "the pet panel")
+    end
+    if not isOff("m.gs") then
+        eq(MS.Built("m.gs"), true, "Gunsight built"); yes(MadeNamed("ForeverSTUwaveGunsight"), "the Gunsight root")
+    end
+    if not isOff("m.class") and not isOff("m.ab") then
+        eq(MS.Built("m.class"), true, "tabs built"); yes(MadeNamed(B5B_CLASSES[token].host), "the " .. token .. " tab")
+    end
+    -- a tab with no action bars under it is never seated or shown (a store that turns the tabs on and the bars off by hand
+    -- still builds the tab frames, empty and hidden), and the Console is not made
+    if isOff("m.ab") then
+        no(MadeNamed("FSConsole"), "no Console")
+        local standing = 0
+        FS.ClassShoulder.EachStanding(function() standing = standing + 1 end)
+        eq(standing, 0, "no class shoulder stands without the Console")
+        for _, f in ipairs(B5B["m.class"].files) do eq(ErrorsFrom(f), "", f .. " raised no error") end
+    end
+    -- the Blizzard frames of the off modules were never touched (the on modules dim theirs, as they do alone)
+    for _, key in ipairs({ "m.ab", "m.pet" }) do
+        if isOff(key) then
+            for _, name in ipairs(B5B[key].blizzard) do
+                for _, file in ipairs(B5B[key].files) do eq(TouchesOn(name, file), "", name .. " untouched by " .. file) end
+            end
+        end
+    end
+end
+
+function T.pair_action_bars_and_addon_tabs_off_for_a_hunter() pairRow("m.ab", "m.class", "HUNTER") end
+function T.pair_action_bars_and_gunsight_off_for_a_hunter() pairRow("m.ab", "m.gs", "HUNTER") end
+function T.pair_action_bars_and_pet_bar_off_for_a_hunter() pairRow("m.ab", "m.pet", "HUNTER") end
+function T.pair_addon_tabs_and_gunsight_off_for_a_hunter() pairRow("m.class", "m.gs", "HUNTER") end
+function T.pair_addon_tabs_and_pet_bar_off_for_a_hunter() pairRow("m.class", "m.pet", "HUNTER") end
+function T.pair_gunsight_and_pet_bar_off_for_a_hunter() pairRow("m.gs", "m.pet", "HUNTER") end
+function T.pair_action_bars_and_addon_tabs_off_for_a_shaman() pairRow("m.ab", "m.class", "SHAMAN") end
+function T.pair_action_bars_and_gunsight_off_for_a_shaman() pairRow("m.ab", "m.gs", "SHAMAN") end
+function T.pair_action_bars_and_pet_bar_off_for_a_shaman() pairRow("m.ab", "m.pet", "SHAMAN") end
+function T.pair_addon_tabs_and_gunsight_off_for_a_shaman() pairRow("m.class", "m.gs", "SHAMAN") end
+function T.pair_addon_tabs_and_pet_bar_off_for_a_shaman() pairRow("m.class", "m.pet", "SHAMAN") end
+function T.pair_gunsight_and_pet_bar_off_for_a_shaman() pairRow("m.gs", "m.pet", "SHAMAN") end
+
+function T.all_four_off_together_still_loads_and_runs_clean()
+    classWorld({ "m.ab", "m.class", "m.gs", "m.pet" }, "SHAMAN")
+    for _, key in ipairs({ "m.ab", "m.class", "m.pet" }) do b5bClean(key); b5bNotBuilt(key) end
+    for _, f in ipairs(hudFiles()) do loaded(f) end
+    gunsightNotBuilt()
+end
+
+-- the Deck holds the micro bar (action bars) and the bag bar (bags): it is built while either is on, never when both are off
+function T.the_deck_is_built_with_only_the_bags_on()
+    classWorld({ "m.ab" }, "SHAMAN")
+    yes(MadeNamed("ForeverSTUwaveDeck"), "the deck stands for the bag bar")
+    loaded("Modules/ActionBars/Deck.lua")
+end
+
+function T.the_deck_is_built_with_only_the_action_bars_on()
+    classWorld({ "m.bags" }, "SHAMAN")
+    yes(MadeNamed("ForeverSTUwaveDeck"), "the deck stands for the micro bar")
+    loaded("Modules/ActionBars/Deck.lua")
+end
+
+function T.the_deck_is_not_built_with_the_action_bars_and_the_bags_both_off()
+    classWorld({ "m.ab", "m.bags" }, "SHAMAN")
+    no(MadeNamed("ForeverSTUwaveDeck"), "no deck")
+    no(MadeNamed("ForeverSTUwaveDeckMicroSlot")); no(MadeNamed("ForeverSTUwaveDeckBagSlot"))
+    loaded("Modules/ActionBars/Deck.lua"); loaded("Modules/ActionBars/MicroBars.lua"); loaded("Modules/Bags/BagBar.lua")
+end
+
+function T.the_deck_is_built_with_both_on()
+    classWorld({}, "SHAMAN")
+    yes(MadeNamed("ForeverSTUwaveDeck"))
+    loaded("Modules/ActionBars/Deck.lua")
 end
 
 return T
