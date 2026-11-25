@@ -594,7 +594,7 @@ def _runtime(
     rt.eval(LOAD_AS_ADDON)(
         (ADDON / "Core/Config.lua").read_text(encoding="utf-8"), "@Core/Config.lua", "forever-stuwave",
         rt.globals().FS)
-    for filename in ("Modules/UnitFrames/FrameStyle.lua", "Core/FrameHelpers.lua", "Modules/UnitFrames/PartyFrames.lua"):
+    for filename in ("Modules/UnitFrames/FrameStyle.lua", "Core/FrameHelpers.lua", "Modules/UnitFrames/FrameExtras.lua", "Modules/UnitFrames/PartyFrames.lua"):
         load((ADDON / filename).read_text(encoding="utf-8"), f"@{filename}", rt.globals().FS)
     if quiet:
         _assert_quiet(rt)

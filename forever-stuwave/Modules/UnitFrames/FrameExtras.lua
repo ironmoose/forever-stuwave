@@ -271,3 +271,325 @@ function Extras.Preview(f)
         if key ~= "player" and On(key, "threatPct") then x.pct:SetText("87%"); x.pct:Show() else x.pct:Hide() end
     else x.threat:Hide() end
 end
+
+-------------------------------------------------------------------------------
+-- Group frames (party rows and raid cells): corner markers and aggro
+-------------------------------------------------------------------------------
+-- Everything below is drawn on plain regions of the row's non-secure child, so a style change applies in combat.
+-- Aura reads are refused under combat lockdown on this client: the callers read only while FS.AurasReadable(), so
+-- the markers hold what they showed when the fight began and refresh when it ends (PLAYER_REGEN_ENABLED).
+
+local MARKER_MAX = 8
+Extras.MARKER_MAX = MARKER_MAX
+local MISSING_BUFF = { 1, 0.231, 0.306, 0.55 }   -- #ff3b4e at .55: a buff they are missing
+Extras.DEBUFF_TYPES = { "Magic", "Curse", "Poison", "Disease" }
+
+-- The heal over time spells a class casts, by aura name, each with its own marker colour (the aura is read from a
+-- HELPFUL list and kept only when it is the player's own).
+Extras.HOTS = {
+    PRIEST = { { "Renew", 0.224, 1, 0.078 } },
+    DRUID = { { "Rejuvenation", 1, 0.180, 0.592 }, { "Regrowth", 0.133, 0.878, 1 }, { "Lifebloom", 1, 0.7137, 0.2824 } },
+    SHAMAN = { { "Earth Shield", 0.133, 0.878, 1 } },
+}
+
+local function PlayerClassToken()
+    if type(UnitClass) ~= "function" then return nil end
+    local ok, _, token = pcall(UnitClass, "player")
+    if ok and not IsSecret(token) and type(token) == "string" then return token end
+    return nil
+end
+
+local function Shared() return FS.PartyFrames and FS.PartyFrames.shared end
+
+local function Push(out, n, r, g, b, a, kind)
+    n = n + 1
+    local e = out[n]
+    if not e then e = {}; out[n] = e end
+    e[1], e[2], e[3], e[4], e.kind = r, g, b, a, kind
+    return n
+end
+
+local function NoReport() end
+
+-- Fills `out` with the markers a unit shows (entries { r, g, b, a, kind }) and returns how many. `harmful` is the
+-- unit's HARMFUL aura list the caller already scanned (aura.dispelType), or nil. A secret name, type or caster is
+-- never compared; it just draws nothing.
+function Extras.ReadMarkers(out, unit, key, harmful)
+    local n = 0
+    local shared = Shared()
+    if On(key, "mkHot") then
+        local hots = Extras.HOTS[PlayerClassToken() or ""]
+        local read = FS.FrameHelpers and FS.FrameHelpers.ReadAuraSlot
+        if hots and read then
+            local seen = {}
+            for slot = 1, 32 do
+                local aura = read(unit, slot, "HELPFUL|PLAYER", NoReport)
+                if not aura then break end
+                local name, caster = aura.name, aura.caster
+                if not IsSecret(name) and type(name) == "string" and not seen[name]
+                    and (caster == nil or IsSecret(caster) or caster == "player") then
+                    for _, hot in ipairs(hots) do
+                        if hot[1] == name then
+                            seen[name] = true
+                            if n < MARKER_MAX then n = Push(out, n, hot[2], hot[3], hot[4], 1, "hot") end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if key == "raid" and On(key, "mkDebuff") and harmful and shared then
+        local mine = Style.Get(key, "mkDebuffWho") ~= "all"
+        local set = shared.DISPELS and shared.DISPELS.Set() or {}
+        local colors = Theme and Theme.DISPEL_COLORS or {}
+        for _, kind in ipairs(Extras.DEBUFF_TYPES) do
+            if On(key, "mk" .. kind) and (not mine or set[kind]) then
+                for _, aura in ipairs(harmful) do
+                    local t = aura.dispelType
+                    if not IsSecret(t) and t == kind then
+                        local c = colors[kind] or { 1, 1, 1, 1 }
+                        if n < MARKER_MAX then n = Push(out, n, c[1], c[2], c[3], 1, "deb " .. kind:lower()) end
+                        break
+                    end
+                end
+            end
+        end
+    end
+    if key == "raid" and On(key, "mkBuff") and shared and shared.EvaluatePartyBuffs then
+        local list, count = shared.EvaluatePartyBuffs(unit)
+        for i = 1, count do
+            if list[i].reason == "missing" and n < MARKER_MAX then
+                n = Push(out, n, MISSING_BUFF[1], MISSING_BUFF[2], MISSING_BUFF[3], MISSING_BUFF[4], "buff")
+            end
+        end
+    end
+    for i = n + 1, #out do out[i] = nil end
+    return n
+end
+
+-- A row of squares in one corner of `parent`, built once.
+function Extras.BuildMarkers(parent, level, anchor)
+    local host = CreateFrame("Frame", nil, parent)
+    host:SetAllPoints(anchor or parent)
+    if level then host:SetFrameLevel(level) end
+    local m = { host = host, tex = {}, list = {}, shown = 0 }
+    for i = 1, MARKER_MAX do
+        local t = host:CreateTexture(nil, "OVERLAY")
+        t:SetColorTexture(1, 1, 1, 1)
+        t:Hide()
+        m.tex[i] = t
+    end
+    return m
+end
+
+local CORNER_VERTICAL = { topleft = "TOP", topright = "TOP", bottomleft = "BOTTOM", bottomright = "BOTTOM" }
+local CORNER_SIDE = { topleft = "LEFT", topright = "RIGHT", bottomleft = "LEFT", bottomright = "RIGHT" }
+
+-- Sizes and seats the squares for the frame's marker size and corner.
+function Extras.SeatMarkers(m, key)
+    local size, corner = Style.Number(key, "mkSize"), Style.Get(key, "mkPos")
+    if not CORNER_SIDE[corner] then corner = Style.Default(key, "mkPos") end
+    if m.seatSize == size and m.seatCorner == corner then return end
+    m.seatSize, m.seatCorner = size, corner
+    local v, s = CORNER_VERTICAL[corner], CORNER_SIDE[corner]
+    local sign = s == "RIGHT" and -1 or 1
+    local y = v == "TOP" and -2 or 2
+    for i, t in ipairs(m.tex) do
+        t:SetSize(size, size)
+        t:ClearAllPoints()
+        t:SetPoint(v .. s, m.host, v .. s, sign * (3 + (i - 1) * (size + 1)), y)
+    end
+end
+
+-- Paints `list[1..n]` (plain colours): the squares beyond n hide.
+function Extras.PaintMarkers(m, key, list, n)
+    Extras.SeatMarkers(m, key)
+    for i, t in ipairs(m.tex) do
+        local e = i <= n and list[i] or nil
+        if e then
+            t:SetColorTexture(e[1], e[2], e[3], e[4])
+            t:Show()
+        else
+            t:Hide()
+        end
+    end
+    m.shown = n
+end
+
+-- True when the switches say a held marker of this kind still shows.
+local function KindOn(key, kind)
+    if kind == "hot" then return On(key, "mkHot") end
+    if kind == "buff" then return On(key, "mkBuff") end
+    local type_ = kind:match("^deb (%a+)$")
+    if type_ then return On(key, "mkDebuff") and On(key, "mk" .. type_:sub(1, 1):upper() .. type_:sub(2)) end
+    return true
+end
+
+-- A switch turned off in a fight takes its held markers out; nothing is read.
+function Extras.Rehold(m, key)
+    local n = 0
+    for i = 1, m.shown do
+        local e = m.list[i]
+        if e and KindOn(key, e.kind) then
+            n = n + 1
+            if n ~= i then
+                local keep = m.list[n]
+                m.list[n] = e
+                m.list[i] = keep
+            end
+        end
+    end
+    m.shown = n
+end
+
+-- Reads a unit's markers and paints them; false when the read is refused (the old squares stay as they were).
+function Extras.UpdateMarkers(m, unit, key, harmful)
+    if not m then return false end
+    if not (FS.AurasReadable and FS.AurasReadable()) then return false end
+    local n = Extras.ReadMarkers(m.list, unit, key, harmful)
+    Extras.PaintMarkers(m, key, m.list, n)
+    return true
+end
+
+-- Sample markers for a preview member `i` (1 is the player), through the same switches and colours the live read uses.
+function Extras.PreviewList(out, key, i)
+    local n = 0
+    local shared = Shared()
+    if On(key, "mkHot") then
+        local hots = Extras.HOTS[PlayerClassToken() or ""] or Extras.HOTS.PRIEST
+        if i == 2 or i == 8 or key == "party" then n = Push(out, n, hots[1][2], hots[1][3], hots[1][4], 1, "hot") end
+        if i == 2 or key == "party" then
+            local h2 = hots[2] or { "", 0.133, 0.878, 1 }
+            n = Push(out, n, h2[2], h2[3], h2[4], 1, "hot")
+        end
+    end
+    if key == "raid" and On(key, "mkDebuff") then
+        local sample = { [3] = "Magic", [6] = "Curse", [5] = "Poison", [7] = "Disease" }
+        local kind = sample[i]
+        if kind and On(key, "mk" .. kind) then
+            local set = shared and shared.DISPELS and shared.DISPELS.Set() or {}
+            if Style.Get(key, "mkDebuffWho") == "all" or set[kind] then
+                local c = Theme.DISPEL_COLORS[kind]
+                n = Push(out, n, c[1], c[2], c[3], 1, "deb " .. kind:lower())
+            end
+        end
+    end
+    if key == "raid" and On(key, "mkBuff") and (i == 4 or i == 7) then
+        n = Push(out, n, MISSING_BUFF[1], MISSING_BUFF[2], MISSING_BUFF[3], MISSING_BUFF[4], "buff")
+    end
+    for k = n + 1, #out do out[k] = nil end
+    return n
+end
+
+-- A fill whose opacity can change: `build(panel, color)` draws the fill (Theme.AddRoundedFill, AddCutSliceFill ...); the
+-- default set is drawn at once, other opacities are drawn the first time they are asked for and then kept, so dragging a
+-- slider builds one set per step and never one per frame. Returns { Set = fn(alpha) } (alpha is the fill's own).
+function Extras.NewFill(panel, build, color)
+    local fill = { sets = {}, shown = nil }
+    local function Draw(alpha)
+        local list = {}
+        local own = rawget(panel, "CreateTexture")
+        local create = panel.CreateTexture
+        panel.CreateTexture = function(self, ...)
+            local t = create(self, ...)
+            list[#list + 1] = t
+            return t
+        end
+        local ok, err = pcall(build, panel, { color[1], color[2], color[3], alpha })
+        panel.CreateTexture = own
+        if not ok then error(err, 0) end
+        -- a texture the builder itself hid (a nine slice that did not load) stays hidden
+        local kept = {}
+        for _, t in ipairs(list) do
+            if type(t.IsShown) ~= "function" or t:IsShown() then kept[#kept + 1] = t end
+        end
+        return kept
+    end
+    local key0 = math.floor((color[4] or 1) * 1000 + 0.5)
+    fill.sets[key0] = Draw(color[4] or 1)
+    fill.shown = key0
+    fill.base = color[4] or 1
+    function fill.Set(alpha)
+        alpha = math.max(0, math.min(1, alpha))
+        local key = math.floor(alpha * 1000 + 0.5)
+        if key == fill.shown then return end
+        for _, t in ipairs(fill.sets[fill.shown] or {}) do t:Hide() end
+        local set = fill.sets[key]
+        if not set then set = Draw(alpha); fill.sets[key] = set end
+        for _, t in ipairs(set) do t:Show() end
+        fill.shown = key
+    end
+    return fill
+end
+
+-- The aggro ring of a group frame: a skinned cut ring on `ring` (a frame seated on the box or cell by the caller, one
+-- level above its edge), pink when a mob is on them, amber when they are close to it, and the share of the mob's threat.
+function Extras.BuildGroupAggro(ring, chamfer)
+    local a = { ring = ring }
+    if Theme and Theme.SkinButton then
+        Theme.SkinButton(ring, { chamfer = chamfer, glowAlpha = 0.5, borderColor = PINK })
+    end
+    ring:Hide()
+    a.pct = Text(ring, 8, 1, 1, 1)
+    a.pct:Hide()
+    return a
+end
+
+local function Tone(a, color)
+    local skin = a.ring.fsSkin
+    if skin and skin.border and skin.border.ring then skin.border.ring:SetVertexColor(color[1], color[2], color[3], 1) end
+    if skin and skin.glow then skin.glow:SetVertexColor(color[1], color[2], color[3], 0.5) end
+    a.pct:SetTextColor(color[1], color[2], color[3], 1)
+end
+
+-- Seats the percent text in the frame's corner and nudges it by the Aggro % offset.
+function Extras.SeatGroupAggro(a, key, point, rel, x, y)
+    a.pct:ClearAllPoints()
+    a.pct:SetPoint(point, a.ring, rel, x + Style.Number(key, "threatX"), y)
+end
+
+-- Reads a group member's threat and paints the ring and the percent. Feature detected and secret guarded: a client that
+-- hides the numbers draws nothing, and no number is ever compared before IsSecret has said it is plain.
+function Extras.UpdateGroupAggro(a, unit, key)
+    if not a then return end
+    if not On(key, "threat") or type(UnitThreatSituation) ~= "function" then a.ring:Hide(); a.pct:Hide(); return end
+    local status
+    local ok, s = pcall(UnitThreatSituation, unit)
+    if ok and not IsSecret(s) and type(s) == "number" then status = s end
+    local pct
+    if type(UnitDetailedThreatSituation) == "function" then
+        local okd, _, _, scaled = pcall(UnitDetailedThreatSituation, unit, "target")
+        if okd and not IsSecret(scaled) and type(scaled) == "number" then pct = scaled end
+    end
+    if status == nil and pct == nil then a.ring:Hide(); a.pct:Hide(); return end
+    if status and status >= 2 then Tone(a, PINK)
+    elseif (status == 1) or (pct and pct >= Extras.NEAR) then Tone(a, AMBER)
+    else a.ring:Hide(); a.pct:Hide(); return end
+    a.ring:Show()
+    if On(key, "threatPct") and pct then
+        a.pct:SetFormattedText("%d%%", math.floor(pct + 0.5)); a.pct:Show()
+    else
+        a.pct:Hide()
+    end
+end
+
+-- A sample ring and percent for the Style tab previews. kind: "pink" (a mob is on them), "amber" (close: only the share
+-- shows) or nil (nothing).
+function Extras.PreviewGroupAggro(a, key, kind, text)
+    if not a then return end
+    if kind and On(key, "threat") then
+        Tone(a, kind == "pink" and PINK or AMBER)
+        a.ring:SetShown(kind == "pink")
+        if On(key, "threatPct") then a.pct:SetText(text or "100%"); a.pct:Show() else a.pct:Hide() end
+    else
+        a.ring:Hide(); a.pct:Hide()
+    end
+end
+
+-- The step a group frame runs on a threat event or a full refresh: f.groupAggro (the ring), f.groupKey ("party" or "raid"),
+-- f.unit. A frame with no ring built (the style module missing) does nothing.
+function Extras.UpdateGroupRow(f)
+    local a = f.groupAggro
+    if not a or not f.groupKey then return end
+    Extras.UpdateGroupAggro(a, f.unit, f.groupKey)
+end

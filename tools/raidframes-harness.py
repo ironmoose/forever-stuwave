@@ -347,7 +347,7 @@ def _runtime(*, before_load: str = "", parent_height: int = 1440, player_class: 
     load((ADDON / "Core/Layout.lua").read_text(encoding="utf-8"), "@Core/Layout.lua", fs)
     rt.eval(P.LOAD_AS_ADDON)(
         (ADDON / "Core/Config.lua").read_text(encoding="utf-8"), "@Core/Config.lua", "forever-stuwave", fs)
-    for filename in ("Modules/UnitFrames/FrameStyle.lua", "Core/FrameHelpers.lua", "Modules/UnitFrames/PartyFrames.lua"):
+    for filename in ("Modules/UnitFrames/FrameStyle.lua", "Core/FrameHelpers.lua", "Modules/UnitFrames/FrameExtras.lua", "Modules/UnitFrames/PartyFrames.lua"):
         load((ADDON / filename).read_text(encoding="utf-8"), f"@{filename}", fs)
     rt.execute("__tickersBeforeRaid=#__tickers __framesBeforeRaid=#__frames")
     load((ADDON / "Modules/UnitFrames/RaidFrames.lua").read_text(encoding="utf-8"),

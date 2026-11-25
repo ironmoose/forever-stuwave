@@ -103,6 +103,37 @@ local function OptionList(list)
 end
 
 local CORNERS = { { "topleft", "Top left" }, { "topright", "Top right" }, { "bottomleft", "Bottom left" }, { "bottomright", "Bottom right" } }
+local GROUP = { "party", "raid" }
+
+-- The player's own party buffs, one switch each (PartyFrames' PARTY_BUFFS, saved where /fsparty buff saves them).
+local function PlayerClassToken()
+    if type(UnitClass) ~= "function" then return nil end
+    local ok, _, token = pcall(UnitClass, "player")
+    return ok and type(token) == "string" and token or nil
+end
+
+local function DispelSwatches()
+    local colors = FS.Theme and FS.Theme.DISPEL_COLORS or {}
+    local out = {}
+    for _, kind in ipairs({ "Magic", "Curse", "Poison", "Disease" }) do
+        local c = colors[kind]
+        if c then out[#out + 1] = { { c[1], c[2], c[3] }, kind:lower() } end
+    end
+    return out
+end
+
+local function BuffRows()
+    local shared = FS.PartyFrames and FS.PartyFrames.shared
+    local out = {}
+    if not (shared and shared.PARTY_BUFFS) then return out end
+    for _, class in ipairs({ "PRIEST", "MAGE", "DRUID" }) do
+        for _, buff in ipairs(shared.PARTY_BUFFS[class] or {}) do
+            out[#out + 1] = { kind = "pbuff", buff = buff, class = class, label = buff.spell, frames = { "party" }, sub = true,
+                needs = "alertBuffs", nl = "Missing buffs" }
+        end
+    end
+    return out
+end
 
 Bars.SECTIONS = {
     { title = "Frame", tip = "The whole frame. Height grows or shrinks the health bar; the data row and power bar keep their size.", rows = {
@@ -195,13 +226,54 @@ Bars.SECTIONS = {
         { kind = "sl", suffix = "threatX", label = "Aggro % offset", frames = Except("pet", "player"), min = -60, max = 60, step = 1, unit = "px",
           sub = true, needs = "threatPct", nl = "Aggro %", tip = "Below 0 moves it left, above 0 moves it right." },
     } },
+    { title = "Markers", tip = "Small coloured squares in a corner of each frame. Auras can only be read out of combat on this client: in a fight the markers hold what they showed when it started, until the fight ends.", rows = {
+        { kind = "sw", suffix = "mkHot", label = "My heal over time", frames = GROUP,
+          tip = "One square per heal over time you cast on them, in that spell's colour. Only yours." },
+        { kind = "sw", suffix = "dispelEdge", label = "Debuff border", frames = { "raid" },
+          tip = "The frame border takes the colour of a debuff you can remove, as today." },
+        { kind = "sw", suffix = "mkDebuff", label = "Debuff markers", frames = { "raid" },
+          tip = "One square per debuff type on them. Party shows these as icons beside the row instead (Cleanse and missing buffs)." },
+        { kind = "seg", suffix = "mkDebuffWho", label = "Show", frames = { "raid" }, sub = true, needs = "mkDebuff", nl = "Debuff markers",
+          options = { { "mine", "Ones I can remove" }, { "all", "All" } } },
+        { kind = "sw", suffix = "mkMagic", label = "Magic", frames = { "raid" }, sub = true, needs = "mkDebuff", nl = "Debuff markers" },
+        { kind = "sw", suffix = "mkCurse", label = "Curse", frames = { "raid" }, sub = true, needs = "mkDebuff", nl = "Debuff markers" },
+        { kind = "sw", suffix = "mkPoison", label = "Poison", frames = { "raid" }, sub = true, needs = "mkDebuff", nl = "Debuff markers" },
+        { kind = "sw", suffix = "mkDisease", label = "Disease", frames = { "raid" }, sub = true, needs = "mkDebuff", nl = "Debuff markers" },
+        { kind = "swatch", label = "Colours", frames = { "raid" }, sub = true, needs = "mkDebuff", nl = "Debuff markers", colors = DispelSwatches() },
+        { kind = "sw", suffix = "mkBuff", label = "Missing buff markers", frames = { "raid" },
+          tip = "A dim red square when they are missing a buff you can cast. A buff that is up never shows, whoever cast it." },
+        { kind = "sl", suffix = "mkSize", label = "Marker size", frames = GROUP, min = 3, max = 12, step = 1, unit = "px" },
+        { kind = "seg", suffix = "mkPos", label = "Corner", frames = GROUP, options = CORNERS },
+    } },
+    { title = "Cleanse and missing buffs", tip = "Icons beside each party row: debuffs you can cleanse first, then buffs you can cast that the member is missing. They sit outside the frames so nothing moves when they come and go.", rows = {
+        { kind = "sw", suffix = "alerts", label = "Alert icons", frames = { "party" } },
+        { kind = "seg", suffix = "alertSide", label = "Side", frames = { "party" }, sub = true, needs = "alerts", nl = "Alert icons",
+          options = { { "left", "Left" }, { "right", "Right" } },
+          tip = "Left by default: with the Gunsight HUD on, the right side runs into the cast bar." },
+        { kind = "sl", suffix = "alertSize", label = "Icon size", frames = { "party" }, min = 14, max = 32, step = 1, unit = "px", sub = true,
+          needs = "alerts", nl = "Alert icons" },
+        { kind = "sl", suffix = "alertMax", label = "Most icons per row", frames = { "party" }, min = 1, max = 5, step = 1, sub = true,
+          needs = "alerts", nl = "Alert icons" },
+        { kind = "sw", suffix = "alertCleanse", label = "Debuffs you can cleanse", frames = { "party" }, sub = true, needs = "alerts", nl = "Alert icons",
+          tip = "Ringed in the dispel colour: magic blue, curse purple, poison green, disease brown. Only types your class can remove." },
+        { kind = "sw", suffix = "alertBuffs", label = "Missing buffs", frames = { "party" }, sub = true, needs = "alerts", nl = "Alert icons",
+          tip = "Dim red icon of the buff, only for buffs you know. A buff that is up never shows, whoever cast it." },
+    } },
 }
+for _, buffRow in ipairs(BuffRows()) do
+    table.insert(Bars.SECTIONS[#Bars.SECTIONS].rows, buffRow)
+end
 
 -- What a frame's rows already change on the live frame. Unit frames apply every row; the party, raid and pet frames list
 -- theirs, and the rest show greyed with a reason instead of doing nothing silently.
 Bars.WIRED = {
-    raid = { w = true, alpha = true, nameSize = true, role = true, raidLook = true },
-    party = { alpha = true },
+    raid = { w = true, alpha = true, nameSize = true, role = true, raidLook = true, raidFmt = true, hpH = true, mpH = true,
+             hpTs = true, bgAlpha = true, threat = true, threatPct = true, threatX = true, mkHot = true, dispelEdge = true,
+             mkDebuff = true, mkDebuffWho = true, mkMagic = true, mkCurse = true, mkPoison = true, mkDisease = true,
+             mkBuff = true, mkSize = true, mkPos = true },
+    party = { alpha = true, w = true, hpStyle = true, mpStyle = true, bgAlpha = true, threat = true, threatPct = true,
+              threatX = true, mkHot = true, mkSize = true, mkPos = true, alerts = true, alertSide = true, alertSize = true,
+              alertMax = true, alertCleanse = true, alertBuffs = true },
     pet = {},
 }
 local NOT_WIRED = "This setting is not applied to this frame yet."
@@ -260,7 +332,7 @@ local function BuildRow(content, row, ctx)
     if row.needs or Bars.WIRED[ctx.firstFrame] ~= nil or ctx.firstFrame ~= frame() then
         local needsReason = row.needs and ("Requires |cffffffff" .. (row.nl or row.needs) .. "|r to be on.") or nil
         entry.enabled = function()
-            if row.suffix and not Bars.IsWired(frame(), row.suffix) and not row.derived then entry.reason = NOT_WIRED; return false end
+            if row.suffix and not Bars.IsWired(frame(), row.derived and "hpH" or row.suffix) then entry.reason = NOT_WIRED; return false end
             if row.needs and Style.Get(frame(), row.needs) ~= true then entry.reason = needsReason; return false end
             return true
         end
@@ -274,6 +346,20 @@ local function BuildRow(content, row, ctx)
         entry.set = function(value) return Style.Set(frame(), suffix, value) end
     end
 
+    if row.kind == "pbuff" then
+        -- one of the player's own party buffs: the switch /fsparty buff saves, applied to the tray at once
+        local shared, buff = FS.PartyFrames.shared, row.buff
+        entry.regKey = "pbuff." .. buff.key
+        entry.when = function() return RowShown(row, frame()) and PlayerClassToken() == row.class end
+        entry.get = function() return shared.BuffEnabled(buff) end
+        entry.set = function(value) return shared.SetBuff(buff.key, value) end
+        entry.isChanged = function()
+            local saved = shared.SavedBuffValue(buff)
+            return saved ~= nil and saved ~= buff.default
+        end
+        entry.reset = function() shared.SetBuff(buff.key, nil) end
+        return UI.Toggle(content, entry)
+    end
     if row.kind == "swatch" then
         return UI.Swatch(content, { label = row.label, sub = row.sub, colors = row.colors, tip = row.tip,
             when = entry.when, enabled = entry.enabled, reason = entry.reason })
