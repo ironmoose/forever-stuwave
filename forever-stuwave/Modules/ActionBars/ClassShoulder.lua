@@ -103,6 +103,7 @@ end
 -- question whose answer says the class's bar is up. Append only; a class not listed here never gets one.
 local OWNERS = {
     DRUID = ClassTab("druid", "ShapeshiftTab", 1),
+    HUNTER = ClassTab("hunter", "CallPetTab", 1),
     PALADIN = {
         key = "paladin", cols = C.COLS, rows = C.ROWS,
         wants = function()
