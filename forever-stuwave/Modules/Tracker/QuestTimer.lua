@@ -19,6 +19,12 @@ local _, FS = ...
 local QT = {}
 FS.QuestTimer = QT
 
+-- Module power (Core/ModuleSwitch.lua). The drawer belongs to the Quest tracker switch: off, nothing here is built or
+-- listens and the game's own timer window is left alone (QT.Refresh and the rest stay defined). It hangs from the STUwave
+-- minimap's key row while that module is built; with the Minimap switch off it hangs under the game's own minimap instead.
+local MS = FS.ModuleSwitch
+local function MinimapOurs() return MS == nil or MS.On("m.mini") end
+
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 local KEY = "questTimer.shown"
 QT.KEY = KEY
@@ -37,6 +43,7 @@ local D = {
     TEXT_X = 66,                           -- name, gauge and label start here
     NAME_PX = 10, LABEL_PX = 8,
     GAUGE_Y = 12, GAUGE_H = 4, GAUGE_N = 20,
+    STOCK_W = 250,                         -- the drawer's width under the game's own map (the STUwave map is 250 wide)
 }
 local CELL_W, CELL_H, ATLAS, GLOW_PAD, GLOW_W, GLOW_H = 10, 12, 64, 2, 14, 16
 local AMBER_AT, PINK_AT = 60, 15
@@ -188,6 +195,14 @@ local function Seat(host)
     G.px = factor and factor / scale or s
     G.k = s / G.px
     G.n = math.max(1, math.floor(G.k + 0.5))
+    G.e = scale
+end
+
+-- The pixel grid the drawer was last laid out on (a harness reads it): physical pixels per design px, per LED texel, and the
+-- effective scale of the drawer then. The drawer is a child of the minimap's key row, so a change of the map's own Scale
+-- changes that scale and with it every count here.
+function QT.Pixels()
+    return { px = G.px, k = G.k, n = G.n, scale = G.e }
 end
 
 local function P(d) return math.floor(d * G.k + 0.5) end
@@ -270,7 +285,17 @@ end
 -- timer down instead of covering it.
 local function Anchor(f)
     local bezel = _G.Minimap and _G.Minimap.fsBezel
-    if not (f and bezel) then return end
+    if not f then return end
+    if not bezel then
+        -- Minimap switch off: the drawer hangs under the game's own map, as wide as the STUwave map is, flush with its
+        -- right edge (the game's map is round and narrower than the drawer's rows need).
+        local stock = f.fsStockMap
+        if not stock or f.fsHost == stock then return end
+        f.fsHost = stock
+        f:ClearAllPoints()
+        f:SetPoint("TOPRIGHT", stock, "BOTTOMRIGHT", 0, 0)
+        return
+    end
     local tray = _G.Minimap.fsTray
     local host = (tray and tray.IsShown and tray:IsShown()) and tray or bezel
     if f.fsHost == host then return end
@@ -291,10 +316,19 @@ end
 local function Build()
     if drawer then WatchTray(drawer); Anchor(drawer); return drawer end
     local bezel = _G.Minimap and _G.Minimap.fsBezel
-    if not bezel then return nil end
+    -- The STUwave map's key row, or (Minimap switch off) the game's own map. A map that is ours but not built yet is waited for.
+    local stock = (not bezel and not MinimapOurs()) and _G.Minimap or nil
+    local parent = bezel or stock
+    if not parent then return nil end
     local T = FS.Theme
-    local f = CreateFrame("Frame", "ForeverSTUwaveQuestTimer", bezel)
-    f:SetFrameLevel(bezel:GetFrameLevel())
+    local f = CreateFrame("Frame", "ForeverSTUwaveQuestTimer", bezel or UIParent)
+    if bezel then
+        f:SetFrameLevel(bezel:GetFrameLevel())
+    else
+        f.fsStockMap = stock
+        f:SetFrameStrata("MEDIUM")
+        f:SetFrameLevel(10)
+    end
     f:SetHeight(1)
     f:Hide()
     f.fill, f.glow, f.border = T.AddPanelChrome(f, { fillColor = T.COLOR_BG, accent = T.COLOR_POWER })
@@ -415,6 +449,14 @@ local laidOutFor
 
 local function Paint()
     if not drawer then return end
+    -- A change of the minimap's Scale (or its size, or the UI scale) changes what a physical pixel is in the drawer's own
+    -- units: lay it out again on the new grid.
+    local okE, e = pcall(drawer.GetEffectiveScale, drawer)
+    if okE and type(e) == "number" and not IsSecret(e) and G.e and math.abs(e - G.e) > 1e-4 then
+        laidOutFor = nil
+        QT.Refresh()
+        return
+    end
     local now = GetTime()
     local worst
     for i, row in ipairs(drawer.rows) do
@@ -472,6 +514,7 @@ function QT.Refresh()
         return
     end
     Seat(f)
+    if f.fsStockMap then f:SetWidth(P(D.STOCK_W) * G.px) end
     local widthPx = math.floor((f:GetWidth() or 0) / G.px + 0.5)
     if widthPx <= 0 then
         local bezel = _G.Minimap.fsBezel
@@ -493,24 +536,27 @@ function QT.Refresh()
     if not ticker and C_Timer and C_Timer.NewTicker then ticker = C_Timer.NewTicker(0.25, Paint) end
 end
 
-local events = CreateFrame("Frame")
-for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "UPDATE_QUEST_TIMERS",
-    "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }) do
-    pcall(events.RegisterEvent, events, e)
-end
-events:SetScript("OnEvent", function(_, event)
-    if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then laidOutFor = nil end
-    local ok, err = pcall(QT.Refresh)
+local function Start()
+    local events = CreateFrame("Frame")
+    for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "UPDATE_QUEST_TIMERS",
+        "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }) do
+        pcall(events.RegisterEvent, events, e)
+    end
+    events:SetScript("OnEvent", function(_, event)
+        if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then laidOutFor = nil end
+        local ok, err = pcall(QT.Refresh)
 
-    if not ok and FS.LogDegradeOnce then FS.LogDegradeOnce("questtimer", "Quest timer: " .. tostring(err)) end
-end)
-
-if FS.Config and FS.Config.OnChange then
-    FS.Config.OnChange(KEY, function()
-        QT.Refresh()
-        local stock = _G.QuestTimerFrame
-        if not Enabled() and stock and type(_G.GetQuestTimers) == "function" and select("#", _G.GetQuestTimers()) > 0 then
-            stock:Show()
-        end
+        if not ok and FS.LogDegradeOnce then FS.LogDegradeOnce("questtimer", "Quest timer: " .. tostring(err)) end
     end)
+
+    if FS.Config and FS.Config.OnChange then
+        FS.Config.OnChange(KEY, function()
+            QT.Refresh()
+            local stock = _G.QuestTimerFrame
+            if not Enabled() and stock and type(_G.GetQuestTimers) == "function" and select("#", _G.GetQuestTimers()) > 0 then
+                stock:Show()
+            end
+        end)
+    end
 end
+if MS then MS.WhenOn("m.track", Start) else Start() end

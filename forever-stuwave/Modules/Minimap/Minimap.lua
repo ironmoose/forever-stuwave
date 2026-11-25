@@ -2856,6 +2856,8 @@ end
 -- Minimap is a non-secure frame, so none of the steps above are combat-illegal;
 -- deferred anyway for consistency with the rest of the addon's Init pattern.
 local function Apply()
+    -- Built from the first step on: the map is ours now, and a later step that throws does not hand it back to Blizzard.
+    if MS then MS.MarkBuilt("m.mini") end
     ApplyLayout()
     ApplySquareMask()
     HideBlizzardChrome()
@@ -2868,7 +2870,6 @@ local function Apply()
     ApplyReadout()
     ApplyMinimapTray()
     ApplyScanline()
-    if MS then MS.MarkBuilt("m.mini") end
 end
 
 -- PLAYER_LOGIN, not file scope. Two reasons, both bitten already elsewhere in

@@ -768,7 +768,7 @@ local function isRead(name)
 end
 
 local function Sponge(label, isWatched)
-    local self = { _label = label, _scripts = {}, _events = {}, _hooks = {}, _regions = {} }
+    local self = { _label = label, _scripts = {}, _events = {}, _hooks = {}, _regions = {}, _points = {} }
     if isWatched then watched[self] = label end
     return setmetatable(self, ownMT)
 end
@@ -808,8 +808,25 @@ ownMT.__index = function(t, k)
         return function(self) return self._name end
     elseif k == "GetParent" then
         return function(self) return self._parent end
-    elseif k == "GetChildren" or k == "GetRegions" or k == "GetPoint" then
+    elseif k == "GetChildren" or k == "GetRegions" then
         return function() end
+    elseif k == "SetPoint" then
+        return function(self, point, rel, relPoint, x, y)
+            if watched[self] then touch(self._label .. ":SetPoint") end
+            self._points[#self._points + 1] = { point, rel, relPoint, x, y }
+        end
+    elseif k == "ClearAllPoints" then
+        return function(self)
+            if watched[self] then touch(self._label .. ":ClearAllPoints") end
+            self._points = {}
+        end
+    elseif k == "GetPoint" then
+        return function(self, i)
+            local p = self._points[i or 1]
+            if p then return p[1], p[2], p[3], p[4], p[5] end
+        end
+    elseif k == "GetNumPoints" then
+        return function(self) return #self._points end
     elseif k == "SetParent" then
         return function(self, p)
             if watched[self] then touch(self._label .. ":SetParent") end
@@ -881,7 +898,12 @@ function InCombatLockdown() return false end
 function GetTime() return 100 end
 function geterrorhandler() return function(e) __errors[#__errors + 1] = tostring(e) end end
 function print(...) local t = {} for i = 1, select("#", ...) do t[#t + 1] = tostring((select(i, ...))) end __printed[#__printed + 1] = table.concat(t, " ") end
-C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end, NewTicker = function(_, fn) return { Cancel = function() end } end }
+__tickers = {}
+C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end, NewTicker = function(_, fn)
+    local t = { fn = fn, Cancel = function(self) self.cancelled = true end }
+    __tickers[#__tickers + 1] = t
+    return t
+end }
 function wipe(t) for k in pairs(t) do t[k] = nil end return t end
 function tinsert(t, v) table.insert(t, v) end
 function strtrim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
@@ -951,7 +973,7 @@ function Boot(opts)
     local timers = __timers
     __timers = {}
     for _, fn in ipairs(timers) do pcall(fn) end
-    Fire("PLAYER_REGEN_ENABLED")
+    if not opts.noRegen then Fire("PLAYER_REGEN_ENABLED") end
 end
 
 -- Child frames of a watched Blizzard frame ({ Child = { GrandChild = true } }): each is a stub that records its own touches
@@ -965,6 +987,18 @@ local function attach(parent, label, tree)
 end
 function WatchTree(name, tree)
     attach(_G[name] or Watch(name), name, tree)
+end
+
+-- A Blizzard panel the way Theme.SkinPanel meets it: the art children a stripped panel is searched for are absent (false), so
+-- the skin finds nothing to hide; `children` adds real (watched) child frames.
+local CHROME_KEYS = { "NineSlice", "Bg", "BG", "Background", "TitleBg", "TitleContainer", "TopTileStreaks", "TopBorder",
+    "BottomBorder", "LeftBorder", "RightBorder", "PortraitContainer", "PortraitFrame", "portrait", "PortraitOverlay",
+    "Inset", "InsetFrame", "ScrollFrameInset", "ListInset", "CloseButton", "Close", "TitleText", "TitleBar" }
+function WatchPanel(name, children)
+    local f = _G[name] or Watch(name)
+    for _, key in ipairs(CHROME_KEYS) do rawset(f, key, false) end
+    if children then attach(f, name, children) end
+    return f
 end
 
 -- every touch recorded on a watched Blizzard frame (and its watched children), as one string ("" when it was left alone);
@@ -1167,6 +1201,148 @@ function T.minimap_on_builds_the_body_defines_the_shape_and_marks_itself_built()
     yes(Minimap.fsPlaced, "the map was seated")
     yes(TouchesOn("Minimap") ~= "", "the stock map was reshaped")
     yes(TouchesOn("MinimapInstanceDifficulty") ~= "", "the banner was skinned")
+end
+
+local TRACK_FILES = { "Modules/Tracker/Tracker.lua", "Modules/Tracker/TrackerSeat.lua", "Modules/Tracker/QuestTimer.lua",
+    "Modules/ActionBars/ConsoleKeys.lua" }
+local TRACK_BLIZZARD = { "ObjectiveTrackerFrame", "QuestTimerFrame", "RightManagedFrameContainer",
+    "ObjectiveTrackerHeaderFont", "ObjectiveTrackerLineFont", "QuestObjectiveTracker", "CampaignQuestObjectiveTracker",
+    "ScenarioObjectiveTracker", "ProfessionsRecipeTracker" }
+local editModeSaves
+local function trackWorld(off, extraWatch, boot)
+    local watch = {}
+    for _, n in ipairs(TRACK_BLIZZARD) do watch[#watch + 1] = n end
+    for _, n in ipairs(extraWatch or {}) do watch[#watch + 1] = n end
+    editModeSaves = 0
+    boot = boot or {}
+    Boot({ off = off, watch = watch, noRegen = boot.noRegen, pre = function()
+        WatchPanel("QuestTimerFrame")
+        if boot.combat then InCombatLockdown = function() return true end end
+        WatchTree("ObjectiveTrackerFrame", { Header = { MinimizeButton = true, Background = true, Text = true }, NineSlice = true })
+        for _, module in ipairs({ "QuestObjectiveTracker", "CampaignQuestObjectiveTracker", "ScenarioObjectiveTracker", "ProfessionsRecipeTracker" }) do
+            WatchTree(module, { Header = { Background = true, Text = true, MinimizeButton = true } })
+        end
+        Enum.EditModeSystem = { ObjectiveTracker = 7 }
+        Enum.EditModeLayoutType = { Preset = 0, Account = 1 }
+        local system = { system = 7, isInDefaultPosition = true, anchorInfo = { point = "TOPRIGHT", relativeTo = "UIParent", relativePoint = "TOPRIGHT", offsetX = 0, offsetY = -200 } }
+        local layout = { layoutType = 1, layoutName = "Mine", systems = { system } }
+        C_EditMode = {
+            GetLayouts = function() return { layouts = { layout }, activeLayout = 1 } end,
+            SaveLayouts = function() editModeSaves = editModeSaves + 1 end,
+            SetActiveLayout = function() end,
+        }
+        EditModePresetLayoutManager = { GetCopyOfPresetLayouts = function() return {} end }
+        C_QuestLog = {
+            GetNumQuestLogEntries = function() return 1 end,
+            GetInfo = function() return { questID = 77, title = "Hurry", isHeader = false } end,
+            GetTimeAllowed = function() return 600, 30 end,
+        }
+    end })
+    Fire("QUEST_LOG_UPDATE"); Fire("UPDATE_QUEST_TIMERS"); if not boot.noRegen then Fire("PLAYER_REGEN_ENABLED") end; Fire("UI_SCALE_CHANGED")
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+function T.quest_tracker_off_builds_nothing_hooks_nothing_and_writes_no_edit_mode_layout()
+    trackWorld({ "m.track" })
+    for _, f in ipairs(TRACK_FILES) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.track"), false)
+    eq(BuiltBy("Modules/Tracker/Tracker.lua"), 0, "no panel frame")
+    eq(BuiltBy("Modules/Tracker/QuestTimer.lua"), 0, "no timer drawer, no event frame")
+    no(MadeNamed("ForeverSTUwaveQuestTimer"))
+    for _, name in ipairs(TRACK_BLIZZARD) do
+        for _, f in ipairs(TRACK_FILES) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+    eq(FS.Tracker.Panel(), nil)
+    FS.Tracker.Refresh()
+    eq(FS.TrackerSeat.Ready(), false, "no seat to report, so the layout editor shows no handle")
+    eq(FS.TrackerSeat.Rect(), nil)
+    local ok, why = FS.TrackerSeat.Move(10, -10)
+    eq(ok, false); yes(why:find("off", 1, true), why)
+    ok = FS.TrackerSeat.Reset()
+    eq(ok, false)
+    eq(editModeSaves, 0, "nothing saved into the Edit Mode layout")
+end
+
+function T.quest_tracker_off_keeps_its_api_and_settings_defined()
+    trackWorld({ "m.track" })
+    eq(type(FS.Tracker.SIZE), "table"); eq(type(FS.Tracker.SIZE_LOCKED), "string")
+    eq(FS.Tracker.SIZE.scale.key, "tracker.scale")
+    eq(type(FS.QuestTimer.Digits), "function")
+    eq(FS.QuestTimer.Read(100) ~= nil, true)
+    FS.Config.Set("tracker.scale", 150); FS.Config.Set("tracker.alpha", 50); FS.Config.Set("questTimer.shown", false)
+    for _, name in ipairs(TRACK_BLIZZARD) do eq(TouchesOn(name), "", name .. " untouched by a changed setting") end
+end
+
+function T.quest_tracker_on_builds_the_panel_and_the_seat_writes_the_layout_as_before()
+    trackWorld({})
+    for _, f in ipairs(TRACK_FILES) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.track"), true)
+    yes(FS.Tracker.Panel(), "the panel exists")
+    yes(TouchesOn("ObjectiveTrackerFrame", "Modules/Tracker/Tracker.lua") ~= "", "the stock tracker is skinned")
+    eq(FS.TrackerSeat.Ready(), true)
+    eq(FS.TrackerSeat.Move(10, -10), true)
+    eq(editModeSaves, 1)
+end
+
+function T.the_console_quests_key_does_not_hook_the_stock_tracker_while_the_quest_tracker_is_off()
+    trackWorld({ "m.track" })
+    eq(TouchesOn("ObjectiveTrackerFrame", "Modules/ActionBars/ConsoleKeys.lua"), "")
+    trackWorld({})
+    -- on: the key follows a collapse made some other way (a post-hook on SetCollapsed)
+    yes(TouchesOn("ObjectiveTrackerFrame", "Modules/ActionBars/ConsoleKeys.lua"):find("SetCollapsed", 1, true), "hooked when on")
+end
+
+local function timerDrawer()
+    local drawer = _G.ForeverSTUwaveQuestTimer
+    yes(drawer, "the timer drawer was built")
+    return drawer
+end
+
+function T.the_quest_timer_hangs_from_the_minimap_key_row_while_the_minimap_is_ours()
+    trackWorld({}, { "Minimap" })
+    local d = timerDrawer()
+    eq(d._parent, Minimap.fsBezel, "a child of the key row, so it scales with the map")
+    eq(d._points[1][2], Minimap.fsBezel)
+    eq(d._points[1][3], "BOTTOMLEFT")
+end
+
+function T.the_quest_timer_falls_back_to_the_stock_minimap_while_the_minimap_module_is_off()
+    trackWorld({ "m.mini" }, { "Minimap" })
+    loaded("Modules/Tracker/QuestTimer.lua")
+    local d = timerDrawer()
+    eq(Minimap.fsBezel, nil)
+    eq(d._parent, UIParent)
+    eq(#d._points, 1)
+    eq(d._points[1][1], "TOPRIGHT"); eq(d._points[1][2], Minimap); eq(d._points[1][3], "BOTTOMRIGHT")
+    eq(TouchesOn("Minimap", "Modules/Tracker/QuestTimer.lua"), "", "anchored to, never written to")
+end
+
+function T.the_quest_timer_waits_for_a_minimap_that_is_ours_but_not_built_yet()
+    -- logged in during a fight: the minimap's build waits for the end of it, and the timer must not seat under the stock map
+    trackWorld({}, { "Minimap" }, { combat = true, noRegen = true })
+    eq(Minimap.fsBezel, nil, "the map is not built yet")
+    no(MadeNamed("ForeverSTUwaveQuestTimer"), "no drawer under the stock map while ours is coming")
+    InCombatLockdown = function() return false end
+    Fire("PLAYER_REGEN_ENABLED")
+    yes(Minimap.fsBezel, "built at the end of the fight")
+    FS.QuestTimer.Refresh()
+    local d = timerDrawer()
+    eq(d._parent, Minimap.fsBezel)
+end
+
+function T.the_quest_timer_lays_out_again_on_a_new_grid_when_the_minimap_scale_changes()
+    trackWorld({}, { "Minimap" })
+    local d = timerDrawer()
+    local before = FS.QuestTimer.Pixels()
+    yes(#__tickers > 0, "a paint ticker runs while a timer shows")
+    rawset(d, "GetEffectiveScale", function() return 1.5 end)   -- the map's Scale is now 150%: the drawer inherits it
+    for _, t in ipairs(__tickers) do if not t.cancelled then t.fn() end end
+    local after = FS.QuestTimer.Pixels()
+    eq(after.scale, 1.5)
+    yes(math.abs(after.k / before.k - 1.5) < 0.001, "a design px is 1.5 times as many physical pixels: " .. after.k .. " vs " .. before.k)
+    yes(after.n >= before.n)
 end
 
 return T

@@ -38,6 +38,11 @@
 
 local _, FS = ...
 
+-- Module power (Core/ModuleSwitch.lua): the build at the end of this file (the panel, the sub-heads, the quest rows, the
+-- quest timer skin and the size settings) runs only with the Quest tracker switch on. Off, Blizzard's objective tracker is
+-- left exactly as the client draws it; FS.Tracker, its settings table and its size keys stay defined.
+local MS = FS.ModuleSwitch
+
 -------------------------------------------------------------------------------
 -- Theme (shared chrome + palette; see Theme.lua for signatures)
 -------------------------------------------------------------------------------
@@ -1420,21 +1425,11 @@ end
 
 if FS.Config and FS.Config.RegisterDefault then
     for _, spec in pairs(SIZE) do FS.Config.RegisterDefault(spec.key, spec.default) end
-    FS.Config.OnChange(SIZE.bgAlpha.key, Guard(ApplyBackground))
-    FS.Config.OnChange(SIZE.alpha.key, Guard(ApplyOpacity))
-    FS.Config.OnChange(SIZE.scale.key, Guard(ApplyScale))
 end
 
--- The profile loads after the files run: apply what it holds at login, and a scale held back in combat when it ends.
-local sizeWatcher = CreateFrame("Frame")
-sizeWatcher:RegisterEvent("PLAYER_LOGIN")
-sizeWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
-sizeWatcher:SetScript("OnEvent", Guard(function(_, event)
-    if event == "PLAYER_REGEN_ENABLED" and not scalePending then return end
-    ApplySizeSettings()
-end))
-
 local function Apply()
+    -- Built from the first step on: the tracker is ours now, and a later step that throws does not hand it back to Blizzard.
+    if MS then MS.MarkBuilt("m.track") end
     StyleHeaderFont()
     StyleLineFont()
     BuildContainerChrome()
@@ -1450,10 +1445,29 @@ FS.PanelSkins.RegisterInspect("Tracker", {
     { name = "QuestTimerFrame", guard = "fsQuestTimerSkin" },
 })
 
-FS.PanelSkins.DeferCombat(Apply)
+-- Everything that listens or hooks starts here, only with the switch on.
+local function Start()
+    if FS.Config and FS.Config.OnChange then
+        FS.Config.OnChange(SIZE.bgAlpha.key, Guard(ApplyBackground))
+        FS.Config.OnChange(SIZE.alpha.key, Guard(ApplyOpacity))
+        FS.Config.OnChange(SIZE.scale.key, Guard(ApplyScale))
+    end
 
--- Blizzard_QuestTimer is its own addon and may load after this file.
-FS.PanelSkins.WatchAddonLoad(SkinQuestTimer, function(name) return name == "Blizzard_QuestTimer" end)
+    -- The profile loads after the files run: apply what it holds at login, and a scale held back in combat when it ends.
+    local sizeWatcher = CreateFrame("Frame")
+    sizeWatcher:RegisterEvent("PLAYER_LOGIN")
+    sizeWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+    sizeWatcher:SetScript("OnEvent", Guard(function(_, event)
+        if event == "PLAYER_REGEN_ENABLED" and not scalePending then return end
+        ApplySizeSettings()
+    end))
+
+    FS.PanelSkins.DeferCombat(Apply, "m.track")
+
+    -- Blizzard_QuestTimer is its own addon and may load after this file.
+    FS.PanelSkins.WatchAddonLoad(SkinQuestTimer, function(name) return name == "Blizzard_QuestTimer" end, "m.track")
+end
+if MS then MS.WhenOn("m.track", Start) else Start() end
 
 -------------------------------------------------------------------------------
 -- Left alone
