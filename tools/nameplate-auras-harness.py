@@ -334,7 +334,7 @@ FS = {
         ReadAuraSlot = function() __slotReads = __slotReads + 1 return nil end,
     }, { __index = function() return function() end end }),
 }
-C_NamePlate = { GetNamePlateForUnit = function(unit)
+local function mkplate(unit)
     __plates = __plates or {}
     if not __plates[unit] then
         local p = __newFrame("Frame", nil, nil)
@@ -342,7 +342,21 @@ C_NamePlate = { GetNamePlateForUnit = function(unit)
         __plates[unit] = p
     end
     return __plates[unit]
-end }
+end
+-- The units whose plate is up (addPlate / removePlate keep it): what GetNamePlates answers, with or without the events.
+__up = {}
+C_NamePlate = {
+    GetNamePlateForUnit = mkplate,
+    GetNamePlates = function()
+        local out = {}
+        for unit in pairs(__up) do
+            local p = mkplate(unit)
+            p.namePlateUnitToken = unit
+            out[#out + 1] = p
+        end
+        return out
+    end,
+}
 
 -- .toc order: Modules/Nameplates/Nameplates.lua loads BEFORE Theme.lua, FrameHelpers.lua and the rest, so
 -- none of what they put on FS exists while this file's top level runs. The file is loaded with
@@ -350,6 +364,7 @@ end }
 local LOADED_LATER = { "Theme", "FrameHelpers", "AurasReadable", "OnAurasReadable", "IsSecret", "LogDegradeOnce" }
 function boot()
     local fn = assert(loadstring(__SRC, "@Modules/Nameplates/Nameplates.lua"))
+    local framesBefore = #__frames
     local later = {}
     for _, k in ipairs(LOADED_LATER) do later[k] = FS[k]; FS[k] = nil end
     local ok, err = pcall(fn, "forever-stuwave", FS)
@@ -360,6 +375,15 @@ function boot()
     FS.LogDegradeOnce = later.LogDegradeOnce
     FS.OnAurasReadable = function(f) __readableCallbacks[#__readableCallbacks + 1] = f end
     if not ok then error("loading Modules/Nameplates/Nameplates.lua before Theme.lua threw: " .. tostring(err), 0) end
+    -- The file registers its events at its own ADDON_LOADED (after every file has loaded), as the client sends it: to the
+    -- frame this load made (a second boot in one world leaves the first load's frame behind).
+    for i = framesBefore + 1, #__frames do
+        local f = __frames[i]
+        if f._scripts.OnEvent and f._events.ADDON_LOADED then
+            local okLoaded, errLoaded = pcall(f._scripts.OnEvent, f, "ADDON_LOADED", "forever-stuwave")
+            if not okLoaded then error("ADDON_LOADED threw: " .. tostring(errLoaded), 0) end
+        end
+    end
 end
 
 -- Test helpers ------------------------------------------------------------------------
@@ -367,11 +391,14 @@ function check(c, msg) if not c then error("CHECK FAILED: " .. msg, 2) end end
 function evframe()
     for _, f in ipairs(__frames) do if f._scripts.OnEvent then return f end end
 end
+-- Delivers an event the way the client does: only to a frame that has the event registered.
 function fire(event, ...)
     local f = evframe()
     check(f, "no event frame")
+    if not f._events[event] then return false end
     local ok, err = pcall(f._scripts.OnEvent, f, event, ...)
     check(ok, "event handler threw on " .. event .. ": " .. tostring(err))
+    return true
 end
 function drain()
     local n = 0
@@ -391,8 +418,8 @@ function pendingTimers()
     for _, t in ipairs(__timers) do if not t.fired then n = n + 1 end end
     return n
 end
-function addPlate(unit) fire("NAME_PLATE_UNIT_ADDED", unit) end
-function removePlate(unit) fire("NAME_PLATE_UNIT_REMOVED", unit) end
+function addPlate(unit) __up[unit] = true; fire("NAME_PLATE_UNIT_ADDED", unit) end
+function removePlate(unit) __up[unit] = nil; fire("NAME_PLATE_UNIT_REMOVED", unit) end
 function degraded(key)
     local n = 0
     for _, k in ipairs(__degrade) do if k == key then n = n + 1 end end

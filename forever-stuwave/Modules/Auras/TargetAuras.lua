@@ -409,13 +409,23 @@ local function Init()
     if not ok then ReportOnce("refresh focus", err) end
 end
 
-if InCombatLockdown() then
-    local regen = CreateFrame("Frame")
-    regen:RegisterEvent("PLAYER_REGEN_ENABLED")
-    regen:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+local function Start()
+    if InCombatLockdown() then
+        local regen = CreateFrame("Frame")
+        regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        regen:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            Init()
+        end)
+    else
         Init()
-    end)
+    end
+end
+
+-- Module power (Core/ModuleSwitch.lua): the aura rows hang off the target and focus frames, so they belong to Unit frames. With
+-- that switch off there are no frames to hang them on, nothing here runs and no event is registered.
+if FS.ModuleSwitch then
+    FS.ModuleSwitch.WhenOn("m.uf", Start)
 else
-    Init()
+    Start()
 end

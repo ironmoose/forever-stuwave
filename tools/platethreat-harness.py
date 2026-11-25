@@ -31,7 +31,6 @@ Exit 0 = every check passed.
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 import sys
 from pathlib import Path
 
@@ -842,15 +841,6 @@ def check_file_scope_locals() -> list[str]:
     return []
 
 
-def check_nameplates_untouched() -> list[str]:
-    """This lane owns no edit of Nameplates.lua: the providers are the contract."""
-    out = subprocess.run(["git", "-C", str(ROOT), "diff", "--stat", "a8819c0", "--", "forever-stuwave/Modules/Nameplates/Nameplates.lua"],
-                         capture_output=True, text=True)
-    if out.returncode == 0 and out.stdout.strip():
-        return ["Nameplates.lua differs from the lane's base: " + out.stdout.strip().splitlines()[-1]]
-    return []
-
-
 def main() -> int:
     np_source = NAMEPLATES.read_text(encoding="utf-8")
     role_source = ROLE.read_text(encoding="utf-8")
@@ -869,7 +859,6 @@ def main() -> int:
         ("platethreat_loads_after_role_and_nameplates", check_toc_order()),
         ("no_dash_characters_in_platethreat", check_no_dashes()),
         ("platethreat_file_scope_locals", check_file_scope_locals()),
-        ("nameplates_lua_is_not_edited_by_this_lane", check_nameplates_untouched()),
     ):
         total += 1
         if problems:

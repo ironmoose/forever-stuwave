@@ -1400,7 +1400,9 @@ local function FramesStateLine()
     for _, unit in ipairs({ "player", "target" }) do
         parts[#parts + 1] = unit .. " " .. (FS.Config.Get(HIDE_KEYS[unit]) == true and "hidden" or "shown")
     end
-    return table.concat(parts, ", ")
+    local line = table.concat(parts, ", ")
+    if FS.ModuleSwitch and not FS.ModuleSwitch.On("m.uf") then line = line .. "; the Unit frames module is off, so none is drawn" end
+    return line
 end
 
 SLASH_FSFRAMES1 = "/fsframes"
@@ -1432,9 +1434,7 @@ local function Init()
     if FocusFrame then
         DimBlizzardFrame(FocusFrame) -- not confirmed present on every 16001 build
     end
-    if PetFrame then
-        DimBlizzardFrame(PetFrame) -- not confirmed present on every 16001 build
-    end
+    -- The game's pet frame is not dimmed here: it follows the Pet bar switch (DimPetFrame below).
     for i = 1, 5 do
         local bossFrame = _G["Boss" .. i .. "TargetFrame"]
         if bossFrame then
@@ -1540,13 +1540,43 @@ local function Init()
     end
 end
 
-if InCombatLockdown() then
-    local regen = CreateFrame("Frame")
-    regen:RegisterEvent("PLAYER_REGEN_ENABLED")
-    regen:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-        Init()
+-- Now, or at the first PLAYER_REGEN_ENABLED when the client loaded in a fight (the secure frames and the stock frames'
+-- mouse cannot be touched in combat).
+local function OutOfCombat(fn)
+    if InCombatLockdown() then
+        local regen = CreateFrame("Frame")
+        regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        regen:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            fn()
+        end)
+    else
+        fn()
+    end
+end
+
+-- The game's own pet frame goes with the pet panel that replaces it (Pet bar, m.pet), not with the Unit frames switch: Pet bar
+-- off leaves the game's pet frame up, and Unit frames off with the Pet bar on still hides it behind the panel.
+local function DimPetFrame()
+    if PetFrame then
+        DimBlizzardFrame(PetFrame) -- not confirmed present on every 16001 build
+    end
+end
+
+-- Module power (Core/ModuleSwitch.lua): with Unit frames off none of the frames above exist, FS.player, FS.target, FS.focus
+-- and FS.boss stay nil (every reader checks them), and the game's player, target, focus and boss frames are left as they are.
+local MS = FS.ModuleSwitch
+if MS then
+    MS.WhenOn("m.uf", function()
+        OutOfCombat(function()
+            Init()
+            MS.MarkBuilt("m.uf")
+        end)
     end)
+    MS.WhenOn("m.pet", function() OutOfCombat(DimPetFrame) end)
 else
-    Init()
+    OutOfCombat(function()
+        Init()
+        DimPetFrame()
+    end)
 end
