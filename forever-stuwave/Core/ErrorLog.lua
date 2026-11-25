@@ -816,6 +816,7 @@ local RELOAD_NAME = "ForeverSTUwaveReload"
 local SecureReload = { NAME = RELOAD_NAME, CLICK = "/click " .. RELOAD_NAME }
 FS.SecureReload = SecureReload
 local reloadButton, covering, lastRefusal = nil, nil, 0
+local coverMiss, buildMiss = nil, nil   -- why the last Cover did not take, and why the button could not be made
 
 local function Say(text) print("|cff22e0ffForever STUwave|r: " .. text) end
 
@@ -852,6 +853,7 @@ local function Build()
     local b = CreateFrame("Button", RELOAD_NAME, UIParent, "SecureActionButtonTemplate")
     b:SetFrameStrata("FULLSCREEN_DIALOG")
     b:SetSize(1, 1)
+    b:EnableMouse(true)
     b:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     -- Up only, and pinned there: /click sends an up click, and a mouse click must not run twice.
     b:RegisterForClicks("LeftButtonUp")
@@ -888,7 +890,7 @@ local function Ensure()
     if reloadButton then return reloadButton end
     if Combat() or type(CreateFrame) ~= "function" then return nil end
     local ok, b = pcall(Build)
-    if ok then reloadButton = b end
+    if ok then reloadButton = b else buildMiss = tostring(b) end
     return reloadButton
 end
 function SecureReload.Button() return Ensure() end
@@ -896,10 +898,11 @@ function SecureReload.Button() return Ensure() end
 -- Lays the secure button over `target` (one of our own Reload buttons) for as long as the pointer is on
 -- it. Returns true when it is in place. Out of combat only.
 function SecureReload.Cover(target)
-    if Combat() or not target then return false end
+    if Combat() then coverMiss = "in combat" return false end
+    if not target then coverMiss = "no target" return false end
     local b = Ensure()
-    if not b then return false end
-    local ok = pcall(function()
+    if not b then coverMiss = "no button: " .. tostring(buildMiss) return false end
+    local ok, err = pcall(function()
         if not target:IsVisible() or (target.IsEnabled and not target:IsEnabled()) then error("hidden") end
         local left, bottom = target:GetLeft(), target:GetBottom()
         local w, h = target:GetWidth(), target:GetHeight()
@@ -913,6 +916,7 @@ function SecureReload.Cover(target)
         b:Show()
     end)
     covering = ok and target or nil
+    coverMiss = (not ok) and tostring(err) or nil
     if not ok then Uncover() end
     return ok
 end
@@ -922,7 +926,13 @@ function SecureReload.Covering() return covering end
 -- A Reload button of ours is clicked without the cover on it (in combat, or the cover could not be
 -- placed): say why nothing happened instead of doing nothing.
 function SecureReload.Explain()
-    Refuse(Refusal() or "type /reload")
+    local why = Refusal()
+    if not why then
+        why = "type /reload"
+        if coverMiss then why = why .. " (cover: " .. coverMiss .. ")"
+        elseif reloadButton then why = why .. " (cover shown " .. tostring(reloadButton:IsShown()) .. ")" end
+    end
+    Refuse(why)
 end
 
 local reloadEvents = CreateFrame("Frame")
