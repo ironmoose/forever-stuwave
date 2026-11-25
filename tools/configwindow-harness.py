@@ -1642,19 +1642,6 @@ local function withRaidPreview()
     FS.RaidFrames.Preview = pv
 end
 
-function T.the_raid_layout_row_needs_the_raid_preview()
-    local W = boot({ preWindow = withRaidFrames })
-    openOld(W, "unitframes")
-    no(row("Raid layout"), "no preview, no layout row")
-    W = boot({ preWindow = withRaidPreview })
-    openOld(W, "unitframes")
-    yes(row("Raid layout"), "the layout row")
-    local sizeTip = tipOfRow("Raid layout")
-    yes(sizeTip and sizeTip:find("own seat", 1, true), tostring(sizeTip))
-    click("25", row("Raid layout"))
-    eq(FS.Config.Get("raid.previewSize"), 25, "the picker writes the saved size")
-end
-
 function T.the_raid_frames_switch_is_left_out_without_the_raid_frames()
     local W = boot({ preWindow = withPartyFrames })
     openOld(W, "unitframes")

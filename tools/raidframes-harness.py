@@ -347,7 +347,7 @@ def _runtime(*, before_load: str = "", parent_height: int = 1440, player_class: 
     load((ADDON / "Core/Layout.lua").read_text(encoding="utf-8"), "@Core/Layout.lua", fs)
     rt.eval(P.LOAD_AS_ADDON)(
         (ADDON / "Core/Config.lua").read_text(encoding="utf-8"), "@Core/Config.lua", "forever-stuwave", fs)
-    for filename in ("Core/FrameHelpers.lua", "Modules/UnitFrames/PartyFrames.lua"):
+    for filename in ("Modules/UnitFrames/FrameStyle.lua", "Core/FrameHelpers.lua", "Modules/UnitFrames/PartyFrames.lua"):
         load((ADDON / filename).read_text(encoding="utf-8"), f"@{filename}", fs)
     rt.execute("__tickersBeforeRaid=#__tickers __framesBeforeRaid=#__frames")
     load((ADDON / "Modules/UnitFrames/RaidFrames.lua").read_text(encoding="utf-8"),
@@ -567,6 +567,28 @@ def _check_height_follows_the_tallest_column() -> None:
     content = rt.eval("FS.raidContent")
     assert (content.w, content.h) == _grid_size(LOOK_A, 2, 2), f"{content.w}x{content.h}"
     _assert_quiet(rt)
+
+
+def _check_raid_style_settings() -> None:
+    """The raid's own style settings: a stored width reseats the cells, Arrange: Grid seats them in rows of Frames per row
+    in Sort order, Scale scales the content, a forced look overrides Auto, Opacity reaches the cells."""
+    rt = _client()
+    _roster(rt, 4, groups=[1, 1, 2, 2])
+    rt.execute("FS.Config.Set('bars.raid.w', 100); FS.Config.Set('bars.raid.alpha', 50)")
+    _settle(rt)
+    cell = _cell(rt, 1)
+    assert cell.w == 100, f"width {cell.w}"
+    assert abs(cell.alpha - 0.5) < 1e-6, f"alpha {cell.alpha}"
+    rt.execute("FS.Config.Set('raid.arrange', 'grid'); FS.Config.Set('raid.perRow', 2)")
+    _settle(rt)
+    x, y = _top_left(_cell(rt, 3))
+    assert _close(x, 0) and _close(y, -(LOOK_A["h"] + LOOK_A["gy"])), f"cell 3 at {(x, y)}"
+    rt.execute("FS.Config.Set('raid.scale', 150)")
+    _settle(rt)
+    assert rt.eval("FS.raidContent").scale > 1.2, rt.eval("FS.raidContent").scale
+    rt.execute("FS.Config.Set('bars.raid.raidLook', 'tiles')")
+    _settle(rt)
+    assert _state(rt).look == "C", _state(rt).look
 
 
 def _check_columns_by_subgroup() -> None:
@@ -1804,6 +1826,7 @@ def main() -> int:
         ("look A at ten members", _check_look_a_at_ten),
         ("look C at eleven and forty", _check_look_c_at_eleven_and_forty),
         ("grid height follows the tallest column", _check_height_follows_the_tallest_column),
+        ("raid style settings reach the grid", _check_raid_style_settings),
         ("columns by subgroup, player's first, empty skipped", _check_columns_by_subgroup),
         ("secret subgroup falls back to roster order", _check_secret_subgroup_falls_back),
         ("player's group unknown: ascending, no pink", _check_player_group_unknown),

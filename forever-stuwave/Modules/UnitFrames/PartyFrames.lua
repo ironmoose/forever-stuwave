@@ -1481,13 +1481,21 @@ end
 -- UnitFrames.lua rather than relying on SecureUnitButton_OnLoad) plus a
 -- non-secure `visual` child holding the name row (class plate, role tag, name,
 -- LV text, LOW tag) and the health/power bars.
-local function BuildPartyRow(unit, frameName, parent)
-    local f = CreateFrame("Button", frameName, parent, "SecureUnitButtonTemplate")
-    f:SetSize(MEMBER_WIDTH, ROW_HEIGHT)
-    f:RegisterForClicks("AnyUp")
-    f:SetAttribute("unit", unit)
-    f:SetAttribute("*type1", "target")
-    f:SetAttribute("*type2", "togglemenu")
+local function BuildPartyRow(unit, frameName, parent, preview)
+    local f
+    if preview then
+        -- The config window's Style tab draws a row from this same code on a plain frame: no secure template, no unit.
+        f = CreateFrame("Frame", nil, parent)
+        f:SetSize(MEMBER_WIDTH, ROW_HEIGHT)
+        f.preview = true
+    else
+        f = CreateFrame("Button", frameName, parent, "SecureUnitButtonTemplate")
+        f:SetSize(MEMBER_WIDTH, ROW_HEIGHT)
+        f:RegisterForClicks("AnyUp")
+        f:SetAttribute("unit", unit)
+        f:SetAttribute("*type1", "target")
+        f:SetAttribute("*type2", "togglemenu")
+    end
     f.unit = unit
 
     local visual = CreateFrame("Frame", nil, f)
@@ -2402,6 +2410,35 @@ end
 local PartyFrames = {}
 FS.PartyFrames = PartyFrames
 
+-- A plain party row for the config window's Style tab, built by BuildPartyRow and filled with a sample member (no unit,
+-- no secret value). Returns { frame, Restyle }; the settings are read again on every Restyle.
+function PartyFrames.NewStylePreview(parent)
+    local row = BuildPartyRow(nil, nil, parent, true)
+    local Style = FS.FrameStyle
+    local function Restyle()
+        row:SetAlpha(Style and Style.Number("party", "alpha") / 100 or 1)
+        row.name:SetText("BRENNA")
+        row.name:SetTextColor(COLOR_HEALTH[1], COLOR_HEALTH[2], COLOR_HEALTH[3], HEADER.NAME_ALPHA)
+        if HAS.CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS.PRIEST then
+            row.classIcon:SetTexCoord(unpack(CLASS_ICON_TCOORDS.PRIEST))
+            row.classIcon:Show()
+        end
+        for _, bar in ipairs({ row.health, row.power }) do
+            bar:SetMinMaxValues(0, 100)
+            bar:SetValue(bar == row.health and 78 or 55)
+        end
+        local role = ROLE_STYLE.HEALER
+        if role and row.roleTag then
+            row.roleLetter:SetText(role[1])
+            row.roleLetter:SetTextColor(role[2][1], role[2][2], role[2][3], 1)
+            row.roleTag:Show()
+        end
+    end
+    row:Show()
+    return { frame = row, Restyle = Restyle }
+end
+
+
 -- The private state and helpers share one table: this file is close to Lua's limit of 200 file-scope locals.
 local SHOWN = {
     -- The saved key keeps the name it had when the Gunsight HUD owned this switch, so every profile keeps its value.
@@ -2610,6 +2647,17 @@ local function Init()
 
         local member = BuildPartyRow(def.unit, "ForeverSTUwavePartyRow" .. i, content)
         member:SetPoint("TOPLEFT", content, "TOPLEFT", PANEL_PAD, rowY)
+        if FS.FrameStyle then
+            -- the party style settings (opacity so far): a plain alpha, so it applies in combat too
+            member:SetAlpha(FS.FrameStyle.Number("party", "alpha") / 100)
+            PartyFrames.rows = PartyFrames.rows or {}
+            PartyFrames.rows[#PartyFrames.rows + 1] = member
+            if i == 1 then
+                FS.FrameStyle.OnChange("party", function()
+                    for _, row in ipairs(PartyFrames.rows) do row:SetAlpha(FS.FrameStyle.Number("party", "alpha") / 100) end
+                end)
+            end
+        end
 
         local pet = BuildPetSlot(def.petUnit, "ForeverSTUwavePartyPet" .. i, content, member.visual)
         pet:SetPoint("TOPRIGHT", content, "TOPRIGHT", -PANEL_PAD, rowY)

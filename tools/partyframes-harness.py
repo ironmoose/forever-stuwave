@@ -594,7 +594,7 @@ def _runtime(
     rt.eval(LOAD_AS_ADDON)(
         (ADDON / "Core/Config.lua").read_text(encoding="utf-8"), "@Core/Config.lua", "forever-stuwave",
         rt.globals().FS)
-    for filename in ("Core/FrameHelpers.lua", "Modules/UnitFrames/PartyFrames.lua"):
+    for filename in ("Modules/UnitFrames/FrameStyle.lua", "Core/FrameHelpers.lua", "Modules/UnitFrames/PartyFrames.lua"):
         load((ADDON / filename).read_text(encoding="utf-8"), f"@{filename}", rt.globals().FS)
     if quiet:
         _assert_quiet(rt)
@@ -3691,10 +3691,22 @@ def _check_blizzard_party_lazy_aura_buttons() -> None:
     assert g.__a3.mouse is False, "the combat-skipped aura button was not caught up"
 
 
+def _check_style_preview_and_opacity() -> None:
+    """The party Style tab draws a row from BuildPartyRow on a plain frame, and the Opacity setting reaches the real rows."""
+    rt = _client()
+    preview = rt.eval("FS.PartyFrames.NewStylePreview(CreateFrame('Frame'))")
+    assert preview.frame.preview is True, "a plain preview frame"
+    rt.eval("FS.Config.Set('bars.party.alpha', 40)")
+    preview.Restyle()
+    assert abs(preview.frame.alpha - 0.4) < 1e-6, preview.frame.alpha
+    assert abs(rt.eval("FS.PartyFrames.rows[1].alpha") - 0.4) < 1e-6, "the live rows follow the setting"
+
+
 def main() -> int:
     """Run the focused regressions and return a failing exit code on any error."""
     cases = [
         ("layout after late UIParent rescale", _check_late_rescale),
+        ("party style preview and opacity", _check_style_preview_and_opacity),
         ("full surname readout", _check_full_name),
         ("class atlas icon", _check_class_icon),
         ("shared FrameHelpers CreatePillBar (cut)", _check_shared_pill_bar),

@@ -45,6 +45,23 @@ for _, key in ipairs({ "player", "target", "focus", "boss" }) do
     })
 end
 
+Bars.RegisterFrame({
+    key = "raid", label = "Raid",
+    preview = function(stage)
+        local raid = FS.RaidFrames
+        if not (raid and raid.NewStylePreview) then return nil end
+        return raid.NewStylePreview(stage)
+    end,
+})
+Bars.RegisterFrame({
+    key = "party", label = "Party",
+    preview = function(stage)
+        local party = FS.PartyFrames
+        if not (party and party.NewStylePreview) then return nil end
+        return party.NewStylePreview(stage)
+    end,
+})
+
 local UNIT4 = { "player", "target", "focus", "boss" }
 local ALL = { "player", "target", "focus", "boss", "party", "raid", "pet" }
 
@@ -103,6 +120,10 @@ Bars.SECTIONS = {
     { title = "Health bar", rows = {
         { kind = "dd", suffix = "hpStyle", label = "Bar style", frames = Except("raid"), looks = true,
           tip = "The bar looks STUwave already draws elsewhere: cut corner (player and target today), laser rail (party today), flat, LED segments (mana regen and quest timer), slant cells (XP bar), chevron (cast bars) and Blizzard's stock bar." },
+        { kind = "seg", suffix = "raidLook", label = "Look", frames = { "raid" }, options = { { "auto", "Auto" }, { "boxes", "Mini boxes" }, { "tiles", "Tiles" } },
+          tip = "Auto is today: mini boxes with a health rail at 10 players or fewer, tiles that fill from the bottom in a bigger raid. The Raid layout picker above the preview shows each." },
+        { kind = "seg", suffix = "raidFmt", label = "Text", frames = { "raid" }, options = Style.RAID_TEXT_FORMATS,
+          tip = "Low only shows the percent in red at 35% health or less, as today." },
         { kind = "sl", suffix = "hpH", label = "Height", min = 2, max = 60, step = 1, unit = "px", tip = "Changes the frame height with it." },
         { kind = "seg", suffix = "hpFmt", label = "Text", frames = Except("raid"), formats = "text", kind2 = "health" },
         { kind = "sl", suffix = "hpTs", label = "Text size", lim = { unit4 = { 6, 20, 0.5 }, other = { 5, 20, 0.5 } }, unit = "px", sub = true },
@@ -176,6 +197,19 @@ Bars.SECTIONS = {
     } },
 }
 
+-- What a frame's rows already change on the live frame. Unit frames apply every row; the party, raid and pet frames list
+-- theirs, and the rest show greyed with a reason instead of doing nothing silently.
+Bars.WIRED = {
+    raid = { w = true, alpha = true, nameSize = true, role = true, raidLook = true },
+    party = { alpha = true },
+    pet = {},
+}
+local NOT_WIRED = "This setting is not applied to this frame yet."
+function Bars.IsWired(frame, suffix)
+    local set = Bars.WIRED[frame]
+    return set == nil or set[suffix] == true
+end
+
 -------------------------------------------------------------------------------
 -- Row building
 -------------------------------------------------------------------------------
@@ -223,9 +257,14 @@ local function BuildRow(content, row, ctx)
         isChanged = function() return Style.IsStored(frame(), row.derived and "hpH" or suffix) end,
         reset = function() Style.Reset(frame(), row.derived and "hpH" or suffix) end,
     }
-    if row.needs then
-        entry.enabled = function() return Style.Get(frame(), row.needs) == true end
-        entry.reason = "Requires |cffffffff" .. (row.nl or row.needs) .. "|r to be on."
+    if row.needs or Bars.WIRED[ctx.firstFrame] ~= nil or ctx.firstFrame ~= frame() then
+        local needsReason = row.needs and ("Requires |cffffffff" .. (row.nl or row.needs) .. "|r to be on.") or nil
+        entry.enabled = function()
+            if row.suffix and not Bars.IsWired(frame(), row.suffix) and not row.derived then entry.reason = NOT_WIRED; return false end
+            if row.needs and Style.Get(frame(), row.needs) ~= true then entry.reason = needsReason; return false end
+            return true
+        end
+        entry.reason = needsReason or NOT_WIRED
     end
     if row.derived then
         entry.get = function() return Style.FrameHeight(frame()) end
@@ -316,6 +355,17 @@ local function PickerButton(parent, label)
     local b = I.MakeButton(parent, { height = S.SEG_H, ring = C.line, textColor = C.muted, chamfer = 4, size = S.TEXT, glow = 0, text = label })
     b:SetWidth(S.Snap(b.fsLabel:GetStringWidth() + 2 * S.SEG_PAD_X))
     return b
+end
+Bars.PickerButton = PickerButton
+
+-- Paints a picker button as picked or not.
+function Bars.MarkPicker(b, selected)
+    b.fsSelected = selected
+    if selected then
+        I.Restyle(b, C.cyan, C.cyan, I.Mix(C.ink, C.cyan, 0.2), 0.5)
+    else
+        I.Restyle(b, C.line, C.muted, C.ink, 0)
+    end
 end
 
 -- hover: the row the pointer is on turns its feature on in the preview for the moment
@@ -416,6 +466,7 @@ function Bars.BuildStyleTab(content, spec)
         end)
     end
 
+    if spec.before then spec.before(content, ctx) end
     for _, sec in ipairs(Bars.SECTIONS) do
         UI.Section(content, {
             title = sec.title, tip = sec.tip,

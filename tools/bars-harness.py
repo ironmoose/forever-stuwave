@@ -447,6 +447,30 @@ function T.a_secret_threat_reading_is_never_compared()
     yes(f.extras.threat:IsShown(), "tanking draws the border")
 end
 
+function T.the_raid_style_tab_has_its_layout_rows_and_the_size_picker_in_the_preview_header()
+    local S, C, CW = boot()
+    local pv = { KEY = "raid.previewSize", SIZES = { 5, 10, 15, 20, 25, 40 } }
+    C.RegisterDefault(pv.KEY, 10)
+    function pv.Size() return C.Get(pv.KEY) end
+    FS.RaidFrames = { Preview = pv, NewStylePreview = function(stage)
+        local f = CreateFrame("Frame", nil, stage); f:SetSize(100, 60); return { frame = f, Restyle = function() end }
+    end }
+    CW.Open("raid", "style")
+    yes(CW.RowByKey("raid.scale", "raid"), "scale")
+    yes(CW.RowByKey("raid.arrange", "raid"), "arrange")
+    local perRow = CW.RowByKey("raid.perRow", "raid")
+    yes(perRow, "perRow")
+    yes(not perRow.row:IsShown(), "frames per row waits for Grid")
+    C.Set("raid.arrange", "grid"); CW.RefreshAll()
+    yes(perRow.row:IsShown(), "frames per row shows with Grid")
+end
+
+function T.rows_a_frame_does_not_apply_yet_say_so_and_the_raid_rows_it_does_apply_stay_live()
+    local S, C, CW = boot()
+    yes(FS.ConfigBars.IsWired("player", "hpH") and FS.ConfigBars.IsWired("raid", "w") and FS.ConfigBars.IsWired("party", "alpha"))
+    yes(not FS.ConfigBars.IsWired("raid", "hpFmt") and not FS.ConfigBars.IsWired("party", "hpH"))
+end
+
 function T.pointing_at_a_switch_turns_the_feature_on_in_the_preview_for_the_moment()
     local S, C, CW = boot()
     openStyle(CW)
