@@ -351,6 +351,8 @@ function Kit.New(def)
 
     local function PaintButton(button, entry)
         SetLit(button, entry.lit, entry.litUnknown)
+        -- the tooltip lines are plain fields, so a live change (the poison on a weapon) reaches them in combat too
+        button.fsTipText, button.fsTipLine = entry.tipText, entry.tipLine
         local icon = button.icon
         if icon then
             if icon.SetDesaturated then icon:SetDesaturated(entry.dim == true) end

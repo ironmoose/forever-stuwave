@@ -14,7 +14,8 @@
 -- mockup's stepped composite of four nested strokes: .546 at the edge, stepping down to nothing by 10 px).
 --
 -- It builds ONLY for a class in OWNERS (a Paladin whose SealBar owns the forms, a Warrior whose StanceBar does, a
--- Shaman whose TotemBar is built; the Shaman's forms stay on the stance bar),
+-- Shaman whose TotemBar is built; the Shaman's forms stay on the stance bar; a Druid, Hunter, Mage, Rogue or Warlock
+-- with a class tab of its own: ClassTab below),
 -- ONLY while the Console is drawn, ONLY out of combat. Every other class gets none.
 -- The art is a plain non-secure child of the Console root. The owner's host (protected, it parents the secure
 -- buttons) is its own frame anchored to the Console root, NEVER to this art: nothing secure may be anchored to
@@ -109,6 +110,7 @@ local OWNERS = {
     DRUID = ClassTab("druid", "ShapeshiftTab", 1),
     HUNTER = ClassTab("hunter", "CallPetTab", 1),
     MAGE = MAGE,
+    ROGUE = ClassTab("rogue", "PoisonsTab", 1),
     PALADIN = {
         key = "paladin", cols = C.COLS, rows = C.ROWS,
         wants = function()
