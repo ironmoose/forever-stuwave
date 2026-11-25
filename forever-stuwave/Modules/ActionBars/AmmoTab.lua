@@ -343,6 +343,7 @@ local function Build()
         if GameTooltip then GameTooltip:Hide() end
     end)
     AT.built = true
+    if FS.ModuleSwitch then FS.ModuleSwitch.MarkBuilt("m.class") end
 end
 
 -- Sizes and points only, on whole pixels; legal in combat (plain frames).
@@ -620,6 +621,9 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+    -- Module power (m.class): off, this tab builds nothing and listens for nothing.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.class") then return end
     local ok, err = pcall(Apply)
     if not ok then WarnOnce("ammotab_apply", "ammo tab failed to start (" .. tostring(err) .. ")") end
 end)

@@ -1491,6 +1491,16 @@ local B5B = {
         named = { "FSPetContainer" },
         blizzard = { "PetActionBar" },
     },
+    ["m.class"] = {
+        files = { "Modules/ActionBars/SealBar.lua", "Modules/ActionBars/ShapeshiftTab.lua", "Modules/ActionBars/CallPetTab.lua",
+            "Modules/ActionBars/PortalsTab.lua", "Modules/ActionBars/ConjureTab.lua", "Modules/ActionBars/PoisonsTab.lua",
+            "Modules/ActionBars/DemonTab.lua", "Modules/ActionBars/TotemBar.lua", "Modules/ActionBars/TotemDial.lua",
+            "Modules/ActionBars/ShamanBuffs.lua", "Modules/ActionBars/BuffTab.lua", "Modules/ActionBars/FiveSecondTab.lua",
+            "Modules/ActionBars/ThunderClapTab.lua", "Modules/ActionBars/AmmoTab.lua" },
+        named = { "FSShapeshiftTab", "FSCallPetTab", "FSPortalsTab", "FSConjureTab", "FSPoisonsTab", "FSDemonTab", "FSSealBar",
+            "FSTotemBar", "FSBuffTab", "FSFiveSecondTab", "FSThunderClapTab", "FSAmmoTab", "FSTotemDialTicker" },
+        blizzard = {},
+    },
 }
 local B5B_HOOKED = { "ActionButtonDown", "ActionButtonUp", "MultiActionButtonDown", "MultiActionButtonUp", "MicroButtonPulse",
     "MicroButtonPulseStop" }
@@ -1656,6 +1666,72 @@ function T.the_class_tabs_stand_close_to_the_console_edge_when_there_is_no_pet_b
     yes(with ~= nil, "a tab stands in this world")
     yes(without ~= nil, "a tab stands with the pet bar off")
     yes(without < with, "the tabs moved left by the pet span: " .. tostring(without) .. " against " .. tostring(with))
+end
+
+-- the tabs by class: what each class's tab is called when it stands (the mock client has no spells, so the host frame is the
+-- evidence), and the class numbers
+local B5B_CLASSES = {
+    DRUID = { id = 11, host = "FSShapeshiftTab" }, HUNTER = { id = 3, host = "FSCallPetTab" }, MAGE = { id = 8, host = "FSPortalsTab" },
+    PALADIN = { id = 2, host = "FSSealBar" }, ROGUE = { id = 4, host = "FSPoisonsTab" }, SHAMAN = { id = 7, host = "FSTotemBar" },
+    WARLOCK = { id = 9, host = "FSDemonTab" }, WARRIOR = { id = 1, host = "FSThunderClapTab" },
+}
+local function classWorld(off, token)
+    b5bWorld(off, function() UnitClass = function() return token, token, B5B_CLASSES[token].id end end)
+end
+
+local function tabsOffRow(token)
+    classWorld({ "m.class" }, token)
+    b5bClean("m.class")
+    b5bNotBuilt("m.class")
+    local standing = 0
+    FS.ClassShoulder.EachStanding(function() standing = standing + 1 end)
+    eq(standing, 0, "no class shoulder stands")
+    eq(FS.ShapeshiftTab.OwnsForms(), false, "the Druid forms stay with the stance bar")
+    eq(FS.SealBar.OwnsForms(), false, "the Paladin forms stay with the stance bar")
+    eq(type(FS.TotemBar), "table"); eq(type(FS.BuffTab), "table"); eq(type(FS.FiveSecondTab), "table")
+    eq(type(FS.AmmoTab), "table"); eq(type(FS.ThunderClapTab), "table"); eq(type(FS.TotemPresets), "table")
+end
+
+local function tabsOnRow(token)
+    classWorld({}, token)
+    b5bClean("m.class")
+    eq(FS.ModuleSwitch.Built("m.class"), true)
+    yes(MadeNamed(B5B_CLASSES[token].host), token .. " tab " .. B5B_CLASSES[token].host)
+end
+
+function T.addon_tabs_off_draw_nothing_for_a_druid() tabsOffRow("DRUID") end
+function T.addon_tabs_off_draw_nothing_for_a_hunter() tabsOffRow("HUNTER") end
+function T.addon_tabs_off_draw_nothing_for_a_mage() tabsOffRow("MAGE") end
+function T.addon_tabs_off_draw_nothing_for_a_paladin() tabsOffRow("PALADIN") end
+function T.addon_tabs_off_draw_nothing_for_a_rogue() tabsOffRow("ROGUE") end
+function T.addon_tabs_off_draw_nothing_for_a_shaman() tabsOffRow("SHAMAN") end
+function T.addon_tabs_off_draw_nothing_for_a_warlock() tabsOffRow("WARLOCK") end
+function T.addon_tabs_off_draw_nothing_for_a_warrior() tabsOffRow("WARRIOR") end
+
+function T.addon_tabs_on_draw_the_druid_tab() tabsOnRow("DRUID") end
+function T.addon_tabs_on_draw_the_hunter_tab() tabsOnRow("HUNTER") end
+function T.addon_tabs_on_draw_the_mage_tabs() tabsOnRow("MAGE"); yes(MadeNamed("FSConjureTab")) end
+function T.addon_tabs_on_draw_the_paladin_seal_bar() tabsOnRow("PALADIN") end
+function T.addon_tabs_on_draw_the_rogue_tab() tabsOnRow("ROGUE") end
+function T.addon_tabs_on_draw_the_shaman_totem_and_buff_tabs() tabsOnRow("SHAMAN"); yes(MadeNamed("FSBuffTab")); yes(MadeNamed("FSTotemDialTicker")) end
+function T.addon_tabs_on_draw_the_warlock_tab() tabsOnRow("WARLOCK") end
+function T.addon_tabs_on_draw_the_warrior_tab() tabsOnRow("WARRIOR") end
+
+function T.the_mana_regen_and_ammo_tabs_follow_the_same_switch()
+    classWorld({ "m.class" }, "HUNTER")
+    no(MadeNamed("FSFiveSecondTab")); no(MadeNamed("FSAmmoTab"))
+end
+
+function T.the_stock_totem_bar_is_dimmed_only_while_the_totem_tab_stands_in_for_it()
+    local AB = "Modules/ActionBars/ActionBars.lua"
+    classWorld({ "m.class" }, "SHAMAN")
+    eq(TouchesOn("MultiCastActionBarFrame", AB), "", "the stock totem bar stays as the game has it")
+    eq(TouchesOn("MultiBarBottomLeft", AB) ~= "", true, "the other stock bars are still dimmed (Action bars are on)")
+end
+
+function T.the_stock_totem_bar_is_dimmed_when_the_totem_tab_is_on()
+    classWorld({}, "SHAMAN")
+    yes(TouchesOn("MultiCastActionBarFrame", "Modules/ActionBars/ActionBars.lua") ~= "", "dimmed, as before")
 end
 
 return T

@@ -586,6 +586,7 @@ function Kit.New(def)
             T.buttons[i]:Hide()
         end
         T.built = true
+        if FS.ModuleSwitch then FS.ModuleSwitch.MarkBuilt("m.class") end
     end
 
     local function OnEvent(_, event, ...)
@@ -676,6 +677,9 @@ function Kit.New(def)
     loader:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_LOGIN")
         pcall(AddConfig)
+        -- Module power (m.class): the config rows stay (the page is covered while it is off); nothing is built or listened for.
+        local MS = FS.ModuleSwitch
+        if MS and not MS.On("m.class") then return end
         if InCombatLockdown() then
             self:RegisterEvent("PLAYER_REGEN_ENABLED")
             self:SetScript("OnEvent", function(inner)
@@ -790,6 +794,8 @@ Tab.FORMS = FORMS
 -- While this tab is on for a Druid it draws the forms, so StanceBar.lua builds none (the same hand over as a Paladin's
 -- SealBar.OwnsForms); the stock bar stays dimmed either way. Turning the tab off hands the forms back to StanceBar.
 function Tab.OwnsForms()
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.class") then return false end
     return Tab.Applies() and Tab.Enabled() == true
 end
 if FS.Config and FS.Config.OnChange then

@@ -476,7 +476,14 @@ local function RedimBlizzardBar(name)
     for k in pairs(redimKnown) do redimKnown[k] = nil end
 end
 
+-- The stock totem bar is dimmed only because the Addon tabs module draws the totem tab in its place; with that module off
+-- the game's own bar stays as it is.
+local TOTEM_BAR_SET = {}
+for _, name in ipairs(TOTEM_BARS) do TOTEM_BAR_SET[name] = true end
+local function TotemTabOurs() return MS == nil or MS.On("m.class") end
+
 local function RedimTotemBars()
+    if not TotemTabOurs() then return end
     if not PlayerIsShaman() then
         local bar = _G.MultiCastActionBarFrame
         if not (bar and bar:IsShown()) then return end
@@ -488,7 +495,10 @@ local function ForEachBlizzardBar(fn)
     for _, spec in ipairs(BARS) do
         if spec.blizzard then fn(spec.blizzard) end
     end
-    for _, name in ipairs(EXTRA_BLIZZARD_BARS) do fn(name) end
+    local totems = TotemTabOurs()
+    for _, name in ipairs(EXTRA_BLIZZARD_BARS) do
+        if totems or not TOTEM_BAR_SET[name] then fn(name) end
+    end
 end
 
 -- Switch strategy live: restore everything with the OLD method, then re-hide
