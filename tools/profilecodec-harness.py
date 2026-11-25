@@ -1221,6 +1221,28 @@ function T.the_modules_checkbox_shows_only_when_the_string_carries_them_and_is_o
     no(share().ui.modulesBox:IsVisible())
 end
 
+function T.the_modules_tip_says_what_would_change_and_when_a_reload_is_needed()
+    boot({ encoding = false, modules = { ["m.cast"] = false, ["m.chat"] = true, ["m.same"] = true } })
+    seed()
+    local MS = FS.ModuleSwitch
+    local text = exportString("all")
+    MS.Snapshot = function() return { ["m.cast"] = true, ["m.chat"] = false, ["m.same"] = true } end
+    profilesPage()
+    click("IMPORT", win())
+    local ui = share().ui
+    paste(text)
+    eq(ui.modulesHelp.fsTip, "Turns off: Label m.cast.\nTurns on: Label m.chat.\nTakes a Reload UI.")
+    -- a module that switches at once needs no reload
+    MS.IsLive = function() return true end
+    paste("")
+    paste(text)
+    eq(ui.modulesHelp.fsTip, "Turns off: Label m.cast.\nTurns on: Label m.chat.", "every change is live")
+    MS.Snapshot = function() return { ["m.cast"] = false, ["m.chat"] = true, ["m.same"] = true } end
+    paste("")
+    paste(text)
+    eq(ui.modulesHelp.fsTip, "The modules in this string are already set the same here.")
+end
+
 function T.a_string_without_modules_shows_no_checkbox_and_the_box_resets_between_strings()
     boot({ encoding = false, modules = { ["m.cast"] = true } })
     seed()

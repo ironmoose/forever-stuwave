@@ -136,7 +136,12 @@ local function ModuleChanges(modules)
         if now[key] ~= on then
             local labelOk, label = true, nil
             if type(switch.Label) == "function" then labelOk, label = pcall(switch.Label, key) end
-            list[#list + 1] = { key = key, label = (labelOk and label) or key, on = on }
+            local live = false
+            if type(switch.IsLive) == "function" then
+                local liveOk, answer = pcall(switch.IsLive, key)
+                live = liveOk and answer == true
+            end
+            list[#list + 1] = { key = key, label = (labelOk and label) or key, on = on, live = live }
         end
     end
     table.sort(list, function(a, b) return a.label < b.label end)
@@ -144,13 +149,16 @@ local function ModuleChanges(modules)
 end
 
 local function ModuleTip(list)
-    local on, off = {}, {}
-    for _, item in ipairs(list) do table.insert(item.on and on or off, item.label) end
+    local on, off, waits = {}, {}, false
+    for _, item in ipairs(list) do
+        table.insert(item.on and on or off, item.label)
+        if not item.live then waits = true end
+    end
     local lines = {}
     if #off > 0 then lines[#lines + 1] = "Turns off: " .. table.concat(off, ", ") .. "." end
     if #on > 0 then lines[#lines + 1] = "Turns on: " .. table.concat(on, ", ") .. "." end
     if #lines == 0 then return "The modules in this string are already set the same here." end
-    lines[#lines + 1] = "Takes a Reload UI."
+    if waits then lines[#lines + 1] = "Takes a Reload UI." end
     return table.concat(lines, "\n")
 end
 
