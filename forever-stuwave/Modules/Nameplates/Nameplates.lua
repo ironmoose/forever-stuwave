@@ -10,12 +10,9 @@ if not C_NamePlate then return end
 -- Constants
 -------------------------------------------------------------------------------
 
-local BAR_WIDTH = 130
-local BAR_HEIGHT = 14
+-- Plate width and the health, power and cast bar heights are settings now (Plates.S below); what stays here does not change.
 local PLATE_OUTER_PAD = 2
-local POWER_BAR_HEIGHT = 5
 local POWER_BAR_GAP = 1
-local CAST_BAR_HEIGHT = 6
 local CAST_BAR_GAP = 2
 local CAST_NAME_FONT_SIZE = 9
 local RAID_MARKER_SIZE = 25
@@ -147,7 +144,6 @@ local GLOW_ALPHA_TARGET_HOSTILE = 0.85
 local GLOW_ALPHA_TARGET_DEFAULT = 0.65
 local ALPHA_NONTARGET_DIM = 0.75
 
-local FONT_SIZE = 10
 local FONT_FLAGS = "OUTLINE"
 
 -- STUwave nameplates switch (Config key `nameplates.enabled`, on by default; the Config window row reads FS.Nameplates.SETTING). Off,
@@ -174,6 +170,63 @@ Plates.SETTING = {
 }
 FS.Nameplates = Plates
 
+-- The Nameplates page's settings (Config keys `plates.*`; ranges and defaults are the config window prototype's). `S` holds the
+-- values in use: Plates.ReadSettings reads them from FS.Config at login and on every change, so no plate code reads the
+-- config on a hot path, and a value that is not of the right kind (a stray true, a word for a number, a number past its
+-- range) reads as the default or the nearest end of its range. A `plates.*` change applies at once to the plates that are
+-- up and to the ones in the pool (Plates.ApplySettings, from Plates.RegisterConfig).
+Plates.SETTINGS = {
+    w = { key = "plates.w", default = 130, min = 80, max = 240, step = 2 },
+    hpH = { key = "plates.hpH", default = 14, min = 6, max = 30, step = 1 },
+    mpH = { key = "plates.mpH", default = 5, min = 0, max = 12, step = 1 },
+    castH = { key = "plates.castH", default = 6, min = 0, max = 16, step = 1 },
+    nameSize = { key = "plates.nameSize", default = 10, min = 8, max = 16, step = 1 },
+    level = { key = "plates.level", default = true },
+    hpText = { key = "plates.hpText", default = "none", options = {
+        { value = "none", text = "None" }, { value = "percent", text = "Percent" },
+        { value = "number", text = "Number" }, { value = "both", text = "Num + %" },
+    } },
+    quest = { key = "plates.quest", default = true },
+    auras = { key = "plates.auras", default = true },
+    raidMark = { key = "plates.raidMark", default = true },
+    friendly = { key = "plates.friendly", default = "same", options = {
+        { value = "same", text = "Same as enemy" }, { value = "smaller", text = "Smaller" }, { value = "off", text = "Off" },
+    } },
+}
+Plates.S = {}
+for field, def in pairs(Plates.SETTINGS) do Plates.S[field] = def.default end
+
+-- Reads every setting into S. FS.Config is not there when this file loads, so S keeps its defaults until login.
+function Plates.ReadSettings()
+    local config = FS.Config
+    if not (config and type(config.Get) == "function") then return end
+    for field, def in pairs(Plates.SETTINGS) do
+        local value = config.Get(def.key)
+        if type(def.default) == "number" then
+            if type(value) ~= "number" or FS.IsSecret(value) or value ~= value then value = def.default end
+            value = math.max(def.min, math.min(def.max, value))
+            value = math.min(def.max, def.min + math.floor((value - def.min) / def.step + 0.5) * def.step)
+        elseif type(def.default) == "boolean" then
+            if type(value) ~= "boolean" then value = def.default end
+        else
+            local known = false
+            for _, option in ipairs(def.options) do
+                if option.value == value then known = true end
+            end
+            if not known then value = def.default end
+        end
+        Plates.S[field] = value
+    end
+end
+
+-- The plate's root width and base height, then the health fill's width and height, for the settings in use. The plate's
+-- outer size is fixed by PLATE_OUTER_PAD, not by the inset, so a thinner inset grows the fill instead of shrinking the plate.
+function Plates.Dims()
+    local S, inset = Plates.S, FS.Theme.BAR_FILL_INSET
+    return S.w + 2 * PLATE_OUTER_PAD, S.hpH + 2 * PLATE_OUTER_PAD,
+        S.w + 2 * (PLATE_OUTER_PAD - inset), S.hpH + 2 * (PLATE_OUTER_PAD - inset)
+end
+
 -- Target Mark (opt-in, default OFF; `/stu targetmark`, Config key below). An optional high-contrast mark above
 -- the current target's nameplate: three flat blocks side by side, yellow, blue, yellow, drawn above everything
 -- else the plate carries. The colors are pure and flat (SetColorTexture, alpha 1, no mask, no vertex color, no
@@ -196,10 +249,40 @@ local TARGET_MARK_STRATA = "TOOLTIP"
 -- Frame level of the mark's frame relative to the plate; AURA_LEVEL_BOOST is the highest sibling above it.
 local TARGET_MARK_LEVEL_BOOST = AURA_LEVEL_BOOST + 15
 -- Above both stacks that rise from the health bar: the name row with the raid marker over it, and the two-row
--- aura flow. Each is measured from the constants that size it, so a change there moves the strip with it.
-local TARGET_MARK_Y = math.max(
-    AURA_ROW_Y + 2 * AURA_ICON_SIZE + AURA_ICON_GAP,
-    2 + FONT_SIZE + 2 + RAID_MARKER_GAP + RAID_MARKER_SIZE) + 4
+-- aura flow. Each is measured from the constants that size it (the name row from the name size setting), so a change
+-- there moves the strip with it.
+function Plates.TargetMarkY(nameSize)
+    return math.max(
+        AURA_ROW_Y + 2 * AURA_ICON_SIZE + AURA_ICON_GAP,
+        2 + nameSize + 2 + RAID_MARKER_GAP + RAID_MARKER_SIZE) + 4
+end
+Plates.TARGET_MARK_SETTING = {
+    key = TARGET_MARK_KEY, default = false, label = "Show target mark",
+    tip = "A mark above the nameplate of your current target: yellow, blue, yellow blocks that stay readable on any "
+        .. "background. Off by default.",
+}
+
+-- What the Nameplates page's preview draws from (read-only data, no behaviour): the plate's own measures and colours, so the
+-- preview follows a change here. The theme's colours (health pink, the violet border) are read from FS.Theme by the page.
+Plates.GEOMETRY = {
+    PAD = PLATE_OUTER_PAD, POWER_GAP = POWER_BAR_GAP, CAST_GAP = CAST_BAR_GAP, CAST_NAME_SIZE = CAST_NAME_FONT_SIZE,
+    RAID_SIZE = RAID_MARKER_SIZE, RAID_GAP = RAID_MARKER_GAP, QUEST_SIZE = QUEST_ICON_SIZE, QUEST_GAP = QUEST_ICON_GAP,
+    AURA_SIZE = AURA_ICON_SIZE, AURA_GAP = AURA_ICON_GAP, AURA_Y = AURA_ROW_Y, NAME_Y = 2,
+    MARK_W = TARGET_MARK_BLOCK_W, MARK_H = TARGET_MARK_BLOCK_H, SMALL_SCALE = 0.8, HP_TEXT_SIZE = 10, THREAT_TEXT_SIZE = 9,
+    GLOW_REST = GLOW_ALPHA_DEFAULT, GLOW_HOSTILE = GLOW_ALPHA_HOSTILE, GLOW_TARGET = GLOW_ALPHA_TARGET_DEFAULT,
+    GLOW_TARGET_HOSTILE = GLOW_ALPHA_TARGET_HOSTILE, DIM = ALPHA_NONTARGET_DIM, GRADIENT_DARK = FILL_GRADIENT_DARK_SCALE,
+    MARK_Y = {}, -- name size -> how far above the health bar the target mark sits
+}
+for size = Plates.SETTINGS.nameSize.min, Plates.SETTINGS.nameSize.max do
+    Plates.GEOMETRY.MARK_Y[size] = Plates.TargetMarkY(size)
+end
+Plates.PALETTE = {
+    text = COLOR_TEXT, tapped = COLOR_BAR_TAPPED, quest = COLOR_QUEST_AMBER,
+    nameHostile = COLOR_NAME_HOSTILE, nameNeutral = COLOR_NAME_NEUTRAL, nameFriendly = COLOR_NAME_FRIENDLY,
+    fillNeutral = COLOR_REACTION_NEUTRAL, fillFriend = COLOR_REACTION_FRIEND,
+    aggro = COLOR_ENGAGEMENT_AGGRO, powerRage = COLOR_POWER_RAGE, powerEnergy = COLOR_POWER_ENERGY,
+    targetMark = TARGET_MARK_COLORS,
+}
 
 -- Nameplate cast bar. CHANNEL_UPDATE/DELAYED restart the same bar (a
 -- channel tick or a pushback edits the existing cast rather than starting a
@@ -811,13 +894,45 @@ end
 -- built in CreatePlateFrame, so root's height tracks the unit's power pool
 -- without Lua ever reading the secret max. The sizer hangs off the PLATE (its
 -- TOP at root's base bottom), never off root, so root -> sizer texture ->
--- sizer -> plate has no anchor cycle.
+-- sizer -> plate has no anchor cycle. With the power bar height at 0 there is no strip to grow by: the BOTTOM then sits
+-- at the fixed base height under the plate, and the sizer decides nothing.
 local function AnchorPlateRoot(root, plate)
     root:ClearAllPoints()
     root.fsSizer:ClearAllPoints()
     root.fsSizer:SetPoint("TOP", plate, "CENTER", 0, -root.baseHeight / 2)
     root:SetPoint("TOP", plate, "CENTER", 0, root.baseHeight / 2)
-    root:SetPoint("BOTTOM", root.fsSizerAnchor, "BOTTOM")
+    if root.powerOff then
+        root:SetPoint("BOTTOM", plate, "CENTER", 0, -root.baseHeight / 2)
+    else
+        root:SetPoint("BOTTOM", root.fsSizerAnchor, "BOTTOM")
+    end
+end
+
+-- Lays one plate frame out for the settings in use (width, bar heights, name size, the target mark's height): on a frame
+-- that has a plate it also anchors again, since the base height moves the anchors. Only this file's own frames and
+-- textures are touched, so it is safe in combat. The fills, text and parts are left to the Update functions.
+function Plates.Layout(root)
+    local S = Plates.S
+    local rootWidth, baseHeight, fillWidth, fillHeight = Plates.Dims()
+    root.baseHeight = baseHeight
+    root.powerOff = S.mpH <= 0
+    root:SetWidth(rootWidth)
+    root.healthBar:SetSize(fillWidth, fillHeight)
+    root.fsSizer:SetSize(1, S.mpH + POWER_BAR_GAP)
+    root.powerBar:SetSize(fillWidth, math.max(1, S.mpH))
+    if root.powerOff then
+        root.powerBar:Hide()
+        ResetPlateGrowth(root)
+    end
+    root.castBar:SetHeight(math.max(1, S.castH))
+    if root.fsNameSize ~= S.nameSize then
+        root.fsNameSize = S.nameSize
+        ApplyFont(root.nameText, S.nameSize)
+        local mark = root.targetMark[2]
+        mark:ClearAllPoints()
+        mark:SetPoint("BOTTOM", root.healthBar, "TOP", 0, Plates.TargetMarkY(S.nameSize))
+    end
+    if root.fsPlate and root.unit then AnchorPlateRoot(root, root.fsPlate) end
 end
 
 -- Once-per-session latches for the two sizer degrade logs (LogDegradeOnce does
@@ -859,18 +974,17 @@ local function CreatePlateFrame()
     -- somewhere to show: a flush child StatusBar would composite above
     -- root's own regions and hide it (see Theme.lua's pill-bar pattern note).
     local inset = FS.Theme.BAR_FILL_INSET
-    -- The plate's outer size is fixed by PLATE_OUTER_PAD, not by the inset, so
-    -- a thinner inset grows the fill instead of shrinking the plate.
-    local fillWidth = BAR_WIDTH + 2 * (PLATE_OUTER_PAD - inset)
-    local fillHeight = BAR_HEIGHT + 2 * (PLATE_OUTER_PAD - inset)
+    local S = Plates.S
+    local rootWidth, baseHeight, fillWidth, fillHeight = Plates.Dims()
     -- baseHeight is the collapsed (no power bar) height, used for the anchor
     -- math in AnchorPlateRoot. Root's real height comes from its TOP and BOTTOM
     -- anchors (only the width is set here): UpdatePower feeds the unit's power
-    -- max into the sizer below, which grows root by POWER_BAR_HEIGHT +
+    -- max into the sizer below, which grows root by the power bar height +
     -- POWER_BAR_GAP when the unit has a power pool and leaves it at baseHeight
     -- when it has none (a no-mana NPC reports power type mana with max 0).
-    root.baseHeight = BAR_HEIGHT + 2 * PLATE_OUTER_PAD
-    root:SetWidth(BAR_WIDTH + 2 * PLATE_OUTER_PAD)
+    root.baseHeight = baseHeight
+    root.powerOff = S.mpH <= 0
+    root:SetWidth(rootWidth)
     root:SetFrameStrata("LOW")
     ApplyBackdrop(root)
 
@@ -878,7 +992,7 @@ local function CreatePlateFrame()
     -- engine can turn the SECRET power max into layout. UpdatePower does
     -- sizer:SetValue(UnitPowerMax(...)), which clamps into 0..1: max 0 (no
     -- power pool) is empty, any real pool is full. Lua never sees the number.
-    -- It is POWER_BAR_HEIGHT + POWER_BAR_GAP tall with its TOP at root's base
+    -- It is the power bar height + POWER_BAR_GAP tall with its TOP at root's base
     -- bottom (AnchorPlateRoot) and fills TOP-DOWN (SetReverseFill), so the
     -- fill texture's BOTTOM sits at the base bottom when empty and one strip
     -- lower when full. Root's BOTTOM anchors to that texture BOTTOM: base
@@ -890,7 +1004,7 @@ local function CreatePlateFrame()
     -- sizer FRAME's bottom instead: always grown, the pre-sizer behavior.
     local sizer = CreateFrame("StatusBar", nil, root)
     sizer:SetOrientation("VERTICAL")
-    sizer:SetSize(1, POWER_BAR_HEIGHT + POWER_BAR_GAP)
+    sizer:SetSize(1, S.mpH + POWER_BAR_GAP)
     sizer:SetStatusBarTexture(FS.Theme.FLAT_TEXTURE)
     sizer:GetStatusBarTexture():SetVertexColor(0, 0, 0, 0)
     sizer:SetAlpha(0)
@@ -949,7 +1063,7 @@ local function CreatePlateFrame()
     -- ApplyPowerFillColor as soon as the frame acquires a unit, so this is
     -- never seen mid-fight.
     local powerBar = CreateFrame("StatusBar", nil, root)
-    powerBar:SetSize(fillWidth, POWER_BAR_HEIGHT)
+    powerBar:SetSize(fillWidth, math.max(1, S.mpH))
     powerBar:SetPoint("TOPLEFT", healthBar, "BOTTOMLEFT", 0, -POWER_BAR_GAP)
     powerBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     powerBar:SetMinMaxValues(0, 1)
@@ -960,11 +1074,32 @@ local function CreatePlateFrame()
 
     powerBar.caret = FS.FrameHelpers.CreateCaret(powerBar, FS.Theme.COLOR_CARET_POWER)
 
-    AddRoundedFillMask(root, powerBar, POWER_BAR_HEIGHT, true)
+    AddRoundedFillMask(root, powerBar, math.max(1, S.mpH), true)
     RaisePlateStroke(root)
 
+    -- Health text and the threat text field (Plates.SetTextProvider), inside the health bar on a frame above the bar's
+    -- masks and the plate's stroke so nothing draws over the letters. Both start hidden; Plates.UpdateHpText and
+    -- Plates.UpdateThreatText show them.
+    local textHost = CreateFrame("Frame", nil, root)
+    textHost:SetAllPoints(healthBar)
+    textHost:SetFrameLevel(math.max(healthBar:GetFrameLevel(), powerBar:GetFrameLevel())
+        + FS.Theme.BAR_CORNER_MASK_LEVEL + 2)
+    local hpText = textHost:CreateFontString(nil, "OVERLAY")
+    ApplyFont(hpText, Plates.GEOMETRY.HP_TEXT_SIZE)
+    hpText:SetTextColor(unpack(COLOR_TEXT))
+    hpText:SetPoint("CENTER", healthBar, "CENTER", 0, 0)
+    hpText:Hide()
+    root.hpText = hpText
+    local threatText = textHost:CreateFontString(nil, "OVERLAY")
+    ApplyFont(threatText, Plates.GEOMETRY.THREAT_TEXT_SIZE)
+    threatText:SetTextColor(unpack(COLOR_TEXT))
+    threatText:SetJustifyH("RIGHT")
+    threatText:SetPoint("RIGHT", healthBar, "RIGHT", -3, 0)
+    threatText:Hide()
+    root.threatText = threatText
+
     local nameText = root:CreateFontString(nil, "OVERLAY")
-    ApplyFont(nameText, FONT_SIZE)
+    ApplyFont(nameText, S.nameSize)
     nameText:SetTextColor(unpack(COLOR_TEXT))
     -- Left-aligned off the health bar's own LEFT edge (the player's ask), not
     -- centered -- a long name then grows rightward instead of shifting the
@@ -972,6 +1107,7 @@ local function CreatePlateFrame()
     nameText:SetPoint("BOTTOMLEFT", healthBar, "TOPLEFT", 0, 2)
     nameText:SetJustifyH("LEFT")
     root.nameText = nameText
+    root.fsNameSize = S.nameSize
 
     -- Raid target marker: centered above the name (locked design spec). Built
     -- here, AFTER nameText exists, so it can anchor off it -- anchoring to the
@@ -998,7 +1134,7 @@ local function CreatePlateFrame()
     questIcon:Hide()
     root.questIcon = questIcon
 
-    -- Target Mark: three flat blocks centered on the health bar, TARGET_MARK_Y above it, on their own child
+    -- Target Mark: three flat blocks centered on the health bar, Plates.TargetMarkY above it, on their own child
     -- frame. Built hidden for every pooled plate; UpdateTargetMark shows the frame on the target plate only, and
     -- only while the setting is on. The frame ignores its parents' alpha (feature-detected) and sits well above
     -- the plate's bars and aura container, so nothing dims, tints or covers the blocks.
@@ -1016,7 +1152,7 @@ local function CreatePlateFrame()
         if type(block.SetIgnoreParentAlpha) == "function" then block:SetIgnoreParentAlpha(true) end
         targetMark[i] = block
     end
-    targetMark[2]:SetPoint("BOTTOM", healthBar, "TOP", 0, TARGET_MARK_Y)
+    targetMark[2]:SetPoint("BOTTOM", healthBar, "TOP", 0, Plates.TargetMarkY(S.nameSize))
     targetMark[1]:SetPoint("BOTTOMRIGHT", targetMark[2], "BOTTOMLEFT", 0, 0)
     targetMark[3]:SetPoint("BOTTOMLEFT", targetMark[2], "BOTTOMRIGHT", 0, 0)
     root.targetMark = targetMark
@@ -1041,7 +1177,7 @@ local function CreatePlateFrame()
     local castBar = CreateFrame("StatusBar", nil, root)
     castBar:SetPoint("TOPLEFT", root, "BOTTOMLEFT", inset, -castBarGap)
     castBar:SetPoint("TOPRIGHT", root, "BOTTOMRIGHT", -inset, -castBarGap)
-    castBar:SetHeight(CAST_BAR_HEIGHT)
+    castBar:SetHeight(math.max(1, S.castH))
     castBar:SetStatusBarTexture(FS.Theme.FLAT_TEXTURE)
     castBar:SetStatusBarColor(FS.Theme.COLOR_CAST_INTERRUPTIBLE[1], FS.Theme.COLOR_CAST_INTERRUPTIBLE[2],
         FS.Theme.COLOR_CAST_INTERRUPTIBLE[3], 1)
@@ -1686,6 +1822,9 @@ local function ReleaseFrame(unit)
     -- Reset the quest icon so a reused plate doesn't flash the previous
     -- occupant's marker before UpdateQuestIcon resolves the new unit.
     frame.questIcon:Hide()
+    -- Same for the health text and the threat text field.
+    frame.hpText:Hide()
+    frame.threatText:Hide()
     -- Reset the target mark so a pooled plate never carries it to its next unit.
     if frame.targetMarkShown then
         frame.targetMarkShown = false
@@ -1714,6 +1853,65 @@ local function HideBlizzardPlate(plate)
     end
 end
 
+-- The percent the engine reads (UnitHealthPercent through CurveConstants.ScaleTo100), or nil without both. A throw is
+-- swallowed. The answer may be secret: type() is legal on one and it goes straight to SetFormattedText.
+function Plates.ReadHealthPercent(unit)
+    if type(UnitHealthPercent) ~= "function" or type(CurveConstants) ~= "table" or CurveConstants.ScaleTo100 == nil then
+        return nil
+    end
+    local ok, percent = pcall(UnitHealthPercent, unit, false, CurveConstants.ScaleTo100)
+    if ok and type(percent) == "number" then return percent end
+    return nil
+end
+
+-- The health text, from the Text setting: percent, the numbers abbreviated by the engine (AbbreviateNumbers takes a secret
+-- and hands back a secret string), or both. Enemy health is secret, so nothing here compares or divides a value that
+-- may be secret: values go to SetFormattedText / SetText as they are. Without the engine's percent, plain values are
+-- divided and a secret one leaves the text blank. A refused write blanks the text and never throws.
+function Plates.UpdateHpText(root, unit, health, maxHealth)
+    local mode, text = Plates.S.hpText, root.hpText
+    if mode == "none" then
+        if text:IsShown() then text:Hide() end
+        return
+    end
+    local percent
+    if mode ~= "number" then
+        percent = Plates.ReadHealthPercent(unit)
+        if percent == nil and not FS.IsSecret(health) and not FS.IsSecret(maxHealth)
+            and type(health) == "number" and type(maxHealth) == "number" and maxHealth > 0 then
+            percent = health / maxHealth * 100
+        end
+    end
+    local written = false
+    if mode == "percent" and percent ~= nil then
+        written = pcall(text.SetFormattedText, text, "%.0f%%", percent)
+    elseif mode ~= "percent" and health and maxHealth and (mode == "number" or percent ~= nil) then
+        local cur, max = health, maxHealth
+        if type(AbbreviateNumbers) == "function" then
+            local okCur, shortCur = pcall(AbbreviateNumbers, health)
+            local okMax, shortMax = pcall(AbbreviateNumbers, maxHealth)
+            if okCur and okMax then cur, max = shortCur, shortMax end
+        end
+        if mode == "number" then
+            written = pcall(text.SetFormattedText, text, "%s / %s", cur, max)
+        else
+            written = pcall(text.SetFormattedText, text, "%s  %.0f%%", cur, percent)
+        end
+    end
+    if written then
+        text:Show()
+    else
+        pcall(text.SetText, text, "")
+        text:Hide()
+    end
+end
+
+-- The health text of one plate again (the setting changed), read fresh.
+function Plates.RefreshHpText(unit)
+    local root = FS.framesByUnit[unit]
+    if root then Plates.UpdateHpText(root, unit, UnitHealth(unit), UnitHealthMax(unit)) end
+end
+
 local function UpdateHealth(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
@@ -1729,6 +1927,7 @@ local function UpdateHealth(unit)
         root.healthBar:SetValue(health)
     end
     FS.FrameHelpers.UpdateCaretFull(root.healthBar.caret, unit, "health")
+    Plates.UpdateHpText(root, unit, health, maxHealth)
 
     -- Blizzard re-shows its own UnitFrame on plate updates; keep re-hiding it.
     HideBlizzardPlate(FS.platesByUnit[unit])
@@ -1765,6 +1964,13 @@ end
 local function UpdatePower(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
+
+    -- Power bar height 0: no strip and no growth, whatever the unit's power (Plates.Layout).
+    if root.powerOff then
+        root.powerBar:Hide()
+        ResetPlateGrowth(root)
+        return
+    end
 
     local powerType = UnitPowerType(unit)
     local color = GetPowerTypeColors()[powerType]
@@ -1856,7 +2062,7 @@ local function UpdateFillColor(unit)
     if root.tapDenied then
         ApplyFillColor(root, COLOR_BAR_TAPPED)
     else
-        ApplyFillColor(root, GetEngagementColor(unit))
+        ApplyFillColor(root, Plates.ProvidedColor(unit) or GetEngagementColor(unit))
     end
 end
 
@@ -1865,7 +2071,7 @@ local function UpdateRaidMarker(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
 
-    if not HAS_GET_RAID_TARGET_INDEX or not HAS_RAID_TARGET_TEXTURE_SETTER then
+    if not Plates.S.raidMark or not HAS_GET_RAID_TARGET_INDEX or not HAS_RAID_TARGET_TEXTURE_SETTER then
         root.raidMarker:Hide()
         return
     end
@@ -2042,6 +2248,7 @@ local ELITE_SUFFIX = {
 }
 
 local function BuildLevelPrefix(unit)
+    if not Plates.S.level then return "" end
     local level = UnitLevel(unit)
     if not level then return "" end
 
@@ -2280,8 +2487,8 @@ local function UpdateQuestIcon(unit)
     if not root then return end
 
     -- Questie draws its own quest icon on the plate (seated beside our health bar, see Questie plate icons): two
-    -- markers for one mob is noise, so ours steps aside while Questie's are on.
-    if Plates.Questie.DrawsPlateIcons() then
+    -- markers for one mob is noise, so ours steps aside while Questie's are on. The Quest marker setting is only ours.
+    if not Plates.S.quest or Plates.Questie.DrawsPlateIcons() then
         root.questIcon:Hide()
         return
     end
@@ -2375,6 +2582,9 @@ local function UpdateAuraIcons(unit)
     local root = FS.framesByUnit[unit]
     if not root or not root.auraIcons then return end
 
+    -- Auras row off: the row is down already (Plates.ApplyAuras) and nothing is scanned.
+    if not Plates.S.auras then return end
+
     if not FS.AurasReadable() then return end
 
     local shown = 0
@@ -2467,6 +2677,12 @@ local function RefreshPlateCast(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
 
+    -- Cast bar height 0 hides the bar: no cast is ever shown.
+    if Plates.S.castH <= 0 then
+        StopPlateCast(root)
+        return
+    end
+
     if not UnitExists(unit) then
         StopPlateCast(root)
         return
@@ -2479,6 +2695,191 @@ local function RefreshPlateCast(unit)
     end
 
     StartPlateCast(root, info)
+end
+
+-------------------------------------------------------------------------------
+-- Settings, friendly plates and the providers
+-------------------------------------------------------------------------------
+
+-- FS.LogDegradeOnce does not dedupe by key, so each log line here latches on its own key.
+Plates.warned = {}
+function Plates.Warn(key, text)
+    if Plates.warned[key] then return end
+    Plates.warned[key] = true
+    FS.LogDegradeOnce(key, "|cffff4488Forever STUwave|r: " .. text)
+end
+
+-- A friendly plate: a unit the player cannot attack and that is a friend. A secret answer counts as "not friendly", so
+-- the plate stays as it is for every other unit.
+function Plates.IsFriendly(unit)
+    local attackable = UnitCanAttack("player", unit)
+    if FS.IsSecret(attackable) or attackable then return false end
+    local friend = UnitIsFriend("player", unit)
+    return not FS.IsSecret(friend) and friend == true
+end
+
+-- Friendly plates off: this unit's plate is not built at all (the stock plate stays hidden). The default asks nothing.
+function Plates.FriendlyOff(unit)
+    return Plates.S.friendly == "off" and Plates.IsFriendly(unit)
+end
+
+-- The friendly setting's "smaller" is a smaller root: every part of the plate scales around its centre.
+function Plates.ApplyScale(root, unit)
+    local scale = 1
+    if Plates.S.friendly == "smaller" and Plates.IsFriendly(unit) then scale = Plates.GEOMETRY.SMALL_SCALE end
+    if root.fsScale ~= scale then
+        root.fsScale = scale
+        root:SetScale(scale)
+    end
+end
+
+-- Brings one plate in line with the friendly setting: builds it, drops it or rescales it. Nothing happens with the plates
+-- off. A plate the addon may not touch (no entry in FS.platesByUnit) is never built either way.
+function Plates.Refit(unit)
+    local plate = FS.platesByUnit[unit]
+    if not plate or not Plates.on then return end
+    local root = FS.framesByUnit[unit]
+    if Plates.FriendlyOff(unit) then
+        if root then ReleaseFrame(unit) end
+        HideBlizzardPlate(plate)
+    elseif not root then
+        Plates.Build(unit, plate)
+    else
+        Plates.ApplyScale(root, unit)
+    end
+end
+
+-- Auras row on or off for every plate that is up: off takes the container back to its pool (the plate keeps no row), on gives
+-- every plate one again, or wakes the fallback row.
+function Plates.ApplyAuras()
+    if Plates.S.auras then
+        if Plates.on then TopUpAuraPool() end
+        for unit, root in pairs(FS.framesByUnit) do
+            if AuraContainersActive() then
+                if not root.auraContainer then AttachAuraContainer(root, unit) end
+            else
+                EnsureAuraIcons(root)
+            end
+            UpdateAuraIcons(unit)
+        end
+        return
+    end
+    for _, root in pairs(FS.framesByUnit) do
+        ReleaseAuraContainer(root)
+        if root.auraIcons then
+            for _, auraIcon in ipairs(root.auraIcons) do
+                ClearAuraCooldown(auraIcon)
+                auraIcon:Hide()
+            end
+        end
+    end
+end
+
+-- Reads the settings again and applies what changed, at once, to the plates that are up and to the ones in the pool (a
+-- pooled plate is laid out here, so its next acquire needs nothing). Only this file's own frames are touched: safe in combat.
+function Plates.ApplySettings()
+    local S, old = Plates.S, {}
+    for field, value in pairs(S) do old[field] = value end
+    Plates.ReadSettings()
+    local function changed(...)
+        for i = 1, select("#", ...) do
+            local field = select(i, ...)
+            if S[field] ~= old[field] then return true end
+        end
+        return false
+    end
+    if changed("w", "hpH", "mpH", "castH", "nameSize") then
+        for _, root in pairs(FS.framesByUnit) do Plates.Layout(root) end
+        for _, root in ipairs(FS.freePool) do Plates.Layout(root) end
+        if changed("mpH") then
+            for unit in pairs(FS.framesByUnit) do UpdatePower(unit) end
+        end
+        if changed("castH") then
+            for unit in pairs(FS.framesByUnit) do RefreshPlateCast(unit) end
+        end
+    end
+    if changed("level") then
+        for unit, root in pairs(FS.framesByUnit) do
+            root.nameKey = nil
+            UpdateName(unit)
+        end
+    end
+    if changed("hpText") then
+        for unit in pairs(FS.framesByUnit) do Plates.RefreshHpText(unit) end
+    end
+    if changed("quest") then Plates.RefreshAllQuestIcons() end
+    if changed("raidMark") then
+        for unit in pairs(FS.framesByUnit) do UpdateRaidMarker(unit) end
+    end
+    if changed("auras") then Plates.ApplyAuras() end
+    if changed("friendly") then
+        for unit in pairs(FS.platesByUnit) do Plates.Refit(unit) end
+    end
+end
+
+-- A colour is a table of three plain numbers (r, g, b; an alpha is ignored). A secret is never one.
+function Plates.ValidColor(color)
+    if FS.IsSecret(color) or type(color) ~= "table" then return false end
+    for i = 1, 3 do
+        local channel = color[i]
+        if FS.IsSecret(channel) or type(channel) ~= "number" then return false end
+    end
+    return true
+end
+
+-- Hooks for the threat view (Roles page). Both providers are off until set. SetColorProvider(fn): fn(unit) answers a colour
+-- table, or nil to keep the plate's own fill; it is asked whenever a plate's fill is worked out and again on every threat
+-- event. SetTextProvider(fn): fn(unit) answers a string, and optionally a colour table, for the small threat text field
+-- inside the health bar; anything else hides the field. Each setter applies at once to the plates that are up, and nil
+-- takes the provider away. A provider that throws is ignored (logged once) and the plate keeps its own look. Return the
+-- same colour table each time, the plate skips a fill it already wears.
+function Plates.ProvidedColor(unit)
+    local provider = Plates.colorProvider
+    if not provider then return nil end
+    local ok, color = pcall(provider, unit)
+    if not ok then
+        Plates.Warn("plate_color_provider", "a nameplate colour provider failed, the plates keep their own colours")
+        return nil
+    end
+    if Plates.ValidColor(color) then return color end
+    return nil
+end
+
+function Plates.UpdateThreatText(unit)
+    local root = FS.framesByUnit[unit]
+    if not root then return end
+    local text, provider = root.threatText, Plates.textProvider
+    local value, color
+    if provider then
+        local ok
+        ok, value, color = pcall(provider, unit)
+        if not ok then
+            Plates.Warn("plate_text_provider", "a nameplate text provider failed, the threat text stays hidden")
+            value = nil
+        end
+    end
+    -- type() is legal on a secret; a secret string goes to SetText as it is.
+    if type(value) ~= "string" then
+        if text:IsShown() then text:Hide() end
+        return
+    end
+    text:SetText(value)
+    if Plates.ValidColor(color) then
+        text:SetTextColor(color[1], color[2], color[3], 1)
+    else
+        text:SetTextColor(unpack(COLOR_TEXT))
+    end
+    text:Show()
+end
+
+function Plates.SetColorProvider(fn)
+    Plates.colorProvider = type(fn) == "function" and fn or nil
+    for unit in pairs(FS.framesByUnit) do UpdateFillColor(unit) end
+end
+
+function Plates.SetTextProvider(fn)
+    Plates.textProvider = type(fn) == "function" and fn or nil
+    for unit in pairs(FS.framesByUnit) do Plates.UpdateThreatText(unit) end
 end
 
 -------------------------------------------------------------------------------
@@ -2507,6 +2908,9 @@ do
             showHookedUnitFrames[plate.UnitFrame] = true
         end
 
+        -- Friendly plates off: the stock plate stays hidden (above) and nothing of ours is built for the unit.
+        if Plates.FriendlyOff(unit) then return end
+
         local root = AcquireFrame()
         root.unit = unit
         root.fsPlate = plate
@@ -2515,13 +2919,14 @@ do
         -- TOP + sizer-derived BOTTOM, see AnchorPlateRoot. UpdatePower's height
         -- changes only ever extend the bottom.
         AnchorPlateRoot(root, plate)
+        Plates.ApplyScale(root, unit)
         Plates.SeatGlow(root)
         root:Show()
 
         FS.framesByUnit[unit] = root
 
-        -- After root's own anchoring: the aura container hangs off root.healthBar.
-        AttachAuraContainer(root, unit)
+        -- After root's own anchoring: the aura container hangs off root.healthBar. Auras row off: no container is taken.
+        if Plates.S.auras then AttachAuraContainer(root, unit) end
 
         RefreshEngineDimCache()
         UpdateHealth(unit)
@@ -2530,6 +2935,7 @@ do
         UpdateGlowState(unit)
         UpdateRaidMarker(unit)
         UpdateName(unit)
+        Plates.UpdateThreatText(unit)
         SyncDeadFlag(unit)
         UpdateQuestIcon(unit)
         UpdateAuraIcons(unit)
@@ -2617,6 +3023,12 @@ do
         registered = true
         config.RegisterDefault(Plates.KEY, true)
         config.OnChange(Plates.KEY, ApplyPlatesSetting)
+        -- The page's settings: defaults, then every key calls the same diff, which reads them all and applies what moved.
+        for _, def in pairs(Plates.SETTINGS) do
+            config.RegisterDefault(def.key, def.default)
+            config.OnChange(def.key, Plates.ApplySettings)
+        end
+        Plates.ApplySettings()
         ApplyPlatesSetting()
     end
 end
@@ -2752,7 +3164,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     -- registers the fallback row's readable callback (Theme.lua is loaded by now).
     if event == "PLAYER_ENTERING_WORLD" then
         Plates.RegisterConfig()
-        if Plates.on then TopUpAuraPool() end
+        if Plates.on and Plates.S.auras then TopUpAuraPool() end
         RegisterAurasReadable()
         RegisterTargetMarkConfig()
         RefreshTargetMarks()
@@ -2775,8 +3187,11 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
         auraAttachRefusedInCombat = false
         if not Plates.on then return end
         if AuraContainersActive() then
-            TopUpAuraPool()
-            RetryBareAuraPlates()
+            -- Auras row off: no container is wanted, so none is built or retried.
+            if Plates.S.auras then
+                TopUpAuraPool()
+                RetryBareAuraPlates()
+            end
         else
             for otherUnit in pairs(FS.framesByUnit) do
                 UpdateAuraIcons(otherUnit)
@@ -2793,6 +3208,15 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
         OnNamePlateRemoved(unit)
     elseif event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH"
         or event == "UNIT_FACTION" or event == "UNIT_FLAGS" then
+        -- A unit can turn friendly or hostile (a duel, a flag): with friendly plates smaller or off its plate is rescaled,
+        -- dropped or built. The player's own token moves every plate at once.
+        if Plates.S.friendly ~= "same" and (event == "UNIT_FACTION" or event == "UNIT_FLAGS") then
+            if unit == "player" then
+                for otherUnit in pairs(FS.platesByUnit) do Plates.Refit(otherUnit) end
+            elseif FS.platesByUnit[unit] then
+                Plates.Refit(unit)
+            end
+        end
         if unit == "player" and (event == "UNIT_FACTION" or event == "UNIT_FLAGS") then
             -- Fires on the player's own token (duel start, PvP flag toggle),
             -- which flips UnitCanAttack for every plate at once but has no
@@ -2825,6 +3249,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
         if FS.framesByUnit[unit] then
             UpdateFillColor(unit)
             UpdateName(unit)
+            Plates.UpdateThreatText(unit)
         end
     elseif event == "UNIT_AURA" then
         if FS.framesByUnit[unit] then
