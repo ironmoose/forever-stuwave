@@ -61,6 +61,7 @@ frame(0.008, 1, 1); frame(0.008, 1, 1); frame(0.008, 1, 1)
 frame(0.120, 30, 2, 400)               -- a hitch with a heap drop, A to blame
 frame(0.008, 1, 1, 410)
 check(H.run.slowCount == 1 and H.run.slowWithGc == 1, "one slow frame, with a heap drop")
+check(#H.run.spikes == 2 and H.run.spikes[1]:find("A 30.00 ms", 1, true), "spikes kept with their time: " .. tostring(H.run.spikes[1]))
 local row = H.run.slow[1]
 check(row[1] == "A 30.00" and row[2] == "B 2.00" and row.gc, "the slow frame names A first: " .. tostring(row[1]))
 frame(10, 0, 0)

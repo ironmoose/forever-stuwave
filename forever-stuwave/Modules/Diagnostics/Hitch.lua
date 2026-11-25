@@ -16,7 +16,8 @@ if type(FS) ~= "table" then return end
 FS.Hitch = FS.Hitch or {}
 local H = FS.Hitch
 
-H.SLOW_MS = 40          -- a frame this long is a hitch at a 118 frame cap (about 8.5 ms a frame)
+H.SLOW_MS = 25          -- a frame this long is a felt stutter at 60 fps (16.7 ms a frame) and above
+H.SPIKE_MS = 2          -- one addon using this much CPU in one frame is kept as a spike, whatever the frame time
 H.KEEP = 80             -- slow frames kept
 H.TOP = 4               -- addons named per slow frame
 H.DEFAULT_S = 60
@@ -54,7 +55,7 @@ local function Finish()
     ForeverSTUwaveDB.hitch = {
         at = date and date("%Y-%m-%d %H:%M:%S") or nil, seconds = seconds, frames = s.frames, slowCount = s.slowCount,
         worstMs = s.worstMs, gcSteps = s.gcSteps, slowWithGc = s.slowWithGc, addons = list, slow = s.slow,
-        moving = s.moving,
+        moving = s.moving, spikes = s.spikes,
     }
     local top = list[1]
     Say(("sample saved: %d frames, %d slow (worst %.0f ms, %d with a heap drop); most CPU in slow frames: %s. Type /fsbug to send it.")
@@ -84,6 +85,13 @@ local function Step(_, elapsed)
         if d > s.max[i] then s.max[i] = d end
     end
     s.frames = s.frames + 1
+    if s.frames > 2 and #s.spikes < H.KEEP then
+        for i = 1, #names do
+            if deltas[i] >= H.SPIKE_MS then
+                s.spikes[#s.spikes + 1] = ("%.2f s %s %.2f ms (frame %.0f ms)"):format(GetTime() - s.startAt, names[i], deltas[i], ms)
+            end
+        end
+    end
     -- the speed can be a secret on this client: count a frame as moving only from a plain read
     local speed = type(GetUnitSpeed) == "function" and GetUnitSpeed("player") or nil
     local moving = type(speed) == "number" and not (FS.IsSecret and FS.IsSecret(speed)) and speed > 0
@@ -129,7 +137,7 @@ function H.Start(seconds)
         return
     end
     local names = LoadedNames()
-    local s = { names = names, last = {}, total = {}, max = {}, inSlow = {}, deltas = {}, slow = {}, frames = 0,
+    local s = { names = names, last = {}, total = {}, max = {}, inSlow = {}, deltas = {}, slow = {}, spikes = {}, frames = 0,
         slowCount = 0, worstMs = 0, gcSteps = 0, slowWithGc = 0, moving = 0 }
     for i = 1, #names do s.total[i], s.max[i], s.inSlow[i], s.deltas[i] = 0, 0, 0, 0 end
     s.startAt = GetTime()
