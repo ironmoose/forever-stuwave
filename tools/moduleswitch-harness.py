@@ -1734,6 +1734,16 @@ function T.the_stock_totem_bar_is_dimmed_when_the_totem_tab_is_on()
     yes(TouchesOn("MultiCastActionBarFrame", "Modules/ActionBars/ActionBars.lua") ~= "", "dimmed, as before")
 end
 
+function T.addon_tabs_need_the_action_bars_because_every_tab_stands_on_the_console()
+    Boot({})
+    local list = FS.ModuleSwitch.Requires("m.class")
+    eq(#list, 1); eq(list[1], "m.ab")
+    local deps = FS.ModuleSwitch.Dependents("m.ab")
+    local found = false
+    for _, k in ipairs(deps) do if k == "m.class" then found = true end end
+    yes(found, "turning the action bars off lists the tabs")
+end
+
 return T
 """
 

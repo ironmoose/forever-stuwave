@@ -62,6 +62,10 @@ local _, FS = ...
 local ClassShoulder = {}
 FS.ClassShoulder = ClassShoulder
 
+-- Module power: every addon tab stands on a shoulder of the Console's top edge, so the Addon tabs module has nothing to
+-- stand on without the Action bars module (turning the bars off asks once, then turns the tabs off with them).
+if FS.ModuleSwitch then FS.ModuleSwitch.Register({ key = "m.class", requires = { "m.ab" } }) end
+
 local C = {
     OWNER = "classshoulder",
     DX = 36,      -- LS_X 755 less the chassis left 719, design px
