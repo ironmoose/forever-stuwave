@@ -27,6 +27,17 @@
 -- Slots, left to right: backpack, bags 1-4, the reagent bag when this client
 -- has one, the keyring when C_ActionBar.ShouldShowKeyring says so.
 --
+-- ONE BAG ALONE. With combined bags on, the stock click on bag 1-4 opens the combined window (Blizzard counts every held
+-- bag 0-4 as generic; only the reagent bag, the keyring and the bank tabs always open alone), so a quiver, an ammo pouch or
+-- a soul bag cannot be opened on its own through the stock path, and the stock path is the only one that does not taint
+-- (see above). A bag whose family says quiver, ammo pouch or soul bag (ReadFamily) therefore gets one more behaviour: its
+-- RIGHT click opens that bag alone in the bag window Bags.lua draws from secure item buttons of its own (FS.SpecialBag).
+-- Mechanics: the slot's `type2` attribute is the empty string, the secure "no action" that excludes the stock click for the
+-- right button only, and a PostClick hook (insecure, runs after the secure step) asks FS.SpecialBag to toggle the bag. The
+-- left click, every other slot, individual-window mode and the setting `bagbar.specialRight` off all keep the stock click.
+-- The reagent bag and the keyring already open alone through the stock click, so they get nothing new. `type2` is a
+-- SetAttribute, so it is applied out of combat only (ApplyClick, from Structure) and replayed at regen like the rest.
+--
 -- Behaviour is Blizzard's BaseBagSlotButtonMixin (Blizzard_MainMenuBarBagButtons):
 --     click           the stock button's OnClick, through the secure click type: a modified
 --                     click is OPENALLBAGS (toggle all bags) or nothing, never a toggle; plain
@@ -84,6 +95,15 @@ local ITEM_CLASS = Enum and Enum.ItemClass
 local CLASS_CONTAINER = (ITEM_CLASS and ITEM_CLASS.Container) or 1
 local CLASS_QUIVER = (ITEM_CLASS and ITEM_CLASS.Quiver) or 11
 local BAG_EQUIP_LOCS = { INVTYPE_BAG = true, INVTYPE_QUIVER = true }
+
+-- Bag families: a bit mask, the second return of C_Container.GetContainerNumFreeSlots and what C_Item.GetItemFamily says of
+-- the bag item. The classic masks, in the order a mask with several bits is read: arrows 1 (quiver), bullets 2 (ammo pouch),
+-- soul shards 4 (soul bag). UNVERIFIED on Forever until the P1 probe's bag part is read from the client. Trade bags (herb,
+-- enchanting, mining ... 8 and up) and the keyring (256) are not special here; a row in this table adds a kind.
+local FAMILY_KINDS = { { bit = 1, kind = "quiver" }, { bit = 2, kind = "ammo" }, { bit = 4, kind = "shard" } }
+local SOLO_SETTING = "bagbar.specialRight" -- on by default; off keeps the stock right click on every slot
+local SOLO_HINT = "Right click: open this bag alone"
+if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(SOLO_SETTING, true) end
 
 local PULSE_RATE = 5.2 -- radians per second, about a 1.2s cycle
 
@@ -220,6 +240,90 @@ local function FreeSlotCount()
 end
 
 -------------------------------------------------------------------------------
+-- Bag family and the right click of a special bag
+-------------------------------------------------------------------------------
+
+local function KindOfFamily(mask)
+    if type(mask) ~= "number" or mask < 0 then return nil end
+    for _, entry in ipairs(FAMILY_KINDS) do
+        if math.floor(mask / entry.bit) % 2 == 1 then return entry.kind end
+    end
+    return nil
+end
+
+-- The family mask of the bag in `slot`, or nil when no API will say. Two sources, each feature-detected: the live container's
+-- own answer (GetContainerNumFreeSlots, second return) and the bag item's family (GetItemFamily, namespaced or the old
+-- global). A nonzero answer from either counts, the container's first; zero and nil stay "generic" only when nothing named a
+-- family. A secret or throwing answer reads as no answer.
+local function ReadFamilyMask(slot)
+    local fromFree, fromItem
+    local getFree = C_Container and C_Container.GetContainerNumFreeSlots
+    if type(getFree) == "function" and type(slot.bagID) == "number" then
+        local ok, _, family = pcall(getFree, slot.bagID)
+        if ok and not IsSecret(family) and type(family) == "number" then fromFree = family end
+    end
+    if fromFree == nil or fromFree == 0 then
+        local getFamily = (C_Item and C_Item.GetItemFamily) or rawget(_G, "GetItemFamily")
+        local itemID = slot.invSlot and Call(rawget(_G, "GetInventoryItemID"), "player", slot.invSlot)
+        if type(getFamily) == "function" and type(itemID) == "number" then
+            local family = Call(getFamily, itemID)
+            if type(family) == "number" then fromItem = family end
+        end
+    end
+    if fromFree and fromFree ~= 0 then return fromFree end
+    if fromItem and fromItem ~= 0 then return fromItem end
+    return fromFree or fromItem
+end
+
+-- Reads the family of the bag in a bag slot into slot.family (the mask, nil when unknown) and slot.special (quiver, ammo or
+-- shard, else nil). Only the held bags 1-4 carry one: the backpack, the reagent bag and the keyring never do.
+local function ReadFamily(slot)
+    local family
+    if slot.kind == "bag" and slot.hasItem then family = ReadFamilyMask(slot) end
+    slot.family = family
+    slot.special = KindOfFamily(family)
+end
+
+-- True while the client shows one combined bag window (the combinedBags CVar, the value Blizzard's own VARIABLES_LOADED handler
+-- reads). A client that cannot say counts as combined. In individual mode the stock click already opens one bag alone.
+local function CombinedBags()
+    local read = (C_CVar and C_CVar.GetCVarBool) or rawget(_G, "GetCVarBool")
+    local value = Call(read, "combinedBags")
+    if value == nil then return true end
+    return value == true
+end
+
+local function SoloEnabled()
+    local config = FS.Config
+    if config and type(config.Get) == "function" then
+        local ok, value = pcall(config.Get, SOLO_SETTING)
+        if ok and value == false then return false end
+    end
+    return true
+end
+
+local function WantsSolo(slot)
+    return slot.special ~= nil and SoloEnabled() and CombinedBags()
+end
+
+-- Puts the slot's `type2` attribute in line with WantsSolo: "" (the empty string is the secure noop, it excludes the stock
+-- click for the right button) while the right click belongs to the single bag window, nil (back to type="click") otherwise.
+-- SetAttribute is protected in combat, so out of combat only; ClickStale asks Structure to replay it at regen.
+local function ApplyClick(slot)
+    local want = WantsSolo(slot)
+    if (slot.soloClick or false) == want then return end
+    if InCombatLockdown() then return end
+    if pcall(slot.button.SetAttribute, slot.button, "type2", want and "" or nil) then slot.soloClick = want end
+end
+
+local function ClickStale()
+    for _, slot in ipairs(slots) do
+        if slot.active and slot.bound and WantsSolo(slot) ~= (slot.soloClick or false) then return true end
+    end
+    return false
+end
+
+-------------------------------------------------------------------------------
 -- Containers
 -------------------------------------------------------------------------------
 
@@ -236,6 +340,7 @@ local MS = FS.ModuleSwitch
 local bar
 local built = false
 local fallbackHost
+local Structure -- (forward) the structural half of a refresh, defined with the wiring below
 
 -- Without the deck, a standalone host bottom-right so the bags are never lost.
 local function EnsureFallbackHost()
@@ -362,6 +467,7 @@ local function ReadItem(slot)
     local inv = slot.invSlot
     if not inv then
         slot.hasItem, slot.quality, slot.qualityColor = false, nil, nil
+        ReadFamily(slot)
         return
     end
     local texture = Call(GetInventoryItemTexture, "player", inv)
@@ -376,6 +482,7 @@ local function ReadItem(slot)
     else
         slot.quality, slot.qualityColor = nil, nil
     end
+    ReadFamily(slot)
 end
 
 local function ReadLock(slot)
@@ -405,10 +512,17 @@ local function BagOpen(bagID)
 end
 
 
+-- Is bag `bagID` open alone in Bags.lua's single bag window (FS.SpecialBag)?
+local function SoloOpen(bagID)
+    local window = FS.SpecialBag
+    if not (window and type(window.IsOpen) == "function") then return false end
+    return Clean(pcall(window.IsOpen, bagID)) == true
+end
+
 local function ReadOpen(slot)
     local bagID = slot.kind == "keyring" and KeyringBagID() or slot.bagID
     if bagID == nil then slot.open = false return end
-    slot.open = BagOpen(bagID)
+    slot.open = BagOpen(bagID) or SoloOpen(bagID)
 end
 
 local function EachActive(fn)
@@ -433,7 +547,12 @@ local function RefreshOpenSlot(slot)
     ApplySlotState(slot)
 end
 
-local function RefreshItems() EachActive(RefreshItemSlot) end
+-- A bag swapped for one of another family, the setting or the window mode changing: the right click attribute is out of
+-- step, so the structural half runs (it waits for regen in combat).
+local function RefreshItems()
+    EachActive(RefreshItemSlot)
+    if ClickStale() then Structure() end
+end
 
 local function RefreshLocks() EachActive(RefreshLockSlot) end
 
@@ -532,6 +651,19 @@ local function BindSlot(slot)
     return true
 end
 
+-- PostClick (insecure, after the secure step): the right click of a special bag asks Bags.lua for that bag alone. It only
+-- ever runs while `type2` is the noop (soloClick), so the stock click did not run for it, and it never clicks a stock
+-- button itself: a Click() from here would run the stock OnClick under our taint. An item on the cursor (the stock click would
+-- put it in the bag) and a modified click are left alone.
+local function OnSlotPostClick(slot, mouseButton)
+    if mouseButton ~= "RightButton" or not slot.soloClick then return end
+    if CursorHoldsItem() or Call(IsModifiedClick) == true then return end
+    local window = FS.SpecialBag
+    if window and type(window.Toggle) == "function" then
+        pcall(window.Toggle, slot.bagID, slot.special, slot.button)
+    end
+end
+
 local function OnSlotReceiveDrag(slot)
     if CursorHoldsItem() then PutCursorItem(slot) end
 end
@@ -576,6 +708,10 @@ local function ShowTooltip(slot)
                 or EQUIP_CONTAINER or BAGSLOT or "Bag"
             tip:SetText(title, 1, 1, 1)
         end
+    end
+    if slot.soloClick then
+        local muted = Theme.COLOR_MUTED or { 0.616, 0.577, 0.769 }
+        tip:AddLine(SOLO_HINT, muted[1], muted[2], muted[3])
     end
     tip:Show()
 end
@@ -660,6 +796,7 @@ local function BuildSlot(def)
         Theme.ApplyMono(slot.count, 10, COLOR_CYAN)
     end
 
+    button:HookScript("PostClick", function(_, mouseButton) OnSlotPostClick(slot, mouseButton) end)
     button:SetScript("OnReceiveDrag", function() OnSlotReceiveDrag(slot) end)
     button:SetScript("OnDragStart", function() OnSlotDragStart(slot) end)
     button:SetScript("OnEnter", function()
@@ -723,6 +860,7 @@ local function RefreshAvailability()
             end
         end
         if active and not BindSlot(slot) then active = false end
+        if active then ApplyClick(slot) end
         slot.active = active and true or false
         slot.button:SetShown(slot.active)
         if not slot.active then
@@ -903,7 +1041,7 @@ end
 -- PLAYER_REGEN_ENABLED (pendingStructure) and meanwhile the slots keep their last seat.
 -- Everything else a refresh does is a texture or FontString write and runs in combat.
 local pendingStructure = false
-local function Structure()
+Structure = function()
     if InCombatLockdown() then
         pendingStructure = true
         return false
@@ -932,6 +1070,8 @@ local EVENT_HANDLERS = {
     CURSOR_CHANGED = RefreshCursor,
     BAG_OPEN = RefreshOpen,
     BAG_CLOSED = RefreshOpen,
+    USE_COMBINED_BAGS_CHANGED = function() Structure() end,
+    CVAR_UPDATE = function(name) if name == "combinedBags" then Structure() end end,
     PLAYER_REGEN_ENABLED = function()
         if pendingMouseSweep then HideBlizzardBar() end
         if pendingStructure then
@@ -965,6 +1105,7 @@ FS.BagBar = {
     ApplySlotState = WhenBuilt(ApplySlotState),
     HideBlizzardBar = WhenBuilt(HideBlizzardBar),
     BagOpen = WhenBuilt(BagOpen),
+    RefreshOpen = WhenBuilt(RefreshOpen), -- the single bag window (Bags.lua) calls it after it opens or closes
 }
 
 local function Build()
@@ -981,6 +1122,7 @@ local function Build()
         if handler then handler(...) end
     end)
     InstallOpenTracking()
+    if FS.Config and FS.Config.OnChange then FS.Config.OnChange(SOLO_SETTING, function() Structure() end) end
     HideBlizzardBar()
     RefreshAll()
 end

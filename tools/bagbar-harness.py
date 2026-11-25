@@ -219,8 +219,9 @@ UIParent = newObj("Frame", nil, "UIParent")
 GameTooltip = newObj("Frame", nil, "GameTooltip")
 function GameTooltip:SetOwner(o) self.owner = o end
 function GameTooltip:GetOwner() return self.owner end
-function GameTooltip:SetText() end
-function GameTooltip:AddLine() end
+TIP_LINES = {}
+function GameTooltip:SetText() TIP_LINES = {} end
+function GameTooltip:AddLine(text) TIP_LINES[#TIP_LINES + 1] = text end
 function GameTooltip:AppendText() end
 function GameTooltip:SetInventoryItem() return false end
 
@@ -240,7 +241,26 @@ function IsModifiedClick(which) if MODIFIER then return which == nil or which ==
 function GetInventoryItemTexture(_, inv) if EQUIPPED[inv] then return "bagtex" .. inv end end
 function IsInventoryItemLocked(inv) return LOCKED[inv] == true end
 KEYRING_CONTAINER = -2
+-- Bag families: BAGFAMILY[bagID] = the second return of GetContainerNumFreeSlots (nil = the client gives none);
+-- ITEMID[inv] / ITEMFAMILY[itemID] feed GetInventoryItemID and GetItemFamily. FAMILY_THROWS makes every family API raise.
+BAGFAMILY, ITEMID, ITEMFAMILY, FAMILY_THROWS, FAMILY_SECRET = {}, {}, {}, false, false
 C_Container = { ContainerIDToInventoryID = function(id) return 19 + id end }   -- bag N -> inventory slot 19 + N (stock GetID)
+-- Opt-in (h_family installs it): the free-count tests rely on the client NOT having it, and a family test needs it.
+function h_installFreeSlots()
+    C_Container.GetContainerNumFreeSlots = function(bag)
+        if FAMILY_THROWS then error("GetContainerNumFreeSlots exploded") end
+        if bag == 0 then return 7, 0 end
+        return 5, BAGFAMILY[bag]
+    end
+end
+C_Item = { GetItemFamily = function(id)
+    if FAMILY_THROWS then error("GetItemFamily exploded") end
+    return ITEMFAMILY[id]
+end }
+function GetInventoryItemID(_, inv) return ITEMID[inv] end
+-- The combined bags CVar (Blizzard's own VARIABLES_LOADED handler reads exactly this): true = one combined window.
+CVAR_BOOL = { combinedBags = true }
+function GetCVarBool(name) return CVAR_BOOL[name] end
 -- The Blizzard atlas lookup the backpack used to paint from: any call is recorded, so a test can prove it is gone.
 ATLAS_CALLS = {}
 C_Texture = { GetAtlasInfo = function(name)
@@ -257,12 +277,33 @@ FS = {
     Layout = { Scale = function() return SCALE end, OnRescale = function(fn) RESCALE[#RESCALE + 1] = fn end,
         deck = { w = 572, h = 38, rightMargin = 92 } },
     PanelSkins = { RequireExport = function() return true end },
-    IsSecret = function() return false end,
+    IsSecret = function(v) return SECRET_FN ~= nil and SECRET_FN(v) == true end,   -- SECRET_FN: set by a test to mark values secret
     LogDegradeOnce = function(key, msg) LOGS[#LOGS + 1] = key .. ": " .. msg end,
     Theme = { SLICE_CUT_MARGIN = 6, SLICE_CUT2_FILL_TEXTURE = "cut2_fill", SLICE_CUT2_OUTLINE_TEXTURE = "cut2_outline",
         SLICE_GLOW_TEXTURE = "glow", SLICE_GLOW_MARGIN = 10, SLICE_GLOW_PAD = 4,
         COLOR_POWER = { 0.133, 0.878, 1, 1 }, COLOR_HEALTH = { 1, 0.18, 0.592, 1 }, COLOR_HUD_SCRIM = { 0.05, 0.02, 0.1, 0.5 } },
 }
+-- FS.Config as Config.lua gives it: Get answers the stored value, else the registered default; OnChange callbacks get
+-- (new, old, key). h_cfg stores a value and fires them.
+CFG, CFG_DEFAULTS, CFG_CHANGE = {}, {}, {}
+FS.Config = {
+    Get = function(key) if CFG[key] ~= nil then return CFG[key] end return CFG_DEFAULTS[key] end,
+    RegisterDefault = function(key, value) CFG_DEFAULTS[key] = value end,
+    OnChange = function(key, fn) CFG_CHANGE[key] = CFG_CHANGE[key] or {}; table.insert(CFG_CHANGE[key], fn) end,
+}
+function h_cfg(key, value)
+    local old = FS.Config.Get(key)
+    CFG[key] = value
+    for _, fn in ipairs(CFG_CHANGE[key] or {}) do fn(value, old, key) end
+end
+-- Bags.lua's single bag window, as BagBar.lua sees it: a recording stub (the real one is pinned in bags-harness.py).
+SOLO_CALLS, SOLO_OPEN = {}, {}
+function h_soloStub()
+    FS.SpecialBag = {
+        Toggle = function(bagID, kind, anchor) SOLO_CALLS[#SOLO_CALLS + 1] = { bagID, kind, anchor and anchor.name }; SOLO_OPEN[bagID] = not SOLO_OPEN[bagID] end,
+        IsOpen = function(bagID) return SOLO_OPEN[bagID] == true end,
+    }
+end
 function FS.Theme.AddCut2Texture(frame, path, color, layer, sublevel, inset)
     local t = frame:CreateTexture(nil, layer or "BACKGROUND", nil, sublevel)
     t:SetTexture(path)
@@ -304,9 +345,9 @@ end
 function h_load()
     assert(loadstring(BAGBAR_SRC, "@BagBar.lua"))("forever-stuwave", FS)
 end
-function h_fire(event)
+function h_fire(event, ...)
     for _, f in ipairs(ALL) do
-        if f.events[event] and f.scripts.OnEvent then f.scripts.OnEvent(f, event) end
+        if f.events[event] and f.scripts.OnEvent then f.scripts.OnEvent(f, event, ...) end
     end
 end
 function h_rescale(s) SCALE = s; for _, fn in ipairs(RESCALE) do fn() end end
@@ -314,7 +355,7 @@ function h_logs() return table.concat(LOGS, "\n") end
 function h_blocked() return table.concat(BLOCKED, ",") end
 function h_toggles() return table.concat(TOGGLES, ",") end
 function h_puts() return table.concat(PUTS, ",") end
-function h_reset() BLOCKED, TOGGLES, PUTS, STOCKCLICKS = {}, {}, {}, {}; BLOCKED_N = 0 end
+function h_reset() BLOCKED, TOGGLES, PUTS, STOCKCLICKS, SOLO_CALLS = {}, {}, {}, {}, {}; BLOCKED_N = 0 end
 function h_stockClicks(name) return STOCKCLICKS[name] or 0, STOCKCLICKS[name .. "#button"] end
 
 local function slot(key) return _G["ForeverSTUwaveBagSlot_" .. key] end
@@ -326,13 +367,26 @@ function h_click(key, btn)
     if b.scripts.OnClick then b.scripts.OnClick(b, btn, false); return "addon-script" end
     if not b.protected then return "none" end
     if b.attrs.useOnKeyDown == nil then return "key-down-only" end
-    if b.attrs.type == "click" and b.attrs.clickbutton then b.attrs.clickbutton:Click(btn); return "secure" end
-    return "no-action"
+    -- The engine's attribute lookup: type<button suffix> before type; the empty string is the noop that excludes an action.
+    local suffix = btn == "RightButton" and "2" or (btn == "LeftButton" and "1" or "")
+    local action = b.attrs["type" .. suffix]
+    if action == nil then action = b.attrs.type end
+    local result = "no-action"
+    if action == "" then result = "noop"
+    elseif action == "click" and b.attrs.clickbutton then b.attrs.clickbutton:Click(btn); result = "secure" end
+    -- PostClick runs after the secure action whatever it was (an insecure hook, so it only ever sees the outcome).
+    for _, fn in ipairs(b.hooks.PostClick or {}) do fn(b, btn, false) end
+    return result
 end
 function h_modifier(m) MODIFIER = m end
 function h_script(key, which, ...) local b = slot(key); local fn = b.scripts[which]; if fn then fn(b, ...) end return fn ~= nil end
 function h_cursor(v) CURSOR = v; h_fire("CURSOR_CHANGED") end
 function h_keyring(v) KEYRING_ON = v end
+-- Family helpers: bag N's family from the free-slot call (nil = none given), or from the bag item (inv 19 + N, item 900 + N).
+function h_family(bag, mask) h_installFreeSlots(); BAGFAMILY[bag] = mask end
+function h_itemFamily(bag, mask) ITEMID[19 + bag] = 900 + bag; ITEMFAMILY[900 + bag] = mask end
+function h_combined(v) CVAR_BOOL.combinedBags = v end
+function h_tooltip(key) h_script(key, "OnEnter"); return TIP_LINES end
 function h_lock(inv, v) LOCKED[inv] = v end
 function h_equip(inv, v) EQUIPPED[inv] = v end
 
@@ -345,7 +399,8 @@ function h_slots()
             protected = b.protected == true, type = b.attrs.type, click = b.attrs.clickbutton and b.attrs.clickbutton.name,
             onKeyDown = b.attrs.useOnKeyDown, hasKeyDown = b.attrs.useOnKeyDown ~= nil,
             clicks = b.clicks and table.concat(b.clicks, ",") or "", drags = b.drags and table.concat(b.drags, ",") or "",
-            iconAlpha = s.icon.alpha, locked = s.locked, glowShown = s.glow.shown }
+            iconAlpha = s.icon.alpha, locked = s.locked, glowShown = s.glow.shown,
+            type2 = b.attrs.type2, family = s.family, special = s.special, soloClick = s.soloClick, open = s.open }
     end
     return out
 end
@@ -439,7 +494,11 @@ class World:
         return getattr(self.g, fn)(*args)
 
     def slots(self) -> dict[str, dict]:
-        return {s["key"]: s for s in py(self.g.h_slots())}
+        out = {s["key"]: s for s in py(self.g.h_slots())}
+        for v in out.values():          # a Lua nil is a missing key: name the optional ones so a test can compare to None
+            for k in ("family", "special", "soloClick", "type2", "open", "locked"):
+                v.setdefault(k, None)
+        return out
 
     def combat(self, on: bool) -> None:
         self.g.IN_COMBAT = on
@@ -768,6 +827,13 @@ def check_source() -> None:
         if lazy.search(code):
             hits.append(f"{n}: {line.strip()}")
     check("source.no_lazy_cache_stock_bag_query_in_BagBar_lua", not hits, f"{hits}")
+    # The right click never runs a stock button from addon code (a :Click() from here would run the stock OnClick tainted).
+    hits = []
+    for n, line in enumerate(BAGBAR_LUA.read_text(encoding="utf-8").splitlines(), 1):
+        code = re.sub(r'"[^"]*"', '""', line.split("--", 1)[0])
+        if re.search(r"[:.]Click\s*\(", code):
+            hits.append(f"{n}: {line.strip()}")
+    check("source.no_addon_side_click_on_a_stock_button_in_BagBar_lua", not hits, f"{hits}")
 
 
 def check_events() -> None:
@@ -886,6 +952,247 @@ def check_backpack_letter_fallback() -> None:
     check("backpack.missing_art_letter_is_shown", w.lua.eval("h_bp().glyph and h_bp().glyph.shown") is True)
 
 
+def with_families(fams: dict[int, int | None], item_fams: dict[int, int] | None = None, **kw) -> World:
+    """A world whose bags 1-4 report the given families (free-slot second return) and/or bag item families, then one refresh."""
+    w = World(**kw)
+    w.call("h_soloStub")
+    for bag, mask in fams.items():
+        w.call("h_family", bag, mask)
+    for bag, mask in (item_fams or {}).items():
+        w.call("h_itemFamily", bag, mask)
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    return w
+
+
+def solo_calls(w: World) -> list:
+    return py(w.lua.eval("SOLO_CALLS")) or []
+
+
+def check_family() -> None:
+    """Bag family detection: the free-slot call's second return, else GetItemFamily of the bag item; classic masks only."""
+    w = with_families({1: 1, 2: 2, 3: 4, 4: 0})
+    s = w.slots()
+    got = {k: (s[k]["family"], s[k]["special"]) for k in ("bag1", "bag2", "bag3", "bag4")}
+    check("family.free_slot_return_reads_quiver_ammo_pouch_soul_bag_and_a_generic_bag",
+          got == {"bag1": (1, "quiver"), "bag2": (2, "ammo"), "bag3": (4, "shard"), "bag4": (0, None)}, f"{got}")
+    check("family.no_error_or_log_while_reading", w.logs() == "" and w.blocked() == "", f"{w.logs()} {w.blocked()}")
+
+    w = with_families({}, {1: 4, 3: 1})
+    s = w.slots()
+    check("family.get_item_family_answers_when_the_free_slot_call_gives_none",
+          (s["bag1"]["special"], s["bag3"]["special"], s["bag2"]["special"]) == ("shard", "quiver", None),
+          f"{[(k, s[k]['family'], s[k]['special']) for k in ('bag1', 'bag2', 'bag3')]}")
+
+    w = World()
+    w.lua.execute("local f = C_Item.GetItemFamily; C_Item = nil; GetItemFamily = f")
+    w.call("h_itemFamily", 2, 2)
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    check("family.the_global_get_item_family_is_the_second_fallback", w.slots()["bag2"]["special"] == "ammo", f"{w.slots()['bag2']}")
+
+    w = with_families({1: 0}, {1: 4})
+    check("family.a_nonzero_item_family_counts_when_the_free_slot_call_says_zero", w.slots()["bag1"]["special"] == "shard", f"{w.slots()['bag1']}")
+    w = with_families({1: 1}, {1: 4})
+    check("family.the_free_slot_answer_wins_when_both_name_a_family", w.slots()["bag1"]["special"] == "quiver", f"{w.slots()['bag1']}")
+
+    w = with_families({1: 8, 2: 32, 3: 1024, 4: 256})
+    s = w.slots()
+    check("family.trade_bag_and_key_families_are_not_special",
+          all(s[k]["special"] is None for k in ("bag1", "bag2", "bag3", "bag4")) and [s[k]["family"] for k in ("bag1", "bag2", "bag3", "bag4")] == [8, 32, 1024, 256],
+          f"{[(k, s[k]['family'], s[k]['special']) for k in ('bag1', 'bag2', 'bag3', 'bag4')]}")
+    w = with_families({1: 3})
+    check("family.a_mask_with_several_bits_takes_the_first_in_quiver_ammo_shard_order", w.slots()["bag1"]["special"] == "quiver")
+
+    w = with_families({1: 4, 2: 4})
+    w.lua.execute("BAGFAMILY[5] = 4; BAGFAMILY[0] = 4")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    s = w.slots()
+    check("family.the_backpack_reagent_bag_and_keyring_are_never_special",
+          all(s[k]["special"] is None and not s[k]["soloClick"] for k in ("backpack", "reagent", "keyring")),
+          f"{[(k, s[k]['special']) for k in ('backpack', 'reagent', 'keyring')]}")
+
+    w = with_families({1: 4, 2: 1})
+    w.call("h_equip", 20, False)
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    s = w.slots()
+    check("family.an_empty_bag_slot_has_no_family", s["bag1"]["family"] is None and s["bag1"]["special"] is None and s["bag2"]["special"] == "quiver", f"{s['bag1']}")
+
+    w = with_families({2: 2})
+    w.call("h_family", 2, 0)
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    check("family.a_swapped_bag_is_read_again", w.slots()["bag2"]["special"] is None and w.slots()["bag2"]["type2"] is None, f"{w.slots()['bag2']}")
+    w.call("h_family", 2, 4)
+    w.g.h_fire("BAG_UPDATE_DELAYED")
+    check("family.the_next_bag_update_picks_up_a_new_family", w.slots()["bag2"]["special"] == "shard" and w.slots()["bag2"]["type2"] == "", f"{w.slots()['bag2']}")
+
+    w = with_families({1: 4})
+    w.lua.execute("SECRET_FN = function(v) return v == 4 end")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    check("family.a_secret_family_is_never_used", w.slots()["bag1"]["special"] is None and w.slots()["bag1"]["family"] is None, f"{w.slots()['bag1']}")
+    w.lua.execute("SECRET_FN = function(v) return true end")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    w.g.h_fire("BAG_UPDATE_DELAYED")
+    check("family.a_world_of_secrets_reads_no_family_and_throws_nothing", all(v["special"] is None for v in w.slots().values()))
+
+    w = with_families({1: 4})
+    w.lua.execute("FAMILY_THROWS = true")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    s = w.slots()
+    check("family.api_that_throws_reads_as_no_family_and_leaves_the_slot_working",
+          s["bag1"]["special"] is None and s["bag1"]["active"] and s["bag1"].get("type") == "click" and w.logs() == "", f"{s['bag1']} {w.logs()}")
+    w = World()
+    w.lua.execute("C_Container.GetContainerNumFreeSlots = nil; C_Item = nil; GetItemFamily = nil")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    check("family.a_client_with_neither_api_reads_no_family", all(v["special"] is None for v in w.slots().values()) and w.logs() == "")
+
+
+def check_solo_click() -> None:
+    """A special bag's right click leaves the secure path and asks Bags.lua for that bag alone; everything else is stock."""
+    w = with_families({1: 1, 2: 2, 3: 4})
+    s = w.slots()
+    check("solo.special_slots_exclude_the_right_click_from_the_secure_path",
+          all(s[k]["type2"] == "" and s[k]["soloClick"] is True and s[k]["type"] == "click" for k in ("bag1", "bag2", "bag3")),
+          f"{[(k, s[k]['type'], s[k]['type2'], s[k]['soloClick']) for k in ('bag1', 'bag2', 'bag3')]}")
+    check("solo.every_other_slot_keeps_the_stock_right_click",
+          all(s[k]["type2"] is None and not s[k]["soloClick"] and s[k]["type"] == "click" for k in ("bag4", "backpack", "reagent", "keyring")),
+          f"{[(k, s[k]['type2']) for k in ('bag4', 'backpack', 'reagent', 'keyring')]}")
+    check("solo.the_bar_registers_no_extra_click_script", w.g.SETSCRIPT_ONCLICK == 0)
+
+    w.call("h_reset")
+    result = w.call("h_click", "bag1", "LeftButton")
+    n, got = stock_clicks(w, "bag1")
+    check("solo.left_click_on_a_special_slot_is_still_the_stock_click", result == "secure" and n == 1 and got == "LeftButton" and solo_calls(w) == [],
+          f"{result} {n} {got} {solo_calls(w)}")
+
+    w.call("h_reset")
+    result = w.call("h_click", "bag2", "RightButton")
+    n, _ = stock_clicks(w, "bag2")
+    check("solo.right_click_on_a_special_slot_reaches_no_stock_button", result == "noop" and n == 0, f"{result} {n}")
+    check("solo.right_click_asks_for_that_bag_alone_with_its_id_kind_and_slot",
+          solo_calls(w) == [[2, "ammo", "ForeverSTUwaveBagSlot_bag2"]], f"{solo_calls(w)}")
+    check("solo.no_container_opening_global_is_called_from_addon_code", w.toggles() == "" and w.blocked() == "", f"{w.toggles()} {w.blocked()}")
+    w.call("h_click", "bag2", "RightButton")
+    check("solo.a_second_right_click_asks_again_so_the_window_can_close", len(solo_calls(w)) == 2)
+    check("solo.the_hook_never_clicks_a_stock_button_itself", stock_clicks(w, "bag2")[0] == 0 and stock_clicks(w, "bag1")[0] == 0)
+
+    for key in ("bag4", "reagent", "backpack", "keyring"):
+        w.call("h_reset")
+        result = w.call("h_click", key, "RightButton")
+        n, got = stock_clicks(w, key)
+        check(f"solo.right_click_on_{key}_is_the_stock_click", result == "secure" and n == 1 and got == "RightButton" and solo_calls(w) == [], f"{result} {n} {solo_calls(w)}")
+
+    # A modified or cursor-holding right click is the stock's business (it does nothing here, never opens the window).
+    w.call("h_reset")
+    w.call("h_modifier", "OPENALLBAGS")
+    w.call("h_click", "bag3", "RightButton")
+    w.call("h_modifier", None)
+    check("solo.a_modified_right_click_does_not_open_the_window", solo_calls(w) == [], f"{solo_calls(w)}")
+    w.call("h_cursor", 4242)
+    w.call("h_click", "bag3", "RightButton")
+    w.call("h_cursor", None)
+    check("solo.a_right_click_with_an_item_on_the_cursor_does_not_open_the_window", solo_calls(w) == [], f"{solo_calls(w)}")
+
+    # The window is Bags.lua's: without it the click does nothing and breaks nothing.
+    w.lua.execute("FS.SpecialBag = nil")
+    w.call("h_reset")
+    result = w.call("h_click", "bag1", "RightButton")
+    check("solo.without_the_window_module_the_right_click_is_a_quiet_noop", result == "noop" and w.toggles() == "" and w.logs() == "", f"{result} {w.logs()}")
+
+
+def check_solo_modes() -> None:
+    """Individual windows, the setting and the CVar events keep the attribute in step; the default is on."""
+    w = with_families({1: 1, 2: 2})
+    check("solo.the_setting_registers_with_a_default_of_on", w.lua.eval("CFG_DEFAULTS['bagbar.specialRight']") is True)
+    w.call("h_combined", False)
+    w.g.h_fire("USE_COMBINED_BAGS_CHANGED", False)
+    s = w.slots()
+    check("solo.individual_windows_leave_the_stock_right_click_alone", s["bag1"]["type2"] is None and not s["bag1"]["soloClick"], f"{s['bag1']}")
+    w.call("h_reset")
+    result = w.call("h_click", "bag1", "RightButton")
+    check("solo.individual_windows_right_click_is_the_stock_click", result == "secure" and stock_clicks(w, "bag1")[0] == 1 and solo_calls(w) == [], f"{result}")
+    w.call("h_combined", True)
+    w.g.h_fire("CVAR_UPDATE", "combinedBags", "1")
+    check("solo.the_cvar_update_event_brings_the_right_click_back", w.slots()["bag1"]["type2"] == "", f"{w.slots()['bag1']}")
+    w.call("h_combined", False)
+    w.g.h_fire("CVAR_UPDATE", "somethingElse", "0")
+    check("solo.an_unrelated_cvar_update_changes_nothing", w.slots()["bag1"]["type2"] == "")
+    w.g.h_fire("CVAR_UPDATE", "combinedBags", "0")
+    check("solo.the_combined_cvar_update_turns_it_off", w.slots()["bag1"]["type2"] is None)
+    w.call("h_combined", True)
+    w.g.h_fire("USE_COMBINED_BAGS_CHANGED", True)
+
+    w.call("h_cfg", "bagbar.specialRight", False)
+    s = w.slots()
+    check("solo.the_setting_off_gives_every_slot_the_stock_right_click", all(v["type2"] is None and not v["soloClick"] for v in s.values()), f"{s['bag1']}")
+    w.call("h_cfg", "bagbar.specialRight", True)
+    check("solo.the_setting_back_on_restores_the_special_right_click", w.slots()["bag1"]["type2"] == "" and w.slots()["bag2"]["type2"] == "")
+    check("solo.changing_the_setting_blocks_nothing", w.blocked() == "", w.blocked())
+
+    w.lua.execute("FS.Config = nil")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    check("solo.without_a_config_module_the_default_is_on", w.slots()["bag1"]["type2"] == "")
+    w2 = World()
+    w2.lua.execute("GetCVarBool = nil")
+    w2.call("h_soloStub")
+    w2.call("h_family", 1, 1)
+    w2.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    check("solo.a_client_that_cannot_say_counts_as_combined", w2.slots()["bag1"]["type2"] == "")
+
+
+def check_solo_combat() -> None:
+    """The attribute is a protected write: nothing is attempted in combat, the change lands at regen."""
+    w = with_families({1: 1, 2: 2})
+    w.combat(True)
+    w.call("h_family", 1, 0)
+    w.call("h_family", 4, 4)
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    w.g.h_fire("BAG_UPDATE_DELAYED")
+    s = w.slots()
+    check("solo.combat_changes_no_attribute_and_blocks_nothing", w.blocked() == "" and s["bag1"]["type2"] == "" and s["bag4"]["type2"] is None,
+          f"{w.blocked()} {s['bag1']['type2']} {s['bag4']['type2']}")
+    check("solo.combat_still_reads_the_new_family", s["bag1"]["special"] is None and s["bag4"]["special"] == "shard", f"{s['bag1']} {s['bag4']}")
+    w.call("h_reset")
+    w.call("h_click", "bag1", "RightButton")
+    check("solo.a_stale_attribute_in_combat_still_opens_nothing_wrong_and_blocks_nothing", w.blocked() == "", w.blocked())
+    w.regen()
+    s = w.slots()
+    check("solo.regen_applies_the_new_right_click_attributes", s["bag1"]["type2"] is None and s["bag4"]["type2"] == "" and s["bag2"]["type2"] == "", f"{s['bag1']['type2']} {s['bag4']['type2']}")
+    check("solo.regen_blocks_nothing", w.blocked() == "", w.blocked())
+
+    w = World(combat_at_load=True)
+    w.call("h_soloStub")
+    w.call("h_family", 3, 4)
+    check("solo.built_in_combat_no_attribute_is_written", all(v.get("type2") is None and v.get("type") is None for v in w.slots().values()) and w.blocked() == "")
+    w.regen()
+    s = w.slots()
+    check("solo.built_in_combat_regen_reads_the_family_and_binds_the_special_slot", s["bag3"]["special"] == "shard" and s["bag3"]["type2"] == "" and s["bag3"]["type"] == "click",
+          f"{s['bag3']}")
+
+
+def check_solo_ui() -> None:
+    """The tooltip hint and the open light follow the single bag window."""
+    w = with_families({1: 1})
+    tip = py(w.call("h_tooltip", "bag1")) or []
+    check("solo.a_special_slot_tooltip_names_the_right_click", len(tip) == 1 and "ight click" in str(tip[0]), f"{tip}")
+    tip = py(w.call("h_tooltip", "bag2")) or []
+    check("solo.an_ordinary_slot_tooltip_gets_nothing_new", tip == [], f"{tip}")
+    tip = py(w.call("h_tooltip", "reagent")) or []
+    check("solo.the_reagent_slot_tooltip_gets_nothing_new", tip == [], f"{tip}")
+    w.call("h_cfg", "bagbar.specialRight", False)
+    tip = py(w.call("h_tooltip", "bag1")) or []
+    check("solo.the_setting_off_drops_the_tooltip_hint", tip == [], f"{tip}")
+    w.call("h_cfg", "bagbar.specialRight", True)
+
+    check("solo.the_slot_is_not_lit_while_nothing_is_open", w.slots()["bag1"]["open"] is False)
+    w.call("h_click", "bag1", "RightButton")      # the stub marks bag 1 open
+    w.lua.execute("FS.BagBar.RefreshOpen()")
+    s = w.slots()
+    check("solo.the_slot_lights_while_its_single_window_is_open", s["bag1"]["open"] is True and s["bag2"]["open"] is False, f"{s['bag1']['open']}")
+    w.call("h_click", "bag1", "RightButton")
+    w.lua.execute("FS.BagBar.RefreshOpen()")
+    check("solo.the_slot_goes_dark_when_the_window_closes", w.slots()["bag1"]["open"] is False)
+    check("solo.refresh_open_is_exported_and_blocks_nothing", w.blocked() == "")
+
+
 def main() -> int:
     check_build()
     check_clicks()
@@ -902,6 +1209,11 @@ def main() -> int:
     check_free_count_text()
     check_backpack_icon()
     check_backpack_letter_fallback()
+    check_family()
+    check_solo_click()
+    check_solo_modes()
+    check_solo_combat()
+    check_solo_ui()
     check_source()
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall checks passed")
     return len(FAILS)
