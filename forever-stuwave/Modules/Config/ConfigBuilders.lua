@@ -68,7 +68,7 @@ local function NewRow(content, o, kind)
             row.fsHelp:SetPoint("LEFT", row.fsLabel, "RIGHT", S.Q_GAP, 0)
             row.fsHelp:Hide()
         end
-        I.rowStates[#I.rowStates + 1] = function() I.ApplyRowState(row, o, entry) end
+        I.TrackState(function() I.ApplyRowState(row, o, entry) end)
     end
     return row
 end

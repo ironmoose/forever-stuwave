@@ -149,9 +149,28 @@ local rowStates = {}
 I.rowStates = rowStates
 
 -- Every control registers one refresh function; RefreshAll runs them all.
+-- A control built while a tab builds belongs to that tab: RefreshAll runs only the shown tab's functions, and the other built
+-- tabs are marked stale (run when next shown). Anything built outside a tab (chrome, dialogs) refreshes every time.
+local tabLists = {}            -- tab id -> { controls = {...}, states = {...} }
+I.tabLists = tabLists
+local function ListFor(id)
+    local list = tabLists[id]
+    if not list then
+        list = { controls = {}, states = {} }
+        tabLists[id] = list
+    end
+    return list
+end
 local function Track(fn)
-    controls[#controls + 1] = fn
+    local id = ui.building
+    local into = id and ListFor(id).controls or controls
+    into[#into + 1] = fn
     fn()
+end
+function I.TrackState(fn)
+    local id = ui.building
+    local into = id and ListFor(id).states or rowStates
+    into[#into + 1] = fn
 end
 
 I.Forward, I.Writable, I.Capitalize, I.Say = Forward, Writable, Capitalize, Say
@@ -825,6 +844,8 @@ local function BuildTab(rec)
         if a.order ~= b.order then return a.order < b.order end
         return a.seq < b.seq
     end)
+    local outer = ui.building
+    ui.building = rec.id
     for _, step in ipairs(steps) do
         if step.ext then
             I.RunExtension(rec, step.ext)
@@ -833,6 +854,7 @@ local function BuildTab(rec)
             if not ok then Forward(err) end
         end
     end
+    ui.building = outer
     rec.built = true
     I.EvalWhens(page.fsHolder)
     I.Reflow(page.fsHolder)
@@ -983,16 +1005,33 @@ local function Select(cat, tab)
 end
 
 -- Does nothing while the window is hidden: Open and Select refresh before anything is seen.
+local function RunAll(list)
+    for _, fn in ipairs(list) do
+        local ok, err = pcall(fn)
+        if not ok then Forward(err) end
+    end
+end
+
+-- Every built tab but the one on screen is stale: its controls repaint when it is next shown.
+local function MarkStale(except)
+    for _, rec in pairs(ui.tabs) do
+        if rec.built and rec ~= except then rec.stale = true end
+    end
+end
+
 function CW.RefreshAll()
-    if not (ui.frame and ui.frame:IsShown()) then return end
-    for _, fn in ipairs(rowStates) do
-        local ok, err = pcall(fn)
-        if not ok then Forward(err) end
+    if not (ui.frame and ui.frame:IsShown()) then
+        MarkStale(nil)
+        return
     end
-    for _, fn in ipairs(controls) do
-        local ok, err = pcall(fn)
-        if not ok then Forward(err) end
-    end
+    local rec = ui.tabRec
+    MarkStale(rec)
+    local list = rec and tabLists[rec.id]
+    RunAll(rowStates)
+    if list then RunAll(list.states) end
+    RunAll(controls)
+    if list then RunAll(list.controls) end
+    if rec then rec.stale = nil end
     if ui.readOnlyIcon then ui.readOnlyIcon:SetShown(Config.IsReadOnly()) end
     I.UpdateChanged()
     local rec = ui.tabRec

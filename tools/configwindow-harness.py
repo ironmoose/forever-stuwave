@@ -443,6 +443,19 @@ local function openOld(W, key)
     for _, o in ipairs(ALL) do
         if o.kind == "ScrollFrame" and want[o.fsPageKey] then o.shown = true end
     end
+    -- The window refreshes only the tab on screen. These legacy checks force several tabs shown at once, so a refresh here
+    -- also repaints every built tab, as if each had been selected.
+    if not W.fsAllTabs then
+        W.fsAllTabs = true
+        local base = W.RefreshAll
+        W.RefreshAll = function()
+            base()
+            for _, list in pairs(W.I.tabLists) do
+                for _, fn in ipairs(list.states) do pcall(fn) end
+                for _, fn in ipairs(list.controls) do pcall(fn) end
+            end
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -2711,6 +2724,66 @@ function T.a_slider_edit_box_never_overwrites_the_text_while_typing()
     FS.Config.Set("demo.level", 4)
     d.W.RefreshAll()
     eq(e:GetText(), "1")
+end
+
+-- ---- A5: refresh only the page on screen ------------------------------------------------------------------
+local function twoTabs()
+    local W = boot()
+    FS.Config.RegisterDefault("demo.a", 1)
+    FS.Config.RegisterDefault("demo.b", 1)
+    local d = { W = W, reads = { a = 0, b = 0 } }
+    W.RegisterCategory({ key = "demo", label = "Demo", order = 3, tabs = {
+        { key = "one", label = "One", build = function(c)
+            W.UI.Slider(c, { label = "Alpha", min = 0, max = 10, step = 1,
+                get = function() d.reads.a = d.reads.a + 1; return FS.Config.Get("demo.a") end,
+                set = function(v) FS.Config.Set("demo.a", v) end })
+        end },
+        { key = "two", label = "Two", build = function(c)
+            W.UI.Slider(c, { label = "Beta", min = 0, max = 10, step = 1,
+                get = function() d.reads.b = d.reads.b + 1; return FS.Config.Get("demo.b") end,
+                set = function(v) FS.Config.Set("demo.b", v) end })
+        end },
+    } })
+    W.Open("demo", "one")
+    W.Open("demo", "two")
+    W.Open("demo", "one")
+    return d
+end
+
+function T.a_refresh_runs_only_the_tab_on_screen()
+    local d = twoTabs()
+    local a, b = d.reads.a, d.reads.b
+    FS.Config.Set("demo.a", 5)
+    yes(d.reads.a > a, "the shown tab refreshed")
+    eq(d.reads.b, b, "the other built tab did not")
+    eq(FS.ConfigWindow.I.ui.tabs["demo/two"].stale, true)
+end
+
+function T.a_stale_tab_repaints_when_it_is_shown()
+    local d = twoTabs()
+    FS.Config.Set("demo.b", 7)
+    d.W.Open("demo", "two")
+    eq(edit("Beta"):GetText(), "7")
+    eq(FS.ConfigWindow.I.ui.tabs["demo/two"].stale, nil)
+end
+
+function T.a_hidden_window_only_sets_the_flag_and_a_profile_switch_marks_everything_stale()
+    local d = twoTabs()
+    d.W.Close()
+    local a, b = d.reads.a, d.reads.b
+    FS.Config.Set("demo.a", 3)
+    eq(d.reads.a, a)
+    eq(d.reads.b, b)
+    yes(FS.ConfigWindow.I.ui.tabs["demo/one"].stale)
+    yes(FS.ConfigWindow.I.ui.tabs["demo/two"].stale)
+    d.W.Open("demo", "one")
+    eq(edit("Alpha"):GetText(), "3")
+    FS.Config.NewProfile("Other")
+    FS.Config.SetActiveProfile("Other")
+    FS.Config.Set("demo.b", 9)
+    yes(FS.ConfigWindow.I.ui.tabs["demo/two"].stale)
+    d.W.Open("demo", "two")
+    eq(edit("Beta"):GetText(), "9")
 end
 
 -------------------------------------------------------------------------------
