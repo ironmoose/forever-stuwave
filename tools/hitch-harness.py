@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""/fshitch (Modules/Diagnostics/Hitch.lua) against the real Lua with a scripted clock and CPU counters.
+"""/fsperf (Modules/Diagnostics/Hitch.lua) against the real Lua with a scripted clock and CPU counters.
 
   * with profiling off it turns it on and asks for a /reload, and turns it off again when the sample ends;
   * per frame CPU is the difference of the cumulative counters, and a slow frame keeps its top addons;
@@ -49,9 +49,9 @@ FS = { IsSecret = function(v) return v == "SECRET" end }
 CHECKS = r"""
 local function check(ok, msg) if not ok then error(msg, 2) end end
 local H = FS.Hitch
-SlashCmdList.FSHITCH("")
-check(H.run == nil and __cvar == "1" and __said[1]:find("/reload, then /fshitch", 1, true), "turns profiling on and asks for a reload")
-SlashCmdList.FSHITCH("10")
+SlashCmdList.FSPERF("")
+check(H.run == nil and __cvar == "1" and __said[1]:find("/reload, then /fsperf", 1, true), "turns profiling on and asks for a reload")
+SlashCmdList.FSPERF("10")
 check(H.run and #H.run.names == 2, "samples the loaded addons only")
 local f = H.frame.scripts.OnUpdate
 local function frame(dt, a, b, heap)
@@ -79,7 +79,7 @@ check(__said[#__said]:find("most CPU in slow frames: A", 1, true) and __said[#__
 check(__cvar == "0" and not ForeverSTUwaveDB.hitchProfileOn, "profiling it turned on goes off again")
 __speed = "SECRET"
 __cvar = "1"
-SlashCmdList.FSHITCH("5")
+SlashCmdList.FSPERF("5")
 local f2 = H.frame.scripts.OnUpdate
 __now = __now + 0.01; f2(H.frame, 0.01)
 check(H.run.frames == 1 and H.run.moving == 0, "a secret speed is never compared and counts as not moving")

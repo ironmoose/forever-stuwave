@@ -1,4 +1,4 @@
--- /fshitch [seconds]: samples every frame for a while (60 s by default) and saves what the slow frames had in them, so a
+-- /fsperf [seconds]: samples every frame for a while (60 s by default) and saves what the slow frames had in them, so a
 -- hitch can be pinned on an addon (or on none) instead of guessed at. Needs the scriptProfile CVar on, which only takes at
 -- a /reload: with it off, the command turns it on and asks for a /reload and the command again; a sample that ends turns
 -- it back off (from the next /reload) when this command was what turned it on, since profiling costs a little itself.
@@ -153,7 +153,7 @@ function H.Start(seconds)
         if type(SetCVar) == "function" and pcall(SetCVar, "scriptProfile", "1") then
             ForeverSTUwaveDB = ForeverSTUwaveDB or {}
             ForeverSTUwaveDB.hitchProfileOn = true
-            Say("CPU profiling is now on. Type /reload, then /fshitch again.")
+            Say("CPU profiling is now on. Type /reload, then /fsperf again.")
         else
             Say("CPU profiling is off and could not be turned on.")
         end
@@ -181,8 +181,8 @@ function H.Start(seconds)
     Say(("sampling %d addons for %d s. Play as usual."):format(#names, seconds))
 end
 
-SLASH_FSHITCH1 = "/fshitch"
-SlashCmdList["FSHITCH"] = function(msg)
+SLASH_FSPERF1 = "/fsperf"
+SlashCmdList["FSPERF"] = function(msg)
     local n = tonumber(msg and msg:match("%d+"))
     H.Start((n and n >= 5 and n <= 600) and n or H.DEFAULT_S)
 end

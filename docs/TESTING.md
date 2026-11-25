@@ -25,6 +25,16 @@ Other commands:
 - `/fsbug all` shows every stored report (the last 20 are kept).
 - `/fsbug clear` deletes the stored reports.
 
+## Stutters and hitches
+
+If the game stutters, a short sample shows whether an addon is behind it.
+
+1. Type `/fsperf`. The first time it turns on CPU profiling and asks for a `/reload`; reload, then type `/fsperf` again.
+2. Play for 60 seconds the way that stutters (running around, fighting). Chat says "sample saved" when it is done.
+3. Type `/fsbug stutter` and send the report as above. It carries the sample.
+
+Profiling costs a little itself, so it turns off again at your next `/reload`.
+
 ## Minimap on a new character's first login
 
 The minimap may sit in the wrong place on a character's very first login only.
