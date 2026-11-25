@@ -254,10 +254,25 @@ function Class:SetNormalFontObject(fo)           -- the engine re-applies the fo
 end
 function Class:GetFontString() return self.Text end
 function Class:SetEnabled() end
+-- secure-button surface: attributes are stored, clicks and drags are registered, an item button has an id
+function Class:SetAttribute(k, v) self._attrs = self._attrs or {}; self._attrs[k] = v end
+function Class:GetAttribute(k) return self._attrs and self._attrs[k] end
+function Class:SetID(id) self._id = id end
+function Class:GetID() return self._id or 0 end
+function Class:RegisterForClicks(...) self._clicks = { ... } end
+function Class:RegisterForDrag(...) self._drags = { ... } end
+function Class:SetFrameStrata(s) self._strata = s end
+function Class:SetClampedToScreen(v) self._clamped = v end
+function Class:SetWordWrap(v) self._wrap = v end
+function Class:SetDesaturated(v) self._desat = v and true or false end
+function Class:SetCooldown(start, duration) self._cd = { start, duration } end
+function Class:Clear() self._cd = nil end
 
+PROTECTED_CALLS = {}
 -- events: RegisterEvent throws on a name the client does not know, like the engine; OnEvent scripts are driven by FireEvent
 KNOWN_EVENTS = { GAME_PAD_CONNECTED = true, GAME_PAD_DISCONNECTED = true, GAME_PAD_ACTIVE_CHANGED = true, PLAYER_ENTERING_WORLD = true,
-    PLAYER_MONEY = true, PLAYER_REGEN_ENABLED = true }
+    PLAYER_MONEY = true, PLAYER_REGEN_ENABLED = true, BAG_UPDATE_DELAYED = true, BAG_UPDATE_COOLDOWN = true,
+    ITEM_LOCK_CHANGED = true, BAG_CONTAINER_UPDATE = true }
 EVENT_FRAMES = {}
 function Class:RegisterEvent(ev)
     if not KNOWN_EVENTS[ev] then error("Frame:RegisterEvent(): Attempt to register unknown event \"" .. tostring(ev) .. "\"") end
@@ -266,9 +281,9 @@ function Class:RegisterEvent(ev)
     EVENT_FRAMES[#EVENT_FRAMES + 1] = self
 end
 function Class:SetScript(which, fn) self._set = self._set or {}; self._set[which] = fn end
-function FireEvent(ev)
+function FireEvent(ev, ...)
     for _, f in ipairs(EVENT_FRAMES) do
-        if f._events[ev] and f._set and f._set.OnEvent then f._set.OnEvent(f, ev) end
+        if f._events[ev] and f._set and f._set.OnEvent then f._set.OnEvent(f, ev, ...) end
     end
 end
 -- combat: DeferCombat queues while INCOMBAT, like the real wrapper waiting for PLAYER_REGEN_ENABLED
@@ -276,10 +291,29 @@ INCOMBAT, DEFERRED = false, {}
 function InCombatLockdown() return INCOMBAT end
 function EndCombat() INCOMBAT = false; local q = DEFERRED; DEFERRED = {}; for _, fn in ipairs(q) do fn() end end
 
-function CreateFrame(kind, name, parent)
+-- A protected frame (a secure template, and every ancestor of one): in combat the engine refuses these calls on it.
+local PROTECTED_METHODS = { "Show", "Hide", "SetShown", "SetPoint", "ClearAllPoints", "SetSize", "SetWidth", "SetHeight", "SetParent", "SetAttribute" }
+function Protect(f)
+    while f and f ~= UIParent do
+        if not f._guarded then
+            f._guarded = true
+            f._protected = true
+            for _, method in ipairs(PROTECTED_METHODS) do
+                f[method] = function(self, ...)
+                    if INCOMBAT then PROTECTED_CALLS[#PROTECTED_CALLS + 1] = method; return end
+                    return Class[method](self, ...)
+                end
+            end
+        end
+        f = f._parent
+    end
+end
+function CreateFrame(kind, name, parent, template)
     local f = new(kind, parent)
+    f._template = template
     if name then _G[name] = f end
     if parent then parent._children[#parent._children + 1] = f end
+    if type(template) == "string" and template:find("SecureActionButtonTemplate", 1, true) then Protect(f) end
     return f
 end
 
@@ -295,7 +329,6 @@ end
 
 -- An ItemButton as ItemButtonTemplate.xml + ContainerFrameItemButtonTemplate build it.
 -- `kind` is "container" or "bank". Instance functions mimic the mixin, which is copied onto the frame.
-PROTECTED_CALLS = {}
 function MkItemButton(parent, kind)
     local b = new("Button", parent)
     b._kind = "Button"
@@ -2147,6 +2180,256 @@ def check_window_tokens() -> None:
     check("tokens.degrade.a_strip_without_border_or_update_is_still_seated", window_ok(w, "tokens.degrade.exists") and w.ev(seated.replace("BackpackTokenFrame._pts", "BackpackTokenFrame._pts")) and w.swallowed() == "", w.swallowed())
 
 
+# ---------------------------------------------------------------------------------------
+# One bag alone: the single-bag window (FS.SpecialBag) a quiver, an ammo pouch or a soul bag opens into
+# ---------------------------------------------------------------------------------------
+
+SOLO_PRE = r"""
+SOLO, FORBIDDEN, PICKUPS, LINKS, TIPS, CALLBACKS = {}, {}, {}, {}, {}, {}
+MODIFIED, CURSOR, REFRESHED = false, false, 0
+-- every stock bag opener and the item user: the window may call none of them from addon code
+for _, name in ipairs({ "ToggleBag", "OpenBag", "ToggleBackpack", "ToggleAllBags", "CloseBag", "OpenAllBags", "CloseAllBags",
+    "ContainerFrame_GenerateFrame", "UseContainerItem" }) do
+    _G[name] = function() FORBIDDEN[#FORBIDDEN + 1] = name end
+end
+local stockInfo = C_Container.GetContainerItemInfo
+C_Container.GetContainerItemInfo = function(bag, slot)
+    local b = SOLO[bag]
+    if not b then return stockInfo(bag, slot) end
+    local i = b.items[slot]
+    return i and { iconFileID = i.icon, stackCount = i.count or 1, quality = i.q, isLocked = i.locked, hyperlink = i.link } or nil
+end
+C_Container.GetContainerNumSlots = function(bag) local b = SOLO[bag]; return b and b.n or 0 end
+C_Container.GetBagName = function(bag) local b = SOLO[bag]; return b and b.name end
+C_Container.GetContainerItemCooldown = function(bag, slot)
+    local b = SOLO[bag]; local i = b and b.items[slot]
+    if i and i.cd then return i.cd[1], i.cd[2], 1 end
+    return 0, 0, 0
+end
+C_Container.GetContainerItemLink = function(bag, slot) local b = SOLO[bag]; local i = b and b.items[slot]; return i and i.link or nil end
+C_Container.PickupContainerItem = function(bag, slot) PICKUPS[#PICKUPS + 1] = bag .. ":" .. slot end
+function IsModifiedClick() return MODIFIED end
+function CursorHasItem() return CURSOR end
+function HandleModifiedItemClick(link) LINKS[#LINKS + 1] = link; return true end
+GameTooltip = CreateFrame("GameTooltip", nil, UIParent)
+function GameTooltip:SetOwner(owner, anchor) TIPS.owner, TIPS.anchor, TIPS.shown = owner, anchor, false end
+function GameTooltip:SetBagItem(bag, slot) TIPS.bag, TIPS.slot = bag, slot end
+function GameTooltip:Show() TIPS.shown = true end
+function GameTooltip:Hide() TIPS.shown = false end
+EventRegistry = { RegisterCallback = function(_, event, fn) CALLBACKS[event] = fn end }
+FS.BagBar = { RefreshOpen = function() REFRESHED = REFRESHED + 1 end }
+ANCHOR = CreateFrame("Button", "TestBagSlot2", UIParent, "SecureActionButtonTemplate")
+ANCHOR2 = CreateFrame("Button", "TestBagSlot3", UIParent, "SecureActionButtonTemplate")
+function Bag(id, name, n, items) SOLO[id] = { name = name, n = n, items = items or {} } end
+function Press(button, which, name)        -- the PostClick hooks, after the secure step the engine ran
+    for _, fn in ipairs(button._scripts.PostClick or {}) do fn(button, which) end
+end
+function SoloFrames()                       -- the single-bag windows made so far
+    local out = {}
+    for name in pairs(_G) do if type(name) == "string" and name:find("^ForeverSTUwaveSoloBag") then out[#out + 1] = name end end
+    table.sort(out)
+    return table.concat(out, ",")
+end
+Bag(2, "Ribbly's Quiver", 6, {
+    [1] = { icon = 135, count = 20, q = 1, link = "|cffffffff|Hitem:2512|h[Rough Arrow]|h|r" },
+    [3] = { icon = 136, count = 1, q = 3, locked = true, cd = { 100, 30 }, link = "|cff0070dd|Hitem:2515|h[Sharp Arrow]|h|r" },
+})
+Bag(3, "Soul Pouch", 4, { [2] = { icon = 137, count = 1, q = 4, link = "|cffa335ee|Hitem:6265|h[Soul Shard]|h|r" } })
+"""
+
+MODS = ["shift-", "ctrl-", "alt-", "alt-ctrl-", "alt-shift-", "ctrl-shift-", "alt-ctrl-shift-"]
+
+
+def solo_world(extra: str = "", **kw) -> World:
+    return World(pre=SOLO_PRE + extra, **kw)
+
+
+def check_special_window() -> None:
+    # --- before anything opens: the API is there, the answer is "closed", and no frame was made
+    w = solo_world()
+    if not w.ev("type(FS.SpecialBag) == 'table' and type(FS.SpecialBag.Toggle) == 'function'"):
+        check("solo.api_exists", False, "FS.SpecialBag.Toggle is missing")
+        return
+    check("solo.api_exists", w.ev("type(FS.SpecialBag) == 'table' and type(FS.SpecialBag.Toggle) == 'function' "
+                                  "and type(FS.SpecialBag.IsOpen) == 'function' and type(FS.SpecialBag.Close) == 'function'"))
+    check("solo.nothing_is_built_until_the_first_open", w.ev("SoloFrames() == '' and FS.SpecialBag.IsOpen(2) == false"), str(w.ev("SoloFrames()")))
+
+    # --- the first open: one frame, one secure button per slot
+    ok = w.ev("FS.SpecialBag.Toggle(2, 'quiver', ANCHOR)")
+    check("solo.toggle_opens_the_bag", ok is True and w.ev("FS.SpecialBag.IsOpen(2)") is True, str(ok))
+    rec = "FS.SpecialBag.Of(2)"
+    if not w.ev(f"{rec} ~= nil"):
+        check("solo.record_exists", False, "FS.SpecialBag.Of(2) is missing")
+        return
+    check("solo.one_named_frame_under_the_screen", w.ev(f"SoloFrames() == 'ForeverSTUwaveSoloBag2' and {rec}.frame == ForeverSTUwaveSoloBag2 "
+                                                         f"and {rec}.frame._parent == UIParent and {rec}.frame:IsShown()"), str(w.ev("SoloFrames()")))
+    check("solo.one_button_per_slot", w.ev(f"#{rec}.buttons == 6"), str(w.ev(f"#{rec}.buttons")))
+    secure = w.ev(f"(function() for _, b in ipairs({rec}.buttons) do if not (b._template or ''):find('SecureActionButtonTemplate', 1, true) then return false end end return true end)()")
+    check("solo.every_slot_is_a_secure_action_button", secure)
+    attrs = w.ev(f"(function() for i, b in ipairs({rec}.buttons) do "
+                 f"if b:GetAttribute('type2') ~= 'item' or b:GetAttribute('item2') ~= '2 ' .. i then return false end end return true end)()")
+    check("solo.right_click_uses_the_item_through_the_secure_path", attrs)
+    noop = w.ev(f"(function() for _, b in ipairs({rec}.buttons) do for _, m in ipairs({{{', '.join(repr(m) for m in MODS)}}}) do "
+                f"if b:GetAttribute(m .. 'type2') ~= '' then return false end end end return true end)()")
+    check("solo.a_modified_right_click_is_the_secure_noop", noop)
+    check("solo.the_left_click_has_no_secure_action",
+          w.ev(f"(function() for _, b in ipairs({rec}.buttons) do if b:GetAttribute('type') ~= nil or b:GetAttribute('type1') ~= nil then return false end end return true end)()"))
+    check("solo.buttons_know_their_bag_and_slot", w.ev(f"(function() for i, b in ipairs({rec}.buttons) do "
+                                                       f"if b:GetID() ~= i or b:GetBagID() ~= 2 then return false end end return true end)()"))
+    check("solo.click_registration_is_mouse_up", w.ev(f"{rec}.buttons[1]._clicks[1] == 'AnyUp' and {rec}.buttons[1]._drags[1] == 'LeftButton'"))
+
+    # --- what a slot shows
+    check("solo.icon_follows_the_item", w.ev(f"{rec}.buttons[1].icon._texture == 135 and {rec}.buttons[2].icon._texture == nil and {rec}.buttons[3].icon._texture == 136"))
+    check("solo.count_shows_for_a_stack_only", w.ev(f"{rec}.buttons[1].Count:GetText() == '20' and ({rec}.buttons[3].Count:GetText() or '') == ''"),
+          str(w.ev(f"{rec}.buttons[3].Count:GetText()")))
+    check("solo.a_locked_item_is_desaturated", w.ev(f"{rec}.buttons[3].icon._desat == true and {rec}.buttons[1].icon._desat == false"))
+    check("solo.cooldown_follows_the_item", w.ev(f"{rec}.buttons[3].Cooldown._cd ~= nil and {rec}.buttons[3].Cooldown._cd[1] == 100 and {rec}.buttons[1].Cooldown._cd == nil"),
+          str(w.ev(f"{rec}.buttons[3].Cooldown._cd")))
+    check("solo.the_slots_wear_the_bag_skin", w.ev(f"(function() for _, b in ipairs({rec}.buttons) do "
+                                                    f"if not (b.fsBagItemSkinned and b.fsSkin and b.fsBagPlate) then return false end end return true end)()"))
+    check("solo.a_filled_slot_rings_in_its_quality", w.ev(f"RingColor({rec}.buttons[3])[1] == 0.0 and RingColor({rec}.buttons[3])[2] == 0.44"),
+          str(w.ev(f"table.concat(RingColor({rec}.buttons[3]), ',')")))
+    check("solo.title_is_the_bag_name", w.ev(f"{rec}.title:GetText() == \"Ribbly's Quiver\""), str(w.ev(f"{rec}.title:GetText()")))
+    check("solo.footer_counts_used_slots", w.ev(f"{rec}.count:GetText() == '2/6'"), str(w.ev(f"{rec}.count:GetText()")))
+    check("solo.the_window_is_skinned_as_a_panel_without_blizzard_chrome",
+          w.ev("(function() for _, c in ipairs(CALLS) do if c[1] == 'SkinPanel' and c[2] == FS.SpecialBag.Of(2).frame then return c[3] and c[3].strip == false end end return false end)()"))
+    check("solo.the_window_is_laid_out_by_the_shared_layout",
+          w.ev(f"(function() local l = FS.BagsWindow.Layout({rec}.grid.w, {rec}.grid.h, ES, {{}}); "
+               f"return math.abs({rec}.frame._w - l.width) < 1e-6 and math.abs({rec}.frame._h - l.height) < 1e-6 end)()"),
+          f"{w.ev(f'{rec}.frame._w')} x {w.ev(f'{rec}.frame._h')}")
+    check("solo.the_bag_bar_is_told", int(w.ev("REFRESHED")) >= 1, str(w.ev("REFRESHED")))
+
+    # --- placement: above the clicked slot; a second window sits above the first
+    pt = w.ev(f"{rec}.frame._pts[#{rec}.frame._pts]")
+    check("solo.anchored_above_the_clicked_slot", w.ev(f"(function() local p = {rec}.frame._pts[#{rec}.frame._pts]; return p[1] == 'BOTTOM' and p[2] == ANCHOR and p[3] == 'TOP' end)()"))
+    w.run("FS.SpecialBag.Toggle(3, 'shard', ANCHOR2)")
+    check("solo.a_second_window_stacks_above_the_first",
+          w.ev("(function() local p = FS.SpecialBag.Of(3).frame._pts; p = p[#p]; return p[1] == 'BOTTOM' and p[2] == FS.SpecialBag.Of(2).frame and p[3] == 'TOP' end)()")
+          and w.ev("FS.SpecialBag.IsOpen(2) and FS.SpecialBag.IsOpen(3)"))
+    w.run("FS.SpecialBag.Close(2)")
+    check("solo.closing_the_lower_one_drops_the_upper_onto_its_slot",
+          w.ev("(function() local p = FS.SpecialBag.Of(3).frame._pts; p = p[#p]; return p[1] == 'BOTTOM' and p[2] == ANCHOR2 and p[3] == 'TOP' end)()")
+          and w.ev("not FS.SpecialBag.IsOpen(2) and not FS.SpecialBag.Of(2).frame:IsShown()"))
+    w.run("FS.SpecialBag.Close(3)")
+
+    # --- toggling closes; opening again reuses the frame and its buttons
+    frame_before = w.ev(f"{rec}.frame")
+    n_attr = w.ev(f"{rec}.buttons[1]._attrs")
+    w.run("FS.SpecialBag.Toggle(2, 'quiver', ANCHOR)")
+    check("solo.reopen_reuses_the_frame_and_buttons", w.ev(f"{rec}.frame == ForeverSTUwaveSoloBag2 and #{rec}.buttons == 6 and {rec}.frame:IsShown()")
+          and w.ev("SoloFrames() == 'ForeverSTUwaveSoloBag2,ForeverSTUwaveSoloBag3'"), str(w.ev("SoloFrames()")))
+    w.run("FS.SpecialBag.Toggle(2, 'quiver', ANCHOR)")
+    check("solo.second_toggle_closes", w.ev("not FS.SpecialBag.IsOpen(2) and not FS.SpecialBag.Of(2).frame:IsShown()"))
+    check("solo.the_bag_bar_is_told_of_the_close", int(w.ev("REFRESHED")) >= 5, str(w.ev("REFRESHED")))
+
+    # --- a smaller bag in the same id: the extra buttons are hidden, the layout shrinks
+    wide = float(w.ev(f"{rec}.frame._h"))
+    w.run("ITEMS2 = SOLO[2].items; Bag(2, 'Small Quiver', 4, { [1] = { icon = 135 } }); FS.SpecialBag.Toggle(2, 'quiver', ANCHOR)")
+    check("solo.a_smaller_bag_hides_the_extra_buttons",
+          w.ev(f"{rec}.n == 4 and {rec}.buttons[4]:IsShown() and not {rec}.buttons[5]:IsShown() and not {rec}.buttons[6]:IsShown()")
+          and w.ev(f"{rec}.title:GetText() == 'Small Quiver'"), f"{w.ev(f'{rec}.n')}")
+    w.run("FS.SpecialBag.Close(2); Bag(2, \"Ribbly's Quiver\", 6, ITEMS2)")
+
+    # --- what a click does after the secure step: the left click picks up or drops, a modified click links, a right click is the secure use
+    w.run("FS.SpecialBag.Toggle(2, 'quiver', ANCHOR); PICKUPS = {}; LINKS = {}")
+    w.run(f"Press({rec}.buttons[1], 'LeftButton')")
+    check("solo.left_click_picks_up_or_drops_through_the_container_api", w.ev("PICKUPS[1] == '2:1' and #PICKUPS == 1"), str(w.ev("table.concat(PICKUPS, ',')")))
+    w.run(f"Press({rec}.buttons[1], 'RightButton')")
+    check("solo.right_click_is_left_to_the_secure_item_use", w.ev("#PICKUPS == 1 and #LINKS == 0 and #FORBIDDEN == 0"))
+    w.run(f"MODIFIED = true; Press({rec}.buttons[1], 'LeftButton')")
+    check("solo.a_modified_click_links_the_item_and_picks_nothing_up", w.ev("#PICKUPS == 1 and #LINKS == 1 and LINKS[1]:find('Rough Arrow', 1, true) ~= nil"), str(w.ev("#LINKS")))
+    w.run(f"Press({rec}.buttons[1], 'RightButton')")
+    check("solo.a_modified_right_click_links_too", w.ev("#LINKS == 2 and #FORBIDDEN == 0"))
+    w.run("MODIFIED = false")
+
+    # --- the tooltip
+    w.run(f"for _, fn in ipairs({rec}.buttons[3]._set and {{ {rec}.buttons[3]._set.OnEnter }} or {{}}) do fn({rec}.buttons[3]) end")
+    check("solo.hover_shows_the_bag_item_tooltip", w.ev(f"TIPS.owner == {rec}.buttons[3] and TIPS.bag == 2 and TIPS.slot == 3 and TIPS.shown == true"))
+    w.run(f"{rec}.buttons[3]._set.OnLeave({rec}.buttons[3])")
+    check("solo.leaving_hides_it", w.ev("TIPS.shown == false"))
+
+    # --- refresh: an item arrives, a stack changes, the bag bar's open mark is told
+    w.run("SOLO[2].items[2] = { icon = 138, count = 5, q = 2 }; FireEvent('BAG_UPDATE_DELAYED')")
+    check("solo.bag_update_repaints_the_slots", w.ev(f"{rec}.buttons[2].icon._texture == 138 and {rec}.buttons[2].Count:GetText() == '5' and {rec}.count:GetText() == '3/6'"),
+          str(w.ev(f"{rec}.count:GetText()")))
+    w.run("SOLO[2].items[3].locked = false; SOLO[2].items[3].cd = { 200, 10 }; FireEvent('ITEM_LOCK_CHANGED'); FireEvent('BAG_UPDATE_COOLDOWN')")
+    check("solo.lock_and_cooldown_events_repaint",
+          w.ev(f"{rec}.buttons[3].icon._desat == false and {rec}.buttons[3].Cooldown._cd[1] == 200"))
+
+    # --- close paths
+    w.run("FireEvent('BAG_UPDATE_DELAYED'); Bag(2, 'Other', 8, SOLO[2].items); FireEvent('BAG_UPDATE_DELAYED')")
+    check("solo.a_bag_that_changed_size_closes_its_window", w.ev("not FS.SpecialBag.IsOpen(2)"))
+    w.run("Bag(2, \"Ribbly's Quiver\", 6, SOLO[2].items); FS.SpecialBag.Toggle(2, 'quiver', ANCHOR); Bag(2, nil, 0, {}); FireEvent('BAG_CONTAINER_UPDATE')")
+    check("solo.a_bag_that_left_closes_its_window", w.ev("not FS.SpecialBag.IsOpen(2)"))
+    w.run("Bag(2, \"Ribbly's Quiver\", 6, {}); FS.SpecialBag.Toggle(2, 'quiver', ANCHOR); FS.SpecialBag.Toggle(3, 'shard', ANCHOR2)")
+    check("solo.close_all_bags_closes_every_window",
+          w.ev("type(CALLBACKS['ContainerFrame.CloseAllBags']) == 'function'")
+          and w.ev("(function() CALLBACKS['ContainerFrame.CloseAllBags'](); return not FS.SpecialBag.IsOpen(2) and not FS.SpecialBag.IsOpen(3) end)()"))
+    w.run("FS.SpecialBag.Toggle(2, 'quiver', ANCHOR); FS.SpecialBag.Of(2).closeButton._set.OnClick(FS.SpecialBag.Of(2).closeButton)")
+    check("solo.the_close_key_closes_it", w.ev("not FS.SpecialBag.IsOpen(2)"))
+    check("solo.no_stock_bag_opener_or_item_user_was_called", w.ev("#FORBIDDEN == 0"), str(w.ev("table.concat(FORBIDDEN, ',')")))
+    check("solo.nothing_swallowed", w.swallowed() == "", w.swallowed())
+    check("solo.no_degrade_logs", w.degrade() == "", w.degrade())
+
+    # --- combat: a protected window is neither built, shown, hidden nor re-anchored; it catches up at regen
+    w = solo_world()
+    w.run("INCOMBAT = true; PROTECTED_CALLS = {}")
+    check("solo.combat.opening_is_refused_and_builds_nothing",
+          w.ev("FS.SpecialBag.Toggle(2, 'quiver', ANCHOR) == false and SoloFrames() == '' and not FS.SpecialBag.IsOpen(2)"), str(w.ev("SoloFrames()")))
+    w.run("EndCombat(); FireEvent('PLAYER_REGEN_ENABLED')")
+    check("solo.combat.the_open_is_carried_out_at_regen", w.ev("FS.SpecialBag.IsOpen(2) and SoloFrames() == 'ForeverSTUwaveSoloBag2'"), str(w.ev("SoloFrames()")))
+    w.run("INCOMBAT = true; PROTECTED_CALLS = {}; FS.SpecialBag.Toggle(2, 'quiver', ANCHOR)")
+    check("solo.combat.closing_waits_for_regen", w.ev("FS.SpecialBag.IsOpen(2) and FS.SpecialBag.Of(2).frame:IsShown()"))
+    w.run("EndCombat(); FireEvent('PLAYER_REGEN_ENABLED')")
+    check("solo.combat.the_close_is_carried_out_at_regen", w.ev("not FS.SpecialBag.IsOpen(2)"))
+    w.run("INCOMBAT = true; FS.SpecialBag.Toggle(2, 'quiver', ANCHOR); FS.SpecialBag.Toggle(2, 'quiver', ANCHOR); EndCombat(); FireEvent('PLAYER_REGEN_ENABLED')")
+    check("solo.combat.two_toggles_in_combat_cancel_out", w.ev("not FS.SpecialBag.IsOpen(2)"))
+    w.run("FS.SpecialBag.Toggle(2, 'quiver', ANCHOR); INCOMBAT = true; PROTECTED_CALLS = {}; SOLO[2].items[4] = { icon = 140, count = 9, q = 2 }; "
+          "SOLO[2].items[1] = nil; FireEvent('BAG_UPDATE_DELAYED'); FireEvent('ITEM_LOCK_CHANGED'); FireEvent('BAG_UPDATE_COOLDOWN')")
+    check("solo.combat.an_open_window_still_repaints_its_slots",
+          w.ev("FS.SpecialBag.Of(2).buttons[4].icon._texture == 140 and FS.SpecialBag.Of(2).buttons[4].Count:GetText() == '9' and FS.SpecialBag.Of(2).buttons[1].icon._texture == nil"))
+    check("solo.combat.that_repaint_calls_no_protected_method", w.ev("#PROTECTED_CALLS == 0"), str(w.ev("table.concat(PROTECTED_CALLS, ',')")))
+    w.run("Bag(2, 'Swapped', 9, {}); FireEvent('BAG_UPDATE_DELAYED')")
+    check("solo.combat.a_bag_swapped_in_combat_closes_at_regen",
+          w.ev("FS.SpecialBag.IsOpen(2) and #PROTECTED_CALLS == 0"))
+    w.run("EndCombat(); FireEvent('PLAYER_REGEN_ENABLED')")
+    check("solo.combat.and_it_closes_once_combat_ends", w.ev("not FS.SpecialBag.IsOpen(2)"))
+    check("solo.combat.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+    # --- module power: with Bags off nothing is built and every answer is "closed"
+    w = solo_world("FS.ModuleSwitch = { WhenOn = function() end, MarkBuilt = function() end }")
+    check("solo.off.the_api_is_defined_and_inert",
+          w.ev("type(FS.SpecialBag) == 'table' and FS.SpecialBag.Toggle(2, 'quiver', ANCHOR) == false and FS.SpecialBag.IsOpen(2) == false "
+               "and SoloFrames() == '' and next(CALLBACKS) == nil"))
+    check("solo.off.no_event_frame_was_made_for_it", w.ev("(function() for _, f in ipairs(EVENT_FRAMES) do if f._events.BAG_UPDATE_DELAYED then return false end end return true end)()"))
+
+    # --- a client without the tooltip, the cooldown helper or the bag name still opens the bag
+    w = solo_world("GameTooltip = nil; C_Container.GetBagName = nil; C_Container.GetContainerItemCooldown = nil; HandleModifiedItemClick = nil; EventRegistry = nil")
+    w.run("FS.SpecialBag.Toggle(2, 'quiver', ANCHOR)")
+    check("solo.degrade.a_client_without_the_extras_still_opens_the_bag",
+          w.ev("FS.SpecialBag.IsOpen(2) and #FS.SpecialBag.Of(2).buttons == 6 and FS.SpecialBag.Of(2).title:GetText() == 'Quiver'"), str(w.ev("FS.SpecialBag.Of(2) and FS.SpecialBag.Of(2).title:GetText()")))
+    w.run("FS.SpecialBag.Of(2).buttons[1]._set.OnEnter(FS.SpecialBag.Of(2).buttons[1]); Press(FS.SpecialBag.Of(2).buttons[1], 'LeftButton'); MODIFIED = true; Press(FS.SpecialBag.Of(2).buttons[1], 'LeftButton')")
+    check("solo.degrade.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+    # --- secret answers are never compared
+    w = solo_world()
+    w.run("SECRET_IDS = true")
+    check("solo.secret.a_secret_slot_count_opens_nothing", w.ev("FS.SpecialBag.Toggle(2, 'quiver', ANCHOR) == false and not FS.SpecialBag.IsOpen(2)"))
+    check("solo.secret.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+
+def check_special_window_source() -> None:
+    # The click path of the window never calls a stock bag opener or the item user from addon code: they taint the container
+    # state and a later UseContainerItem is then forbidden. Comments are stripped; only code is scanned.
+    code = "\n".join(re.sub(r"--.*$", "", line) for line in BAGS_LUA.read_text(encoding="utf-8").splitlines())
+    banned = ["ToggleBag", "OpenBag", "ToggleBackpack", "ToggleAllBags", "CloseBag", "OpenAllBags", "CloseAllBags",
+              "ContainerFrame_GenerateFrame", "UseContainerItem"]
+    hit = [name for name in banned if re.search(rf"(?<![\w.]){name}\s*\(", code) or re.search(rf"\b_G\s*\[\s*[\"']{name}[\"']\s*\]", code)]
+    check("source.no_stock_bag_opener_or_item_user_is_called_in_Bags_lua", not hit, ", ".join(hit))
+    check("source.no_addon_side_click_on_a_stock_button_in_Bags_lua", not re.search(r":Click\s*\(", code))
+
+
+
 def main() -> int:
     db = databar_money()
     check_art()
@@ -2171,6 +2454,8 @@ def main() -> int:
     check_window_combat()
     check_window_degrade()
     check_window_tokens()
+    check_special_window()
+    check_special_window_source()
     print(f"\n{CHECKS} checks, {len(FAILS)} failed" if FAILS else f"\nall {CHECKS} checks passed")
     return len(FAILS)
 

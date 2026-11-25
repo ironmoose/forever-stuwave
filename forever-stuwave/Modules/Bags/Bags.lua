@@ -1757,6 +1757,451 @@ local function WatchGamepad()
 end
 
 -------------------------------------------------------------------------------
+-- One bag alone: the single-bag window (FS.SpecialBag)
+-------------------------------------------------------------------------------
+
+-- The bag bar (BagBar.lua) gives a quiver, an ammo pouch or a soul bag a right click that opens THAT bag alone, and this is
+-- the window it opens. With combined bags on, the stock click on bag 1 to 4 opens the one combined window and a special
+-- bag has no stock window of its own to open, and the stock opener (ToggleBag, OpenBag, the container frame generator) is
+-- the call that taints the container state, so a window of the game's own is out. This one is ours: a plain frame with a
+-- SECURE item button per slot, built from the bag's own API (C_Container.GetContainerNumSlots, GetContainerItemInfo).
+--
+-- Item use is the secure path, not a script of ours: each button is a SecureActionButtonTemplate whose `type2` is "item" and
+-- `item2` is "<bag> <slot>", so a right click runs UseContainerItem inside the secure environment, the way a stock slot's
+-- click does, in and out of combat. The modified right clicks are the secure no-op (the empty string) and the left button
+-- has no secure action, so what is left is a PostClick hook (insecure, after the secure step): the left click picks up or
+-- drops through C_Container.PickupContainerItem, a modified click hands the link to HandleModifiedItemClick (chat link,
+-- dress up). Nothing here calls a stock bag opener or UseContainerItem, and nothing clicks a stock button (a source scan in
+-- tools/bags-harness.py pins both).
+--
+-- Not done, on purpose: no stack split (the stock split frame needs the stock item button), no new-item glow, no search,
+-- sort or money (a one bag window has none), and no UISpecialFrames entry (Esc would Hide a protected frame in combat).
+--
+-- Combat: a window holding secure buttons is protected, and so is every frame anchored to it. Out of combat, the build, the
+-- Show/Hide, the anchors, the sizes and the attributes happen; in combat a toggle is remembered and carried out at
+-- PLAYER_REGEN_ENABLED, while an already open window still repaints (icon, count, lock, cooldown are regions) and the secure
+-- right click still uses the item. Closing happens when the bag size changes or the bag leaves (checked on every bag event),
+-- on the close key and on the game's own close all bags event.
+--
+-- Nothing is built until the Bags switch is on (StartSolo, from Start) and nothing until the first open; the table is
+-- defined either way and answers "closed".
+local StartSolo   -- assigned below, called by Start with the rest of the build
+
+do
+    local COLUMNS, CELL, GAP = 4, 37, 5          -- the stock individual bag window: 4 columns, 37 px slots, a 42 px pitch
+    local LIFT, STACK_GAP = 8, 6                 -- window above its bag bar slot; a second window above the first
+    local TITLES = { quiver = "Quiver", ammo = "Ammo pouch", shard = "Soul bag" }
+    local NOOP_MODIFIERS = { "shift-", "ctrl-", "alt-", "alt-ctrl-", "alt-shift-", "ctrl-shift-", "alt-ctrl-shift-" }
+    local EVENTS = { "BAG_UPDATE_DELAYED", "BAG_CONTAINER_UPDATE", "BAG_UPDATE_COOLDOWN", "ITEM_LOCK_CHANGED", "PLAYER_REGEN_ENABLED" }
+
+    local windows = {}    -- bagID -> record { frame, buttons, n, kind, anchor, open, ... }, kept once built
+    local order = {}      -- bag ids of the open windows, the lowest on screen first
+    local pending = {}    -- bagID -> { open, kind, anchor }: a toggle made in combat, carried out at regen
+    local built = false   -- the Bags switch is on and StartSolo ran
+
+    local function Plain(value)
+        if value == nil or IsSecretValue(value) then return nil end
+        return value
+    end
+
+    local function InCombat() return InCombatLockdown and InCombatLockdown() and true or false end
+
+    local function IsOpen(bagID)
+        local rec = built and windows[bagID]
+        return rec and rec.open == true or false
+    end
+
+    -- The bag's slot count, nil unless the client says a plain number (a bag that is gone answers 0).
+    local function SlotCount(bagID)
+        if type(C_Container) ~= "table" or type(C_Container.GetContainerNumSlots) ~= "function" then return nil end
+        local ok, n = pcall(C_Container.GetContainerNumSlots, bagID)
+        n = ok and Plain(n) or nil
+        if type(n) ~= "number" or n < 1 or n > 64 then return nil end
+        return n
+    end
+
+    local function BagTitle(bagID, kind)
+        if type(C_Container) == "table" and type(C_Container.GetBagName) == "function" then
+            local ok, name = pcall(C_Container.GetBagName, bagID)
+            name = ok and Plain(name) or nil
+            if type(name) == "string" and name ~= "" then return name end
+        end
+        return TITLES[kind] or "Bag"
+    end
+
+    local function ItemInfo(bagID, slot)
+        if type(C_Container) ~= "table" or type(C_Container.GetContainerItemInfo) ~= "function" then return nil end
+        local ok, info = pcall(C_Container.GetContainerItemInfo, bagID, slot)
+        if not ok or type(Plain(info)) ~= "table" then return nil end
+        return info
+    end
+
+    local function ItemLink(bagID, slot)
+        if type(C_Container) ~= "table" or type(C_Container.GetContainerItemLink) ~= "function" then return nil end
+        local ok, link = pcall(C_Container.GetContainerItemLink, bagID, slot)
+        link = ok and Plain(link) or nil
+        return type(link) == "string" and link or nil
+    end
+
+    local function Notify()
+        local bar = FS.BagBar
+        if bar and type(bar.RefreshOpen) == "function" then pcall(bar.RefreshOpen) end
+    end
+
+    ---------------------------------------------------------------------------
+    -- A slot
+    ---------------------------------------------------------------------------
+
+    local function PickupItem(bagID, slot)
+        if type(C_Container) == "table" and type(C_Container.PickupContainerItem) == "function" then
+            pcall(C_Container.PickupContainerItem, bagID, slot)
+        end
+    end
+
+    local function ModifiedClick()
+        if type(IsModifiedClick) ~= "function" then return false end
+        local ok, modified = pcall(IsModifiedClick)
+        return ok and modified == true
+    end
+
+    -- After the secure step: the right click (item use) was the secure action already; everything else is ours.
+    local function SlotPostClick(bagID, button, mouseButton)
+        local slot = button:GetID()
+        if ModifiedClick() then
+            local link = ItemLink(bagID, slot)
+            if link and type(HandleModifiedItemClick) == "function" then pcall(HandleModifiedItemClick, link) end
+        elseif mouseButton == "LeftButton" then
+            PickupItem(bagID, slot)
+        end
+    end
+
+    local function BuildButton(rec, i)
+        local bagID = rec.bagID
+        -- Anonymous, and made out of combat only (a secure template; the window is protected from here on).
+        local button = CreateFrame("Button", nil, rec.frame, "SecureActionButtonTemplate")
+        button:SetID(i)
+        button.GetBagID = function() return bagID end
+        button:RegisterForClicks("AnyUp")
+        button:RegisterForDrag("LeftButton")
+        button.icon = button:CreateTexture(nil, "ARTWORK")
+        button.icon:SetAllPoints(button)
+        button.Count = button:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+        button.Count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -3, 3)
+        local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+        cooldown:SetAllPoints(button)
+        button.Cooldown = cooldown
+
+        button:SetAttribute("useOnKeyDown", false)
+        button:SetAttribute("type2", "item")
+        button:SetAttribute("item2", bagID .. " " .. i)
+        for _, prefix in ipairs(NOOP_MODIFIERS) do button:SetAttribute(prefix .. "type2", "") end
+
+        button:HookScript("PostClick", function(self, mouseButton) SlotPostClick(bagID, self, mouseButton) end)
+        button:SetScript("OnDragStart", function(self) PickupItem(bagID, self:GetID()) end)
+        button:SetScript("OnReceiveDrag", function(self) PickupItem(bagID, self:GetID()) end)
+        button:SetScript("OnEnter", function(self)
+            if type(GameTooltip) ~= "table" or type(GameTooltip.SetBagItem) ~= "function" then return end
+            pcall(GameTooltip.SetOwner, GameTooltip, self, "ANCHOR_RIGHT")
+            pcall(GameTooltip.SetBagItem, GameTooltip, bagID, self:GetID())
+            pcall(GameTooltip.Show, GameTooltip)
+        end)
+        button:SetScript("OnLeave", function()
+            if type(GameTooltip) == "table" and type(GameTooltip.Hide) == "function" then pcall(GameTooltip.Hide, GameTooltip) end
+        end)
+        SkinItemButton(button, true)
+        return button
+    end
+
+    -- Regions only (icon, count, desaturation, cooldown, ring), so it is legal in combat. Returns whether the slot holds an item.
+    local function RefreshButton(rec, button, slot)
+        local info = ItemInfo(rec.bagID, slot)
+        local texture = info and Plain(info.iconFileID) or nil
+        local icon = button.icon
+        icon:SetTexture(texture)
+        icon:SetShown(texture ~= nil)
+        icon:SetDesaturated(info ~= nil and Plain(info.isLocked) == true)
+        local count = info and Plain(info.stackCount) or nil
+        if type(count) == "number" and count > 1 then
+            button.Count:SetText(tostring(count))
+            button.Count:Show()
+        else
+            button.Count:SetText("")
+            button.Count:Hide()
+        end
+        local cooldown = button.Cooldown
+        if type(C_Container) == "table" and type(C_Container.GetContainerItemCooldown) == "function" then
+            local ok, start, duration, enable = pcall(C_Container.GetContainerItemCooldown, rec.bagID, slot)
+            start, duration, enable = Plain(start), Plain(duration), Plain(enable)
+            if ok and type(start) == "number" and type(duration) == "number" then
+                if duration > 0 and enable ~= 0 and enable ~= false then
+                    cooldown:SetCooldown(start, duration)
+                elseif type(cooldown.Clear) == "function" then
+                    cooldown:Clear()
+                end
+            end
+        end
+        ReadSlotRing(button)
+        SyncSlot(button)
+        return info ~= nil
+    end
+
+    local function Refresh(rec)
+        local used = 0
+        for i = 1, rec.n do
+            local ok, held = pcall(RefreshButton, rec, rec.buttons[i], i)
+            if ok and held then used = used + 1 end
+        end
+        rec.count:SetText(used .. "/" .. rec.n)
+        rec.title:SetText(BagTitle(rec.bagID, rec.kind))
+    end
+
+    ---------------------------------------------------------------------------
+    -- The window
+    ---------------------------------------------------------------------------
+
+    local Close   -- (bagID) -> true when it closed now; in combat the close is remembered
+
+    local function BuildWindow(bagID, kind)
+        local Theme = FS.Theme
+        if type(Theme.SkinButton) ~= "function" or type(CreateFrame) ~= "function" then
+            WarnWindow("Theme.SkinButton missing for the single bag window")
+            return nil
+        end
+        local rec
+        local ok, err = pcall(function()
+            local frame = CreateFrame("Frame", "ForeverSTUwaveSoloBag" .. bagID, UIParent)
+            frame:SetFrameStrata("HIGH")
+            frame:SetClampedToScreen(true)
+            frame:EnableMouse(true)
+            frame:Hide()
+            SkinPanel(frame, { strip = false })
+            rec = { bagID = bagID, kind = kind, frame = frame, buttons = {}, n = 0, open = false }
+
+            local cyan, violet, pink = Theme.COLOR_POWER or { 0.133, 0.878, 1, 1 }, Theme.COLOR_BORDER or { 0.659, 0.333, 0.969, 1 },
+                Theme.COLOR_HEALTH or { 1, 0.18, 0.592, 1 }
+            rec.title = frame:CreateFontString(nil, "OVERLAY")
+            rec.count = frame:CreateFontString(nil, "OVERLAY")
+            if type(Theme.ApplyMono) == "function" then
+                Theme.ApplyMono(rec.title, METRICS.FONT, WHITE)
+                Theme.ApplyMono(rec.count, METRICS.FONT, cyan)
+            end
+            rec.title:SetJustifyH("LEFT")
+            rec.title:SetWordWrap(false)
+            rec.rule = frame:CreateTexture(nil, "ARTWORK")
+            rec.rule:SetColorTexture(violet[1], violet[2], violet[3], 0.40)
+            Snap(rec.rule)
+
+            rec.close = NewPlate(frame, pink, METRICS.KEY_CHAMFER, 1)
+            rec.closeColours = { main = pink }
+            local key = CreateFrame("Button", nil, frame)
+            key:SetScript("OnEnter", function() rec.close.state.hover = true; PaintPlate(rec.close) end)
+            key:SetScript("OnLeave", function() rec.close.state.hover, rec.close.state.pressed = false, false; PaintPlate(rec.close) end)
+            key:SetScript("OnMouseDown", function() rec.close.state.pressed = true; PaintPlate(rec.close) end)
+            key:SetScript("OnMouseUp", function() rec.close.state.pressed = false; PaintPlate(rec.close) end)
+            key:SetScript("OnClick", function() Close(bagID) end)
+            rec.closeButton = key
+            PaintPlate(rec.close)
+        end)
+        if not ok then
+            if rec and rec.frame then pcall(rec.frame.Hide, rec.frame) end
+            WarnWindow(tostring(err))
+            return nil
+        end
+        return rec
+    end
+
+    -- Sizes the window for `n` slots and seats everything on it. Out of combat only: it sizes, anchors and shows protected frames.
+    local function Layout(rec, n)
+        local es = PixelsPerUnit(rec.frame)
+        local frame = rec.frame
+        local rows = math.ceil(n / COLUMNS)
+        local gw, gh = COLUMNS * CELL + (COLUMNS - 1) * GAP, rows * CELL + (rows - 1) * GAP
+        local lay = ComputeLayout(gw, gh, es, {})
+        rec.layout, rec.grid, rec.n = lay, { w = gw, h = gh }, n
+        frame:SetSize(lay.width, lay.height)
+
+        for i = #rec.buttons + 1, n do rec.buttons[i] = BuildButton(rec, i) end
+        local cell = RoundPx(CELL, es)
+        for i, button in ipairs(rec.buttons) do
+            if i <= n then
+                local col, row = (i - 1) % COLUMNS, math.floor((i - 1) / COLUMNS)
+                button:ClearAllPoints()
+                button:SetPoint("TOPLEFT", frame, "TOPLEFT", RoundPx(lay.grid.left + col * (CELL + GAP), es),
+                    -RoundPx(lay.grid.top + row * (CELL + GAP), es))
+                button:SetSize(cell, cell)
+                button:Show()
+            else
+                button:Hide()
+            end
+        end
+
+        local keyPx = math.floor(lay.close.w * es + 0.5)
+        SeatPlate(rec.close, frame, lay.close, true)
+        SeatGlyph(rec.close, rec.close.frame, CloseCells(), rec.closeColours, keyPx, keyPx, es)
+        PaintPlate(rec.close)
+        rec.closeButton:ClearAllPoints()
+        rec.closeButton:SetPoint("TOPLEFT", frame, "TOPLEFT", lay.close.x, -lay.close.y)
+        rec.closeButton:SetSize(lay.close.w, lay.close.h)
+
+        rec.title:ClearAllPoints()
+        rec.title:SetPoint("LEFT", frame, "TOPLEFT", lay.grid.left, -(lay.close.y + lay.close.h / 2))
+        rec.title:SetWidth(math.max(8, lay.close.x - lay.grid.left - 4))
+        rec.rule:ClearAllPoints()
+        rec.rule:SetPoint("TOPLEFT", frame, "TOPLEFT", lay.rule.x, -lay.rule.y)
+        rec.rule:SetSize(lay.rule.w, lay.rule.h)
+        rec.count:ClearAllPoints()
+        rec.count:SetPoint("LEFT", frame, "TOPLEFT", lay.count.x, -lay.count.cy)
+    end
+
+    -- Every open window, the first above its own bag bar slot and each next one above the one before it. Out of combat only.
+    local function PlaceAll()
+        local previous
+        for _, bagID in ipairs(order) do
+            local rec = windows[bagID]
+            rec.frame:ClearAllPoints()
+            if previous then
+                rec.frame:SetPoint("BOTTOM", previous, "TOP", 0, STACK_GAP)
+            elseif rec.anchor then
+                rec.frame:SetPoint("BOTTOM", rec.anchor, "TOP", 0, LIFT)
+            else
+                rec.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            end
+            previous = rec.frame
+        end
+    end
+
+    local function OpenNow(bagID, kind, anchor)
+        local n = SlotCount(bagID)
+        if not n then return false end
+        local rec = windows[bagID]
+        if not rec then
+            rec = BuildWindow(bagID, kind)
+            if not rec then return false end
+            windows[bagID] = rec
+        end
+        rec.kind = kind or rec.kind
+        rec.anchor = anchor or rec.anchor
+        local laid, err = pcall(Layout, rec, n)
+        if not laid then WarnWindow("layout failed: " .. tostring(err)); return false end
+        if not rec.open then
+            rec.open = true
+            order[#order + 1] = bagID
+        end
+        PlaceAll()
+        rec.frame:Show()
+        Refresh(rec)
+        Notify()
+        return true
+    end
+
+    local function CloseNow(bagID)
+        local rec = windows[bagID]
+        if not (rec and rec.open) then return false end
+        rec.open = false
+        for i, id in ipairs(order) do
+            if id == bagID then table.remove(order, i) break end
+        end
+        rec.frame:Hide()
+        PlaceAll()
+        Notify()
+        return true
+    end
+
+    -- A toggle made in combat flips what is already asked for (two toggles cancel out) and waits for regen.
+    local function Defer(bagID, open, kind, anchor)
+        local before = pending[bagID]
+        if open == nil then
+            if before then open = not before.open else open = not IsOpen(bagID) end
+        end
+        pending[bagID] = { open = open, kind = kind or (before and before.kind), anchor = anchor or (before and before.anchor) }
+    end
+
+    local function Toggle(bagID, kind, anchor)
+        if not built or type(bagID) ~= "number" or IsSecretValue(bagID) then return false end
+        if InCombat() then Defer(bagID, nil, kind, anchor) return false end
+        if IsOpen(bagID) then return CloseNow(bagID) end
+        return OpenNow(bagID, kind, anchor)
+    end
+
+    Close = function(bagID)
+        if not built then return false end
+        if InCombat() then
+            if IsOpen(bagID) then Defer(bagID, false) end
+            return false
+        end
+        pending[bagID] = nil
+        return CloseNow(bagID)
+    end
+
+    local function CloseAll()
+        local ids = {}
+        for _, id in ipairs(order) do ids[#ids + 1] = id end
+        for _, id in ipairs(ids) do Close(id) end
+    end
+
+    local function ApplyPending()
+        local ids, queue = {}, pending
+        pending = {}
+        for id in pairs(queue) do ids[#ids + 1] = id end
+        table.sort(ids)
+        for _, id in ipairs(ids) do
+            local want = queue[id]
+            if want.open then
+                if not IsOpen(id) then OpenNow(id, want.kind, want.anchor) end
+            elseif IsOpen(id) then
+                CloseNow(id)
+            end
+        end
+    end
+
+    -- A bag that changed size or left (a swap, an unequip) has no window any more.
+    local function CheckBags()
+        local ids = {}
+        for _, id in ipairs(order) do ids[#ids + 1] = id end
+        for _, id in ipairs(ids) do
+            local n = SlotCount(id)
+            if n ~= windows[id].n then Close(id) end
+        end
+    end
+
+    local function RefreshAll()
+        for _, id in ipairs(order) do pcall(Refresh, windows[id]) end
+    end
+
+    local function OnEvent(_, event)
+        if event == "PLAYER_REGEN_ENABLED" then
+            ApplyPending()
+            CheckBags()
+        elseif event == "BAG_UPDATE_DELAYED" or event == "BAG_CONTAINER_UPDATE" then
+            CheckBags()
+        end
+        RefreshAll()
+    end
+
+    FS.SpecialBag = {
+        Toggle = Toggle,
+        Open = function(bagID, kind, anchor)
+            if IsOpen(bagID) then return true end
+            return Toggle(bagID, kind, anchor)
+        end,
+        Close = Close,
+        CloseAll = CloseAll,
+        IsOpen = IsOpen,
+        Of = function(bagID) return windows[bagID] end,
+    }
+
+    StartSolo = function()
+        built = true
+        local events = CreateFrame("Frame")
+        for _, event in ipairs(EVENTS) do pcall(events.RegisterEvent, events, event) end
+        events:SetScript("OnEvent", OnEvent)
+        if type(EventRegistry) == "table" and type(EventRegistry.RegisterCallback) == "function" then
+            pcall(EventRegistry.RegisterCallback, EventRegistry, "ContainerFrame.CloseAllBags", CloseAll, FS.SpecialBag)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
 -- Init
 -------------------------------------------------------------------------------
 
@@ -1788,6 +2233,7 @@ local MS = FS.ModuleSwitch
 local function Start()
     if MS then MS.MarkBuilt("m.bags") end
     WatchGamepad()
+    StartSolo()
     FS.PanelSkins.DeferCombat(Apply, "m.bags")
 end
 if MS then MS.WhenOn("m.bags", Start) else Start() end
