@@ -146,6 +146,34 @@ Bars.SECTIONS = {
           needs = "raidMark", nl = "Raid marker", tip = "Below 0 moves it left, above 0 moves it right." },
         { kind = "sw", suffix = "resting", label = "Resting icon", frames = { "player" }, tip = "The Zzz on your class icon in an inn or a city." },
     } },
+    { title = "Extras", tip = "Small parts a frame can wear. Each is off until you turn it on.", rows = {
+        { kind = "sw", suffix = "elite", label = "Elite and rare mark", frames = { "target", "focus", "boss" },
+          tip = "The gold elite or silver rare level icon the Gunsight target box already draws, on the level chip." },
+        { kind = "sw", suffix = "tot", label = "Target of target", frames = { "target", "focus", "boss" },
+          tip = "A line under the frame with who this unit is targeting. The Gunsight target box already reads it." },
+        { kind = "sw", suffix = "combat", label = "Combat icon", frames = { "player" },
+          tip = "Crossed swords on the name row while you are in combat." },
+        { kind = "sw", suffix = "pet", label = "Pet slot", frames = { "party" },
+          tip = "The narrow slot beside each row with that member's pet health. Dashed and empty when they have no pet." },
+        { kind = "sw", suffix = "portrait", label = "Portrait", frames = { "player", "target", "focus", "party", "boss" },
+          tip = "A face portrait in the class icon spot, at the icon size. Creatures get one too." },
+        { kind = "sw", suffix = "cast", label = "Cast bar on the frame", frames = { "target", "focus", "boss" },
+          tip = "A thin cast bar under the frame with the spell name. Needs a quick check in game first: other units' cast times may be hidden from addons." },
+        { kind = "sw", suffix = "pvp", label = "PvP flag", frames = { "player", "target", "focus", "party" },
+          tip = "A small PVP tag on the name row when the unit is flagged." },
+        { kind = "sw", suffix = "leader", label = "Group leader crown", frames = { "player", "party" },
+          tip = "A small crown on the leader of your group." },
+    } },
+    { title = "Aggro", tip = "Who a mob is attacking, and how close you are to pulling it. Read live in combat: on this client the threat numbers are not hidden from addons.", rows = {
+        { kind = "sw", suffix = "threat", label = "Aggro status", frames = Except("pet"),
+          tip = "Target, focus and boss: the border goes orange as you near the top of that mob's threat, pink when it turns to you. Player: pink while any mob is on you. Party and raid: pink on whoever a mob is attacking." },
+        { kind = "swatch", label = "Colours", frames = Except("pet"), sub = true, needs = "threat", nl = "Aggro status",
+          colors = { { { 1, 0.7137, 0.2824 }, "close" }, { { 1, 0.180, 0.592 }, "has aggro" } } },
+        { kind = "sw", suffix = "threatPct", label = "Aggro %", frames = Except("pet", "player"), sub = true, needs = "threat", nl = "Aggro status",
+          tip = "Share of the mob's threat, 100 means it is on them. Target, focus and boss: yours on that mob. Party and raid: each member's on your target." },
+        { kind = "sl", suffix = "threatX", label = "Aggro % offset", frames = Except("pet", "player"), min = -60, max = 60, step = 1, unit = "px",
+          sub = true, needs = "threatPct", nl = "Aggro %", tip = "Below 0 moves it left, above 0 moves it right." },
+    } },
 }
 
 -------------------------------------------------------------------------------
@@ -190,7 +218,7 @@ local function BuildRow(content, row, ctx)
     local suffix = row.suffix
     local function frame() return ctx.frame() end
     local entry = {
-        label = row.label, tip = row.tip, sub = row.sub, regKey = "bars." .. suffix,
+        label = row.label, tip = row.tip, sub = row.sub, regKey = suffix and ("bars." .. suffix) or nil,
         when = function() return RowShown(row, frame()) end,
         isChanged = function() return Style.IsStored(frame(), row.derived and "hpH" or suffix) end,
         reset = function() Style.Reset(frame(), row.derived and "hpH" or suffix) end,
@@ -207,6 +235,10 @@ local function BuildRow(content, row, ctx)
         entry.set = function(value) return Style.Set(frame(), suffix, value) end
     end
 
+    if row.kind == "swatch" then
+        return UI.Swatch(content, { label = row.label, sub = row.sub, colors = row.colors, tip = row.tip,
+            when = entry.when, enabled = entry.enabled, reason = entry.reason })
+    end
     local built
     if row.kind == "sw" then
         built = UI.Toggle(content, entry)

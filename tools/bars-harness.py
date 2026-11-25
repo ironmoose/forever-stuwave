@@ -42,6 +42,7 @@ _spec.loader.exec_module(CWH)
 FILES = {
     "config": ADDON / "Core/Config.lua",
     "style": ADDON / "Modules/UnitFrames/FrameStyle.lua",
+    "extras": ADDON / "Modules/UnitFrames/FrameExtras.lua",
     "unit": ADDON / "Modules/UnitFrames/UnitFrames.lua",
 }
 
@@ -173,6 +174,7 @@ function(src, opts)
     function UnitPowerPercent(unit, t, c, curve) __pctCalls[#__pctCalls + 1] = { "power", unit, t, c, curve }; return __pct.power end
     assert(load(src.config, "@Config.lua"))("forever-stuwave", FS)
     if opts.noStyle ~= true then assert(load(src.style, "@FrameStyle.lua"))("forever-stuwave", FS) end
+    if opts.noStyle ~= true then assert(load(src.extras, "@FrameExtras.lua"))("forever-stuwave", FS) end
     if opts.noUnit ~= true then assert(load(src.unit, "@UnitFrames.lua"))("forever-stuwave", FS) end
     for _, chunk in ipairs(src.window) do
         assert(load(chunk[2], "@" .. chunk[1]))("forever-stuwave", FS)
@@ -355,7 +357,7 @@ function T.every_row_of_the_style_sections_has_a_registered_row()
     local missing = {}
     for _, sec in ipairs(FS.ConfigBars.SECTIONS) do
         for _, row in ipairs(sec.rows) do
-            if not seen["bars." .. row.suffix] then missing[#missing + 1] = row.suffix end
+            if row.suffix and not seen["bars." .. row.suffix] then missing[#missing + 1] = row.suffix end
         end
     end
     eq(#missing, 0, "missing rows: " .. table.concat(missing, ","))
@@ -412,6 +414,39 @@ function T.bar_looks_reach_the_bars_and_the_dropdown_offers_only_what_a_frame_ca
     yes(sawLed, "a changed hpStyle restyles the bar")
 end
 
+function T.extras_and_aggro_show_in_the_preview_only_when_their_switch_is_on()
+    local S = boot()
+    local f = FS.UnitFrames.NewPreview(CreateFrame("Frame"), "target")
+    local x = f.extras
+    yes(x, "the frame builds its extras")
+    for _, k in ipairs({ "elite", "tot", "pvp", "leader", "portrait" }) do yes(not x[k]:IsShown(), k .. " is off by default") end
+    yes(not x.cast:IsShown() and not x.threat:IsShown())
+    for _, k in ipairs({ "elite", "tot", "pvp", "cast", "threat", "threatPct" }) do S.Set("target", k, true) end
+    f.Restyle()
+    yes(x.tot:IsShown() and x.pvp:IsShown() and x.cast:IsShown() and x.threat:IsShown() and x.pct:IsShown())
+    S.Set("target", "threat", false)
+    f.Restyle()
+    yes(not x.threat:IsShown())
+    local p = FS.UnitFrames.NewPreview(CreateFrame("Frame"), "player")
+    S.Set("player", "threat", true); S.Set("player", "threatPct", true)
+    p.Restyle()
+    yes(p.extras.threat:IsShown() and not p.extras.pct:IsShown(), "the player frame has no percent")
+end
+
+function T.a_secret_threat_reading_is_never_compared()
+    local S = boot()
+    local f = FS.UnitFrames.NewPreview(CreateFrame("Frame"), "target")
+    f.preview = nil; f.unit = "target"
+    S.Set("target", "threat", true)
+    __exists.target = true
+    UnitDetailedThreatSituation = function() return false, __SECRET, __SECRET end
+    FS.FrameExtras.Update(f)
+    yes(not f.extras.threat:IsShown(), "a hidden reading draws nothing")
+    UnitDetailedThreatSituation = function() return true, 3, 100 end
+    FS.FrameExtras.Update(f)
+    yes(f.extras.threat:IsShown(), "tanking draws the border")
+end
+
 function T.pointing_at_a_switch_turns_the_feature_on_in_the_preview_for_the_moment()
     local S, C, CW = boot()
     openStyle(CW)
@@ -435,6 +470,7 @@ def sources() -> dict:
     return {
         "config": FILES["config"].read_text(encoding="utf-8"),
         "style": FILES["style"].read_text(encoding="utf-8"),
+        "extras": FILES["extras"].read_text(encoding="utf-8"),
         "unit": FILES["unit"].read_text(encoding="utf-8"),
         "window": CWH.config_sources(),
     }

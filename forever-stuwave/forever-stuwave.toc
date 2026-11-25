@@ -43,6 +43,7 @@ Modules/Chat/ChatFrameSkin.lua
 Modules/Chat/ChatSlashCommands.lua
 Modules/Chat/ChatFormat.lua
 Modules/UnitFrames/FrameStyle.lua
+Modules/UnitFrames/FrameExtras.lua
 Modules/UnitFrames/UnitFrames.lua
 Modules/Auras/TargetAuras.lua
 Modules/UnitFrames/PartyFrames.lua

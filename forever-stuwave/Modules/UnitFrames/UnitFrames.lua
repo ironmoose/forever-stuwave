@@ -466,9 +466,11 @@ local function ApplyStyle(f)
     f.glowHost:SetAlpha(0.38 * Style.Number(key, "glowAmt") / 100)
     f.glowHost:SetShown(Style.Get(key, "glow") == true)
     SeatDataRow(f)
+    if FS.FrameExtras then FS.FrameExtras.Seat(f) end
     SeatBars(f)
     SeatPanelWidth(f)
     SetPanelHeight(f, f.powerShown ~= false)
+    if FS.FrameExtras and f.unit and UnitExists(f.unit) then FS.FrameExtras.Update(f) end
 end
 
 -------------------------------------------------------------------------------
@@ -654,6 +656,7 @@ local function BuildUnitFrame(unitToken, frameName, mirrored, styleKey, previewP
     power.caret = CreateCaret(power, COLOR_CARET_POWER)
     f.power = power
 
+    if FS.FrameExtras then FS.FrameExtras.Build(f) end
     ApplyStyle(f)
     return f
 end
@@ -1160,6 +1163,7 @@ local function UpdateAll(frame)
     TryStep(frame, "classIcon", UpdateClassIcon)
     TryStep(frame, "raidMarker", UpdateRaidMarker)
     TryStep(frame, "resting", UpdateResting)
+    if FS.FrameExtras then TryStep(frame, "extras", FS.FrameExtras.Update) end
 end
 
 -------------------------------------------------------------------------------
@@ -1219,6 +1223,7 @@ function FS.UnitFrames.NewPreview(parent, key)
     function f.Restyle()
         base(f)
         PreviewFill(f)
+        if FS.FrameExtras then FS.FrameExtras.Preview(f) end
     end
     f.Restyle()
     return f
@@ -1329,6 +1334,7 @@ local function WireEvents(frame)
         end
     end)
     frame.events = events
+    if FS.FrameExtras then FS.FrameExtras.Wire(frame) end
 end
 
 -------------------------------------------------------------------------------

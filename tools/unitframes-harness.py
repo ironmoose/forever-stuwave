@@ -40,6 +40,7 @@ ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 UNITFRAMES_FILE = Path(os.environ.get("UNITFRAMES_LUA", ADDON / "Modules/UnitFrames/UnitFrames.lua"))
 CONFIG_FILE = ADDON / "Core/Config.lua"
 STYLE_FILE = ADDON / "Modules/UnitFrames/FrameStyle.lua"
+EXTRAS_FILE = ADDON / "Modules/UnitFrames/FrameExtras.lua"
 TARGETAURAS_FILE = ADDON / "Modules/Auras/TargetAuras.lua"
 
 MOCK = r"""
@@ -195,6 +196,7 @@ function(unitFramesSrc, configSrc, targetAurasSrc, opts)
     end
     assert(load(configSrc, "@Config.lua"))("forever-stuwave", FS)
     assert(load(__styleSrc, "@FrameStyle.lua"))("forever-stuwave", FS)
+    assert(load(__extrasSrc, "@FrameExtras.lua"))("forever-stuwave", FS)
     assert(load(unitFramesSrc, "@UnitFrames.lua"))("forever-stuwave", FS)
     assert(load(targetAurasSrc, "@TargetAuras.lua"))("forever-stuwave", FS)
     __log = {}     -- only calls made after the frames are built count
@@ -506,6 +508,7 @@ def boot() -> "LuaRuntime":
     lua.globals().__session = lua.eval(SESSION)
     lua.globals().__unitFramesSrc = UNITFRAMES_FILE.read_text(encoding="utf-8")
     lua.globals().__styleSrc = STYLE_FILE.read_text(encoding="utf-8")
+    lua.globals().__extrasSrc = EXTRAS_FILE.read_text(encoding="utf-8")
     lua.globals().__configSrc = CONFIG_FILE.read_text(encoding="utf-8")
     lua.globals().__targetAurasSrc = TARGETAURAS_FILE.read_text(encoding="utf-8")
     lua.globals().__helpersSrc = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
