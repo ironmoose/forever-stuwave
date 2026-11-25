@@ -1122,6 +1122,103 @@ def check_the_normal_edge_can_be_retinted_and_reset() -> None:
     assert pd.SetEdgeColor("x") is False
 
 
+def _rgba(tex) -> list:
+    return [round(tex.color[i], 6) for i in (1, 2, 3, 4)]
+
+
+def _colors(rt: LuaRuntime, handles) -> list:
+    return [_rgba(handles[i]) for i in range(1, len(handles) + 1)]
+
+
+def check_background_opacity_retints_only_the_fill_of_both_looks() -> None:
+    """The pet page's Background opacity (bars.pet.bgAlpha): PetDock.SetFillAlpha(a) puts alpha `a` on the float fill and
+    on every piece of the dock fill, keeps their colours, leaves the strokes, halos and edges alone, and nil gives back
+    the alpha each was built with. It writes texture colours only, so it is legal in combat."""
+    look = ("FS.Console = FS.Console or {}; FS.Console.FILL_TOP = { 45/255, 27/255, 78/255, 0.80 }; "
+            "FS.Console.OUTLINE_ALPHA = 0.72; FS.Console.GLOW = { texture = 'glow', size = 64, pad = 11, margin = 25, "
+            "mid0 = 28, mid1 = 36 }")
+    for after_load, built_alpha in (("", 0.4675), (look, 0.80)):
+        rt = runtime(1.0, after_load=after_load)
+        pd = rt.globals().FS.PetDock
+        float_fill = rt.globals().__cut2[2].tex
+        dock_fill = pd.parts.dock.fill
+        stroke_before = _colors(rt, pd.parts.dock.stroke)
+        halo_before = _colors(rt, pd.parts.dock.halo)
+        red_before = _colors(rt, pd.parts.dock.red.stroke)
+        built_float = _rgba(float_fill)
+        built_dock = _colors(rt, dock_fill)
+        assert abs(built_float[3] - 0.4675) < 1e-6, f"float fill is the scrim: {built_float}"
+        assert all(abs(c[3] - built_alpha) < 1e-6 for c in built_dock), f"dock fill alpha {built_dock}"
+        rt.execute("__combat = true")
+        assert pd.SetFillAlpha(0.2) is True
+        assert abs(float_fill.color[4] - 0.2) < 1e-9, "the float fill takes the alpha"
+        assert _rgba(float_fill)[:3] == built_float[:3], "and keeps its colour"
+        after = _colors(rt, dock_fill)
+        assert all(abs(c[3] - 0.2) < 1e-6 for c in after), f"every dock fill piece takes the alpha: {after}"
+        assert [c[:3] for c in after] == [c[:3] for c in built_dock], "dock fill colours are kept"
+        assert _colors(rt, pd.parts.dock.stroke) == stroke_before, "the stroke is not the fill"
+        assert _colors(rt, pd.parts.dock.halo) == halo_before, "the halo is not the fill"
+        assert _colors(rt, pd.parts.dock.red.stroke) == red_before, "the red edge is not the fill"
+        assert pd.GetFillAlpha() == 0.2
+        rt.execute("__combat = false")
+        assert pd.SetFillAlpha(0) is True and abs(float_fill.color[4]) < 1e-9, "0 is a clear fill, not nil"
+        assert pd.SetFillAlpha(1) is True and abs(float_fill.color[4] - 1) < 1e-9
+        assert pd.SetFillAlpha(nil_arg(rt)) is True
+        assert _rgba(float_fill) == built_float, "nil gives the float fill back as built"
+        assert _colors(rt, dock_fill) == built_dock, "nil gives the dock fill back as built"
+        assert pd.GetFillAlpha() is None
+
+
+def nil_arg(rt: LuaRuntime):
+    return rt.eval("nil")
+
+
+def check_the_preview_chrome_is_the_float_art_on_a_plain_frame() -> None:
+    """The Pet bar page's preview wears the float panel's art without the live layers: NewPreviewChrome puts the same two
+    nine-sliced textures (the COLOR_POWER outline on BORDER, the scrim fill at inset 0 on BACKGROUND) on the frame it is
+    given and NewPreviewPlate the action button plate. Nothing else is built."""
+    rt = runtime(1.0)
+    pd = rt.globals().FS.PetDock
+    rt.execute("__panel = CreateFrame('Frame'); __button = CreateFrame('Frame')")
+    before = len(list(rt.globals().__cut2.values()))
+    frames_before = len(list(rt.globals().__frames.values()))
+    chrome = pd.NewPreviewChrome(rt.globals().__panel)
+    plate = pd.NewPreviewPlate(rt.globals().__button)
+    rt.globals().__outline, rt.globals().__fill, rt.globals().__plate = chrome.outline, chrome.fill, plate
+    assert len(list(rt.globals().__cut2.values())) == before + 3, "the outline, the fill and one plate, nothing else"
+    assert len(list(rt.globals().__frames.values())) == frames_before, "no live layer, edge or frame is built"
+    out, fill, plate_call = (rt.globals().__cut2[before + i] for i in (1, 2, 3))
+    on = lambda i, frame: rt.eval(f"rawequal(__cut2[{before + i}].frame, {frame})")
+    assert on(1, "__panel") and on(2, "__panel"), "the outline and the fill are on the given frame"
+    assert on(3, "__button"), "the plate is on the given button"
+    assert out.path == rt.eval("FS.Theme.SLICE_CUT2_OUTLINE_TEXTURE") and out.layer == "BORDER"
+    assert rt.eval(f"rawequal(__cut2[{before + 1}].color, FS.Theme.COLOR_POWER)"), "the outline is COLOR_POWER"
+    assert fill.path == rt.eval("FS.Theme.SLICE_CUT2_FILL_TEXTURE") and fill.layer == "BACKGROUND"
+    assert rt.eval(f"rawequal(__cut2[{before + 2}].color, FS.Theme.COLOR_HUD_SCRIM)"), "the fill is the scrim"
+    assert (fill.inset or 0) == 0, "the fill meets the stroke flush"
+    assert plate_call.path == rt.eval("FS.Theme.SLICE_CUT2_BUTTON_TEXTURE") and plate_call.layer == "BACKGROUND"
+    for i, name in ((1, "__outline"), (2, "__fill"), (3, "__plate")):
+        assert rt.eval(f"rawequal(__cut2[{before + i}].tex, {name})"), f"{name} is the texture it drew"
+
+
+def check_background_opacity_refuses_a_bad_alpha_and_waits_for_the_build() -> None:
+    rt = runtime(1.0)
+    pd = rt.globals().FS.PetDock
+    float_fill = rt.globals().__cut2[2].tex
+    built = _rgba(float_fill)
+    for bad in (-0.1, 1.5, "x", float("nan"), float("inf")):
+        assert pd.SetFillAlpha(bad) is False, bad
+    assert pd.SetFillAlpha(rt.eval("{}")) is False
+    assert _rgba(float_fill) == built and pd.GetFillAlpha() is None, "a refused alpha changes nothing"
+    # an alpha asked for before the panel exists is applied by the build
+    rt = runtime(1.0, after_load="FS.PetDock.SetFillAlpha(0.3)")
+    float_fill = rt.globals().__cut2[2].tex
+    assert abs(float_fill.color[4] - 0.3) < 1e-9, "the build applies an alpha set before it"
+    assert all(abs(c[3] - 0.3) < 1e-6 for c in _colors(rt, rt.globals().FS.PetDock.parts.dock.fill))
+    src = PETDOCK.read_text(encoding="utf-8")
+    assert not re.search(r"\bcontainer\s*:\s*SetAlpha\b", src), "the fill alpha never goes through the protected container"
+
+
 # ---------------------------------------------------------------------------------------------
 # Checks: docking onto the Console (S8)
 # ---------------------------------------------------------------------------------------------
@@ -2525,6 +2622,9 @@ def main() -> int:
         ("a mode set before the low layer exists is picked up", check_a_mode_set_before_the_low_layer_exists_is_picked_up_after),
         ("the edge pulse is PetFrame's pulse", check_the_edge_pulse_is_the_petframes_pulse),
         ("normal edge retints and resets, red untouched", check_the_normal_edge_can_be_retinted_and_reset),
+        ("background opacity retints only the fill, in both looks", check_background_opacity_retints_only_the_fill_of_both_looks),
+        ("the preview chrome is the float art on a plain frame", check_the_preview_chrome_is_the_float_art_on_a_plain_frame),
+        ("background opacity refuses a bad alpha and waits for the build", check_background_opacity_refuses_a_bad_alpha_and_waits_for_the_build),
         ("a drawn Console docks the pet panel on its top left", check_a_drawn_console_docks_the_pet_panel_on_its_top_left),
         ("no or an undrawn Console leaves the float panel", check_no_console_or_an_undrawn_one_leaves_the_float_panel),
         ("the Console toggling docks and undocks live", check_the_console_toggling_docks_and_undocks_live),

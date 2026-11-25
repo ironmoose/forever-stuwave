@@ -62,6 +62,11 @@
 -- shoulder is drawn as part of the Console's chassis (its fill tint, its stroke alpha and its own baked halo,
 -- Console.GLOW) and GapSpan reports the halo it really draws.
 --
+-- BACKGROUND OPACITY (the pet page's Background opacity): PetDock.SetFillAlpha(a) puts alpha a (0 to 1) on the float
+-- panel's scrim and on every piece of the dock's fill (Shoulder:SetFillAlpha), keeping their colours; nil, the default,
+-- gives each back the alpha it was built with, so nothing changes until the slider moves. Only the fill: the stroke, the
+-- halo and the red edge are untouched. Texture writes, so it is legal in combat.
+--
 -- Headless check: python3 addons/petdock-harness.py
 
 local _, FS = ...
@@ -151,6 +156,7 @@ local gapReclaimed = false         -- the gap came back in combat: the owner's s
 local patchKept = false            -- the owner's gap takes the pet panel's span in and its patch covers only that: keep driving it
 
 local dockShoulder              -- the NewShoulder object the pet's dock chrome is (nil when the dock failed to build)
+local fillAlpha = nil             -- the pet page's Background opacity, 0 to 1 (nil: each fill keeps the alpha it was built with)
 local frames = {}               -- frames.float, frames.dock: the chrome roots (the only things Shown / Hidden)
 local edges = {}                -- edges.float, edges.dock: { host, pulseFrame, group, normal, base }
 local function NewDockParts()
@@ -438,6 +444,18 @@ end
 function Shoulder:SetAlpha(alpha)
     if not (IsFinite(alpha) and alpha >= 0 and alpha <= 1) then return false end
     self.art:SetAlpha(alpha)
+    return true
+end
+
+-- The fill's alpha, 0 to 1, in the colour it was built with (the chassis tint, or the scrim), on every piece of the
+-- fill; nil gives each piece back the alpha it was built with. Only the fill: the stroke, the halo and the red twin
+-- are untouched. Texture writes, legal in combat. False for anything else.
+function Shoulder:SetFillAlpha(alpha)
+    if alpha ~= nil and not (IsFinite(alpha) and alpha >= 0 and alpha <= 1) then return false end
+    local base = self.fillTint or Theme.COLOR_HUD_SCRIM
+    for _, tex in ipairs(self.fill) do
+        tex:SetVertexColor(base[1], base[2], base[3], alpha or base[4])
+    end
     return true
 end
 
@@ -793,6 +811,45 @@ function PetDock.HasDock()
     return frames.dock ~= nil
 end
 
+-- The pet page's Background opacity (bars.pet.bgAlpha): the fill's alpha in both looks, the float panel's scrim and
+-- every piece of the dock's fill. nil (the default, nothing stored) leaves each look as it was built, so the panel is
+-- pixel identical until the player moves the slider. Texture writes only, legal in combat. An alpha asked for before
+-- the panel exists is applied by Build. False (and nothing changes) for anything but nil or a number from 0 to 1.
+local function ApplyFillAlpha()
+    if not built then return end
+    local float = parts.float.fill
+    if float then
+        local scrim = Theme.COLOR_HUD_SCRIM
+        float:SetVertexColor(scrim[1], scrim[2], scrim[3], fillAlpha or scrim[4])
+    end
+    if dockShoulder then dockShoulder:SetFillAlpha(fillAlpha) end
+end
+
+function PetDock.SetFillAlpha(alpha)
+    if alpha ~= nil and not (IsFinite(alpha) and alpha >= 0 and alpha <= 1) then return false end
+    fillAlpha = alpha
+    ApplyFillAlpha()
+    return true
+end
+
+function PetDock.GetFillAlpha()
+    return fillAlpha
+end
+
+-- The Pet bar page's preview wears the float panel's art without the live layers, edges or events: the same two
+-- nine-sliced textures BuildFloat draws (the COLOR_POWER outline, the scrim fill at inset 0), and the action button plate,
+-- on frames the caller owns. The caller retints the fill for Background opacity.
+function PetDock.NewPreviewChrome(panel)
+    return {
+        outline = Theme.AddCut2Texture(panel, Theme.SLICE_CUT2_OUTLINE_TEXTURE, Theme.COLOR_POWER, "BORDER"),
+        fill = Theme.AddCut2Texture(panel, Theme.SLICE_CUT2_FILL_TEXTURE, Theme.COLOR_HUD_SCRIM, "BACKGROUND", nil, 0),
+    }
+end
+
+function PetDock.NewPreviewPlate(button)
+    return Theme.AddCut2Texture(button, Theme.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND")
+end
+
 -------------------------------------------------------------------------------
 -- Docking onto the Console
 -------------------------------------------------------------------------------
@@ -1087,6 +1144,7 @@ function PetDock.Build(frame)
     if not frames.dock then mode = "float" end   -- a "dock" remembered before the build cannot be honoured
     built = true
     Apply()
+    ApplyFillAlpha()
     if not frames.dock then return end           -- nothing to rescale
 
     -- The dock art is scaled by the layout scale. A rescale in combat waits for regen, like the

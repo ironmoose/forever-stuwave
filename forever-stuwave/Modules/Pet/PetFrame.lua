@@ -22,11 +22,23 @@
 -- Show/Hide is therefore out of combat only, deferred to PLAYER_REGEN_ENABLED
 -- (`pendingRescale`, `pendingLockApply`, `pendingReset`).
 --
--- Headless check: python3 addons/petframe-harness.py (geometry against the numbers
--- parsed back out of the mockup's dc branch, at scale 1 and 0.64).
+-- THE PET BAR PAGE (bars.pet.*, FrameStyle.lua; pet.cast* and pet.happy, Config.lua): Plan() turns the settings into the
+-- panel's numbers (block width and rail heights, the Wider health and mana case when the cast plate is gone for good),
+-- ApplySlotGeometry() seats the slots from it, and FS.PetFrame.ApplyStyle() applies the rest. While docked beside the
+-- Console the dock sets the size, so Plan() uses today's numbers there. The container and the slots wait for
+-- PLAYER_REGEN_ENABLED (the pendingStyle flag); rail heights, text sizes, formats, name and level, looks, opacity, the
+-- happiness dot and the dock fill alpha apply in combat too, as they touch no protected frame. FS.PetFrame.NewStylePreview(parent) draws the same panel from the same
+-- block code for the Pet bar page's preview band, with sample data and no events.
+--
+-- Headless check: python3 tools/petframe-harness.py (geometry against the numbers
+-- parsed back out of the mockup's dc branch, at scale 1 and 0.64, then the page's settings).
 
 local _, FS = ...
 FS.PetFrame = FS.PetFrame or {}
+
+-- The panel's size is the Pet bar page's (ApplySlotGeometry sets it from the style plan), not the layout entry's:
+-- Layout.Apply seats the container and leaves its size alone, and /fsedit reads the live size for the move handle.
+if type(FS.Layout.petcontainer) == "table" then FS.Layout.petcontainer.noSize = true end
 
 -------------------------------------------------------------------------------
 -- Theme / geometry constants
@@ -64,11 +76,14 @@ local FONT_MONO = FS.Theme.FONT_MONO
 --               30px + 9 gaps * 4px. 5 + 26 + 3 + 30 + 4 = 68, so 4 is left under it.
 local INSET_TOP = 5
 local INSET_SIDE = 6
+local INSET_BOTTOM = 4
 local GAP = 4
 local ROW_GAP_TOP = 3
 local TOP_HEIGHT = 26
 local STATUS_WIDTH = 134
+local CAST_WIDTH = 198
 local BAR_HEIGHT = 30
+local BUTTON_ROW_WIDTH = 336   -- 10 buttons * 30 + 9 gaps * 4: the interior is never narrower
 
 -- Frame levels above the container. The chrome (PetDock.lua: the fill and normal edge at +0, the red
 -- edge twins and PetFrame's fallback red edge at +1) draws only the panel edge, but it must never rely
@@ -93,6 +108,8 @@ local NAME_LEVEL_GAP = 4
 local NAME_FONT_SIZE = 9
 local LEVEL_FONT_SIZE = 7.5
 local VALUE_FONT_SIZE = 7.5
+local VALUE_PAD = 4            -- a left or right aligned value sits this far in from the rail's end
+local HAPPY_DOT_SIZE = 5       -- the prototype's 5 px dot, 4 from the level text like every gap on the name row
 
 -- Rail tint by UnitPowerType, shared with the party frames' power rail.
 local POWER_COLORS = FS.FrameHelpers.POWER_COLORS
@@ -115,6 +132,9 @@ local LOW_PULSE_LEG = 0.55
 local container, castSlot, barSlot, statusSlot, dragHandle
 local healthBar, powerBar, nameText, levelText, nameRow
 local redHealthBar, redName
+local block            -- the status block's parts as one table, what SeatBlockGeometry and SeatBlockText take
+local happyDot, happyDotOn
+local pendingStyle = false   -- a size change waits for PLAYER_REGEN_ENABLED
 local locked = false
 local docked = false   -- seated on the Console by PetDock.lua (SeatDocked); drag is off while true
 local pendingLockApply = false
@@ -123,97 +143,278 @@ local pendingReset = false
 local events
 
 -------------------------------------------------------------------------------
--- Slot geometry
+-- Style: the Pet bar page's settings (bars.pet.*, pet.cast*)
 -------------------------------------------------------------------------------
 
--- Text sizes are design px times the scale, so a UI Scale change re-applies them with
--- the geometry. Called from ApplySlotGeometry once the status block exists.
-local function ApplyStatusFonts(scale)
-    ApplyFontGeneric(nameText, FONT_MONO, NAME_FONT_SIZE * scale, nil, "OUTLINE")
-    ApplyMono(levelText, LEVEL_FONT_SIZE * scale, COLOR_MUTED)
-    ApplyFontGeneric(healthBar.text, FONT_MONO, VALUE_FONT_SIZE * scale, nil, "OUTLINE")
-    ApplyFontGeneric(powerBar.text, FONT_MONO, VALUE_FONT_SIZE * scale, nil, "OUTLINE")
-    -- The low-HP twins wear the same sizes (the name and rail text in red / white).
-    if redName then ApplyFontGeneric(redName, FONT_MONO, NAME_FONT_SIZE * scale, COLOR_RED, "OUTLINE") end
-    if redHealthBar then
-        ApplyFontGeneric(redHealthBar.text, FONT_MONO, VALUE_FONT_SIZE * scale, nil, "OUTLINE")
+-- FrameStyle.lua loads before this file. Without it (a bare harness) every reader answers today's value.
+local Style = FS.FrameStyle
+
+local function Setting(suffix, today)
+    if Style then
+        local value = Style.Get("pet", suffix)
+        if value ~= nil then return value end
+    end
+    return today
+end
+
+-- A finite number inside the row's own range, so a damaged saved value cannot size a frame to nothing or to NaN.
+local function Bounded(suffix, today, lo, hi)
+    local value = Setting(suffix, today)
+    if type(value) ~= "number" or value ~= value then value = today end
+    return math.max(lo, math.min(hi, value))
+end
+
+-- A hunter's pet has no spell with a cast time (ApplyCastStyle in PetCastBar.lua decides Auto the same way); any
+-- other class that owns a pet is demon-like.
+local function PlayerIsHunter()
+    if type(UnitClass) ~= "function" then return false end
+    local ok, _, class = pcall(UnitClass, "player")
+    return ok and not FS.IsSecret(class) and class == "HUNTER"
+end
+
+-- True when the cast plate is never drawn: the Cast bar switch is off, or the pet is a hunter's and Show is not
+-- Always. A plate that only hides between casts (a demon on While casting) is NOT gone: it keeps its room, because
+-- the block cannot grow back in the middle of a fight.
+local function CastGone(hunter)
+    local Config = FS.Config
+    if not Config then return false end
+    if Config.Get("pet.cast") == false then return true end
+    local show = Config.Get("pet.castShow")
+    return hunter == true and (show == "casting" or show == "auto")
+end
+
+-- The panel's sizes in design px for the current settings: the status block (width, health, power, height), the top
+-- row (as high as the block, never under the cast plate's 26), the interior (never narrower than the 10 buttons) and
+-- the panel. `docked`: the Console sets the panel size, so width and heights are today's. `gone`: the cast plate
+-- never draws; with "Wider health and mana" the block then fills the interior, with "Leave the gap" it keeps its width.
+local function Plan(docked, gone)
+    local w, hp, mp = STATUS_WIDTH, RAIL_CORE_HEIGHT, RAIL_CORE_HEIGHT
+    if not docked then
+        w = Bounded("w", STATUS_WIDTH, 60, 400)
+        hp = Bounded("hpH", RAIL_CORE_HEIGHT, 2, 60)
+        mp = Bounded("mpH", RAIL_CORE_HEIGHT, 0, 40)
+    end
+    local plan = { w = w, hp = hp, mp = mp }
+    plan.block = NAME_ROW_HEIGHT + ROW_GAP + hp + (mp > 0 and (RAIL_PAIR_GAP + mp) or 0)
+    plan.top = math.max(TOP_HEIGHT, plan.block)
+    plan.interior = math.max(BUTTON_ROW_WIDTH, w + GAP + CAST_WIDTH)
+    plan.panelW = plan.interior + 2 * INSET_SIDE
+    plan.panelH = INSET_TOP + plan.top + ROW_GAP_TOP + BAR_HEIGHT + INSET_BOTTOM
+    plan.wide = gone == true and FS.Config ~= nil and FS.Config.Get("pet.castFree") ~= "gap"
+    if plan.wide then plan.w = plan.interior end
+    return plan
+end
+
+local function LivePlan()
+    return Plan(docked, CastGone(PlayerIsHunter()))
+end
+
+-- The same plan for the config window's preview, which knows which kind of pet it shows and asks the live panel
+-- whether the Console is docking it.
+function FS.PetFrame.Plan(isDocked, hunter)
+    return Plan(isDocked == true, CastGone(hunter == true))
+end
+FS.PetFrame.CastGone = CastGone
+
+-- The status block (name row, level, the happiness dot and the two rails) as one table of parts, built into any
+-- parent: the live status slot and the config window's preview use the same recipe and the same two Seat functions.
+local function NewBlock(parent, scale)
+    local b = { slot = parent }
+    local function StyleValueText(fontString)
+        ApplyFontGeneric(fontString, FONT_MONO, VALUE_FONT_SIZE * scale, nil, "OUTLINE")
+    end
+    local function Rail(color)
+        return FS.FrameHelpers.CreateLaserRail(parent, {
+            coreHeight = RAIL_CORE_HEIGHT * scale,
+            bloomSize = RAIL_BLOOM_SIZE * scale,
+            sparkWidth = RAIL_SPARK_SIZE * scale,
+            sparkHeight = RAIL_SPARK_SIZE * scale,
+            color = color,
+            styleText = StyleValueText,
+        })
+    end
+    b.healthBar = Rail(COLOR_HEALTH)
+    b.powerBar = Rail(COLOR_POWER)
+
+    -- The name row: a plain frame across the top of the block, holding the name and the
+    -- level text. The health rail hangs ROW_GAP under it (SeatBlockGeometry).
+    b.nameRow = CreateFrame("Frame", nil, parent)
+
+    -- The level, the mockup's plain muted "LV n" text at the row's right end: no chip, no
+    -- plate (the console dock draws none), set in the muted token like the party's LV text.
+    b.levelText = b.nameRow:CreateFontString(nil, "OVERLAY")
+    b.levelText:SetJustifyH("RIGHT")
+    b.levelText:SetJustifyV("MIDDLE")
+    ApplyMono(b.levelText, LEVEL_FONT_SIZE * scale, COLOR_MUTED)
+
+    -- Name fills the row to the left of the level text rather than a fixed-width guess,
+    -- so it never overlaps the level regardless of digit count.
+    b.nameText = b.nameRow:CreateFontString(nil, "OVERLAY")
+    b.nameText:SetJustifyH("LEFT")
+    ApplyFontGeneric(b.nameText, FONT_MONO, NAME_FONT_SIZE * scale, nil, "OUTLINE")
+    -- A space-separated pet name otherwise wraps onto a second line outside the row.
+    b.nameText:SetWordWrap(false)
+    if b.nameText.SetNonSpaceWrap then b.nameText:SetNonSpaceWrap(false) end
+    if b.nameText.SetMaxLines then b.nameText:SetMaxLines(1) end
+    b.nameText:SetJustifyV("MIDDLE")
+
+    -- The happiness dot (Hunter tab), between the name and the level; hidden until a hunter pet answers.
+    b.dot = b.nameRow:CreateTexture(nil, "OVERLAY")
+    b.dot:SetTexture(FS.Theme.FLAT_TEXTURE or "Interface\\Buttons\\WHITE8X8")
+    b.dot:SetSize(HAPPY_DOT_SIZE * scale, HAPPY_DOT_SIZE * scale)
+    b.dot:Hide()
+    return b
+end
+
+-- Anchors, rail heights and the power rail's shell: the part of the block's look that a size change moves.
+-- (Out of combat on the live panel, with the container.)
+local function SeatBlockGeometry(b, plan, scale)
+    local SetLaserRailSize = FS.FrameHelpers.SetLaserRailSize
+    local function Rail(bar, height)
+        SetLaserRailSize(bar, height * scale, RAIL_BLOOM_SIZE * scale, RAIL_SPARK_SIZE * scale,
+            RAIL_SPARK_SIZE * scale)
+    end
+    local nameGap = ROW_GAP * scale
+    local railGap = RAIL_PAIR_GAP * scale
+    Rail(b.healthBar, plan.hp)
+    if b.redHealthBar then Rail(b.redHealthBar, plan.hp) end
+    local powerOn = plan.mp > 0
+    if powerOn then Rail(b.powerBar, plan.mp) end
+    b.powerBar.shell:SetShown(powerOn)
+
+    b.nameRow:ClearAllPoints()
+    b.nameRow:SetPoint("TOPLEFT", b.slot, "TOPLEFT", 0, 0)
+    b.nameRow:SetPoint("TOPRIGHT", b.slot, "TOPRIGHT", 0, 0)
+    b.nameRow:SetHeight(NAME_ROW_HEIGHT * scale)
+
+    b.healthBar.shell:ClearAllPoints()
+    b.healthBar.shell:SetPoint("TOPLEFT", b.nameRow, "BOTTOMLEFT", 0, -nameGap)
+    b.healthBar.shell:SetPoint("TOPRIGHT", b.nameRow, "BOTTOMRIGHT", 0, -nameGap)
+    b.powerBar.shell:ClearAllPoints()
+    b.powerBar.shell:SetPoint("TOPLEFT", b.healthBar.shell, "BOTTOMLEFT", 0, -railGap)
+    b.powerBar.shell:SetPoint("TOPRIGHT", b.healthBar.shell, "BOTTOMRIGHT", 0, -railGap)
+    if b.redHealthBar then
+        b.redHealthBar.shell:ClearAllPoints()
+        b.redHealthBar.shell:SetPoint("TOPLEFT", b.healthBar.shell, "TOPLEFT", 0, 0)
+        b.redHealthBar.shell:SetPoint("TOPRIGHT", b.healthBar.shell, "TOPRIGHT", 0, 0)
     end
 end
 
--- (Re)seats the three slots and the status block from the current FS.Layout.Scale(),
--- so their literal SetSize/gap values (scaled pixels, not automatic like a plain
--- SetPoint offset) stay correct across a UI Scale change. Called once at build time
--- and again from the OnRescale callback below (never in combat, see the file header).
+-- A value text's seat on its rail: size aside, left / center / right and a nudge. The default (center, 0) is the one
+-- CENTER anchor FrameHelpers.CreateLaserRail gives it.
+local function SeatValueText(bar, align, offset, scale)
+    local text = bar and bar.text
+    if not text then return end
+    text:ClearAllPoints()
+    if align == "left" then
+        text:SetPoint("LEFT", bar, "LEFT", (VALUE_PAD + offset) * scale, 0)
+    elseif align == "right" then
+        text:SetPoint("RIGHT", bar, "RIGHT", (-VALUE_PAD + offset) * scale, 0)
+    else
+        text:SetPoint("CENTER", bar, "CENTER", offset * scale, 0)
+    end
+end
+
+-- The name, the dot and the level on the name row. The level sits on the row's right end, the dot just left of it
+-- (or on the end when the level is off), and the name runs from its pad to the nearest of them.
+local function SeatNameRow(b, scale)
+    local nameOn = Setting("name", true) ~= false
+    local levelOn = Setting("level", true) ~= false
+    local nameX = Bounded("nameX", 0, -60, 60)
+    local levelX = Bounded("levelX", 0, -60, 60)
+    local gap = NAME_LEVEL_GAP * scale
+
+    b.levelText:SetShown(levelOn)
+    b.levelText:ClearAllPoints()
+    b.levelText:SetPoint("RIGHT", b.nameRow, "RIGHT", levelX * scale, 0)
+
+    local edge, edgePoint, edgeX = b.nameRow, "RIGHT", 0
+    if levelOn then edge, edgePoint, edgeX = b.levelText, "LEFT", -gap end
+    b.dot:ClearAllPoints()
+    b.dot:SetPoint("RIGHT", edge, edgePoint, edgeX, 0)
+    b.dot:SetSize(HAPPY_DOT_SIZE * scale, HAPPY_DOT_SIZE * scale)
+    b.dot:SetShown(b.dotOn == true)
+    if b.dotOn then edge, edgePoint, edgeX = b.dot, "LEFT", -gap end
+
+    for _, name in ipairs({ b.nameText, b.redName or false }) do
+        if name then
+            name:ClearAllPoints()
+            name:SetPoint("LEFT", b.nameRow, "LEFT", (NAME_PAD + nameX) * scale, 0)
+            name:SetPoint("RIGHT", edge, edgePoint, edgeX, 0)
+            name:SetShown(nameOn)
+        end
+    end
+end
+
+-- Fonts, value text seats, the name row and the bar looks: everything about the block that does not move a frame
+-- the protected panel depends on, so it runs in combat too.
+local function SeatBlockText(b, scale)
+    local nameSize = Bounded("nameSize", NAME_FONT_SIZE, 4, 40) * scale
+    local levelSize = Bounded("levelSize", LEVEL_FONT_SIZE, 4, 40) * scale
+    local hpSize = Bounded("hpTs", VALUE_FONT_SIZE, 4, 40) * scale
+    local mpSize = Bounded("mpTs", VALUE_FONT_SIZE, 4, 40) * scale
+    ApplyFontGeneric(b.nameText, FONT_MONO, nameSize, nil, "OUTLINE")
+    ApplyMono(b.levelText, levelSize, COLOR_MUTED)
+    ApplyFontGeneric(b.healthBar.text, FONT_MONO, hpSize, nil, "OUTLINE")
+    ApplyFontGeneric(b.powerBar.text, FONT_MONO, mpSize, nil, "OUTLINE")
+    -- The low-HP twins wear the same sizes (the name and rail text in red / white).
+    if b.redName then ApplyFontGeneric(b.redName, FONT_MONO, nameSize, COLOR_RED, "OUTLINE") end
+    if b.redHealthBar then ApplyFontGeneric(b.redHealthBar.text, FONT_MONO, hpSize, nil, "OUTLINE") end
+
+    local hpAlign, hpX = Setting("hpTa", "center"), Bounded("hpTx", 0, -60, 60)
+    SeatValueText(b.healthBar, hpAlign, hpX, scale)
+    SeatValueText(b.redHealthBar, hpAlign, hpX, scale)
+    SeatValueText(b.powerBar, Setting("mpTa", "center"), Bounded("mpTx", 0, -60, 60), scale)
+    SeatNameRow(b, scale)
+
+    if Style then
+        Style.ApplyLook("pet", b.healthBar, "hpStyle")
+        if b.redHealthBar then Style.ApplyLook("pet", b.redHealthBar, "hpStyle") end
+        Style.ApplyLook("pet", b.powerBar, "mpStyle")
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Slot geometry
+-------------------------------------------------------------------------------
+
+-- (Re)seats the container, the three slots and the status block from the current FS.Layout.Scale() and the style
+-- plan, so their literal SetSize/gap values (scaled pixels, not automatic like a plain SetPoint offset) stay
+-- correct across a UI Scale change or a style change. Called once at build time, from the OnRescale callback below
+-- and from ApplyStyle (never in combat, see the file header). The container's size is OURS (its Layout entry is
+-- noSize): the panel is as big as the plan says. barSlot, the parent of the secure buttons, anchors to the
+-- container alone, so nothing else in the panel is held fixed by it.
 local function ApplySlotGeometry(scale)
     if not (container and castSlot and barSlot and statusSlot) then return end
 
+    local plan = LivePlan()
     local insetTop = INSET_TOP * scale
     local insetSide = INSET_SIDE * scale
-    local gap = GAP * scale
 
-    -- Top row: HP/mana block at the left, cast slot in the rest, same top and height.
+    container:SetSize(plan.panelW * scale, plan.panelH * scale)
+
+    -- Top row: the HP/mana block at the left, the cast slot at the right edge, same top.
     statusSlot:ClearAllPoints()
     statusSlot:SetPoint("TOPLEFT", container, "TOPLEFT", insetSide, -insetTop)
-    statusSlot:SetSize(STATUS_WIDTH * scale, TOP_HEIGHT * scale)
+    statusSlot:SetSize(plan.w * scale, plan.block * scale)
 
     castSlot:ClearAllPoints()
-    castSlot:SetPoint("TOPLEFT", statusSlot, "TOPRIGHT", gap, 0)
     castSlot:SetPoint("TOPRIGHT", container, "TOPRIGHT", -insetSide, -insetTop)
-    castSlot:SetHeight(TOP_HEIGHT * scale)
+    castSlot:SetSize(CAST_WIDTH * scale, TOP_HEIGHT * scale)
 
-    -- Bottom row: the pet buttons under both, across the whole interior.
-    local rowGap = ROW_GAP_TOP * scale
+    -- Bottom row: the pet buttons under the top row, across the whole interior.
+    local rowTop = (INSET_TOP + plan.top + ROW_GAP_TOP) * scale
     barSlot:ClearAllPoints()
-    barSlot:SetPoint("TOPLEFT", statusSlot, "BOTTOMLEFT", 0, -rowGap)
-    barSlot:SetPoint("TOPRIGHT", castSlot, "BOTTOMRIGHT", 0, -rowGap)
+    barSlot:SetPoint("TOPLEFT", container, "TOPLEFT", insetSide, -rowTop)
+    barSlot:SetPoint("TOPRIGHT", container, "TOPRIGHT", -insetSide, -rowTop)
     barSlot:SetHeight(BAR_HEIGHT * scale)
 
     -- Status block: the rail sizes, the name row and every gap are literal scaled-pixel
-    -- values, so they are re-seated here like the slots above. Guarded separately
-    -- because Build() calls ApplySlotGeometry once BEFORE the status block exists.
-    if healthBar and powerBar and nameRow and levelText then
-        local SetLaserRailSize = FS.FrameHelpers.SetLaserRailSize
-        local nameGap = ROW_GAP * scale
-        local railGap = RAIL_PAIR_GAP * scale
-        SetLaserRailSize(healthBar, RAIL_CORE_HEIGHT * scale, RAIL_BLOOM_SIZE * scale,
-            RAIL_SPARK_SIZE * scale, RAIL_SPARK_SIZE * scale)
-        SetLaserRailSize(powerBar, RAIL_CORE_HEIGHT * scale, RAIL_BLOOM_SIZE * scale,
-            RAIL_SPARK_SIZE * scale, RAIL_SPARK_SIZE * scale)
-        if redHealthBar then
-            SetLaserRailSize(redHealthBar, RAIL_CORE_HEIGHT * scale, RAIL_BLOOM_SIZE * scale,
-                RAIL_SPARK_SIZE * scale, RAIL_SPARK_SIZE * scale)
-        end
-
-        nameRow:ClearAllPoints()
-        nameRow:SetPoint("TOPLEFT", statusSlot, "TOPLEFT", 0, 0)
-        nameRow:SetPoint("TOPRIGHT", statusSlot, "TOPRIGHT", 0, 0)
-        nameRow:SetHeight(NAME_ROW_HEIGHT * scale)
-
-        -- The level is plain text at the row's right edge; the name stops short of it.
-        levelText:ClearAllPoints()
-        levelText:SetPoint("RIGHT", nameRow, "RIGHT", 0, 0)
-        nameText:ClearAllPoints()
-        nameText:SetPoint("LEFT", nameRow, "LEFT", NAME_PAD * scale, 0)
-        nameText:SetPoint("RIGHT", levelText, "LEFT", -NAME_LEVEL_GAP * scale, 0)
-        if redName then
-            redName:ClearAllPoints()
-            redName:SetPoint("LEFT", nameRow, "LEFT", NAME_PAD * scale, 0)
-            redName:SetPoint("RIGHT", levelText, "LEFT", -NAME_LEVEL_GAP * scale, 0)
-        end
-
-        healthBar.shell:ClearAllPoints()
-        healthBar.shell:SetPoint("TOPLEFT", nameRow, "BOTTOMLEFT", 0, -nameGap)
-        healthBar.shell:SetPoint("TOPRIGHT", nameRow, "BOTTOMRIGHT", 0, -nameGap)
-        powerBar.shell:ClearAllPoints()
-        powerBar.shell:SetPoint("TOPLEFT", healthBar.shell, "BOTTOMLEFT", 0, -railGap)
-        powerBar.shell:SetPoint("TOPRIGHT", healthBar.shell, "BOTTOMRIGHT", 0, -railGap)
-        if redHealthBar then
-            redHealthBar.shell:ClearAllPoints()
-            redHealthBar.shell:SetPoint("TOPLEFT", healthBar.shell, "TOPLEFT", 0, 0)
-            redHealthBar.shell:SetPoint("TOPRIGHT", healthBar.shell, "TOPRIGHT", 0, 0)
-        end
-
-        ApplyStatusFonts(scale)
+    -- values, so they are re-seated here like the slots above. Absent while Build() runs this
+    -- once BEFORE the status block exists.
+    if block then
+        SeatBlockGeometry(block, plan, scale)
+        SeatBlockText(block, scale)
     end
 end
 
@@ -346,6 +547,8 @@ function FS.PetFrame.SeatDocked(anchor, dx)
     FS.Layout._applied[container] = nil
     docked = true
     ApplyLockState()
+    -- The dock sets the size: the slots and the block go back to today's, whatever the style says.
+    if FS.PetFrame.ReseatStyle then FS.PetFrame.ReseatStyle() end
     return true
 end
 
@@ -357,6 +560,8 @@ function FS.PetFrame.SeatFloat()
     FS.Layout.Apply(container, "petcontainer")
     ApplySavedPosition()
     ApplyLockState()
+    -- The layout entry is noSize: the style's size comes back with the float seat.
+    if FS.PetFrame.ReseatStyle then FS.PetFrame.ReseatStyle() end
     return true
 end
 
@@ -481,6 +686,11 @@ end
 -- PLAYER_REGEN_ENABLED. Every event handler below funnels into this one
 -- gate -- Phases 4/5/6 (cast bar, action buttons, status text) hook into
 -- this same gate rather than each re-deriving visibility.
+-- The panel's opacity (Frame > Opacity): the whole panel, buttons included. SetAlpha is legal in combat.
+local function PanelAlpha()
+    return Bounded("alpha", 100, 0, 100) / 100
+end
+
 local function Apply()
     if not container then return end
     local show = ShouldShow()
@@ -495,14 +705,14 @@ local function Apply()
         -- children still take mouse at alpha 0: in float mode with the panel unlocked the drag handle
         -- (EnableMouse(true), see ApplyLockState) covers the rect, and the secure pet buttons are
         -- mouse-enabled at any alpha.
-        container:SetAlpha(show and 1 or 0)
+        container:SetAlpha(show and PanelAlpha() or 0)
         -- PetDock's gap patch in the Console's top line follows the panel by ALPHA, which is legal
         -- here, so a pet dying (or summoned) in combat closes (or reopens) the hole at once.
         if FS.PetDock and FS.PetDock.SetPetShown then FS.PetDock.SetPetShown(show) end
         return
     end
 
-    container:SetAlpha(1)
+    container:SetAlpha(PanelAlpha())
     if show then
         container:Show()
     else
@@ -546,59 +756,20 @@ end
 -- Name row, health rail and power rail (FrameHelpers.CreateLaserRail) built into
 -- FS.PetFrame.statusSlot, the mockup's peStatusDc: a 9 high name row (name left, plain
 -- muted "LV n" text right), then a 7 high health rail and a 7 high power rail, ROW_GAP
--- and RAIL_PAIR_GAP apart. Sizes and anchors are all seated by ApplySlotGeometry (they
--- are scaled pixels); only the structure is built here.
+-- and RAIL_PAIR_GAP apart. NewBlock builds the structure; sizes and anchors are all seated by
+-- ApplySlotGeometry (they are scaled pixels).
 local function BuildStatus()
-    local scale = FS.Layout.Scale()
-    local function StyleValueText(fontString)
-        ApplyFontGeneric(fontString, FONT_MONO, VALUE_FONT_SIZE * scale, nil, "OUTLINE")
-    end
-
-    healthBar = FS.FrameHelpers.CreateLaserRail(statusSlot, {
-        coreHeight = RAIL_CORE_HEIGHT * scale,
-        bloomSize = RAIL_BLOOM_SIZE * scale,
-        sparkWidth = RAIL_SPARK_SIZE * scale,
-        sparkHeight = RAIL_SPARK_SIZE * scale,
-        color = COLOR_HEALTH,
-        styleText = StyleValueText,
-    })
-
-    powerBar = FS.FrameHelpers.CreateLaserRail(statusSlot, {
-        coreHeight = RAIL_CORE_HEIGHT * scale,
-        bloomSize = RAIL_BLOOM_SIZE * scale,
-        sparkWidth = RAIL_SPARK_SIZE * scale,
-        sparkHeight = RAIL_SPARK_SIZE * scale,
-        color = COLOR_POWER,
-        styleText = StyleValueText,
-    })
-
-    -- The name row: a plain frame across the top of the block, holding the name and the
-    -- level text. The health rail hangs ROW_GAP under it (ApplySlotGeometry).
-    nameRow = CreateFrame("Frame", nil, statusSlot)
-
-    -- The level, the mockup's plain muted "LV n" text at the row's right end: no chip, no
-    -- plate (the console dock draws none), set in the muted token like the party's LV text.
-    levelText = nameRow:CreateFontString(nil, "OVERLAY")
-    levelText:SetJustifyH("RIGHT")
-    levelText:SetJustifyV("MIDDLE")
-    ApplyMono(levelText, LEVEL_FONT_SIZE * scale, COLOR_MUTED)
-
-    -- Name fills the row to the left of the level text rather than a fixed-width guess,
-    -- so it never overlaps the level regardless of digit count.
-    nameText = nameRow:CreateFontString(nil, "OVERLAY")
-    nameText:SetJustifyH("LEFT")
-    ApplyFontGeneric(nameText, FONT_MONO, NAME_FONT_SIZE * scale, nil, "OUTLINE")
-    -- A space-separated pet name otherwise wraps onto a second line outside the row.
-    nameText:SetWordWrap(false)
-    if nameText.SetNonSpaceWrap then nameText:SetNonSpaceWrap(false) end
-    if nameText.SetMaxLines then nameText:SetMaxLines(1) end
-    nameText:SetJustifyV("MIDDLE")
+    block = NewBlock(statusSlot, FS.Layout.Scale())
+    healthBar, powerBar = block.healthBar, block.powerBar
+    nameRow, nameText, levelText = block.nameRow, block.nameText, block.levelText
+    happyDot = block.dot
 
     FS.PetFrame.healthBar = healthBar
     FS.PetFrame.powerBar = powerBar
     FS.PetFrame.nameRow = nameRow
     FS.PetFrame.nameText = nameText
     FS.PetFrame.levelText = levelText
+    FS.PetFrame.happyDot = happyDot
 end
 
 -- UnitHealthMax("pet")/UnitPowerMax("pet") are SECRET on this client, exactly
@@ -623,9 +794,18 @@ end
 -- logs once, so a client that rejects a secret there degrades to bars with no numbers.
 local valueTextBroken = false
 
-local function WriteValueText(bar, cur, max)
+-- kind is "health" or "power": the format row it follows (None, Percent, Number, Num + %) and, for the percent
+-- forms, which engine read. FrameStyle writes the text through SetFormattedText only.
+local function WriteValueText(bar, kind, cur, max)
     if valueTextBroken or not bar.text then return end
-    if pcall(bar.text.SetFormattedText, bar.text, "%d / %d", cur, max) then return end
+    local ok
+    if Style then
+        local fmt = Setting(kind == "health" and "hpFmt" or "mpFmt", "number")
+        ok = pcall(Style.WriteBarText, bar.text, fmt, "pet", kind, cur, max)
+    else
+        ok = pcall(bar.text.SetFormattedText, bar.text, "%d / %d", cur, max)
+    end
+    if ok then return end
     valueTextBroken = true
     healthBar.text:SetText("")
     powerBar.text:SetText("")
@@ -816,6 +996,7 @@ do
         redName:SetJustifyV("MIDDLE")
         redName:SetAlpha(0)
 
+        block.redName, block.redHealthBar = redName, redHealthBar
         FS.PetFrame.redName = redName
         FS.PetFrame.redHealthBar = redHealthBar
     end
@@ -857,12 +1038,12 @@ local function UpdateStatusHealth()
     local cur, max = UnitHealth("pet"), UnitHealthMax("pet")
     healthBar:SetMinMaxValues(0, max)
     healthBar:SetValue(cur)
-    WriteValueText(healthBar, cur, max)
+    WriteValueText(healthBar, "health", cur, max)
     -- The red twin gets the very same values (a secret straight to the setters, no compare).
     if redHealthBar then
         redHealthBar:SetMinMaxValues(0, max)
         redHealthBar:SetValue(cur)
-        WriteValueText(redHealthBar, cur, max)
+        WriteValueText(redHealthBar, "health", cur, max)
     end
     UpdatePetLowHealth()
 end
@@ -872,7 +1053,7 @@ local function UpdateStatusPower()
     local cur, max = UnitPower("pet"), UnitPowerMax("pet")
     powerBar:SetMinMaxValues(0, max)
     powerBar:SetValue(cur)
-    WriteValueText(powerBar, cur, max)
+    WriteValueText(powerBar, "power", cur, max)
     -- Bloom and spark would sit as a stray dot at the left of an empty rail.
     FS.FrameHelpers.UpdatePowerHostEmpty(powerBar.fsRail.host, "pet")
 
@@ -912,29 +1093,26 @@ local function UpdateStatusLevel()
 end
 
 -- The happiness dot (Hunter tab, pet.happy): green happy, yellow content, red unhappy. GetPetHappiness is feature
--- detected and pcall'd, and only a plain 1 to 3 answer draws; anything else, or the switch off, hides the dot.
+-- detected and pcall'd, and only a plain 1 to 3 answer draws (a demon has no happiness, so it answers nothing);
+-- anything else, or the switch off, hides the dot and the name takes its room back.
 local HAPPY_COLORS = { [3] = { 0, 0.659, 0.110 }, [2] = { 1, 0.824, 0.247 }, [1] = { 1, 0.231, 0.306 } }
-local happyDot
 local function UpdateHappiness()
-    local want = FS.Config and FS.Config.Get("pet.happy") == true and type(GetPetHappiness) == "function" and nameRow and levelText
+    if not (block and happyDot) then return end
+    local want = FS.Config and FS.Config.Get("pet.happy") == true and type(GetPetHappiness) == "function"
     local level
     if want then
         local ok, value = pcall(GetPetHappiness)
         if ok and not FS.IsSecret(value) and HAPPY_COLORS[value] then level = value end
     end
-    if not level then
-        if happyDot then happyDot:Hide() end
-        return
+    if level then
+        local c = HAPPY_COLORS[level]
+        happyDot:SetVertexColor(c[1], c[2], c[3], 1)
     end
-    if not happyDot then
-        happyDot = nameRow:CreateTexture(nil, "OVERLAY")
-        happyDot:SetTexture(FS.Theme.FLAT_TEXTURE or "Interface\\Buttons\\WHITE8X8")
-        happyDot:SetSize(6, 6)
-        happyDot:SetPoint("RIGHT", levelText, "LEFT", -6, 0)
-    end
-    local c = HAPPY_COLORS[level]
-    happyDot:SetVertexColor(c[1], c[2], c[3], 1)
-    happyDot:Show()
+    local on = level ~= nil
+    if on == (happyDotOn == true) then return end
+    happyDotOn = on
+    block.dotOn = on
+    SeatNameRow(block, FS.Layout.Scale())
 end
 FS.PetFrame.UpdateHappiness = UpdateHappiness
 if FS.Config then FS.Config.OnChange("pet.happy", UpdateHappiness) end
@@ -945,6 +1123,37 @@ local function RefreshStatus()
     UpdateStatusPower()
     UpdateStatusName()
     UpdateStatusLevel()
+end
+
+-- Everything the Pet bar page changes, applied to the live panel. The text, the looks, the opacity and the dock's fill
+-- go at once, in combat too (frames of ours that nothing protected hangs from). A size change (width, rail heights,
+-- the cast bar's room) moves the container and the button slot, which the client refuses in combat: it waits for
+-- PLAYER_REGEN_ENABLED, like a rescale does. Safe to call any number of times.
+function FS.PetFrame.ApplyStyle()
+    if not (container and block) then return end
+    local scale = FS.Layout.Scale()
+    local inCombat = InCombatLockdown()
+    -- The rails and the name row are plain children of the status slot (not an ancestor of a secure button), so their size
+    -- is legal in combat; the slots and the container wait for the end of it.
+    if inCombat then SeatBlockGeometry(block, LivePlan(), scale) end
+    SeatBlockText(block, scale)
+    UpdateStatusHealth()
+    UpdateStatusPower()
+    Apply()
+    if FS.PetDock and FS.PetDock.SetFillAlpha then
+        local stored = Style and Style.IsStored("pet", "bgAlpha")
+        local value = stored and Bounded("bgAlpha", 47, 0, 100) / 100 or nil
+        pcall(FS.PetDock.SetFillAlpha, value)
+    end
+    if inCombat then
+        pendingStyle = true
+        return
+    end
+    pendingStyle = false
+    ApplySlotGeometry(scale)
+end
+FS.PetFrame.ReseatStyle = function()
+    if container and not InCombatLockdown() then ApplySlotGeometry(FS.Layout.Scale()) end
 end
 
 -- The pet unit can resolve a frame after UNIT_PET/PLAYER_ENTERING_WORLD
@@ -1024,6 +1233,10 @@ local function OnEvent(_, event, unit)
             pendingRescale = false
             ApplyRescale()
         end
+        -- Reconciles a size change from the style settings that landed mid-combat.
+        if pendingStyle then
+            FS.PetFrame.ApplyStyle()
+        end
         -- Reconciles a /fspet reset that landed mid-combat and got deferred,
         -- same idiom as pendingLockApply/pendingRescale.
         if pendingReset then
@@ -1088,6 +1301,110 @@ local function RegisterEvents()
 end
 
 -------------------------------------------------------------------------------
+-- Preview (the config window's Pet bar page)
+-------------------------------------------------------------------------------
+
+-- What the preview pets read: a hunter's pet (focus, brown rail, a happiness dot) and a demon (mana, blue rail,
+-- casting Firebolt). Nothing is read from a unit.
+local PREVIEW_PETS = {
+    hunter = { name = "Wolf", level = 22, hp = { 208, 253 }, mp = { 70, 100 }, power = 2 },
+    demon = { name = "Grimzik", level = 22, hp = { 208, 253 }, mp = { 162, 253 }, power = 0 },
+}
+
+-- The panel on a still frame, drawn from the same plan and the same block code as the live one: the float chrome
+-- (PetDock.NewPreviewChrome), the status block (NewBlock, SeatBlockGeometry, SeatBlockText), the cast plate
+-- (PetCastBar.lua's NewPreview) and ten button plates. Returns { frame, Restyle, parts }; Restyle reads the settings
+-- again (Style.override included, for the row the pointer is on) and takes no unit.
+function FS.PetFrame.NewStylePreview(parent)
+    local Theme = FS.Theme
+    local frame = CreateFrame("Frame", nil, parent)
+    local panel = CreateFrame("Frame", nil, frame)
+    panel:SetAllPoints(frame)
+    local parts = { panel = panel, buttons = {} }
+    -- The chrome is PetDock.lua's (it loads after this file, so it is read now); without it the preview has no panel art.
+    local dock = FS.PetDock
+    if dock and dock.NewPreviewChrome then
+        local chrome = dock.NewPreviewChrome(panel)
+        parts.outline, parts.fill = chrome.outline, chrome.fill
+    end
+    parts.status = CreateFrame("Frame", nil, panel)
+    parts.block = NewBlock(parts.status, 1)
+    local castMaker = FS.PetCastBar and FS.PetCastBar.NewPreview
+    parts.cast = castMaker and castMaker(panel) or nil
+    for i = 1, 10 do
+        local button = CreateFrame("Frame", nil, panel)
+        button:SetSize(BAR_HEIGHT, BAR_HEIGHT)
+        if dock and dock.NewPreviewPlate then dock.NewPreviewPlate(button) end
+        parts.buttons[i] = button
+    end
+
+    local function Restyle()
+        local Config = FS.Config
+        local kind = (Config and Config.Get("pet.previewKind") == "demon") and "demon" or "hunter"
+        local sample = PREVIEW_PETS[kind]
+        local hunter = kind == "hunter"
+        local plan = FS.PetFrame.Plan(docked, hunter)
+        local b = parts.block
+
+        frame:SetSize(plan.panelW, plan.panelH)
+        frame:SetAlpha(Bounded("alpha", 100, 0, 100) / 100)
+        local fillAlpha = Theme.COLOR_HUD_SCRIM[4]
+        if Style and Style.IsStored("pet", "bgAlpha") then fillAlpha = Bounded("bgAlpha", 47, 0, 100) / 100 end
+        if parts.fill then
+            parts.fill:SetVertexColor(Theme.COLOR_HUD_SCRIM[1], Theme.COLOR_HUD_SCRIM[2], Theme.COLOR_HUD_SCRIM[3], fillAlpha)
+        end
+
+        parts.status:ClearAllPoints()
+        parts.status:SetPoint("TOPLEFT", panel, "TOPLEFT", INSET_SIDE, -INSET_TOP)
+        parts.status:SetSize(plan.w, plan.block)
+        b.dotOn = hunter and Config ~= nil and Config.Get("pet.happy") == true
+        SeatBlockGeometry(b, plan, 1)
+        SeatBlockText(b, 1)
+        if b.dotOn then
+            local c = HAPPY_COLORS[3]
+            b.dot:SetVertexColor(c[1], c[2], c[3], 1)
+        end
+
+        b.nameText:SetText(sample.name)
+        b.levelText:SetText("LV " .. sample.level)
+        local function Fill(bar, values, suffix, kind)
+            bar:SetMinMaxValues(0, values[2])
+            bar:SetValue(values[1])
+            local fmt = Setting(suffix, "number")
+            -- The live frame keeps the number where the client has no percent read; so does the preview.
+            if Style and (fmt == "percent" or fmt == "both") and not Style.PercentAvailable(kind) then fmt = "number" end
+            local text = Style and Style.TextFor(fmt, values[1], values[2]) or ("%d / %d"):format(values[1], values[2])
+            bar.text:SetText(text)
+            bar.text:SetShown(fmt ~= "none")
+        end
+        Fill(b.healthBar, sample.hp, "hpFmt", "health")
+        Fill(b.powerBar, sample.mp, "mpFmt", "power")
+        local tint = POWER_COLORS[sample.power] or COLOR_POWER
+        FS.FrameHelpers.SetLaserRailColor(b.powerBar, tint[1], tint[2], tint[3])
+
+        if parts.cast then
+            local cast = parts.cast
+            cast.frame:ClearAllPoints()
+            cast.frame:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -INSET_SIDE, -INSET_TOP)
+            cast.frame:SetShown(not CastGone(hunter))
+            cast.Restyle({
+                casting = not hunter,
+                icon = Config == nil or Config.Get("pet.castIcon") ~= false,
+                name = Config == nil or Config.Get("pet.castName") ~= false,
+                timer = Config == nil or Config.Get("pet.castTimer") ~= false,
+            })
+        end
+
+        local rowTop = INSET_TOP + plan.top + ROW_GAP_TOP
+        for i, button in ipairs(parts.buttons) do
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", panel, "TOPLEFT", INSET_SIDE + (i - 1) * (BAR_HEIGHT + GAP), -rowTop)
+        end
+    end
+    return { frame = frame, Restyle = Restyle, parts = parts }
+end
+
+-------------------------------------------------------------------------------
 -- Assembly
 -------------------------------------------------------------------------------
 
@@ -1147,6 +1464,14 @@ local function Build()
     ApplySlotGeometry(FS.Layout.Scale())
 
     BuildDragHandle()
+
+    -- The Pet bar page: every bars.pet.* setting and the cast bar's room rewrite the panel as they change.
+    if Style then Style.OnChange("pet", function() FS.PetFrame.ApplyStyle() end) end
+    if FS.Config then
+        for _, key in ipairs({ "pet.cast", "pet.castShow", "pet.castFree" }) do
+            FS.Config.OnChange(key, function() FS.PetFrame.ApplyStyle() end)
+        end
+    end
 
     local saved = type(ForeverSTUwaveDB) == "table" and ForeverSTUwaveDB.petFrame
     locked = (saved and saved.locked) and true or false

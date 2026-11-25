@@ -2033,6 +2033,110 @@ function T.the_curve_results_are_never_truth_tested_or_compared_in_the_source()
     eq(checked, 2, "both curve results are checked with type()")
 end
 
+-- ---- the cast bar settings (pet.cast*) and the config window's preview ------------
+
+-- A world with a stand-in FS.Config holding the pet.cast* switches and a player of the given class (the idle
+-- row's "Auto" depends on it). `__cfg` is the stored table; `__changed[key]` the callback PetCastBar registered.
+local function configured(klass, overrides)
+    __cfg = { ["pet.cast"] = true, ["pet.castShow"] = "always", ["pet.castIcon"] = true, ["pet.castName"] = true,
+        ["pet.castTimer"] = true }
+    for k, v in pairs(overrides or {}) do __cfg[k] = v end
+    __changed = {}
+    return world(function()
+        UnitClass = function() return "Class", klass end
+        FS.Config = {
+            Get = function(key) return __cfg[key] end,
+            OnChange = function(key, fn) __changed[key] = fn end,
+        }
+    end)
+end
+
+local style_variants = {
+    "always_hunter", "casting_hunter", "auto_hunter", "auto_warlock", "casting_warlock", "off_warlock",
+}
+local STYLE_CASES = {
+    always_hunter = { "HUNTER", { ["pet.castShow"] = "always" }, 1, 1 },
+    casting_hunter = { "HUNTER", { ["pet.castShow"] = "casting" }, 0, 1 },
+    auto_hunter = { "HUNTER", { ["pet.castShow"] = "auto" }, 0, 1 },
+    auto_warlock = { "WARLOCK", { ["pet.castShow"] = "auto" }, 1, 1 },
+    casting_warlock = { "WARLOCK", { ["pet.castShow"] = "casting" }, 0, 1 },
+    off_warlock = { "WARLOCK", { ["pet.cast"] = false }, 0, 0 },
+}
+function T.the_show_setting_decides_the_idle_row_and_a_cast_always_shows_it(variant)
+    local klass, overrides, idleAlpha, castAlpha = unpack(STYLE_CASES[variant])
+    local W = configured(klass, overrides)
+    eq(W.castSlot._alpha, idleAlpha, variant .. ": the plate between casts")
+    W.cast("C1", 100, 2.5); W.fire("UNIT_SPELLCAST_START")
+    eq(W.castSlot._alpha, castAlpha, variant .. ": the plate during a cast")
+    __unit.cast = nil; W.fire("UNIT_SPELLCAST_STOP", "pet", "C1")
+    W.clean()
+end
+
+function T.a_changed_setting_restyles_the_bar_at_once_in_idle_and_mid_cast()
+    local W = configured("HUNTER")
+    eq(W.castSlot._alpha, 1)
+    __cfg["pet.castShow"] = "casting"; __changed["pet.castShow"]()
+    eq(W.castSlot._alpha, 0, "While casting hides the idle row")
+    W.cast("C1", 100, 2.5); W.fire("UNIT_SPELLCAST_START")
+    eq(W.castSlot._alpha, 1, "and a cast shows it")
+    __cfg["pet.cast"] = false; __changed["pet.cast"]()
+    eq(W.castSlot._alpha, 0, "the switch off hides it mid cast too")
+    __cfg["pet.cast"] = true; __changed["pet.cast"]()
+    eq(W.castSlot._alpha, 1)
+    W.clean()
+end
+
+function T.the_icon_name_and_timer_switches_hide_their_parts_of_a_cast()
+    local W = configured("WARLOCK", { ["pet.castIcon"] = false, ["pet.castName"] = false, ["pet.castTimer"] = false })
+    W.cast("C1", 100, 2.5); W.fire("UNIT_SPELLCAST_START")
+    eq(W.nameText._alpha, 0, "name off")
+    eq(W.timerText._alpha, 0, "timer off")
+    eq(W.timerSmall._alpha, 0, "the small timer too")
+    eq(W.iconTexture._alpha, 0, "icon off")
+    __cfg["pet.castName"] = true; __changed["pet.castName"]()
+    eq(W.nameText._alpha, 1, "name back on at once")
+    W.clean()
+end
+
+function T.a_plate_that_is_not_drawn_gives_no_spell_tooltip()
+    local W = configured("WARLOCK", { ["pet.cast"] = false })
+    W.cast("C1", 100, 2.5); W.fire("UNIT_SPELLCAST_START")
+    eq(W.iconHover._shown, false, "an invisible plate has no icon to hover")
+    __cfg["pet.cast"] = true; __changed["pet.cast"]()
+    eq(W.iconHover._shown, true, "back on, the icon hovers again")
+    __cfg["pet.castIcon"] = false; __changed["pet.castIcon"]()
+    eq(W.iconHover._shown, false, "an icon switched off has no tooltip")
+    __cfg["pet.castIcon"] = true; __changed["pet.castIcon"]()
+    eq(W.iconHover._shown, true)
+    W.clean()
+end
+
+-- The preview of the plate for the config window: the live bar's chrome, art and text, held still.
+function T.the_preview_draws_the_idle_ghost_row_and_the_firebolt_cast()
+    local P = FS.PetCastBar.NewPreview(UIParent)
+    eq(P.frame._w, 198, "the plate is the 198 wide slot"); eq(P.frame._h, 26, "26 high")
+    P.Restyle({ casting = false, icon = true, name = true, timer = true })
+    near(P.parts.plate._alpha, __mock.PLATEIDLE, 1e-9, "the ghost plate"); near(P.parts.outline._alpha, __mock.OUTLINEIDLE, 1e-9)
+    eq(#P.parts.chevrons, 11, "eleven chevrons")
+    for k, c in ipairs(P.parts.chevrons) do
+        eq(c.ghost._shown, true, "ghost " .. k); near(c.ghost._vc[4], 0.24, 1e-9, "the ghost alpha")
+        eq(c.fill._shown, false, "no filled chevron at idle")
+    end
+    eq(P.parts.icon._shown, false, "no icon at idle"); eq(P.parts.name._shown, false); eq(P.parts.timer._shown, false)
+    P.Restyle({ casting = true, icon = true, name = true, timer = true })
+    near(P.parts.plate._alpha, __mock.PLATECAST, 1e-9, "the firm plate"); near(P.parts.outline._alpha, __mock.OUTLINECAST, 1e-9)
+    for k, c in ipairs(P.parts.chevrons) do
+        eq(c.ghost._shown, false, "no ghost while casting")
+        near(c.fill._vc[4], k <= 6 and 1 or 0.2, 1e-9, "chevron " .. k .. " lit or unlit")
+    end
+    eq(P.parts.icon._shown, true); eq(P.parts.name._text, "Firebolt"); eq(P.parts.timer._text, "1.2 / 2.0")
+    local x1, x2 = P.parts.chevrons[1].fill._points.TOPLEFT.x, P.parts.chevrons[2].fill._points.TOPLEFT.x
+    eq(x1, 28, "the run starts at 28"); eq(x2 - x1, 10, "pitch 10")
+    P.Restyle({ casting = true, icon = false, name = false, timer = false })
+    eq(P.parts.icon._shown, false, "icon off"); eq(P.parts.name._shown, false, "name off"); eq(P.parts.timer._shown, false, "timer off")
+end
+
+
 __variants = {
     a_99_9_over_99_9_readout_fits_the_timer_box_at_every_scale = fit_variants,
     a_secret_first_number_crossfades_through_an_engine_step_curve = crossfade_variants,
@@ -2040,6 +2144,7 @@ __variants = {
     a_non_number_curve_answer_falls_back_to_8_5 = nonnumber_variants,
     an_evaluate_method_that_is_missing_or_throws_falls_back_to_8_5 = unavailable_variants,
     a_client_without_a_usable_curve_api_leaves_the_secret_path_at_8_5 = nocurve_variants,
+    the_show_setting_decides_the_idle_row_and_a_cast_always_shows_it = style_variants,
 }
 
 __checks = T

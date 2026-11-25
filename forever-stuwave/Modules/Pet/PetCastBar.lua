@@ -4,8 +4,8 @@
 -- Chevron cast/channel bar for FS.PetFrame.castSlot, the top-row slot PetFrame.lua reserves
 -- to the right of the status slot (the console-docked pet component, option C of
 -- the design mockup: the slot is 198 x 26, the 10 pet buttons sit under it).
--- A leaf module like CastBars.lua: nothing else in the addon consumes anything from this
--- file, so there is no FS.PetCastBar export. Loads after Theme.lua/FrameHelpers.lua/
+-- A leaf module like CastBars.lua: the only thing it exports is NewPreview, the still plate the config window's
+-- Pet bar page draws (FS.PetCastBar). Loads after Theme.lua/FrameHelpers.lua/
 -- ChevronCastBar.lua/PetFrame.lua per the .toc, so FS.Theme.*/FS.FrameHelpers.* fields are
 -- captured into file-scope locals below exactly like CastBars.lua does. FS.ChevronCastBar is
 -- read at Build time.
@@ -429,9 +429,10 @@ end
 
 -- The icon box (icon, its 1px stroke and the shield) belongs to a cast; the mockup's idle bar
 -- has none of it.
+local hoverAllowed = true   -- set by ApplyCastStyle: the plate is drawn and its icon switch is on
 local function SetIconBox(on)
     if iconTexture then iconTexture:SetShown(on) end
-    if iconHover then iconHover:SetShown(on) end
+    if iconHover then iconHover:SetShown(on and hoverAllowed) end
     if iconEdges then
         for _, edge in ipairs(iconEdges) do edge.tex:SetShown(on) end
     end
@@ -737,10 +738,6 @@ local function FetchDuration(isChannel)
     return nil
 end
 
--- Ends whatever is showing and returns to the idle row (see the header). The engine's
--- ShowIdle does the full reset (effects, lit segments, OnUpdate, the panel's alpha), so
--- this is also how an abandoned cast or a hold is ended. Called from the engine's
--- onFinished and for every other end of a cast.
 -- The pet cast bar settings (pet.cast*): the whole plate, whether it shows between casts, and the icon, name and timer
 -- of a cast. Plain alphas on frames this file owns, so it runs in combat too. `casting` is true from BeginCast.
 local function ApplyCastStyle(casting)
@@ -753,7 +750,11 @@ local function ApplyCastStyle(casting)
     local _, playerClass = UnitClass("player")
     local hideIdle = show == "casting" or (show == "auto" and playerClass == "HUNTER")
     local idle = not casting and mode == nil
-    host:SetAlpha((on and not (idle and hideIdle)) and 1 or 0)
+    local drawn = on and not (idle and hideIdle)
+    host:SetAlpha(drawn and 1 or 0)
+    -- A plate that is not drawn has no icon to point at: its hover frame would show a spell tooltip over nothing.
+    hoverAllowed = drawn and Config.Get("pet.castIcon") ~= false
+    if iconHover then iconHover:SetShown(hoverAllowed and iconTexture ~= nil and iconTexture:IsShown()) end
     local function Part(region, key)
         if region then region:SetAlpha(Config.Get(key) ~= false and 1 or 0) end
     end
@@ -767,6 +768,10 @@ local function ApplyCastStyle(casting)
     end
 end
 
+-- Ends whatever is showing and returns to the idle row (see the header). The engine's
+-- ShowIdle does the full reset (effects, lit segments, OnUpdate, the panel's alpha), so
+-- this is also how an abandoned cast or a hold is ended. Called from the engine's
+-- onFinished and for every other end of a cast.
 local function GoIdle()
     mode = nil
     castPetGUID = nil
@@ -1077,6 +1082,90 @@ local function BuildIconEdges()
         Edge("TOPLEFT", "TOPRIGHT", true), Edge("BOTTOMLEFT", "BOTTOMRIGHT", true),
         Edge("TOPLEFT", "BOTTOMLEFT", false), Edge("TOPRIGHT", "BOTTOMRIGHT", false),
     }
+end
+
+-- The plate for the config window's Pet bar page: the live bar's chrome (plate and outline), chevron art, icon box
+-- and text column at design px (scale 1), held still instead of run by the engine. Restyle(state) takes
+-- { casting, icon, name, timer } (booleans): idle is the faint plate under the outline chevron ghosts, a cast is the
+-- firm plate with the first PREVIEW_LIT chevrons lit, the Firebolt icon, name and timer. Returns
+-- { frame, Restyle, parts }.
+local PREVIEW_CHEVRONS, PREVIEW_LIT, PREVIEW_PITCH, PREVIEW_CHEVRON_SIZE, PREVIEW_UNLIT_ALPHA = 11, 6, 10, 14, 0.2
+local PREVIEW_SPELL_ID = 3110   -- Firebolt, the imp's: its icon from the client, the file below when the client will not say
+local PREVIEW_ICON = "Interface\\Icons\\Spell_Fire_FireBolt02"
+local function PreviewIcon()
+    local read = (type(C_Spell) == "table" and C_Spell.GetSpellTexture) or _G.GetSpellTexture
+    if type(read) == "function" then
+        local ok, texture = pcall(read, PREVIEW_SPELL_ID)
+        if ok and texture ~= nil and not IsSecret(texture) then return texture end
+    end
+    return PREVIEW_ICON
+end
+local PetCastBar = FS.PetCastBar or {}
+FS.PetCastBar = PetCastBar
+function PetCastBar.NewPreview(parent)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetSize(CAST_SLOT_W, BAR_HEIGHT)
+    local parts = { chevrons = {} }
+    parts.plate = AddCut2Texture(frame, FS.Theme.SLICE_CUT2_FILL_TEXTURE,
+        { COLOR_BAR_TRACK[1], COLOR_BAR_TRACK[2], COLOR_BAR_TRACK[3], 1 }, "BACKGROUND", 0)
+    parts.outline = AddCut2Texture(frame, FS.Theme.SLICE_CUT2_OUTLINE_TEXTURE, COLOR_BORDER, "BORDER")
+    for k = 1, PREVIEW_CHEVRONS do
+        local function Chevron(texture)
+            local tex = frame:CreateTexture(nil, "ARTWORK")
+            tex:SetTexture(texture)
+            tex:SetSize(PREVIEW_CHEVRON_SIZE, PREVIEW_CHEVRON_SIZE)
+            tex:SetPoint("TOPLEFT", frame, "TOPLEFT", RUN_X + (k - 1) * PREVIEW_PITCH, -RUN_Y)
+            return tex
+        end
+        parts.chevrons[k] = { fill = Chevron(FS.Theme.CAST_CHEVRON_FILL_TEXTURE),
+            ghost = Chevron(FS.Theme.CAST_CHEVRON_OUTLINE_TEXTURE) }
+    end
+    parts.icon = frame:CreateTexture(nil, "ARTWORK")
+    parts.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    parts.icon:SetTexture(PreviewIcon())
+    parts.icon:SetSize(ICON_SIZE, ICON_SIZE)
+    parts.icon:SetPoint("TOPLEFT", frame, "TOPLEFT", ICON_X, -ICON_Y)
+    parts.edges = {}
+    for _, e in ipairs({ { "TOPLEFT", "TOPRIGHT", true }, { "BOTTOMLEFT", "BOTTOMRIGHT", true },
+        { "TOPLEFT", "BOTTOMLEFT", false }, { "TOPRIGHT", "BOTTOMRIGHT", false } }) do
+        local edge = frame:CreateTexture(nil, "OVERLAY", nil, 2)
+        edge:SetColorTexture(COLOR_BAR_BORDER[1], COLOR_BAR_BORDER[2], COLOR_BAR_BORDER[3], 1)
+        edge:SetPoint(e[1], parts.icon, e[1], 0, 0)
+        edge:SetPoint(e[2], parts.icon, e[2], 0, 0)
+        if e[3] then edge:SetHeight(1) else edge:SetWidth(1) end
+        parts.edges[#parts.edges + 1] = edge
+    end
+    parts.name = frame:CreateFontString(nil, "OVERLAY")
+    ApplyMono(parts.name, NAME_FONT_SIZE, COLOR_POWER)
+    parts.name:SetJustifyH("RIGHT")
+    parts.name:SetPoint("RIGHT", frame, "TOPRIGHT", -RIGHT_PAD, -NAME_Y)
+    parts.name:SetWidth(NAME_MAX_W)
+    parts.name:SetText("Firebolt")
+    parts.timer = frame:CreateFontString(nil, "OVERLAY")
+    ApplyMono(parts.timer, TIMER_FONT_SIZE)
+    parts.timer:SetJustifyH("RIGHT")
+    parts.timer:SetPoint("RIGHT", frame, "TOPRIGHT", -RIGHT_PAD, -TIMER_Y)
+    parts.timer:SetWidth(NAME_MAX_W + RUN_GAP)
+    parts.timer:SetText("1.2 / 2.0")
+
+    local function Restyle(state)
+        local casting = type(state) == "table" and state.casting == true
+        parts.plate:SetAlpha(casting and PLATE_CAST_ALPHA or PLATE_IDLE_ALPHA)
+        parts.outline:SetAlpha(casting and OUTLINE_CAST_ALPHA or OUTLINE_IDLE_ALPHA)
+        for k, c in ipairs(parts.chevrons) do
+            c.fill:SetVertexColor(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], k <= PREVIEW_LIT and 1 or PREVIEW_UNLIT_ALPHA)
+            c.fill:SetShown(casting)
+            c.ghost:SetVertexColor(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], GHOST_ALPHA)
+            c.ghost:SetShown(not casting)
+        end
+        local icon = casting and state.icon ~= false
+        parts.icon:SetShown(icon)
+        for _, edge in ipairs(parts.edges) do edge:SetShown(icon) end
+        parts.name:SetShown(casting and state.name ~= false)
+        parts.timer:SetShown(casting and state.timer ~= false)
+    end
+    Restyle(nil)
+    return { frame = frame, Restyle = Restyle, parts = parts }
 end
 
 local function Build()
