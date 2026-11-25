@@ -166,39 +166,28 @@ Chat.termBar = nil          -- the term bar Frame (ChatTermBar.BuildTermBar)
 Chat.minimiseButton = nil   -- term bar lamp (ChatTermBar.BuildTermBar)
 Chat.maximiseButton = nil   -- term bar lamp (ChatTermBar.BuildTermBar)
 
--- The docked tab selected last session, read here and only here.
+-- The docked tab selected last session, and whether to force the comms tab, read ONCE from the saved table.
 --
--- Captured at FILE LOAD TIME rather than inside ChatTabs.ApplyDockState's own
--- restore branch, and this is the whole point. ApplyDockState is also where
--- the CURRENT selection gets saved back to this same SavedVariables key, and
--- its first call during login happens inside ChatSlashCommands.lua's Apply(),
--- which does not run until every Chat* module -- this file included -- has
--- already finished loading. Reading ForeverSTUwaveDB.chatSelectedTab that
--- late would find whatever ApplyDockState's own save had ALREADY overwritten
--- it with (Blizzard's login default, usually tab 1) rather than the value
--- from the previous session. Reading it now, before any Chat* module has run
--- a single line of Apply-time code, is what avoids that race.
+-- The saved table does not exist while the files load: the client hands ForeverSTUwaveDB over at this addon's ADDON_LOADED,
+-- after every file ran, so a read at file scope is always nil (the tab was never restored and comms was forced at every
+-- login). The read happens when Chat.ApplyDockState first runs (TakeSavedSelection, called at its top), which is after
+-- the table arrived and BEFORE that same function saves the current selection back over the key: that save would
+-- otherwise overwrite last session's value with Blizzard's login default (usually tab 1).
 --
--- Consumed and cleared by Chat.ApplyDockState the first time it runs; nil
--- afterwards means either there was nothing to restore or it already
--- happened, and either way that function's restore branch is a no-op.
-Chat.pendingSelectedTab = ForeverSTUwaveDB and ForeverSTUwaveDB.chatSelectedTab
-
--- Interim default: force the comms tab active at login when chatSelectedTab
--- is unset, so a persisted user choice still wins once the client's
--- SavedVariables bug is fixed. The Forever beta client never restores
--- per-character SavedVariables across a /reload (design notes), so this
--- default always fires today -- the player's interim call, companion to
--- ChatTabs.lua's comms-first pill hardcode (design notes tracks the real
--- persisted-order/selection feature this stands in for).
--- Consumed and cleared by Chat.ApplyDockState's own one-shot block, same
--- discipline as Chat.pendingSelectedTab above.
-Chat.pendingDefaultComms = not (ForeverSTUwaveDB and ForeverSTUwaveDB.chatSelectedTab)
-
--- The window state saved last session ("normal", "min" or "max"), as the saved table held it while the files loaded. In the
--- client that is nothing (the table arrives at ADDON_LOADED), so ChatSlashCommands' Apply() reads the saved table itself
--- when it runs there and uses this capture only when the table has no state.
-Chat.pendingWindowState = ForeverSTUwaveDB and ForeverSTUwaveDB.chatWindowState
+-- Chat.pendingSelectedTab is consumed and cleared by ApplyDockState's restore branch; nil means there was nothing to
+-- restore or it already happened. Chat.pendingDefaultComms is the interim default (force the comms tab at login when no
+-- tab was ever saved; a saved choice wins), consumed by ApplyDockState's one-shot block the same way.
+Chat.pendingSelectedTab = nil
+Chat.pendingDefaultComms = false
+local selectionTaken = false
+function Chat.TakeSavedSelection()
+    if selectionTaken then return end
+    selectionTaken = true
+    local db = ForeverSTUwaveDB
+    local saved = type(db) == "table" and db.chatSelectedTab or nil
+    Chat.pendingSelectedTab = saved
+    Chat.pendingDefaultComms = not saved
+end
 
 -------------------------------------------------------------------------------
 -- THE CHAT TERMINAL COMPONENT.

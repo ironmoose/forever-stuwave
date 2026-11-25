@@ -71,9 +71,10 @@ local xAtAddonLoaded = "not-seen"
 --
 -- If ForeverSTUwaveDB survives a reload and the per-character table does
 -- not, the fix is simply to keep the position here.
-ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-local dbAtFileScope = type(ForeverSTUwaveDB.issueReporterX) == "number"
-    and tostring(ForeverSTUwaveDB.issueReporterX) or "nil"
+-- The table is NOT created here: the client hands ForeverSTUwaveDB over at ADDON_LOADED and replaces anything a file
+-- put in that global while loading, so a table made here would only collect writes (the unknown-event log, the
+-- degrade log) that are then lost. Config.lua creates it at ADDON_LOADED when there is none.
+local dbAtFileScope = "nil"   -- what a file-scope read of the account table finds in the client: nothing
 
 ForeverSTUwaveIssueReporterPos = ForeverSTUwaveIssueReporterPos or {}
 

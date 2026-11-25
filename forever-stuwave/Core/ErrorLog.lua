@@ -49,6 +49,7 @@ local foreignStored = 0
 -- (the errors a tester most needs) lives in a table that is about to be
 -- discarded. They are kept here and put back in ADDON_LOADED.
 local preLoad = {}
+local preDegrade = {}   -- LogDegradeOnce entries made while our files loaded, written at ADDON_LOADED
 local loaded = false
 
 local PREFIX = "|cff22e0ffForever STUwave|r"
@@ -740,13 +741,16 @@ function FS.LogDegradeOnce(key, msg)
         print(msg)
     end
 
-    -- Same guard style as Diagnostics.lua's /fsfont and every other
-    -- ForeverSTUwaveDB writer in this addon: create the table if this is the
-    -- first write of the session rather than requiring some other file to have
-    -- done it first.
+    -- Before ADDON_LOADED the saved table has not arrived, and one made here would be replaced by it, so the entry waits
+    -- in preDegrade and is written when the table lands (see the ADDON_LOADED handler).
+    local entry = { msg = msg, time = time() }
+    if not loaded then
+        preDegrade[key] = entry
+        return
+    end
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
     ForeverSTUwaveDB.degradeLog = ForeverSTUwaveDB.degradeLog or {}
-    ForeverSTUwaveDB.degradeLog[key] = { msg = msg, time = time() }
+    ForeverSTUwaveDB.degradeLog[key] = entry
 end
 
 -- The same record as LogDegradeOnce, with no chat line: for a failure the player cannot act on, kept on disk (after a
@@ -1399,6 +1403,12 @@ checkFrame:SetScript("OnEvent", function(self, event, loadedAddon)
             if not entry.ours then foreignStored = foreignStored + 1 end
         end
         wipe(preLoad)
+        if next(preDegrade) then
+            ForeverSTUwaveDB = ForeverSTUwaveDB or {}
+            ForeverSTUwaveDB.degradeLog = ForeverSTUwaveDB.degradeLog or {}
+            for key, entry in pairs(preDegrade) do ForeverSTUwaveDB.degradeLog[key] = entry end
+            wipe(preDegrade)
+        end
         loaded = true
         return
     end

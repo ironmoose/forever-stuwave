@@ -690,15 +690,16 @@ end
 
 function Chat.ApplyDockState()
     if not Chat.termTabs then return end
+    Chat.TakeSavedSelection()   -- first call only: last session's tab, read before this function saves over it
 
     -- Resolve the active window ONCE, here, and let the rest of the swap read
     -- it. This is the line that makes the active pill follow the tab.
     Chat.activeChatFrame = Chat.ActiveChatFrame()
 
     -- One-time login restore of the tab the player had selected last session.
-    -- Chat.pendingSelectedTab is captured at file load in ChatCore.lua, BEFORE
-    -- this function can possibly run -- see that capture's comment for why it
-    -- has to happen that early. Cleared immediately, whether or not a swap
+    -- Chat.pendingSelectedTab is read from the saved table by
+    -- Chat.TakeSavedSelection (ChatCore.lua) at the top of this function's first
+    -- call -- see that function's comment for why it has to be this early. Cleared immediately, whether or not a swap
     -- actually happens below, so this branch can never fire twice and can
     -- never fight a later manual tab switch (this same function also runs on
     -- every real selection change, via the FCF_SelectDockFrame/FCF_Tab_OnClick
@@ -734,7 +735,7 @@ function Chat.ApplyDockState()
     end
 
     -- Interim hardcoded default-active-tab: force comms active at login when
-    -- Chat.pendingDefaultComms was set (ChatCore.lua, only when there was no
+    -- Chat.pendingDefaultComms was set (Chat.TakeSavedSelection, only when there was no
     -- saved tab for the block above to restore). Companion to
     -- OrderedDockedFrames' comms-first pill hardcode further up this file;
     -- blocked on the client SavedVariables /reload bug (design notes), to

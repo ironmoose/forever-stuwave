@@ -2649,6 +2649,7 @@ local function b5dWorld(off, opts)
     Boot({ off = off, watch = watch, db = opts.db, noRegen = opts.combat,
         pre = function()
             b5bStubs(); b5dStubs(); __combat = opts.combat or false
+            if opts.pre then opts.pre() end
             if opts.preDb then ForeverSTUwaveDB = opts.preDb end   -- a client that hands the saved store over before the files load
         end })
     for _, ev in ipairs(B5D_EVENTS) do Fire(unpack(ev)) end
@@ -2854,18 +2855,12 @@ function T.chat_on_the_saved_window_state_is_restored_at_login()
     eq(FS.Chat.windowState, "min", "a state saved last session is applied at login")
 end
 
-function T.chat_on_a_window_state_present_when_the_files_load_is_restored_at_the_first_paint()
-    b5dWorld({}, { preDb = { chatWindowState = "min" }, noPoke = true })
-    eq(FS.Chat.windowState, "min")
-    yes(TouchesOn("ChatFrame1"):find("Hide", 1, true), "the minimised window is hidden")
-end
-
 -- The console quick keys are remembered across a reload: a login, a press on every key but the tracker's own (the game keeps
 -- that one), the saved store written out and read back as the client does, a second login that finds every key still off.
 local function serialize(v)
     if type(v) == "table" then
         local out = {}
-        for k, x in pairs(v) do out[#out + 1] = "[" .. string.format("%q", k) .. "]=" .. serialize(x) end
+        for k, x in pairs(v) do out[#out + 1] = "[" .. (type(k) == "number" and tostring(k) or string.format("%q", k)) .. "]=" .. serialize(x) end
         return "{" .. table.concat(out, ",") .. "}"
     elseif type(v) == "string" then
         return string.format("%q", v)
@@ -2883,29 +2878,73 @@ local function pressKey(key)
     end
     error("no key " .. key)
 end
+-- The game's objectives tracker as the client has it: one Lua field holds the collapsed state, nothing saves it, and
+-- SetCollapsed is the one call every route ends in (the header button's OnClick -> ToggleCollapsed -> SetCollapsed, the
+-- game's own ForceExpand). hooksecurefunc post-hooks for real, which the rest of this harness does not need.
+local trackerCalls
+local function installTracker(collapsed)
+    trackerCalls = {}
+    WatchTree("ObjectiveTrackerFrame", { Header = { MinimizeButton = true, Background = true, Text = true }, NineSlice = true })
+    local t = _G.ObjectiveTrackerFrame
+    local state = collapsed == true
+    rawset(t, "IsCollapsed", function() return state end)
+    rawset(t, "SetCollapsed", function(_, value)
+        state = value == true
+        trackerCalls[#trackerCalls + 1] = state
+    end)
+    local watchedHook = hooksecurefunc
+    hooksecurefunc = function(target, name, fn)
+        local orig = type(target) == "table" and type(name) == "string" and rawget(target, name)
+        if type(orig) == "function" then
+            rawset(target, name, function(...) local r = orig(...); fn(...); return r end)
+            return
+        end
+        return watchedHook(target, name, fn)
+    end
+end
+-- what a press on the quests key does in the game: the minimise button's handler toggles the container
+local function pressQuestsKey()
+    local t = _G.ObjectiveTrackerFrame
+    t:SetCollapsed(not t:IsCollapsed())
+end
+local function trackerCollapsed() return _G.ObjectiveTrackerFrame:IsCollapsed() end
 local function keyIsOn(key)
     for _, k in ipairs(FS.ConsoleKeys.keys) do
         if k.key == key then return k.on end
     end
 end
 
+-- A fresh client over the saved store, as /reload does: what the client wrote is read back, the old world is gone, the files
+-- load with NO saved table, and the table is handed over at ADDON_LOADED.
+local function reload(opts)
+    opts = opts or {}
+    local saved = load("return " .. serialize(ForeverSTUwaveDB))()
+    FS = {}
+    __evFrames = {}
+    __errors = {}
+    ForeverSTUwaveDB = nil
+    local want = opts.pre
+    opts.pre = function() installTracker(opts.trackerCollapsed) if want then want() end end
+    opts.db = saved
+    opts.noPoke = true
+    b5dWorld({}, opts)
+    return saved
+end
+
 function T.console_keys_stay_off_across_a_reload()
-    b5dWorld({}, { noPoke = true })
+    b5dWorld({}, { noPoke = true, pre = function() installTracker(false) end })
     local PRESS = { "you", "next", "shard", "buff", "tgt", "dot", "prc", "party", "chat" }
     for _, key in ipairs(PRESS) do pressKey(key) end
+    pressQuestsKey()
     for _, key in ipairs(PRESS) do
         no(FS.ConsoleKeys.keys and FS.Gunsight.IsPieceOn(key) or false, key .. " is off after its press")
     end
     eq(FS.Chat.windowState, "min", "the chat key minimised the chat")
+    yes(trackerCollapsed(), "the quests key collapsed the tracker")
     local oldChat = FS.Chat
-    local saved = load("return " .. serialize(ForeverSTUwaveDB))()   -- what the client writes at /reload and reads back
 
-    -- the next login: a fresh client, the saved store handed over after the files load
-    FS = {}
-    __evFrames = {}
-    __errors = {}
-    ForeverSTUwaveDB = nil   -- the client hands the store over after the files load, not before
-    b5dWorld({}, { db = saved, noPoke = true })
+    -- the next login: a fresh client, the game's tracker back to its default (expanded), the saved store handed over after the files load
+    reload({ trackerCollapsed = false })
     yes(FS.Chat ~= oldChat, "the second login is a fresh client")
     eq(ForeverSTUwaveDB.profiles.Default.settings["gunsight.pieces.you"], false, "the saved store reached the second login")
     for _, key in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc" }) do
@@ -2913,6 +2952,195 @@ function T.console_keys_stay_off_across_a_reload()
     end
     no(FS.PartyFrames.IsShown(), "the party frames came back on after the reload")
     eq(FS.Chat.windowState, "min", "the chat window came back out of the minimised state after the reload")
+    yes(trackerCollapsed(), "the quests tracker came back collapsed after the reload")
+    no(keyIsOn("quests"), "the quests key reads off for a collapsed tracker")
+end
+
+function T.quests_key_saves_the_tracker_state_per_profile_and_puts_it_back_at_login()
+    b5dWorld({}, { noPoke = true, pre = function() installTracker(false) end })
+    eq(#trackerCalls, 0, "an expanded tracker with nothing saved is never touched")
+    pressQuestsKey()
+    eq(ForeverSTUwaveDB.profiles.Default.settings["tracker.collapsed"], true, "collapsing saves the state in the profile")
+    pressQuestsKey()
+    eq(ForeverSTUwaveDB.profiles.Default.settings["tracker.collapsed"], nil, "expanding stores nothing (the default)")
+    pressQuestsKey()
+
+    reload({ trackerCollapsed = false })
+    yes(trackerCollapsed(), "collapsed again after the reload")
+    eq(#trackerCalls, 1, "one SetCollapsed, out of combat")
+    eq(trackerCalls[1], true)
+    yes(FS.ModuleSwitch.Built("m.track"), "the tracker skin followed it")
+    eq(#__errors, 0, table.concat(__errors, " | "))
+
+    -- the player expands it, reloads: it stays expanded, and nothing calls the game's tracker
+    pressQuestsKey()
+    eq(ForeverSTUwaveDB.profiles.Default.settings["tracker.collapsed"], nil)
+    reload({ trackerCollapsed = false })
+    no(trackerCollapsed(), "expanded after the reload")
+    eq(#trackerCalls, 0, "no call at all for an expanded tracker")
+end
+
+function T.quests_key_state_is_not_overwritten_by_the_game_before_the_first_restore()
+    -- a saved collapsed state, a login in a fight: nothing is touched until the fight ends, and the game's own
+    -- SetCollapsed(false) in between saves nothing
+    b5dWorld({}, { noPoke = true, db = { profiles = { Default = { settings = { ["tracker.collapsed"] = true }, layout = { v = 1, frames = {} } } } },
+        pre = function() installTracker(false) end, combat = true,
+        beforeRegen = function()
+            eq(#trackerCalls, 0, "nothing touched in the fight")
+            _G.ObjectiveTrackerFrame:SetCollapsed(false)
+            eq(ForeverSTUwaveDB.profiles.Default.settings["tracker.collapsed"], true, "the game's login state did not overwrite the saved one")
+        end })
+    yes(trackerCollapsed(), "restored when the fight ended")
+end
+
+function T.quests_key_follows_a_profile_switch_and_the_tracker_switch_off_leaves_it_alone()
+    b5dWorld({}, { noPoke = true, pre = function() installTracker(false) end })
+    pressQuestsKey()
+    yes(FS.Config.NewProfile("Other"))
+    yes(FS.Config.SetActiveProfile("Other"))
+    no(trackerCollapsed(), "another profile, another state: expanded")
+    pressQuestsKey()
+    eq(ForeverSTUwaveDB.profiles.Other.settings["tracker.collapsed"], true)
+    eq(ForeverSTUwaveDB.profiles.Default.settings["tracker.collapsed"], true)
+    yes(FS.Config.SetActiveProfile("Default"))
+    yes(trackerCollapsed())
+    FS.Config.ResetProfile()
+    no(trackerCollapsed(), "a reset profile holds the default, expanded")
+
+    -- Quest tracker module off: no hook, no restore, no write
+    FS = {}; __evFrames = {}; __errors = {}; ForeverSTUwaveDB = nil
+    b5dWorld({ "m.track" }, { noPoke = true, db = { profiles = { Default = { settings = { ["tracker.collapsed"] = true }, layout = { v = 1, frames = {} } } } },
+        pre = function() installTracker(false) end })
+    eq(#trackerCalls, 0, "the module is off: the game's tracker is not touched")
+    pressQuestsKey()
+    eq(ForeverSTUwaveDB.profiles.Default.settings["tracker.collapsed"], true, "and nothing is saved")
+end
+
+-- The saved tab of the chat is read at the first dock pass (after the table arrived), not at file load.
+function T.chat_on_the_selected_tab_and_the_comms_default_read_the_saved_table_at_login()
+    b5dWorld({}, { noPoke = true, db = { chatSelectedTab = 3 } })
+    eq(FS.Chat.pendingDefaultComms, false, "a saved tab means the comms default is not forced")
+    eq(FS.Chat.pendingSelectedTab, nil, "the saved tab was consumed by the first dock pass")
+    b5dWorld({}, { noPoke = true })
+    eq(FS.Chat.pendingDefaultComms, nil, "no saved tab: the comms default ran in the first dock pass and cleared itself")
+end
+
+-- The saved store reaches the addon at ADDON_LOADED, after every file ran. A saved global read while the files load is
+-- always nil in the client, and a Config.Get read then answers the default, never the saved value. Every read below is
+-- either guarded and re-read at login or is a write guard whose result the client replaces; a new one fails this row.
+local LOAD_READS_OK = {
+    ["global ForeverSTUwaveErrorLog at Core/ErrorLog.lua:35"] = "the log is wiped at ADDON_LOADED (see the comment there)",
+    ["global ForeverSTUwaveCharDB at Core/Role.lua:205"] = "a role asked for while the files load answers the default; Role loads the pick again at PLAYER_LOGIN",
+    ["global ForeverSTUwaveDB at Core/Role.lua:194"] = "the same Role read: AccountTable answers nil without the table, and Role loads again at PLAYER_LOGIN",
+    ["global ForeverSTUwaveDB at Core/FrameHelpers.lua:293"] = "an event noted while the files load waits (pendingUnknown) until the table exists",
+    ["Config.Get(icons.microstyle)"] = "MicroBars re-reads it at PLAYER_LOGIN and on change",
+    ["Config.Get(skins.damageMeterRows)"] = "DamageMeter re-reads it at PLAYER_LOGIN and on change",
+}
+function T.no_saved_global_or_setting_is_read_while_the_files_load()
+    local hits = {}
+    local function where()
+        local out = {}
+        for line in debug.traceback("", 3):gmatch("[^\n]+") do
+            local f, n = line:match("([%w_/%.]+%.lua):(%d+):")
+            if f and not f:find("Core/Config.lua", 1, true) then out[#out + 1] = f .. ":" .. n end
+            if #out >= 2 then break end
+        end
+        return out
+    end
+    -- A name a file assigns while the files load (a write guard, `X = X or {}`) is kept off the real globals, so a LATER
+    -- read in another file is still a read of nothing, as in the client where the table does not exist yet.
+    local shadow = {}
+    local function isSaved(k)
+        return type(k) == "string" and k:find("^ForeverSTUwave")
+            and (k:find("DB$") or k == "ForeverSTUwaveErrorLog" or k == "ForeverSTUwaveExport")
+    end
+    setmetatable(_G, {
+        __index = function(_, k)
+            if __phase == "load" and isSaved(k) then
+                local at = where()
+                hits[#hits + 1] = { text = "global " .. k .. " at " .. table.concat(at, " <- "), key = "global " .. k .. " at " .. (at[1] or "?") }
+                return shadow[k]
+            end
+        end,
+        __newindex = function(t, k, v)
+            local source = debug.getinfo(2, "S").source
+            if __phase == "load" and isSaved(k) and source:sub(1, 1) == "@" then shadow[k] = v else rawset(t, k, v) end
+        end,
+    })
+    local realLoad = __load
+    __load = function(path, src)
+        local r = realLoad(path, src)
+        local C = FS.Config
+        if C and not C.__probed then
+            C.__probed = true
+            for _, name in ipairs({ "Get", "IsStored" }) do
+                local fn = C[name]
+                C[name] = function(key, ...)
+                    if __phase == "load" then
+                        hits[#hits + 1] = { text = "Config." .. name .. "(" .. tostring(key) .. ") at " .. table.concat(where(), " <- "),
+                            key = "Config." .. name .. "(" .. tostring(key) .. ")" }
+                    end
+                    return fn(key, ...)
+                end
+            end
+        end
+        return r
+    end
+    b5dWorld({}, { noPoke = true })
+    __load = realLoad
+    setmetatable(_G, nil)
+    local seen, list = {}, {}
+    for _, h in ipairs(hits) do
+        local ok = LOAD_READS_OK[h.key] or LOAD_READS_OK[h.key:gsub("^Config%.%w+", "Config.Get")]
+        -- a Degrade line written while the files load (a missing game API) creates the table the client then replaces
+        if h.text:find("Core/ErrorLog.lua:7", 1, true) then ok = true end
+        if not ok and not seen[h.text] then seen[h.text] = true; list[#list + 1] = h.text end
+    end
+    eq(#list, 0, "read while the files load: " .. table.concat(list, " ;; "))
+end
+
+-- Nothing the addon does at login may overwrite what the last session saved. A session that touched every switch, setting and
+-- state the addon stores is written out and read back; a second login with no player input must leave every saved value
+-- as it was (the diagnostic logs are rewritten each session by design).
+local LOGIN_MAY_REWRITE = { degradeLog = true, boot = true, bugreports = true, recon = true, inspect = true, fsprobe = true,
+    fscheck = true, charTiming = true, allocOwners = true, allocSample = true, minimapSeatLog = true, minimapSeatLogPrev = true,
+    minimapSeatLogFirst = true, chatSeatLog = true, chatSeatLogPrev = true, combinedBagsTrace = true, fontProbe = true,
+    taintScan = true, hitch = true, inspectSkins = true, labelsAtApply = true, promptIdle = true, buffTabEngine = true,
+    totemPresetState = true, questTimerState = true, unknownEvents = true, tt = true, p2 = true, profileLabels = true, taintLogCVar = true,
+    gold = true }   -- the gold ledger is today's purse by design
+local function diffTables(a, b, path, out)
+    for k, v in pairs(a) do
+        local here = path .. "." .. tostring(k)
+        if type(v) == "table" and type(b[k]) == "table" then diffTables(v, b[k], here, out)
+        elseif b[k] ~= v then out[#out + 1] = here .. ": saved " .. tostring(v) .. " now " .. tostring(b[k]) end
+    end
+end
+function T.a_login_with_no_input_rewrites_none_of_the_saved_player_state()
+    b5dWorld({}, { noPoke = true, pre = function() installTracker(false) end })
+    local Config = FS.Config
+    for key, value in pairs({ ["tracker.w"] = 300, ["tracker.alpha"] = 70, ["chat.w"] = 640, ["chat.bgAlpha"] = 40, ["bars.party.w"] = 160 }) do
+        Config.Set(key, value)
+    end
+    for _, key in ipairs({ "you", "next", "prc" }) do pressKey(key) end
+    pressQuestsKey()
+    pressKey("chat")
+    local db = ForeverSTUwaveDB
+    db.xpVariant = 2; db.consoleEnabled = false; db.minimapTrayOpen = true; db.chatFontSize = 15; db.chatLevels = true
+    db.totemPicks = { ["Player-1"] = { earth = { id = 8075, name = "x" } } }
+    db.gold = { ["Player-1"] = { copper = 5 } }
+    Config.NewProfile("Other"); Config.SetActiveProfile("Other"); Config.Set("tracker.alpha", 50); Config.SetActiveProfile("Default")
+    local saved = load("return " .. serialize(ForeverSTUwaveDB))()
+    reload({ trackerCollapsed = false })
+    local out = {}
+    local now = ForeverSTUwaveDB
+    for k, v in pairs(saved) do
+        if not LOGIN_MAY_REWRITE[k] then
+            if type(v) == "table" and type(now[k]) == "table" then diffTables(v, now[k], k, out)
+            elseif now[k] ~= v then out[#out + 1] = k .. ": saved " .. tostring(v) .. " now " .. tostring(now[k]) end
+        end
+    end
+    table.sort(out)
+    eq(#out, 0, "rewritten at login: " .. table.concat(out, " ;; "))
 end
 
 function T.chat_on_in_a_fight_waits_for_the_fight_to_end()

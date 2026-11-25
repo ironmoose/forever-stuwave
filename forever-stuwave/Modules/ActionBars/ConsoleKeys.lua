@@ -177,16 +177,73 @@ end
 local function Notify(piece, on)
     for _, fn in ipairs(onChanged) do fn(piece, on) end
 end
+-- THE QUESTS KEY IS REMEMBERED. The game keeps the tracker's collapsed state in one Lua field and never saves it, so a
+-- /reload brings it back expanded. The state is saved per profile (FS.Config "tracker.collapsed", true = collapsed) every
+-- time the container's SetCollapsed runs, whoever called it: this key's click, the tracker's own minimise button, the game
+-- expanding it for a scenario or a quest popup. It is put back by TrackerRestore (below) once the profile is final.
+-- Until that first reconcile (`trackerSettled`) the hook saves nothing, so the game's own login state cannot overwrite
+-- what the last session left.
+local TRACKER_KEY = "tracker.collapsed"
+if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(TRACKER_KEY, false) end
+local trackerSettled = false
+local trackerPending = false
+
+local function TrackerSave()
+    local Config = FS.Config
+    if not trackerSettled or type(Config) ~= "table" or type(Config.Set) ~= "function" then return end
+    Config.Set(TRACKER_KEY, not TrackerOpen())
+end
+
 local hookedTracker, hookedChat = false, false
-function Switch.HookLate()
+-- The post-hook on the container's SetCollapsed: moves the key and saves the state. Module power: with the Quest tracker
+-- switch off the game's own tracker is left unhooked (the key still clicks its minimise button, it just does not follow a
+-- collapse made some other way, and nothing is saved or restored).
+function Switch.HookTracker()
     local tracker = Tracker()
-    -- Module power: with the Quest tracker switch off the game's own tracker is left unhooked (the key still clicks its
-    -- minimise button, it just does not follow a collapse made some other way).
     local MS = FS.ModuleSwitch
     local trackerOurs = MS == nil or MS.On("m.track")
     if trackerOurs and not hookedTracker and type(tracker) == "table" and type(tracker.SetCollapsed) == "function" then
-        hookedTracker = pcall(hooksecurefunc, tracker, "SetCollapsed", function() Notify("quests", TrackerOpen()) end)
+        hookedTracker = pcall(hooksecurefunc, tracker, "SetCollapsed", function()
+            Notify("quests", TrackerOpen())
+            TrackerSave()
+        end)
     end
+    return hookedTracker
+end
+
+-- Puts the saved state back: out of combat only (a combat login or a profile switch in a fight waits for PLAYER_REGEN_ENABLED),
+-- and a call only when the tracker is not already in the wanted state, so a player who never collapses it never has
+-- the game's tracker touched at all. Read from the profile at run time (the saved table arrives at ADDON_LOADED, the
+-- character's profile at PLAYER_LOGIN at the latest), so it is first run from PLAYER_ENTERING_WORLD.
+--
+-- TAINT. SetCollapsed writes the container's own `isCollapsed` field and re-lays the modules out, and this runs from addon
+-- code, so that field is written tainted. There is no clean route from an insecure caller: the key's secure click
+-- would run the same Blizzard handlers in the same tainted thread (and play the click sound), and the restricted
+-- environment has no Click for an unprotected button, so a secure snippet cannot do it either. What is done instead is
+-- to keep the exposure small: a call only when the saved state differs from the live one (never for an expanded
+-- tracker), only out of combat, once per login or profile change, and the field is rewritten clean by the game's own
+-- code the next time the player presses the key or the tracker's button.
+function ConsoleKeys.TrackerRestore()
+    local Config = FS.Config
+    if type(Config) ~= "table" or type(Config.Get) ~= "function" then return end
+    if not Switch.HookTracker() then return end
+    local tracker = Tracker()
+    if type(tracker.IsCollapsed) ~= "function" then return end
+    if InCombatLockdown() then
+        trackerPending = true
+        return
+    end
+    trackerPending = false
+    local want = Config.Get(TRACKER_KEY) == true
+    if want ~= not TrackerOpen() then
+        local ok, err = pcall(tracker.SetCollapsed, tracker, want)
+        if not ok then Degrade("tracker", err) end
+    end
+    trackerSettled = true
+end
+
+function Switch.HookLate()
+    Switch.HookTracker()
     local Chat = FS.Chat
     if not hookedChat and not ChatModuleOff() and type(Chat) == "table" and type(Chat.ApplyWindowState) == "function" then
         local wasOpen = ChatOpen()
@@ -805,10 +862,24 @@ if FS.Layout and FS.Layout.OnRescale then FS.Layout.OnRescale(Reseat) end
 local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("PLAYER_ENTERING_WORLD")
-events:SetScript("OnEvent", function()
+events:SetScript("OnEvent", function(_, event)
+    -- The saved quests state goes back at the first world entry (the profile is final by then) and again once, a moment
+    -- later, in case the game laid the tracker out after this handler; a fight at login waits for its end.
+    if event == "PLAYER_ENTERING_WORLD" or trackerPending then
+        pcall(ConsoleKeys.TrackerRestore)
+        if event == "PLAYER_ENTERING_WORLD" and C_Timer and C_Timer.After then
+            C_Timer.After(1, function() pcall(ConsoleKeys.TrackerRestore) end)
+        end
+    end
     Ensure()
     Refresh()
 end)
+
+-- Another profile holds another tracker state: follow it when the profile changes (a row change fires this too, with the
+-- state already in place, and then there is nothing to do).
+if FS.Config and FS.Config.OnChange then
+    FS.Config.OnChange(TRACKER_KEY, function() pcall(ConsoleKeys.TrackerRestore) end)
+end
 
 -- Test and diagnostic surface.
 ConsoleKeys.keys = keys
