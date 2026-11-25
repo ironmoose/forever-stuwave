@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.0-beta.5.2 (2026-11-24)
+
+Smoother frames while moving, a Forever STUwave button in the game menu, and a way to send a stutter report.
+
+### New
+- Game menu: a Forever STUwave button sits right above AddOns. One click closes the menu and opens /fsconfig.
+- /fsperf: if the game still stutters, type `/fsperf`, play for a minute, then `/fsbug stutter` and send the report. It saves the slow frames and what fired in them. `/fsperf on` (then /reload) adds per addon CPU detail; `/fsperf off` (then /reload) turns it back off. It is off by default. See docs/TESTING.md.
+
+### Fixes
+- Fewer stutters every few seconds while running around. The data bar was reading addon memory every second and the CPU rate every frame, and each read was a felt hitch; it now reads memory every 5 minutes and the CPU rate every 10 seconds.
+- Fewer stutters on busy events: action bars, nameplates, unit frames, the Shaman shock discs and every class module now fold bursts of the same event into one pass per frame and skip repeat work.
+- Priest: targeting a party member no longer doubles every shield and Mending update.
+- Priest: the Inner Fire medallion arms again (it threw "Font not set" for some players).
+- Prayer of Mending keeps tracking on a friend outside your party.
+- Quest rewards: the Experience label stays light on the dark panel.
+
 ## 1.0.0-beta.5.1.1 (2026-11-23)
 
 Two small fixes: tooltips over the stance and seal buttons, and the text cursor in search boxes.

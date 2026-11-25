@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Forever STUwave
 ## Notes: Custom UI for WoW Forever.
-## Version: 1.0.0-beta.5.1.1
+## Version: 1.0.0-beta.5.2
 ## Author: ironmoose
 ## IconTexture: Interface\AddOns\forever-stuwave\Media\Textures\addon_icon
 ## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog, ForeverSTUwaveExport
