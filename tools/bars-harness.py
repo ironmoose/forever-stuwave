@@ -24,6 +24,8 @@ Exit 0 = every check passed.
 from __future__ import annotations
 
 import importlib.util
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -34,6 +36,7 @@ except ImportError:
 
 HERE = Path(__file__).resolve().parent
 ADDON = HERE.parent / "forever-stuwave"
+MOCKUPS = Path(os.environ.get("FS_MOCKUPS_DIR", HERE.parent / "mockups"))
 
 _spec = importlib.util.spec_from_file_location("configwindow_harness", HERE / "configwindow-harness.py")
 CWH = importlib.util.module_from_spec(_spec)
@@ -471,23 +474,110 @@ function T.rows_a_frame_does_not_apply_yet_say_so_and_the_raid_rows_it_does_appl
     yes(not FS.ConfigBars.IsWired("raid", "hpFmt") and not FS.ConfigBars.IsWired("party", "hpH"))
 end
 
-function T.the_pet_page_has_its_cast_bar_rows_the_hunter_dot_and_greyed_rows_for_what_is_not_applied()
+-- The pet frame, as far as the config page can reach it: a dock state and a preview that is a plain frame.
+local function stubPet(docked)
+    local made = {}
+    FS.PetFrame = {
+        IsDocked = function() return docked.on end,
+        NewStylePreview = function(stage)
+            local f = CreateFrame("Frame", nil, stage); f:SetSize(348, 68)
+            made[#made + 1] = f
+            return { frame = f, Restyle = function() end }
+        end,
+    }
+    return made
+end
+
+-- Every shared row the pet frame applies (Bars.WIRED.pet): all live, none greyed.
+local PET_APPLIED = { "w", "fh", "alpha", "bgAlpha", "hpStyle", "hpH", "hpFmt", "hpTs", "hpTa", "hpTx",
+    "mpStyle", "mpH", "mpFmt", "mpTs", "mpTa", "mpTx", "name", "nameSize", "nameX", "level", "levelSize", "levelX" }
+
+function T.the_pet_style_tab_has_the_cast_bar_rows_the_preview_and_the_rows_the_pet_frame_applies()
     local S, C, CW = boot()
+    local docked = { on = false }
+    local made = stubPet(docked)
     CW.Open("pet", "style")
-    for _, key in ipairs({ "pet.cast", "pet.castShow", "pet.castFree", "pet.castIcon", "pet.castName", "pet.castTimer", "pet.previewKind" }) do
+    for _, key in ipairs({ "pet.cast", "pet.castShow", "pet.castFree", "pet.castIcon", "pet.castName", "pet.castTimer" }) do
         yes(CW.RowByKey(key, "pet"), key)
     end
+    eq(#made, 1, "the preview is the pet frame's own drawing")
     local free = CW.RowByKey("pet.castFree", "pet")
     yes(not free.row:IsShown(), "When hidden waits for a cast bar that is not always shown")
     C.Set("pet.castShow", "casting"); CW.RefreshAll()
     yes(free.row:IsShown(), "When hidden shows once the bar can hide")
-    CW.Open("pet", "hunter")
-    yes(CW.RowByKey("pet.happy", "pet"), "happiness dot")
-    eq(C.Get("pet.happy"), false)
+    for _, suffix in ipairs(PET_APPLIED) do
+        local e = CW.RowByKey("bars." .. suffix, "pet")
+        yes(e, "shared row bars." .. suffix)
+        yes(not e.row.fsRowOff, "bars." .. suffix .. " is applied to the pet frame, so it is not greyed")
+        yes(FS.ConfigBars.IsWired("pet", suffix), suffix .. " is on the applied list")
+    end
+    for _, suffix in ipairs({ "glow", "glowAmt" }) do
+        local e = CW.RowByKey("bars." .. suffix, "pet")
+        yes(e and e.row.fsRowOff, "bars." .. suffix .. " is not applied to the pet frame yet, so it is greyed")
+    end
+end
+
+function T.the_pet_kind_picker_sits_in_the_preview_header_and_switches_the_preview_kind()
+    local S, C, CW = boot()
+    stubPet({ on = false })
     CW.Open("pet", "style")
-    local w = CW.RowByKey("bars.hpH", "pet")
-    yes(w, "shared rows build for the pet frame")
-    yes(w.row.fsRowOff, "a row the pet frame does not apply yet is greyed")
+    eq(C.Get("pet.previewKind"), "hunter")
+    yes(CW.RowByKey("pet.previewKind", "pet") == nil, "the picker is in the header, not a row")
+    local picked
+    for _, b in ipairs(ALL) do
+        if b.fsLabel and b.fsLabel.GetText and b.fsLabel:GetText() == "Warlock demon" and b.GetScript and b:GetScript("OnClick") then picked = b end
+    end
+    yes(picked, "a Warlock demon button in the header")
+    picked:GetScript("OnClick")(picked)
+    eq(C.Get("pet.previewKind"), "demon")
+end
+
+function T.docked_beside_the_console_the_pet_size_rows_are_greyed_with_a_reason_and_float_frees_them()
+    local S, C, CW = boot()
+    local docked = { on = true }
+    stubPet(docked)
+    CW.Open("pet", "style")
+    for _, key in ipairs({ "bars.w", "bars.fh", "bars.hpH", "bars.mpH" }) do
+        local e = CW.RowByKey(key, "pet")
+        yes(e.row.fsRowOff, key .. " is locked while docked")
+        yes(e.why and e.why:find("Console", 1, true), key .. " says the Console sets the size")
+        yes(not e.why:find("not applied", 1, true), key .. " is not the not-applied line")
+    end
+    yes(not CW.RowByKey("bars.hpTs", "pet").row.fsRowOff, "text size is not the dock's to set")
+    yes(not CW.RowByKey("bars.alpha", "pet").row.fsRowOff, "opacity is not the dock's to set")
+    docked.on = false; CW.RefreshAll()
+    for _, key in ipairs({ "bars.w", "bars.fh", "bars.hpH", "bars.mpH" }) do
+        yes(not CW.RowByKey(key, "pet").row.fsRowOff, key .. " is free once the bar floats")
+    end
+end
+
+function T.the_pet_size_rows_stay_live_when_the_pet_frame_is_missing()
+    local S, C, CW = boot()
+    FS.PetFrame = nil
+    CW.Open("pet", "style")
+    yes(not CW.RowByKey("bars.w", "pet").row.fsRowOff, "no pet frame, no dock to lock the row")
+end
+
+-- Criterion 6: every row of the prototype's three Pet tabs has its row here.
+function T.every_row_of_the_prototype_pet_tabs_is_registered_on_the_pet_page()
+    local S, C, CW = boot()
+    stubPet({ on = false })
+    local seen = {}
+    for tab, keys in pairs(__protoPet) do
+        CW.Open("pet", tab)
+        for _, key in pairs(keys) do
+            if key ~= "pet.previewKind" then
+                yes(CW.RowByKey(key, "pet"), "prototype row " .. key .. " on the " .. tab .. " tab")
+            end
+        end
+        seen[tab] = true
+    end
+    yes(seen.style and seen.hunter and seen.warlock, "three tabs parsed from the prototype")
+    local swatches = 0
+    for _, e in ipairs(CW.Rows()) do
+        if e.page == "pet" and e.tab == "hunter" and e.kind == "swatch" then swatches = swatches + 1 end
+    end
+    eq(swatches, 1, "the happiness colour swatch")
 end
 
 function T.pointing_at_a_switch_turns_the_feature_on_in_the_preview_for_the_moment()
@@ -519,6 +609,17 @@ def sources() -> dict:
     }
 
 
+def proto_pet_rows() -> dict[str, list[str]]:
+    """The prototype's Pet bar tabs: tab key -> the setting keys of its rows (proto-pages.js)."""
+    src = (MOCKUPS / "proto-src-2026-11-25" / "proto-pages.js").read_text(encoding="utf-8")
+    start = src.index(" {key:'pet',label:'Pet bar',tabs:[")
+    end = src.index(" {key:'profiles'", start)
+    tabs: dict[str, list[str]] = {}
+    for chunk in re.split(r"\n  \{key:'", src[start:end])[1:]:
+        tabs[chunk.split("'", 1)[0]] = re.findall(r"\bk:'(pet\.[A-Za-z]+)'", chunk)
+    return tabs
+
+
 def boot():
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(CWH.MOCK)
@@ -526,6 +627,7 @@ def boot():
     lua.globals().__session = lua.eval(SESSION)
     src = sources()
     lua.globals().__src = CWH.to_lua(lua, src)
+    lua.globals().__protoPet = CWH.to_lua(lua, proto_pet_rows())
     lua.globals().__checks = lua.execute(CHECKS)
     return lua
 
