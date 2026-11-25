@@ -21,7 +21,7 @@ A rebuilt /fsconfig with search, tabs and a power button for every module, a pag
   - Party frames and Raid frames: a Style tab each, with a preview. Width, bar heights and looks, text formats, background opacity, markers for your heals over time and for debuffs you can remove, an aggro ring with the share of threat, and (party) a tray of cleansable debuffs and missing buffs. Raid frames also get Scale, Group columns or Grid, Frames per row and Sort by.
   - Pet bar: Style, Hunter and Warlock tabs. Size, text, looks, background opacity, a cast bar for the pet, Wider or Leave the gap when the cast bar is hidden, and a Hunter happiness dot.
   - Nameplates: Size, Text, Parts and Friendly tabs, each with a preview of the plates. Plate width, health, power and cast bar heights, name size, level, health text, quest marker, auras row, raid marker, and friendly plates as the same as enemy, smaller or off.
-  - Roles: tabs for Tank, Healer, Melee and Ranged. Auto picks your role from your group role, then your talents, then your class. Plates colour by threat for your role, with optional Aggro % or Lead text, an alert when you lose aggro (tank) or a mob turns to you (healer), a warning when you near the tank's threat (melee, ranged) and a dim for a target out of range. Each alert and sound has an off switch.
+  - Roles: tabs for Tank, Healer, Melee and Ranged. Auto picks your role from your group role, then your talents, then your class. Turn on threat colours for your role's plates, with optional Aggro % or Lead text, an alert when you lose aggro (tank) or a mob turns to you (healer), a warning when you near the tank's threat (melee, ranged) and a dim for a target out of range. Each alert and sound has an off switch.
   - Class modules: Background and Border switches for the module plate, Opacity, and an Alert scale for the Warrior and Druid alerts. A tab per class: Priest Show, Hunter low ammo warning, the four Warlock cues, the three Warrior alerts.
   - Addon tabs: every class tab on one page, with a strip of the nine classes.
   - Chat: window width and height, background opacity, line tint strength, a switch and colour for each kind of line, and a Raid kind.
@@ -47,8 +47,8 @@ A rebuilt /fsconfig with search, tabs and a power button for every module, a pag
 - The Move and Reset position rows for the party and raid frames are gone from their pages. Use /fsedit, or EDIT LAYOUT on the Layout page.
 - Priest: "Right side shows" is now Show on Class modules, Priest, with Auto, Spirit Tap and Inner Fire, Prayer of Mending and Nothing. The Inner Fire reminder reads "Pulse Inner Fire when it is missing".
 - The Class module background slider is now Opacity on Class modules, General, next to the Background and Border switches.
-- A healer now sees missing health ("-880") on the party frames instead of the percent. Change it under Party frames, Style, Text, or on Roles.
-- Plate threat colours follow your role. A tank sees cyan on you, amber slipping and pink off you; damage dealers see pink on you, amber close and cyan safe.
+- A healer can show missing health ("-880") on the party frames instead of the percent: Roles, Healer, Health text, or Party frames, Style, Text.
+- Plate threat colours can follow your role (off until you turn them on under Roles). A tank sees cyan on you, amber slipping and pink off you; damage dealers see pink on you, amber close and cyan safe.
 - The settings window opens larger (960 by 640).
 - The data bar's MEM and CPU segments start off. Turn them on under Data bar.
 - Quest tracker Height sets the height of the tracker in the game's Edit Mode layout, so move it once in /fsedit first. Width stays fixed.

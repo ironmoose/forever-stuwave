@@ -156,7 +156,13 @@ function go(opts)
     opts = opts or {}
     boot()
     FS.IsSecret = function(v) return rawequal(v, SECRET) or rawequal(v, SECRETSTR) end
-    FS.Config = mkConfig(opts.config)
+    -- The view's switches start off (a player who never opens the Roles page keeps the approved plates), so every
+    -- check here runs with them on unless it says otherwise.
+    local cfg = opts.config or {}
+    for _, key in ipairs({ "tank.aggro", "melee.warn", "melee.aggro", "melee.range", "ranged.warn", "ranged.aggro", "ranged.range" }) do
+        if cfg[key] == nil then cfg[key] = true end
+    end
+    FS.Config = mkConfig(cfg)
     FS.Layout = { ForwardError = function(e) __forwarded[#__forwarded + 1] = tostring(e) end }
     FS.FrameHelpers.RegisterEvents = function(f, list) for _, e in ipairs(list) do f:RegisterEvent(e) end end
     CLASSTOKEN = opts.class or CLASSTOKEN

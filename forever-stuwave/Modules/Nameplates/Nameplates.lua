@@ -3034,8 +3034,14 @@ do
 
     -- The older per profile key changed (the Nameplates page row, a profile switch): it is now a view of the module
     -- switch, so it writes that and the module switch's own change callback applies it.
+    -- A profile switch is not a choice: the module switch is account wide, so another profile's saved copy of the older
+    -- key must not turn the plates off or on for every character. The key is put back to the switch instead.
     function Plates.OnKeyChange(new)
-        local MS = FS.ModuleSwitch
+        local MS, config = FS.ModuleSwitch, FS.Config
+        if MS and config and type(config.Reapplying) == "function" and config.Reapplying() then
+            Plates.MirrorSwitch(MS.Wanted(Plates.MODULE))
+            return
+        end
         if MS then
             MS.Set(Plates.MODULE, new ~= false)
         else

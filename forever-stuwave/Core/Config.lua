@@ -125,9 +125,19 @@ local function BindLayout(reseat)
 end
 
 -- Call after the active profile's contents or identity changed; `oldSettings` is the table it replaced.
+local reapplying = false
 local function Reapply(oldSettings)
     BindLayout(true)
-    FireDifferences(oldSettings, ActiveTable().settings)
+    reapplying = true
+    local ok, err = pcall(FireDifferences, oldSettings, ActiveTable().settings)
+    reapplying = false
+    if not ok then FS.Layout.ForwardError(err) end
+end
+
+-- True while the change callbacks run because the active profile was switched, reset or imported, not because a row
+-- changed. A key that mirrors an account wide value (nameplates.enabled) ignores these.
+function Config.Reapplying()
+    return reapplying
 end
 
 local function SwitchTo(name)

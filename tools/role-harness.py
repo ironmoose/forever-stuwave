@@ -449,14 +449,14 @@ check(seen2 >= 5, "without the helper the events still register: " .. seen2)
     ("settings: defaults, kinds, ranges and options", r"""
 local R = enter({ login = false })
 local want = {
-    ["tank.aggro"] = { "tank", true }, ["tank.threat"] = { "tank", "off" }, ["tank.lost"] = { "tank", true },
+    ["tank.aggro"] = { "tank", false }, ["tank.threat"] = { "tank", "off" }, ["tank.lost"] = { "tank", true },
     ["tank.lost.snd"] = { "tank", true },
     ["heal.incoming"] = { "healer", true }, ["heal.range"] = { "healer", true }, ["heal.dispel"] = { "healer", true },
-    ["heal.hp"] = { "healer", "missing" }, ["heal.aggro"] = { "healer", true }, ["heal.aggro.snd"] = { "healer", true },
-    ["melee.warn"] = { "melee", true }, ["melee.pct"] = { "melee", 90 }, ["melee.aggro"] = { "melee", true },
-    ["melee.range"] = { "melee", true },
-    ["ranged.warn"] = { "ranged", true }, ["ranged.pct"] = { "ranged", 90 }, ["ranged.aggro"] = { "ranged", true },
-    ["ranged.range"] = { "ranged", true },
+    ["heal.hp"] = { "healer", "percent" }, ["heal.aggro"] = { "healer", true }, ["heal.aggro.snd"] = { "healer", true },
+    ["melee.warn"] = { "melee", false }, ["melee.pct"] = { "melee", 90 }, ["melee.aggro"] = { "melee", false },
+    ["melee.range"] = { "melee", false },
+    ["ranged.warn"] = { "ranged", false }, ["ranged.pct"] = { "ranged", 90 }, ["ranged.aggro"] = { "ranged", false },
+    ["ranged.range"] = { "ranged", false },
 }
 local n = 0
 for key, w in pairs(want) do
@@ -480,11 +480,11 @@ check(R.SETTINGS["ranged.pct"].min == 70 and R.SETTINGS["ranged.pct"].max == 100
     ("settings: a bad stored value reads as the default, a slider is held to its range and step", r"""
 local R = enter({ config = { ["tank.aggro"] = "yes", ["tank.threat"] = "loud", ["melee.pct"] = "lots", ["ranged.pct"] = 51,
     ["heal.hp"] = 4 } })
-check(R.Get("tank.aggro") == true, "a word for a switch")
+check(R.Get("tank.aggro") == false, "a word for a switch")
 check(R.Get("tank.threat") == "off", "an unknown choice")
 check(R.Get("melee.pct") == 90, "a word for a number")
 check(R.Get("ranged.pct") == 70, "a number past the range is held to it, got " .. tostring(R.Get("ranged.pct")))
-check(R.Get("heal.hp") == "missing", "a number for a choice")
+check(R.Get("heal.hp") == "percent", "a number for a choice")
 FS.Config.Set("melee.pct", 83)
 check(R.Get("melee.pct") == 85, "a value off the step snaps: " .. tostring(R.Get("melee.pct")))
 FS.Config.Set("melee.pct", 500)
@@ -497,9 +497,10 @@ __class, __points = "SHAMAN", { 0, 31, 0 }
 local R = enter()
 FS.Config.Set("tank.aggro", false)
 FS.Config.Set("heal.incoming", false)
-FS.Config.Set("melee.warn", false)
+FS.Config.Set("melee.warn", true)
 check(R.Current() == "melee", "melee")
 check(R.Active("melee.warn") == true and R.Active("tank.aggro") == false and R.Active("heal.incoming") == false, "active")
+FS.Config.Set("melee.warn", false)
 check(R.Disabled("melee.warn") == true, "your own switch off is disabled")
 check(R.Disabled("tank.aggro") == false and R.Disabled("heal.incoming") == false, "another role's switch off does nothing")
 check(R.Value("melee.pct") == 90 and R.Value("tank.threat") == nil, "Value is nil for another role")
@@ -515,7 +516,7 @@ FS = { IsSecret = function() return false end }
 __frames = {}
 assert(load(__ROLE_SRC, "@Role.lua"))("forever-stuwave", FS)
 local R = FS.Role
-check(R.Get("tank.aggro") == true and R.Get("heal.hp") == "missing", "defaults without a config")
+check(R.Get("tank.aggro") == false and R.Get("heal.hp") == "percent", "defaults without a config")
 """),
 
     ("the party rows repaint at once on a role change, a healer switch and the health text pick, and only then", r"""
@@ -537,9 +538,9 @@ check(#runs == base + 2, "a healer switch repaints")
 FS.Config.Set("heal.incoming", false)
 FS.Config.Set("heal.range", false)
 check(#runs == base + 4, "each healer switch repaints")
-FS.Config.Set("heal.hp", "percent")
+FS.Config.Set("heal.hp", "missing")
 check(#runs == base + 5, "the health text pick repaints")
-FS.Config.Set("tank.aggro", false)
+FS.Config.Set("tank.aggro", true)
 check(#runs == base + 5, "other keys do not")
 FS.PartyFrames = nil
 FS.Config.Set("heal.dispel", true)
@@ -555,6 +556,13 @@ check(R.SOURCE_TEXT.talents == "from talents" and R.SOURCE_TEXT.group == "from g
 
 
 # ---- the page tests: the real Role.lua and PlateThreat.lua under the config window mock ------------------------------
+
+# Defaults that differ from the prototype on purpose: each would change a look players already have (the plate colours,
+# the target dim, the party health text) for a character who never opens the Roles page, so they start off or at today's
+# value (review 2026-11-25, approved visuals locked). The prototype shows them on.
+KEEP_TODAY = {"tank.aggro": False, "melee.warn": False, "melee.aggro": False, "melee.range": False,
+              "ranged.warn": False, "ranged.aggro": False, "ranged.range": False, "heal.hp": "Percent"}
+
 
 def proto_roles() -> dict:
     """The role page of proto-pages.js: {tab: {"label": .., "sections": [{title, role, hidden, tip, rows}]}}."""
@@ -599,6 +607,8 @@ def proto_roles() -> dict:
                 c = re.search(r"(?:^|,)c:\[(\[.*\])\]", rest)
                 if c:
                     row["c"] = [list(pair) for pair in re.findall(r"\['(#[0-9a-f]{6})','([^']*)'\]", c.group(1))]
+                if row.get("k") in KEEP_TODAY:
+                    row["d"] = KEEP_TODAY[row["k"]]
                 section["rows"].append(row)
             sections.append(section)
         tabs[key] = {"label": label, "sections": sections}
@@ -851,9 +861,9 @@ end
 function T.the_rows_of_another_role_stay_editable()
     local W = boot({ preWindow = roles() })
     W.Open("role", "tank")
-    eq(FS.Config.Get("tank.aggro"), true)
-    yes(press("Aggro colours"), "the tank's switch did not press while the role is melee")
     eq(FS.Config.Get("tank.aggro"), false)
+    yes(press("Aggro colours"), "the tank's switch did not press while the role is melee")
+    eq(FS.Config.Get("tank.aggro"), true)
     yes(press("Lost aggro"))
     eq(FS.Config.Get("tank.lost"), false)
 end
@@ -864,13 +874,17 @@ function T.dependent_rows_follow_their_switch()
     local sound, colours = W.RowByKey("tank.lost.snd", "role"), nil
     for _, e in ipairs(entries("tank")) do if e.kind == "swatch" then colours = e end end
     no(sound.disabled, "the sound row starts on")
-    no(colours.disabled, "the colours row starts on")
+    yes(colours.disabled, "the colours row starts off with Aggro colours")
+    FS.Config.Set("tank.aggro", true)
+    no(colours.disabled, "the colours row comes on with Aggro colours")
     FS.Config.Set("tank.lost", false)
     yes(W.RowByKey("tank.lost.snd", "role").disabled, "Sound follows Lost aggro")
     FS.Config.Set("tank.aggro", false)
     yes(colours.disabled, "Colours follows Aggro colours")
     yes(colours.why and colours.why:find("Aggro colours", 1, true), "the reason names the switch")
     W.Open("role", "melee")
+    FS.Config.Set("melee.warn", true)
+    no(W.RowByKey("melee.pct", "role").disabled, "Warn at comes on with Warn near the tank")
     FS.Config.Set("melee.warn", false)
     yes(W.RowByKey("melee.pct", "role").disabled, "Warn at follows Warn near the tank")
     FS.Config.Set("melee.aggro", false)
@@ -902,14 +916,14 @@ function T.the_health_text_row_is_live_until_the_party_style_tab_sets_its_own_te
     W.Open("role", "healer")
     local e = W.RowByKey("heal.hp", "role")
     no(e.disabled, "the party frames draw the pick, so the row is live")
-    eq(FS.Config.Get("heal.hp"), "missing")
+    eq(FS.Config.Get("heal.hp"), "percent")
     yes(not (e.why and e.why:find("Not applied yet", 1, true)), "no row says it is not applied yet")
     stored = true
-    FS.Config.Set("heal.hp", "percent")
+    FS.Config.Set("heal.hp", "missing")
     e = W.RowByKey("heal.hp", "role")
     yes(e.disabled, "a party Style Text that was set wins, so the row says it does nothing")
     yes(e.why and e.why:find("Party style tab", 1, true), "the reason names the setting that wins")
-    eq(FS.Config.Get("heal.hp"), "percent", "the pick is kept")
+    eq(FS.Config.Get("heal.hp"), "missing", "the pick is kept")
 end
 
 function T.the_threat_text_and_warn_rows_write_their_keys()

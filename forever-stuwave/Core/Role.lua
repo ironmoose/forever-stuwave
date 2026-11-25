@@ -66,7 +66,7 @@ local GROUP_ROLES = { TANK = "tank", HEALER = "healer", DAMAGER = "damage" }
 
 local SWITCH, CHOICE, SLIDER = "switch", "choice", "slider"
 local DEFS = {
-    { "tank.aggro", "tank", SWITCH, true },
+    { "tank.aggro", "tank", SWITCH, false },
     { "tank.threat", "tank", CHOICE, "off",
         options = { { value = "off", text = "Off" }, { value = "pct", text = "Aggro %" }, { value = "lead", text = "Lead" } } },
     { "tank.lost", "tank", SWITCH, true },
@@ -74,18 +74,20 @@ local DEFS = {
     { "heal.incoming", "healer", SWITCH, true },
     { "heal.range", "healer", SWITCH, true },
     { "heal.dispel", "healer", SWITCH, true },
-    { "heal.hp", "healer", CHOICE, "missing",
+    -- Every switch that changes a look players already have (plate colours, the target dim, the party text) starts off or at
+    -- today's value, so a character who never opens the Roles page sees the approved look. New alerts start on.
+    { "heal.hp", "healer", CHOICE, "percent",
         options = { { value = "none", text = "None" }, { value = "percent", text = "Percent" }, { value = "missing", text = "Missing" } } },
     { "heal.aggro", "healer", SWITCH, true },
     { "heal.aggro.snd", "healer", SWITCH, true },
-    { "melee.warn", "melee", SWITCH, true },
+    { "melee.warn", "melee", SWITCH, false },
     { "melee.pct", "melee", SLIDER, 90, min = 70, max = 100, step = 5 },
-    { "melee.aggro", "melee", SWITCH, true },
-    { "melee.range", "melee", SWITCH, true },
-    { "ranged.warn", "ranged", SWITCH, true },
+    { "melee.aggro", "melee", SWITCH, false },
+    { "melee.range", "melee", SWITCH, false },
+    { "ranged.warn", "ranged", SWITCH, false },
     { "ranged.pct", "ranged", SLIDER, 90, min = 70, max = 100, step = 5 },
-    { "ranged.aggro", "ranged", SWITCH, true },
-    { "ranged.range", "ranged", SWITCH, true },
+    { "ranged.aggro", "ranged", SWITCH, false },
+    { "ranged.range", "ranged", SWITCH, false },
 }
 
 Role.SETTINGS = {}
@@ -392,7 +394,14 @@ events:SetScript("OnEvent", function(_, event)
             Refresh("all")
         elseif event == WORLD_EVENT then
             -- a GUID that was not readable at login is by now: copy the pick account wide
-            if pick ~= "auto" then Store() end
+            if pick ~= "auto" then
+                Store()
+            elseif Guid() then
+                -- the character copy was not restored and the GUID was late at login: the account copy is readable now
+                local account = AccountTable(false)
+                local value = account and CleanPick(account[Guid()]) or nil
+                if value then pick = value end
+            end
             Refresh("all")
         elseif Is(TREE_EVENTS, event) then
             Refresh("tree")
