@@ -730,7 +730,7 @@ def check_the_files_are_clean() -> list[str]:
     problems = []
     for path in (MS_FILE, MODULES_FILE):
         text = path.read_text(encoding="utf-8")
-        if "—" in text or "–" in text:
+        if "\u2014" in text or "\u2013" in text:
             problems.append(f"{path.name}: an em or en dash")
         if re.search(r"\bReloadUI\s*\(", text):
             problems.append(f"{path.name}: calls ReloadUI (addon code cannot reload; the secure button does)")
