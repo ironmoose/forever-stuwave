@@ -496,9 +496,10 @@ local BAGS_COLOR_FULL = { 1, 0.180, 0.592 }  -- --pink
 local ADDON_NAME = addonName
 
 -- UpdateAddOnMemoryUsage walks every loaded addon's heap in one frame, so calling
--- it on the 1 s bar tick made a hitch every second (2026-11-24). It reads at most
--- every MEMORY_INTERVAL and never in combat; the readout holds the last value.
-local MEMORY_INTERVAL = 30
+-- it on the 1 s bar tick made a hitch every second (2026-11-24). Even every 30 s it
+-- was a 23 ms frame with Questie's 250 MB loaded (/fsperf, 2026-11-24), so it reads
+-- at most every MEMORY_INTERVAL and never in combat; the readout holds the last value.
+local MEMORY_INTERVAL = 300
 local lastMemoryAt
 
 local function UpdateMemory(segment)
@@ -527,6 +528,10 @@ end
 -- Previous cumulative reading, so UpdateCPU can turn it into a rate.
 local lastCPUTotal, lastCPUAt, cpuRate
 
+-- UpdateAddOnCPUUsage costs 12 to 16 ms a call with profiling on (/fsperf, 2026-11-24), a stutter every second on the
+-- 1 s bar tick, so the rate is re-read at most every CPU_INTERVAL; it is a rate over that window either way.
+local CPU_INTERVAL = 10
+
 local function UpdateCPU(segment)
     if not (GetAddOnCPUUsage and UpdateAddOnCPUUsage) then
         segment.valueText:SetText("--")
@@ -541,9 +546,10 @@ local function UpdateCPU(segment)
         return
     end
 
+    local now = GetTime()
+    if lastCPUAt and now - lastCPUAt < CPU_INTERVAL then return end
     UpdateAddOnCPUUsage()
     local total = GetAddOnCPUUsage(ADDON_NAME) or 0
-    local now = GetTime()
 
     -- GetAddOnCPUUsage is CUMULATIVE milliseconds since profiling started, not
     -- a per-frame cost. Printed raw it only ever goes up, which reads like a
