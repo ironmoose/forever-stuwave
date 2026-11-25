@@ -840,26 +840,24 @@ end
 
 -- One row per segment, in order, for the page to draw:
 --   key, label (the default title), title (the title now on the bar, "" for none), titleIsDefault,
---   on (it is on the bar), available, reason (why it is not available), tip (the row's ? text),
+--   on (it is on the bar, which is what the switch shows), available, reason (why it is not available), tip (the row's ? text),
 --   canUp / canDown (a neighbour to swap with), lock (nil, or why the switch cannot be used: the segment is not
 --   available, or it is the last one on).
 function Segments.Model()
     local order = EffectiveOrder()
-    local onCount = 0
-    for _, key in ipairs(order) do
-        local def = DEF_BY_KEY[key]
-        if SegmentAvailable(def) and SettingOn(def) then onCount = onCount + 1 end
-    end
+    local shown = ShownKeys()
+    local onBar = {}
+    for _, key in ipairs(shown) do onBar[key] = true end
     local rows = {}
     for index, key in ipairs(order) do
         local def = DEF_BY_KEY[key]
         local available = SegmentAvailable(def)
-        local on = available and SettingOn(def)
+        local on = onBar[key] == true
         local title = EffectiveTitle(def)
         local lock
         if not available then
             lock = def.missing
-        elseif on and onCount <= 1 then
+        elseif on and #shown <= 1 then
             lock = LOCK_TEXT
         end
         rows[index] = {
@@ -1160,9 +1158,9 @@ local function TryUpdate(segment)
     end
 end
 
--- The widest the value part (what sits right of the title) can get, so a long title is clipped to what is left of
--- the segment instead of running into it. Estimates at the font sizes above: a value of a few characters, the
--- meter, or the three coin pairs.
+-- The widest the value part (what sits right of the title) is taken to get, so a long title the player typed is
+-- clipped to what is left of the segment instead of running into it. Estimates at the font sizes above: a value of
+-- a few characters, the meter, or the three coin pairs.
 local VALUE_RESERVE = 40
 local COIN_TEXT_RESERVE = 28
 local TITLE_END_PAD = 4
@@ -1177,26 +1175,30 @@ local function BodyReserve(segment)
 end
 
 -- Seats the title and what follows it. A segment with a title keeps the original anchors (label at PAD_X, the body
--- LABEL_GAP right of it); with an empty title, or too little room for one, the label hides and the body starts at
--- PAD_X. A title wider than the room left in the segment (its width less the body) is cut to that, with the label's
--- own width, so it ends before the value rather than over it. Only regions of the segment's own frame are touched.
+-- LABEL_GAP right of it); with an empty title the label hides and the body starts at PAD_X. A title the player
+-- typed that is wider than the room left in the segment (its width less BodyReserve) is cut to that room with the
+-- label's own width, so it ends before the value instead of running over it, and with less room than TITLE_MIN_W it
+-- is dropped like an empty one. The default title is never touched, so a bar left at its defaults lays out as it
+-- always did, at any width. Only regions of the segment's own frame are touched.
 local function SeatTitle(segment)
     local label = segment.labelText
     local visible = segment.title ~= nil and segment.title ~= ""
-    if visible and segment.width then
+    local clip
+    if visible and segment.titleCustom and segment.width then
         local room = segment.width - PAD_X - LABEL_GAP - BodyReserve(segment) - TITLE_END_PAD
         if room < TITLE_MIN_W then
             visible = false
         else
             local natural = label:GetStringWidth()
-            if type(natural) == "number" and natural > room then
-                label:SetWidth(room)
-            else
-                label:SetWidth(0)
-            end
+            if type(natural) == "number" and natural > room then clip = room end
         end
-    elseif visible then
-        label:SetWidth(0)
+    end
+    if clip then
+        label:SetWidth(clip)
+        segment.labelClipped = true
+    elseif segment.labelClipped then
+        label:SetWidth(0)   -- 0 gives the label its natural width back
+        segment.labelClipped = false
     end
     label:SetShown(visible)
     if segment.titleSeated == visible then return end
@@ -1212,7 +1214,9 @@ end
 
 -- Puts the title the settings give on the label, then seats it.
 local function ApplyTitle(segment)
-    segment.title = EffectiveTitle(DEF_BY_KEY[segment.key])
+    local def = DEF_BY_KEY[segment.key]
+    segment.title = EffectiveTitle(def)
+    segment.titleCustom = segment.title ~= def.label
     segment.labelText:SetText(segment.title)
     SeatTitle(segment)
 end

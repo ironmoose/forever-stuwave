@@ -18,6 +18,12 @@ widget method is a no-op). It pins the behaviour the bar promises:
     text the bar shows) and a "Realm" line (GetGameTime, 12-hour like the bar), anchored at the mouse (ANCHOR_CURSOR),
     refreshed when a minute rolls over, hidden on leave and on hide, never taking a tooltip another frame owns.
 
+  * SETTINGS (E1): databar.order, databar.seg.<key> and databar.title.<key> pick, order and rename the segments; a
+    change re-lays the bar out live (no reload), hidden segments stop updating, the STATUS slot keeps its rule (before
+    TIME, at the end without TIME), defaults leave the bar as it was (minus MEM and CPU, which start off), at least one
+    segment always stays on, titles are at most 10 characters, an empty one shows only the value, a long one is clipped
+    before the value, a change in combat waits for regen; FS.DataBarSegments is the API the config page calls.
+
     python3 tools/databar-harness.py
 
 Exit 0 = every check passed; otherwise the number of failures.
@@ -75,7 +81,15 @@ function Region:SetPoint(point, rel, relPoint, x, y)
 end
 function Region:ClearAllPoints() if refused(self, "ClearAllPoints") then return end self.pt = nil; self.pts = nil end
 function Region:Show() if refused(self, "Show") then return end local was = self.shown; self.shown = true; if not was then runHooks(self, "OnShow") end end
-function Region:Hide() if refused(self, "Hide") then return end local was = self.shown; self.shown = false; if was then runHooks(self, "OnHide") end end
+function Region:Hide()
+    if refused(self, "Hide") then return end
+    local was = self.shown
+    self.shown = false
+    if was then
+        runHooks(self, "OnHide")
+        if self.scripts and self.scripts.OnHide then self.scripts.OnHide(self) end
+    end
+end
 function Region:SetShown(v) if v then self:Show() else self:Hide() end end
 function Region:IsShown() return self.shown end
 function Region:HookScript(which, fn) self.hooks[which] = self.hooks[which] or {}; table.insert(self.hooks[which], fn) end
@@ -85,6 +99,7 @@ function Region:GetEffectiveScale() return self.scale * (self.parent and self.pa
 function Region:CreateTexture() return new("texture", self) end
 function Region:CreateFontString() return new("fontstring", self) end
 function Region:SetText(t) self.text = t end
+function Region:SetFormattedText(f, ...) self.text = string.format(f, ...) end
 function Region:GetStringWidth() return #(self.text or "") * 6.5 end   -- "STATUS" = 39
 function Region:GetStatusBarTexture() return new("texture", self) end
 
@@ -126,7 +141,27 @@ C_Container = { GetContainerNumFreeSlots = function() return __bagFree or 10 end
 unpack = unpack or table.unpack
 
 local noop = function() end
+-- FS.Config as Config.lua behaves: defaults, a value equal to its default stored as nothing, key callbacks (new, old, key)
+-- when the effective value changes (tables compare by reference), Set refused while __cfgReadOnly.
+local cfgDefaults, cfgSettings, cfgCallbacks = {}, {}, {}
+__cfg = { defaults = cfgDefaults, settings = cfgSettings }
+local function cfgEffective(key) local v = cfgSettings[key]; if v == nil then return cfgDefaults[key] end return v end
+local Config = {
+    RegisterDefault = function(key, value) cfgDefaults[key] = value end,
+    Get = cfgEffective,
+    Set = function(key, value)
+        if __cfgReadOnly then return false end
+        local old = cfgEffective(key)
+        if value == cfgDefaults[key] then value = nil end
+        cfgSettings[key] = value
+        local new = cfgEffective(key)
+        if old ~= new then for _, fn in ipairs(cfgCallbacks[key] or {}) do fn(new, old, key) end end
+        return true
+    end,
+    OnChange = function(key, fn) cfgCallbacks[key] = cfgCallbacks[key] or {}; table.insert(cfgCallbacks[key], fn) end,
+}
 local FS = {
+    Config = Config,
     IsSecret = function(v) return v == 99 end,   -- 99 stands in for a secret number
     FrameHelpers = { AnchorTooltip = function(owner) __anchored[#__anchored + 1] = owner; GameTooltip:SetOwner(owner, "ANCHOR_NONE") end },
     Layout = { OnRescale = function(fn) __rescale[#__rescale + 1] = fn end },
@@ -162,12 +197,49 @@ function __event(e)
         if f.events and f.events[e] and f.scripts and f.scripts.OnEvent then f.scripts.OnEvent(f, e) end
     end
 end
--- The bar's direct children in creation order, as { name, x, w, shown }.
-function __children()
+-- The segment keys this client's globals can build, in SEGMENT_DEFS order (mirrors each def's `available`).
+function __createdKeys()
+    local has = {
+        fps = GetFramerate ~= nil, mem = UpdateAddOnMemoryUsage ~= nil, cpu = GetAddOnCPUUsage ~= nil,
+        latency = GetNetStats ~= nil, rested = GetXPExhaustion ~= nil, durability = GetInventoryItemDurability ~= nil,
+        bags = (C_Container and C_Container.GetContainerNumFreeSlots) ~= nil, time = date ~= nil or GetGameTime ~= nil,
+        gold = GetMoney ~= nil,
+    }
     local out = {}
+    for _, k in ipairs({ "fps", "mem", "cpu", "latency", "rested", "durability", "bags", "time", "gold" }) do
+        if has[k] then out[#out + 1] = k end
+    end
+    return out
+end
+-- The bar's segment frames (every built segment, placed or parked) in creation order, then the STATUS slot, as
+-- { name, key, x, w, shown, placed } with the parts a settings test reads: divider shown, label text/shown/width and
+-- the anchor of what follows the title.
+function __children()
+    local out, keys, n = {}, __createdKeys(), 0
     for _, f in ipairs(__frames) do
-        if f.parent == _G.ForeverSTUwaveDataBar and f.kind ~= "texture" and f.kind ~= "fontstring" and f.pt then
-            out[#out + 1] = { name = f.name, x = f.pt.x, w = f.w, shown = f.shown }
+        if f.parent == _G.ForeverSTUwaveDataBar and f.kind ~= "texture" and f.kind ~= "fontstring" then
+            local row = { name = f.name, shown = f.shown, placed = f.pt ~= nil, x = f.pt and f.pt.x, w = f.w }
+            if f.name ~= "ForeverSTUwaveDataBarStatus" then
+                n = n + 1
+                row.key = keys[n]
+                local textures, fonts, frames = {}, {}, {}
+                for _, c in ipairs(__frames) do
+                    if c.parent == f then
+                        if c.kind == "texture" then textures[#textures + 1] = c
+                        elseif c.kind == "fontstring" then fonts[#fonts + 1] = c
+                        else frames[#frames + 1] = c end
+                    end
+                end
+                local label, value, divider = fonts[1], fonts[2], textures[1]
+                row.dividerShown = divider and divider.shown or false
+                row.label, row.labelShown, row.labelW = label.text, label.shown, label.w
+                local first = value                       -- what follows the title: the value, the meter, or the first coin
+                if frames[1] then first = frames[1] elseif keys[n] == "gold" then first = textures[2] end
+                row.firstPt = first.pt and { point = first.pt.point, rel = first.pt.rel == label and "label"
+                    or (first.pt.rel == f and "segment" or "other"), relPoint = first.pt.relPoint, x = first.pt.x, y = first.pt.y }
+                row.value = value.text
+            end
+            out[#out + 1] = row
         end
     end
     return out
@@ -221,12 +293,16 @@ def check(cond: bool, label: str, detail: str = "") -> None:
 
 
 class Bar:
-    def __init__(self, ui_scale: float = 0.5333, phys_h: int = PHYS_H, corners: str = "cut", pre: str = "") -> None:
-        """`pre` is Lua run after the mock and before DataBar.lua loads (the module reads the client's API at load)."""
+    def __init__(self, ui_scale: float = 0.5333, phys_h: int = PHYS_H, corners: str = "cut", pre: str = "",
+                 config: bool = True) -> None:
+        """`pre` is Lua run after the mock and before DataBar.lua loads (the module reads the client's API at load);
+        `config` False loads the module without FS.Config."""
         self.rt = LuaRuntime(unpack_returned_tuples=False)
         self.rt.eval("function(src, ...) assert(loadstring(src))(...) end")(MOCK, SCREEN_W, phys_h)
         self.rt.execute(f'__FS.Theme.CHROME_CORNERS = "{corners}"')
         self.rt.execute(f"__setUiScale({ui_scale})")
+        if not config:
+            self.rt.execute("__FS.Config = nil")
         if pre:
             self.rt.execute(pre)
         self.rt.eval("__load")(DATABAR.read_text(encoding="utf-8"))
@@ -237,18 +313,25 @@ class Bar:
     def login(self) -> None:
         self.rt.execute('__event("PLAYER_LOGIN")')
 
+    def children(self) -> list[dict]:
+        """Every segment frame (placed or parked, in creation order) then the STATUS slot, as plain dicts."""
+        out = []
+        for c in self.rt.eval("__children()").values():
+            row = {k: (str(v) if isinstance(v, bytes) else v) for k, v in dict(c).items()}
+            if row.get("firstPt") is not None:
+                row["firstPt"] = {k: (str(v) if isinstance(v, bytes) else v) for k, v in dict(row["firstPt"]).items()}
+            row["key"] = "link" if row.get("name") == "ForeverSTUwaveDataBarStatus" else row.get("key")
+            out.append(row)
+        return out
+
     def layout(self) -> list[dict]:
-        """Bar children left to right as {key, x, w}; key is 'link' or the segment's SEGMENT_DEFS order."""
-        kids = [dict(x=c["x"], w=c["w"], name=c["name"], shown=c["shown"])
-                for c in self.rt.eval("__children()").values()]
-        segs = [k for k in kids if k["name"] != "ForeverSTUwaveDataBarStatus"]
-        for key, k in zip(("fps", "bags", "time", "gold"), segs):
-            k["key"] = key
-        for k in kids:
-            if k["name"] == "ForeverSTUwaveDataBarStatus":
-                k["key"] = "link"
-        return sorted((k for k in kids if k["name"] != "ForeverSTUwaveDataBarStatus" or k["shown"]),
+        """The placed segments (and STATUS while shown) left to right as {key, x, w, ...}; key is 'link' or the
+        segment's SEGMENT_DEFS key."""
+        return sorted((k for k in self.children() if k["placed"] and (k["key"] != "link" or k["shown"])),
                       key=lambda k: k["x"])
+
+    def seg(self, key: str) -> dict:
+        return next(k for k in self.children() if k["key"] == key)
 
     def theme_calls(self) -> list[dict]:
         """Meter chrome calls (track fill, track border, fill caps) in order, as plain dicts."""
@@ -702,6 +785,443 @@ def test_gold_tooltip() -> None:
     check(lines(b)[1][0].startswith("Stu Shockalaka"), "new money while hovering re-sorts", str(lines(b)))
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# Settings (E1): which segments show, in what order, under what title
+# ---------------------------------------------------------------------------------------------------------------
+
+ALL = ["fps", "mem", "cpu", "latency", "rested", "durability", "bags", "time", "gold"]
+DEFAULT_SHOWN = ["fps", "latency", "rested", "durability", "bags", "time", "gold"]   # MEM and CPU start off
+LABELS = {"fps": "FPS", "mem": "FS MEM", "cpu": "FS CPU", "latency": "MS", "rested": "REST", "durability": "DUR",
+          "bags": "BAGS", "time": "TIME", "gold": "GOLD"}
+TIPS = {
+    "fps": "Frames per second.",
+    "mem": "Memory this addon uses. For bug reports; most players leave it off.",
+    "cpu": "Share of one CPU core this addon uses. For bug reports.",
+    "latency": "Home and world latency.",
+    "rested": "Rested XP as a meter.",
+    "durability": "Durability across all your gear, as one percent. Hover for each piece.",
+    "bags": "Free bag slots.",
+    "time": "Realm and local time.",
+    "gold": "Gold on this character; the tooltip lists your other characters.",
+}
+LOCK = "At least one segment stays on."
+
+# Every API the nine segments read, so all nine can be built.
+FULL_PRE = """
+GetNetStats = function() return 0, 0, 40, 55 end
+GetXPExhaustion = function() return nil end
+UnitXPMax = function() return 1000 end
+__dur = { [1] = { 40, 50 }, [5] = { 30, 100 } }
+function GetInventoryItemDurability(slot) local d = __dur[slot]; if d then return d[1], d[2] end end
+__fpsCalls, __memCalls, __cpuCalls = 0, 0, 0
+GetFramerate = function() __fpsCalls = __fpsCalls + 1; return 60 end
+UpdateAddOnMemoryUsage = function() __memCalls = __memCalls + 1 end
+GetAddOnMemoryUsage = function() return 2048 end
+UpdateAddOnCPUUsage = function() __cpuCalls = __cpuCalls + 1 end
+GetAddOnCPUUsage = function() return 0 end
+GetCVar = function() return "0" end
+GetTime = function() return 1000 end
+GetMoney = function() return 1234567 end
+function GameTooltip:AddLine(t, r, g, b) self.lines[#self.lines + 1] = { left = t, color = { r, g, b } } end
+"""
+
+
+def full(pre: str = "", **kw) -> Bar:
+    return Bar(pre=FULL_PRE + pre, **kw)
+
+
+def placed(b: Bar) -> list[str]:
+    """The segment keys on the bar, left to right (STATUS left out)."""
+    return [k["key"] for k in b.layout() if k["key"] != "link"]
+
+
+def tick(b: Bar) -> None:
+    b.run("local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)")
+
+
+def api(b: Bar, call: str) -> tuple:
+    """Calls FS.DataBarSegments.<call> and answers (ok, reason-or-second-value)."""
+    t = b.rt.eval(f"function() local a, b = __FS.DataBarSegments.{call}; return {{ a, b }} end")()
+    return t[1], t[2]
+
+
+def model(b: Bar) -> list[dict]:
+    return [dict(r) for r in b.rt.eval("__FS.DataBarSegments.Model()").values()]
+
+
+def stored(b: Bar, key: str):
+    return b.rt.eval(f'__cfg.settings["{key}"]')
+
+
+def shares_equally(lay: list[dict], width: float = SCREEN_W) -> bool:
+    segs = [k for k in lay if k["key"] != "link"]
+    return bool(segs) and all(abs(k["w"] - segs[0]["w"]) < 1e-9 for k in segs) and (
+        "link" in keys(lay) or contiguous(lay) or abs(segs[-1]["x"] + segs[-1]["w"] - width) < 1e-6)
+
+
+def test_settings_defaults() -> None:
+    print("\n== settings: defaults leave today's bar (minus MEM and CPU, which start off)")
+    b = full()
+    b.login()
+    lay = b.layout()
+    check(keys(lay) == DEFAULT_SHOWN, "default order and visibility", str(keys(lay)))
+    want_w = SCREEN_W / len(DEFAULT_SHOWN)
+    check(all(abs(k["w"] - want_w) < 1e-9 for k in lay) and contiguous(lay),
+          "the seven share the width equally (widths re-shared as before), no gap", str([(k["key"], k["w"]) for k in lay]))
+    check(all(k["x"] == i * want_w for i, k in enumerate(lay)), "segment i sits at exactly (i - 1) * segWidth",
+          str([(k["key"], k["x"]) for k in lay]))
+    check([b.seg(k)["dividerShown"] for k in DEFAULT_SHOWN] == [False] + [True] * 6,
+          "the first segment has no divider, every other one has", str([b.seg(k)["dividerShown"] for k in DEFAULT_SHOWN]))
+    for key in ("mem", "cpu"):
+        seg = b.seg(key)
+        check(seg["shown"] is False and seg["placed"] is False, f"{key} is built but parked (hidden, no anchors)", str(seg))
+    check(all(b.seg(k)["label"] == LABELS[k] for k in ALL), "every default title is today's label",
+          str({k: b.seg(k)["label"] for k in ALL}))
+    check(all(b.seg(k)["labelShown"] for k in DEFAULT_SHOWN) and all(b.seg(k)["labelW"] == 0 for k in DEFAULT_SHOWN),
+          "default titles are shown at their natural width (no clip)")
+    check(all(b.seg(k)["firstPt"] == {"point": "LEFT", "rel": "label", "relPoint": "RIGHT", "x": 6, "y": 0}
+              for k in DEFAULT_SHOWN), "what follows each title is anchored LABEL_GAP right of it, as always",
+          str({k: b.seg(k)["firstPt"] for k in DEFAULT_SHOWN}))
+    check(stored(b, "databar.order") is None and stored(b, "databar.seg.fps") is None
+          and stored(b, "databar.title.fps") is None, "defaults store nothing")
+
+    # hidden segments are not read, shown ones are
+    tick(b)
+    tick(b)
+    check(b.rt.eval("__memCalls") == 0 and b.rt.eval("__cpuCalls") == 0,
+          "MEM and CPU (off) are never read", f"mem {b.rt.eval('__memCalls')} cpu {b.rt.eval('__cpuCalls')}")
+    check(b.rt.eval("__fpsCalls") >= 2, "FPS (on) is read every tick")
+
+
+def test_settings_model() -> None:
+    print("\n== settings: Model() rows for the config page")
+    b = full()
+    b.login()
+    rows = model(b)
+    check([r["key"] for r in rows] == ALL, "one row per segment in default order", str([r["key"] for r in rows]))
+    check(all(r["label"] == LABELS[r["key"]] and r["title"] == LABELS[r["key"]] and r["titleIsDefault"] for r in rows),
+          "label and title are today's label")
+    check(all(r["tip"] == TIPS[r["key"]] for r in rows), "tips are the row texts", str([r["tip"] for r in rows]))
+    check([r["on"] for r in rows] == [k in DEFAULT_SHOWN for k in ALL], "on follows the defaults", str([r["on"] for r in rows]))
+    check(all(r["available"] and r.get("reason") is None and r.get("lock") is None for r in rows),
+          "all nine are available and unlocked")
+    check([r["canUp"] for r in rows] == [False] + [True] * 8 and [r["canDown"] for r in rows] == [True] * 8 + [False],
+          "the first row cannot go up and the last cannot go down")
+    texts = " ".join(r["tip"] for r in rows).lower()
+    check(not any(w in texts for w in ("bot", "automat", "macro")), "tips stay neutral", texts)
+
+    # an unavailable segment: row disabled with a reason, not built, never shown
+    b = Bar()                                   # the base mock has no latency, rested, durability, mem or cpu API
+    b.login()
+    rows = {r["key"]: r for r in model(b)}
+    check([k for k in rows] == ALL, "unavailable segments still have a row", str(list(rows)))
+    for key in ("mem", "cpu", "latency", "rested", "durability"):
+        r = rows[key]
+        check(r["available"] is False and r["on"] is False and r["reason"] and r["lock"] == r["reason"],
+              f"{key}: unavailable, off, and the lock text names why", str(r))
+    check("report" in rows["latency"]["reason"], "the reason says what the client lacks", rows["latency"]["reason"])
+    check(api(b, 'SetEnabled("latency", true)')[0] is False and stored(b, "databar.seg.latency") is None,
+          "switching an unavailable segment on is refused and stores nothing")
+    check(len([c for c in b.children() if c["key"] not in (None, "link")]) == 4, "only the four available segments were built")
+
+
+def test_settings_order_live() -> None:
+    print("\n== settings: order changes re-lay the bar out at once")
+    b = full()
+    b.login()
+    ok, _ = api(b, 'SetOrder({"gold", "fps"})')
+    check(ok is True, "SetOrder accepts a partial list")
+    check(placed(b) == ["gold", "fps", "latency", "rested", "durability", "bags", "time"],
+          "named keys first, the rest in default order, no reload", str(placed(b)))
+    lay = b.layout()
+    check(all(abs(k["w"] - SCREEN_W / 7) < 1e-9 for k in lay) and contiguous(lay), "widths unchanged by a reorder")
+    check(b.seg("gold")["dividerShown"] is False and b.seg("fps")["dividerShown"] is True,
+          "the divider follows the position: GOLD first has none, FPS now has one")
+    check(len(stored(b, "databar.order")) == 9, "the stored order lists every segment")
+    check([r["key"] for r in model(b)][:3] == ["gold", "fps", "mem"], "Model follows the order", str([r["key"] for r in model(b)]))
+
+    ok, _ = api(b, 'SetOrder(__FS.DataBarSegments.Order())')
+    check(ok is True and placed(b)[0] == "gold", "SetOrder(Order()) changes nothing")
+    api(b, 'SetOrder({"fps","mem","cpu","latency","rested","durability","bags","time","gold"})')
+    check(placed(b) == DEFAULT_SHOWN and stored(b, "databar.order") is None,
+          "the default order is stored as nothing and comes back as it was", str(placed(b)))
+
+    b = full()
+    b.login()
+    check(api(b, 'Move("gold", -1)')[0] is True and placed(b)[-2:] == ["gold", "time"], "Move left swaps with the neighbour",
+          str(placed(b)))
+    check(api(b, 'Move("fps", -1)')[0] is False, "Move refuses at the left end")
+    ok, why = api(b, 'Move("time", 1)')
+    check(ok is False, "Move refuses at the right end", str(why))
+    check(api(b, 'Move("nope", 1)')[0] is False, "Move refuses an unknown key")
+    # hidden segments move too: MEM sits between FPS and CPU even though it is off
+    api(b, 'Move("mem", 1)')
+    check([r["key"] for r in model(b)][:3] == ["fps", "cpu", "mem"], "a hidden segment moves in the full list",
+          str([r["key"] for r in model(b)]))
+    check("mem" not in placed(b), "and stays off the bar")
+
+
+def test_settings_visibility_live() -> None:
+    print("\n== settings: switches show and hide segments live; a hidden segment stops updating")
+    b = full()
+    b.login()
+    tick(b)
+    ok, _ = api(b, 'SetEnabled("fps", false)')
+    lay = b.layout()
+    check(ok is True and keys(lay) == DEFAULT_SHOWN[1:], "FPS off: gone from the bar at once", str(keys(lay)))
+    check(all(abs(k["w"] - SCREEN_W / 6) < 1e-9 for k in lay) and contiguous(lay),
+          "the six left share the width", str([(k["key"], round(k["w"], 1)) for k in lay]))
+    check(b.seg("latency")["dividerShown"] is False, "MS is first now and loses its divider")
+    seg = b.seg("fps")
+    check(seg["shown"] is False and seg["placed"] is False, "the hidden segment is hidden and parked", str(seg))
+    before = b.rt.eval("__fpsCalls")
+    tick(b)
+    tick(b)
+    check(b.rt.eval("__fpsCalls") == before, "a hidden segment is not read", f"{before} -> {b.rt.eval('__fpsCalls')}")
+
+    api(b, 'SetEnabled("fps", true)')
+    check(placed(b) == DEFAULT_SHOWN and b.rt.eval("__fpsCalls") == before + 1,
+          "switched back on: back in its place and read at once, not on the next tick", str(placed(b)))
+    check(b.seg("fps").get("value") == "60", "its value is on the bar", str(b.seg("fps").get("value")))
+
+    api(b, 'SetEnabled("mem", true)')
+    check(placed(b)[:2] == ["fps", "mem"] and b.rt.eval("__memCalls") == 1, "MEM on: between FPS and MS, read once",
+          f"{placed(b)} {b.rt.eval('__memCalls')}")
+    check(b.seg("mem").get("value") == "2.0M", "MEM shows its value", str(b.seg("mem").get("value")))
+    api(b, 'SetEnabled("mem", false)')
+    check("mem" not in placed(b), "MEM off again")
+
+    # a tooltip held by a segment that goes off the bar is let go (the OnHide script runs)
+    hover(b, "DUR")
+    check(b.rt.eval("GameTooltip.shown") is True, "DUR tooltip is up")
+    api(b, 'SetEnabled("durability", false)')
+    check(b.rt.eval("GameTooltip.shown") is False, "DUR switched off with the mouse on it: the tooltip hides")
+
+
+def test_settings_last_segment_stays() -> None:
+    print("\n== settings: at least one segment always stays on")
+    b = Bar()                                   # fps, bags, time, gold available
+    b.login()
+    for key in ("fps", "bags", "time"):
+        check(api(b, f'SetEnabled("{key}", false)')[0] is True, f"{key} can go off while others stay")
+    check(placed(b) == ["gold"], "one left", str(placed(b)))
+    ok, why = api(b, 'SetEnabled("gold", false)')
+    check(ok is False and why == LOCK, "the last one refuses to go off, and says why", f"{ok} {why}")
+    check(stored(b, "databar.seg.gold") is None and placed(b) == ["gold"], "it stays on the bar")
+    rows = {r["key"]: r for r in model(b)}
+    check(rows["gold"]["on"] is True and rows["gold"]["lock"] == LOCK, "Model locks the last switch with the text",
+          str(rows["gold"]))
+    check(rows["fps"].get("lock") is None and rows["fps"]["on"] is False, "the others stay free to switch on")
+    check(shares_equally(b.layout()) and abs(b.layout()[0]["w"] - SCREEN_W) < 1e-9, "the one left takes the whole bar")
+    api(b, 'SetEnabled("fps", true)')
+    check(api(b, 'SetEnabled("gold", false)')[0] is True and placed(b) == ["fps"], "with a second one on, the first may go")
+
+    # a save that has every switch off (or turned off by hand) still shows one
+    b = full()
+    b.run('for _, k in ipairs({"fps","mem","cpu","latency","rested","durability","bags","time","gold"}) do '
+          '__cfg.settings["databar.seg." .. k] = false end')
+    b.login()
+    check(placed(b) == ["fps"] and abs(b.layout()[0]["w"] - SCREEN_W) < 1e-9,
+          "every switch off in the save: the first segment in order shows", str(placed(b)))
+    row = {r["key"]: r for r in model(b)}["fps"]
+    check(row["on"] is True and row["lock"] == LOCK, "Model shows what the bar shows: FPS on and locked", str(row))
+
+
+def test_settings_bad_saves() -> None:
+    print("\n== settings: a hand edited save is read safely")
+    b = full()
+    b.run('__cfg.settings["databar.order"] = { "gold", "gold", "bogus", 7, "fps" }')
+    b.login()
+    check(placed(b) == ["gold", "fps", "latency", "rested", "durability", "bags", "time"],
+          "repeats, unknown keys and non-text entries are dropped; the rest follow in default order", str(placed(b)))
+    b = full()
+    b.run('__cfg.settings["databar.order"] = "gold"; __cfg.settings["databar.seg.fps"] = "yes"; '
+          '__cfg.settings["databar.title.fps"] = 123; __cfg.settings["databar.title.time"] = "ABCDEFGHIJKLMNO"')
+    b.login()
+    check(placed(b) == DEFAULT_SHOWN, "an order that is not a list is the default; a switch that is not a boolean is its default",
+          str(placed(b)))
+    check(b.seg("fps")["label"] == "FPS", "a title that is not text is the default label")
+    check(b.seg("time")["label"] == "ABCDEFGHIJ", "a saved title longer than ten characters shows its first ten",
+          b.seg("time")["label"])
+    # no FS.Config at all: defaults, and the setters say so
+    b = full(config=False)
+    b.login()
+    check(placed(b) == DEFAULT_SHOWN and model(b)[0]["title"] == "FPS", "without FS.Config the bar and the model use the defaults")
+    check(api(b, 'SetEnabled("fps", false)')[0] is False and api(b, 'SetTitle("fps", "X")')[0] is False
+          and api(b, 'SetOrder({"gold"})')[0] is False and placed(b) == DEFAULT_SHOWN,
+          "and the setters refuse without changing anything")
+    b = full()
+    b.login()
+    b.run("__cfgReadOnly = true")
+    check(api(b, 'SetEnabled("fps", false)')[0] is False and api(b, 'SetTitle("fps", "X")')[0] is False
+          and api(b, 'Move("gold", -1)')[0] is False and placed(b) == DEFAULT_SHOWN, "read only settings: every setter refuses")
+
+
+def test_settings_titles() -> None:
+    print("\n== settings: segment titles (default, custom, empty, at most 10 characters)")
+    b = full()
+    b.login()
+    ok, clean = api(b, 'SetTitle("time", "CLOCK")')
+    check(ok is True and clean == "CLOCK" and b.seg("time")["label"] == "CLOCK", "typing renames the title live",
+          f"{ok} {clean} {b.seg('time')['label']}")
+    check(stored(b, "databar.title.time") == "CLOCK", "stored per segment under databar.title.<seg>")
+    row = {r["key"]: r for r in model(b)}["time"]
+    check(row["title"] == "CLOCK" and row["label"] == "TIME" and row["titleIsDefault"] is False,
+          "Model: the title is CLOCK, the label (the row's own name) stays TIME", str(row))
+    check(b.seg("gold")["label"] == "GOLD", "other segments keep theirs")
+    check(keys(b.layout()) == DEFAULT_SHOWN, "a rename does not move anything")
+
+    ok, clean = api(b, 'SetTitle("time", "ABCDEFGHIJKLMN")')
+    check(clean == "ABCDEFGHIJ" and b.seg("time")["label"] == "ABCDEFGHIJ", "at most ten characters", clean)
+    ok, clean = api(b, 'SetTitle("time", "ééééééééééXYZ")')
+    check(clean == "é" * 10, "ten characters means ten letters, an accented one counts once", clean)
+    ok, clean = api(b, 'SetTitle("time", "|cffff0000HI|r")')
+    check("|" not in clean and clean == "cffff0000H", "escape bars are stripped (then cut to ten)", clean)
+
+    # empty: only the value, which moves up to PAD_X
+    for key in ("fps", "bags", "gold"):                # a plain value, a meter, and the coins
+        api(b, f'SetTitle("{key}", "")')
+        seg = b.seg(key)
+        check(seg["labelShown"] is False and seg["label"] == "", f"{key}: an empty title hides the label", str(seg))
+        check(seg["firstPt"] == {"point": "LEFT", "rel": "segment", "relPoint": "LEFT", "x": 8, "y": 0},
+              f"{key}: and the value starts at PAD_X in the segment", str(seg["firstPt"]))
+    check(b.seg("fps").get("value") == "60", "the value is untouched")
+    check(model(b)[0]["title"] == "" and model(b)[0]["titleIsDefault"] is False, "Model: empty is a title of its own")
+    check(stored(b, "databar.title.fps") == "", "an empty title is stored as empty, not as nothing")
+    api(b, 'SetTitle("fps", "   ")')
+    check(b.seg("fps")["labelShown"] is False, "spaces only count as empty")
+    ok, clean = api(b, 'SetTitle("fps", "FPS")')
+    check(b.seg("fps")["labelShown"] is True and stored(b, "databar.title.fps") is None
+          and b.seg("fps")["firstPt"]["rel"] == "label", "typing the default label back stores nothing and seats the title again",
+          str(b.seg("fps")))
+    check(api(b, "SetTitle(\"fps\", nil)")[0] is False and api(b, 'SetTitle("nope", "X")')[0] is False,
+          "a title that is not text, or for an unknown segment, is refused")
+
+    # a hidden segment keeps its title for when it comes back
+    api(b, 'SetTitle("mem", "RAM")')
+    check(b.seg("mem")["label"] == "RAM" and "mem" not in placed(b), "a hidden segment is retitled and stays off the bar")
+    api(b, 'SetEnabled("mem", true)')
+    check(b.seg("mem")["label"] == "RAM" and b.seg("mem")["labelShown"] is True, "and shows the new title when switched on")
+
+    # saved titles apply at login
+    b = full()
+    b.run('__cfg.settings["databar.title.fps"] = "FRAMES"; __cfg.settings["databar.title.bags"] = ""')
+    b.login()
+    check(b.seg("fps")["label"] == "FRAMES" and b.seg("bags")["labelShown"] is False, "saved titles are on the bar at login")
+
+
+def test_settings_title_clipped() -> None:
+    print("\n== settings: a long title is clipped before the value, never over it")
+    # four segments on a 450 wide bar: 112.5 each; a 10 character title is 65 wide in the mock (6.5 a letter)
+    b = Bar(pre="UIParent.w = 450")
+    b.login()
+    room = 112.5 - 8 - 6 - 40 - 4                      # plain value segment: title room beside a 40 wide value
+    api(b, 'SetTitle("fps", "WWWWWWWWWW")')
+    seg = b.seg("fps")
+    check(seg["labelShown"] is True and abs(seg["labelW"] - room) < 1e-9,
+          "a title wider than the room is cut to the room", f"{seg['labelW']} want {room}")
+    check(seg["firstPt"]["rel"] == "label", "the value stays anchored to the (clipped) label, so it cannot be overlapped")
+    api(b, 'SetTitle("fps", "AB")')
+    check(b.seg("fps")["labelW"] == 0, "a title that fits goes back to its natural width", str(b.seg("fps")["labelW"]))
+    api(b, 'SetTitle("fps", "WWWWWWWWWW")')
+    b.run("UIParent.w = 2560; for _, fn in ipairs(__rescale) do fn() end")
+    check(b.seg("fps")["labelW"] == 0, "more room (a rescale): clip lifted")
+    b.run("UIParent.w = 450; for _, fn in ipairs(__rescale) do fn() end")
+    check(abs(b.seg("fps")["labelW"] - room) < 1e-9, "less room (a rescale): clipped again")
+
+    # a meter has less room still: no room at all drops the title and the value moves up to PAD_X
+    api(b, 'SetTitle("bags", "WW")')
+    seg = b.seg("bags")
+    check(seg["labelShown"] is False and seg["firstPt"]["rel"] == "segment",
+          "no room beside the meter and its value: the typed title is dropped, the meter starts at PAD_X", str(seg))
+    # but a default title is never touched, at any width (a bar at its defaults lays out as it always did)
+    check(b.seg("time")["labelShown"] is True and b.seg("gold")["labelShown"] is True
+          and b.seg("time")["labelW"] == 0 and b.seg("gold")["labelW"] == 0,
+          "default titles are never clipped or dropped", str((b.seg("time"), b.seg("gold"))))
+    api(b, 'SetTitle("bags", "BAGS")')
+    check(b.seg("bags")["labelShown"] is True, "typing the default back brings it back at this width too")
+
+
+def test_settings_link_slot() -> None:
+    print("\n== settings: the STATUS slot keeps its rule (before TIME, or at the end without TIME)")
+    b = full()
+    b.run("__makeBridge(true)")
+    b.login()
+    check(keys(b.layout()) == ["fps", "latency", "rested", "durability", "bags", "link", "time", "gold"],
+          "defaults: STATUS before TIME", str(keys(b.layout())))
+    api(b, 'SetOrder({"time", "gold", "fps"})')
+    check(keys(b.layout())[:2] == ["link", "time"], "TIME first: STATUS before it, at the left end", str(keys(b.layout())))
+    api(b, 'SetOrder({"fps", "time", "gold"})')
+    check(keys(b.layout())[:3] == ["fps", "link", "time"], "TIME second: STATUS between FPS and TIME", str(keys(b.layout())))
+    api(b, 'SetEnabled("time", false)')
+    lay = b.layout()
+    check(keys(lay)[-1] == "link" and "time" not in keys(lay), "TIME off: STATUS goes to the end", str(keys(lay)))
+    segs = [k for k in lay if k["key"] != "link"]
+    check(all(abs(k["w"] - segs[0]["w"]) < 1e-9 for k in segs) and contiguous(lay),
+          "the others share the remainder equally and the bar is full", str([(k["key"], round(k["w"], 1)) for k in lay]))
+    api(b, 'SetEnabled("time", true)')
+    check("link" in keys(b.layout()) and keys(b.layout()).index("link") == keys(b.layout()).index("time") - 1,
+          "TIME back: STATUS before it again", str(keys(b.layout())))
+    b.run("ForeverStatusStripFrame:Hide()")
+    check("link" not in keys(b.layout()) and shares_equally(b.layout()), "strip hidden: no STATUS, equal shares again")
+
+
+def test_settings_combat() -> None:
+    print("\n== settings: in combat a layout change waits for regen (titles are text and apply)")
+    b = full()
+    b.login()
+    b.run("ForeverSTUwaveDataBar.restricted = true")
+    before = [(k["key"], k["x"], k["w"]) for k in b.layout()]
+    b.run("__combat = true")
+    api(b, 'SetEnabled("fps", false)')
+    api(b, 'Move("gold", -1)')
+    api(b, 'SetTitle("gold", "COIN")')
+    check(b.rt.eval("#__blocked") == 0, "nothing restricted is touched in combat", str(list(b.rt.eval("__blocked").values())))
+    check([(k["key"], k["x"], k["w"]) for k in b.layout()] == before, "the segments keep their seats until combat ends")
+    check(b.seg("gold")["label"] == "COIN", "a retitle (text only) shows at once")
+    b.run("__combat = false")
+    b.rt.execute('__event("PLAYER_REGEN_ENABLED")')
+    check(placed(b) == ["latency", "rested", "durability", "bags", "gold", "time"] and b.rt.eval("#__blocked") == 0,
+          "regen replays both changes", str(placed(b)))
+    check(shares_equally(b.layout()), "and the six share the width")
+
+
+def test_settings_failed_segment() -> None:
+    print("\n== settings: a segment whose read throws drops off the bar at the next layout")
+    b = full("function GetNetStats() error('boom') end")
+    b.run("print = function() end")      # the module says once that the segment failed
+    b.login()
+    lay_before = placed(b)
+    check("latency" in lay_before, "MS still has its slot until the layout runs again", str(lay_before))
+    b.run("for _, fn in ipairs(__rescale) do fn() end")
+    check(placed(b) == [k for k in DEFAULT_SHOWN if k != "latency"] and shares_equally(b.layout()),
+          "the next layout closes the gap and re-shares the width", str(placed(b)))
+    row = {r["key"]: r for r in model(b)}["latency"]
+    check(row["available"] is False and row["on"] is False and row["lock"], "Model shows it unavailable", str(row))
+    check(api(b, 'SetEnabled("latency", true)')[0] is False, "and it cannot be switched on")
+
+
+def test_settings_gold_record_off_bar() -> None:
+    print("\n== settings: this character's gold is still recorded with GOLD off the bar")
+    b = full(GOLD_PRE)
+    b.login()
+    tick(b)
+    api(b, 'SetEnabled("gold", false)')
+    b.run("__money = 777777")
+    b.rt.execute('__event("PLAYER_MONEY")')
+    row = b.rt.eval('ForeverSTUwaveDB.gold["Player-91-AAA"]')
+    check(row is not None and row["copper"] == 777777, "PLAYER_MONEY records the new total", str(row))
+    b.run("__money = 888888")
+    tick(b)
+    check(b.rt.eval('ForeverSTUwaveDB.gold["Player-91-AAA"].copper') == 777777, "a hidden segment is not read by the tick")
+    api(b, 'SetEnabled("gold", true)')
+    check(b.rt.eval('ForeverSTUwaveDB.gold["Player-91-AAA"].copper') == 888888, "back on the bar it is read at once")
+    b.run("__money = 999999")
+    b.rt.execute('__event("PLAYER_MONEY")')
+    check(b.rt.eval('ForeverSTUwaveDB.gold["Player-91-AAA"].copper') == 888888,
+          "on the bar, PLAYER_MONEY leaves the recording to the segment (no second path)")
+
+
 def main() -> int:
     test_equal_without_bridge()
     test_link_between_bags_and_time()
@@ -717,6 +1237,18 @@ def main() -> int:
     test_time_tooltip_unavailable()
     test_durability_tooltip()
     test_gold_tooltip()
+    test_settings_defaults()
+    test_settings_model()
+    test_settings_order_live()
+    test_settings_visibility_live()
+    test_settings_last_segment_stays()
+    test_settings_bad_saves()
+    test_settings_titles()
+    test_settings_title_clipped()
+    test_settings_link_slot()
+    test_settings_combat()
+    test_settings_failed_segment()
+    test_settings_gold_record_off_bar()
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")
     for f in FAILURES:
         print(f"  - {f}")
