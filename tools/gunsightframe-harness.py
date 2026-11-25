@@ -743,6 +743,33 @@ check(GF.horizon.you.frame:IsShown(), "the horizon still draws")
 check(OnUpdates() == 0, "nothing animates")
 """)
 
+case("the_config_preview_lights_a_classes_proc_rungs_whatever_class_and_puts_the_real_state_back")(r"""
+-- A rogue has no profile and no rungs; the config window can still show the Warlock's (Shadow Trance left, Decimation right)
+local GF = boot({ profile = "ROGUE", state = function(p) return StateFor(p) end })
+local P = GF.Preview
+check(P and P.Show and P.Hide and P.Restyle and P.IsShown, "the module has a Preview table")
+local classes = table.concat(P.Classes(), ",")
+check(classes == "PALADIN,WARLOCK", "the classes with proc rungs: " .. classes)
+check(P.Show("PRIEST") == false, "a class with no procs has nothing to show")
+check(P.Show("WARLOCK") == true, "the warlock rungs come up")
+local L, R = GF.rungs.left, GF.rungs.right
+check(L.key == "shadow_trance" and R.key == "decimation", "Shadow Trance left, Decimation right")
+check(L.target == 1 and R.target == 1, "both lit")
+check(L.frame:IsShown() and R.frame:IsShown(), "both drawn")
+check(L.label:GetText() == "TRANCE" and R.label:GetText() == "DECIMATION", "the real labels")
+check(P.Show("PALADIN") == false and P.IsShown(), "a second Show while up changes nothing")
+Push(StateFor(nil, {}))
+check(L.key == "shadow_trance", "the Hud state does not take the rungs while the preview is up")
+P.Hide()
+check(not P.IsShown(), "down")
+check(not L.frame:IsShown() and not R.frame:IsShown() and L.key == nil, "the real state (none) is back: both rungs hidden")
+check(P.Show("PALADIN") == true and GF.rungs.left.key == "hs" and GF.rungs.right.key == "jd", "Holy Strike and Judgement")
+P.Hide()
+InCombatLockdown = function() return true end
+check(P.Show("WARLOCK") == false, "never in combat")
+InCombatLockdown = nil
+""")
+
 case("paladin_ready_rungs_take_the_spell_icon_from_the_state")(r"""
 -- Holy Strike (left) and Judgement (right) are `ready` procs: no aura, so the icon is the spell icon
 -- HudLogic puts on the state entry. A secret or missing one falls back to the two letters.

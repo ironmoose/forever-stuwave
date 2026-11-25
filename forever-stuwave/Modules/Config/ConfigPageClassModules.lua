@@ -19,7 +19,7 @@ end
 
 -- "<Class> class module" with the module's own ? tip (what each piece shows), from HelpModules.lua through FS.ClassModuleHelp.
 local function ModuleSection(content, token, title, tip)
-    UI.Section(content, { title = title, tip = tip or FS.ClassModuleHelp[token] })
+    return UI.Section(content, { title = title, tip = tip or FS.ClassModuleHelp[token] })
 end
 
 -- A part of the plate that is switched on (a stored value that is not a boolean reads as the default, on).
@@ -109,7 +109,8 @@ local tabs = {
         ClassMessage(content, "Mage")
     end },
     { key = "paladin", label = "Paladin", build = function(content)
-        ModuleSection(content, "PALADIN", "Paladin")
+        local sec = ModuleSection(content, "PALADIN", "Paladin")
+        if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(sec, "procs.paladin") end
         ClassMessage(content, "Paladin")
     end },
     { key = "priest", label = "Priest", build = PriestTab },
@@ -125,7 +126,8 @@ local tabs = {
         -- One switch per cue (WarlockState.lua)
         local WS = FS.WarlockState
         if not (WS and WS.SETTINGS and WS.ORDER) then return end
-        UI.Section(content, { title = "Warlock class module", tip = "The cues on the right of the Warlock module. The shard count and the demon stay either way." })
+        local sec = UI.Section(content, { title = "Warlock class module", tip = "The cues on the right of the Warlock module. The shard count and the demon stay either way." })
+        if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(sec, "procs.warlock") end
         for _, name in ipairs(WS.ORDER) do
             local def = WS.SETTINGS[name]
             UI.Toggle(content, { label = def.label, key = def.key, tip = def.tip })

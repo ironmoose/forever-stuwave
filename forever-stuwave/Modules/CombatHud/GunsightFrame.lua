@@ -659,7 +659,12 @@ end
 
 -- FS.Hud state to rungs: the profile says which proc sits on which side, the state says whether
 -- it is up. No profile procs, no rungs.
+local previewClass          -- the class whose proc rungs the config window is showing (see GunsightFrame.Preview), or nil
+local lastState             -- the last state the Hud pushed, drawn again when a preview ends
+
 local function ApplyState(state)
+    lastState = state
+    if previewClass then return end
     local hud = FS.Hud
     local profile = type(hud) == "table" and type(hud.GetProfile) == "function" and hud.GetProfile() or nil
     local specs = type(profile) == "table" and type(profile.procs) == "table" and profile.procs or nil
@@ -685,6 +690,63 @@ local function ApplyState(state)
             UnbindRung(rung)
         end
     end
+end
+
+-------------------------------------------------------------------------------
+-- The config window's preview of the proc rungs
+-------------------------------------------------------------------------------
+-- Shows a class's proc rungs lit (its HudProfiles `procs`: the sample is the real spells' icons and labels, "TRANCE" and
+-- "DECIMATION", "HOLY STRIKE" and "JUDGEMENT") at the real posts whatever class the player is. The rungs are plain frames, the
+-- Hud state is ignored while it is up, and the real state is drawn again when it ends. Out of combat only. Show answers true
+-- when this call put it up; false when it is already up, the HUD is not built or a fight is on.
+GunsightFrame.Preview = {}
+function GunsightFrame.Preview.IsShown() return previewClass ~= nil end
+function GunsightFrame.Preview.Classes()
+    local out = {}
+    for class, profile in pairs(FS.HudProfiles or {}) do
+        if type(profile) == "table" and type(profile.procs) == "table" then
+            for _, spec in pairs(profile.procs) do
+                if type(spec) == "table" and (spec.side == "left" or spec.side == "right") then out[#out + 1] = class; break end
+            end
+        end
+    end
+    table.sort(out)
+    return out
+end
+function GunsightFrame.Preview.Show(class)
+    if previewClass or not built then return false end
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return false end
+    local profile = FS.HudProfiles and FS.HudProfiles[class]
+    local specs = type(profile) == "table" and profile.procs or nil
+    if type(specs) ~= "table" then return false end
+    local keys = {}
+    for key, spec in pairs(specs) do
+        if type(spec) == "table" then keys[#keys + 1] = key end
+    end
+    table.sort(keys)
+    local bound = {}
+    for _, key in ipairs(keys) do
+        local spec = specs[key]
+        local rung = rungs[spec.side]
+        if rung and not bound[rung] then
+            bound[rung] = true
+            if rung.key then UnbindRung(rung) end
+            BindRung(rung, key, spec, nil)
+            SetTarget(rung, true)
+        end
+    end
+    if next(bound) == nil then return false end
+    previewClass = class
+    return true
+end
+function GunsightFrame.Preview.Hide()
+    if not previewClass then return end
+    previewClass = nil
+    for _, rung in pairs(rungs) do UnbindRung(rung) end
+    ApplyState(lastState)
+end
+function GunsightFrame.Preview.Restyle()
+    if previewClass and GunsightFrame.Layout then GunsightFrame.Layout() end
 end
 
 -------------------------------------------------------------------------------

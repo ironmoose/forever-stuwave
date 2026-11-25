@@ -1181,6 +1181,34 @@ function T.the_test_button_keeps_an_alert_up_until_clicked_again_the_page_change
     W.SetHover(nil)
 end
 
+
+function T.the_proc_rungs_piece_row_previews_a_class_rung_pair_and_its_test_button_keeps_it_up()
+    local W = boot()
+    local shown, calls = nil, 0
+    FS.GunsightFrame = { Preview = {
+        Show = function(class) if shown or __combat then return false end shown = class; calls = calls + 1; return true end,
+        Hide = function() shown = nil end, Restyle = function() end, IsShown = function() return shown ~= nil end,
+    } }
+    UnitClass = function() return "Shaman", "SHAMAN" end
+    W.SetHover({ key = "gunsight.pieces.prc", row = {} })
+    eq(shown, "WARLOCK", "off a rung class the piece row shows the Warlock's rungs")
+    W.SetHover(nil)
+    eq(shown, nil, "and takes them down after")
+    UnitClass = function() return "Paladin", "PALADIN" end
+    W.SetHover({ key = "gunsight.pieces.prc", row = {} })
+    eq(shown, "PALADIN", "a Paladin sees its own")
+    W.SetHover(nil)
+    local header = CreateFrame("Frame", nil, UIParent)
+    local sec = { header = header, meta = CreateFrame("Frame", nil, UIParent) }
+    local b = W.Flash.AddTest(sec, "procs.warlock")
+    yes(b, "the Warlock section gets a Test button")
+    b.scripts.OnClick(b)
+    eq(shown, "WARLOCK", "Test shows the Warlock rungs on any class")
+    b.scripts.OnClick(b)
+    eq(shown, nil)
+    UnitClass = nil
+end
+
 -- Plain data for the python level checks (the real files, booted once).
 __helpers = {
     prefixes = function()

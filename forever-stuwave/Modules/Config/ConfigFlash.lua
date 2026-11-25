@@ -673,6 +673,36 @@ F.RegisterAlert({
     end,
 })
 
+-- The Gunsight proc rungs of a class (HudProfiles procs with a side): Warlock (Nightfall's Shadow Trance and Decimation) and Paladin (Holy Strike and Judgement). Shown at the real posts whatever your class. The piece row stands for
+-- your own class when it has rungs, else the Warlock's.
+local function RungApi(class)
+    return function()
+        local gf = FS.GunsightFrame
+        local p = gf and gf.Preview
+        if not (p and p.Show) then return nil end
+        return {
+            Show = function() return p.Show(class) end, Hide = p.Hide, Restyle = p.Restyle,
+        }
+    end
+end
+
+local function OwnRungClass()
+    local ok, _, token = pcall(UnitClass, "player")
+    if ok and (token == "WARLOCK" or token == "PALADIN") then return token end
+    return "WARLOCK"
+end
+
+F.OwnRungClass = OwnRungClass
+for _, class in ipairs({ "WARLOCK", "PALADIN" }) do
+    F.RegisterAlert({
+        id = "procs." .. class:lower(), label = class:sub(1, 1) .. class:sub(2):lower() .. " procs",
+        api = RungApi(class),
+        match = function(entry)
+            return entry.key == "gunsight.pieces.prc" and OwnRungClass() == class
+        end,
+    })
+end
+
 CW.On("rowEnter", AlertsOnEnter)
 CW.On("rowLeave", AlertsOnLeave)
 CW.On("hide", F.ClearAlerts)
