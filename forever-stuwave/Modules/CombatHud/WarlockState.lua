@@ -27,6 +27,7 @@
 --   data.summonAt GetTime of the player's last Summon cast, nil before one; data.tapAt the same for Life Tap
 --   data.dead    true while the player is a corpse or a ghost (no cue is drawn)
 --   data.drainKnown, data.tapKnown   true | false
+--   data.summonKnown   true | false: any Summon in the book (a new Warlock has none until the level 4 Imp quest)
 -- A listener is called fn(reason) with "pet", "cast", "tap", "mana", "dead", "learn".
 
 local _, FS = ...
@@ -87,7 +88,7 @@ end
 
 local data = {
     pet = "unknown", demon = nil, casting = false, noMana = nil, summonAt = nil, tapAt = nil, dead = false,
-    drainKnown = false, tapKnown = false,
+    drainKnown = false, tapKnown = false, summonKnown = false,
 }
 State.data = data
 function State.Get() return data end
@@ -166,13 +167,18 @@ local function BookId(name)
 end
 
 local boltId
+local SUMMONS = { "Summon Imp", "Summon Voidwalker", "Summon Succubus", "Summon Incubus", "Summon Felhunter" }
 
--- Re-reads what the book says: Drain Soul, Life Tap, and the Shadow Bolt id the mana read uses.
+-- Re-reads what the book says: Drain Soul, Life Tap, any Summon, and the Shadow Bolt id the mana read uses.
 local function ReadBook()
     local drain, tap = BookId("Drain Soul") ~= nil, BookId("Life Tap") ~= nil
+    local summon = false
+    for i = 1, #SUMMONS do
+        if BookId(SUMMONS[i]) then summon = true; break end
+    end
     boltId = BookId("Shadow Bolt")
-    if drain ~= data.drainKnown or tap ~= data.tapKnown then
-        data.drainKnown, data.tapKnown = drain, tap
+    if drain ~= data.drainKnown or tap ~= data.tapKnown or summon ~= data.summonKnown then
+        data.drainKnown, data.tapKnown, data.summonKnown = drain, tap, summon
         Notify("learn")
     end
 end

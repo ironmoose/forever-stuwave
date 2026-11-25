@@ -508,7 +508,7 @@ local function ChooseCue(st, count)
         if D.tranceAt then return "bolt" end
         if D.decimAt then return "fire" end
     end
-    if st.pet == "none" and State.Cue("summon") then return "summon" end
+    if st.pet == "none" and st.summonKnown and State.Cue("summon") then return "summon" end
     if st.noMana == true and st.tapKnown and State.Cue("tap") then return "tap" end
     if count and count < C.LOW_SHARDS and st.drainKnown and State.Cue("drain") then return "drain" end
     return nil

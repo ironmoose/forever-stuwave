@@ -115,7 +115,7 @@ function push(state) HUD = state; for i = 1, #SUBS do SUBS[i](state) end end
 -- the world the state reads
 PET = { exists = true, dead = false, family = "Voidwalker", unreadable = false }
 DEAD = false
-BOOK = { ["Drain Soul"] = 1, ["Life Tap"] = 2, ["Shadow Bolt"] = 3 }
+BOOK = { ["Drain Soul"] = 1, ["Life Tap"] = 2, ["Shadow Bolt"] = 3, ["Summon Imp"] = 4 }
 NAMES = { [100] = "Summon Voidwalker", [101] = "Summon Imp", [102] = "Summon Felhunter", [103] = "Summon Succubus", [104] = "Life Tap" }
 USABLE = { usable = true, noMana = false }
 HEALTH = { v = SECRET, m = SECRET }
@@ -339,6 +339,11 @@ case("every_cue_has_an_off_switch_that_removes_only_that_cue", """
     -- with the Life Tap not in the book the cue never shows
     BOOK["Life Tap"] = nil; USABLE.noMana = true; push(HS(3)); World()
     assert(Cue() == nil, "Life Tap unknown: no tap cue")
+    -- a new Warlock with no Summon in the book yet (the Imp comes from a level 4 quest): no SUMMON, never "NO SHARD"
+    BOOK["Summon Imp"] = nil; USABLE.noMana = false; PET.exists = false; push(HS(0)); World()
+    assert(Cue() ~= "summon" and Txt(P().word) ~= "SUMMON", "no Summon known: no SUMMON cue, got " .. tostring(Cue()))
+    BOOK["Summon Imp"] = 4; World()
+    assert(Cue() == "summon", "learning the Imp brings the cue: " .. tostring(Cue()))
     NoLog()
 """)
 
