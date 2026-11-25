@@ -53,6 +53,8 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     "skillup_chips": (64, 32),
     # generate_queue_eye.py: our own group finder eye, lid (cyan) and pupil (pink), tinted in Lua.
     "queue_eye": {"queue_eye_lid": (64, 64), "queue_eye_pupil": (64, 64)},
+    # generate_bar_look_tiles.py: the fill tiles of the LED segments and Slant cells bar looks, repeated by the engine.
+    "bar_look_tiles": {"bar_led_tile": (8, 16), "bar_slant_tile": (16, 16)},
     # generate_damage_meter_cells.py: the damage meter ladder's gap tile, one leaning pip and its gap.
     "damage_meter_cells": {"dm_cell_tile": (16, 16)},
     # generate_icon_style.py: the runtime icon style's nine 8x8 colour ramps and the one 128x128 key cover.

@@ -911,7 +911,36 @@ local function UpdateStatusLevel()
     levelText:SetText((lvl and lvl > 0) and ("LV " .. tostring(lvl)) or "LV ??")
 end
 
+-- The happiness dot (Hunter tab, pet.happy): green happy, yellow content, red unhappy. GetPetHappiness is feature
+-- detected and pcall'd, and only a plain 1 to 3 answer draws; anything else, or the switch off, hides the dot.
+local HAPPY_COLORS = { [3] = { 0, 0.659, 0.110 }, [2] = { 1, 0.824, 0.247 }, [1] = { 1, 0.231, 0.306 } }
+local happyDot
+local function UpdateHappiness()
+    local want = FS.Config and FS.Config.Get("pet.happy") == true and type(GetPetHappiness) == "function" and nameRow and levelText
+    local level
+    if want then
+        local ok, value = pcall(GetPetHappiness)
+        if ok and not FS.IsSecret(value) and HAPPY_COLORS[value] then level = value end
+    end
+    if not level then
+        if happyDot then happyDot:Hide() end
+        return
+    end
+    if not happyDot then
+        happyDot = nameRow:CreateTexture(nil, "OVERLAY")
+        happyDot:SetTexture(FS.Theme.FLAT_TEXTURE or "Interface\\Buttons\\WHITE8X8")
+        happyDot:SetSize(6, 6)
+        happyDot:SetPoint("RIGHT", levelText, "LEFT", -6, 0)
+    end
+    local c = HAPPY_COLORS[level]
+    happyDot:SetVertexColor(c[1], c[2], c[3], 1)
+    happyDot:Show()
+end
+FS.PetFrame.UpdateHappiness = UpdateHappiness
+if FS.Config then FS.Config.OnChange("pet.happy", UpdateHappiness) end
+
 local function RefreshStatus()
+    UpdateHappiness()
     UpdateStatusHealth()
     UpdateStatusPower()
     UpdateStatusName()
@@ -935,6 +964,11 @@ local HAS_C_TIMER_AFTER = type(C_Timer) == "table" and type(C_Timer.After) == "f
 -- it fires on the owner token, other members' pets are ignored below.
 local function OnEvent(_, event, unit)
     if event == "UNIT_PET" and unit ~= "player" then return end
+
+    if event == "UNIT_HAPPINESS" then
+        UpdateHappiness()
+        return
+    end
 
     if event == "UNIT_FLAGS" then
         if unit ~= "pet" then return end
@@ -1016,6 +1050,7 @@ local function RegisterEvents()
     for _, event in ipairs({
         "PET_BAR_UPDATE",
         "UNIT_PET",
+        "UNIT_HAPPINESS",
         "PLAYER_CONTROL_LOST",
         "PLAYER_CONTROL_GAINED",
         "PLAYER_ENTERING_WORLD",

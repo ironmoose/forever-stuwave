@@ -18,6 +18,9 @@ CW.RegisterCategory({
             UI.Toggle(content, { label = "Show focus frame", key = "unitFrames.showFocus" })
             UI.Toggle(content, { label = "Show boss frames", key = "unitFrames.showBoss" })
         end },
-        { key = "bars", label = "Style", build = function() end },   -- C1: frame picker and the shared style blocks
+        { key = "bars", label = "Style", build = function(content)
+            local bars = FS.ConfigBars
+            if bars then bars.BuildStyleTab(content, { page = "unit", tab = "bars", frames = { "player", "target", "focus", "boss" } }) end
+        end },
     },
 })

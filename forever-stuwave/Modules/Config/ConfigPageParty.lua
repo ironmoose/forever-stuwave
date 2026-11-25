@@ -1,5 +1,5 @@
 -- Forever STUwave: Config page, Party frames
--- Frames tab: the party frames' own switch (PartyFrames.lua). The Style tab shell is filled by the party style ticket (C1b).
+-- Frames tab: the party frames' own switch (PartyFrames.lua). The Style tab is the shared style blocks (ConfigPageBars.lua).
 -- Move and Reset position are not here: moving and resetting happen in the layout editor (/fsedit).
 
 local _, FS = ...
@@ -20,6 +20,11 @@ CW.RegisterCategory({
                 UI.Toggle(content, { label = "Show party frames", key = party.CONFIG_KEY, tip = TIP })
             end
         end },
-        { key = "style", label = "Style", build = function() end },   -- C1b: the shared style blocks for Party
+        { key = "style", label = "Style", build = function(content)
+            if FS.ConfigBars then
+                FS.ConfigBars.BuildStyleTab(content, { page = "party", tab = "style", frames = { "party" },
+                    previewTip = "A party row as it is drawn with the settings below. Pointing at a setting turns that feature on here for a moment." })
+            end
+        end },
     },
 })

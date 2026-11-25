@@ -25,6 +25,7 @@ if not Shared then
 end
 
 local Theme = FS.Theme
+local Style = FS.FrameStyle
 local IsSecret = FS.IsSecret
 local DimBlizzardFrame = FS.FrameHelpers.DimBlizzardFrame
 local CreateLaserRail = FS.FrameHelpers.CreateLaserRail
@@ -546,6 +547,7 @@ end
 
 local function PaintRole(parts, role)
     local style = not IsSecret(role) and role and ROLE_STYLE[role]
+    if Style and not Style.Get("raid", "role") then style = nil end
     if not style then
         parts.role:Hide()
         return
@@ -652,6 +654,24 @@ end
 -- Layout (out of combat only: the container, the content frame and every cell are protected)
 -------------------------------------------------------------------------------
 
+-- What the raid's style settings change on one built cell: its opacity and the name size of both looks. Plain regions
+-- only, so it runs in combat too.
+local function ApplyCellStyle(cell)
+    if not Style then return end
+    cell:SetAlpha(Style.Number("raid", "alpha") / 100)
+    local ratio = Style.Number("raid", "nameSize") / 8.5
+    for _, parts in pairs(cell.looks or {}) do
+        local name = parts.name
+        if name and name.GetFont then
+            local font, size, flags = name:GetFont()
+            if font and type(size) == "number" then
+                parts.nameBase = parts.nameBase or size
+                if parts.nameBase * ratio ~= size then name:SetFont(font, parts.nameBase * ratio, flags) end
+            end
+        end
+    end
+end
+
 -- Gives one cell a look, building its pieces the first time. A cell holds both looks and shows one.
 local function LookCell(cell, id)
     local parts = cell.looks[id]
@@ -662,6 +682,7 @@ local function LookCell(cell, id)
     for other, otherParts in pairs(cell.looks) do otherParts.frame:SetShown(other == id) end
     cell.parts = parts
     cell.lowHealthTargets, cell.lowHealthBase = parts.lowTargets, parts.lowBase
+    ApplyCellStyle(cell)
 end
 
 local function UseLook(id)
@@ -670,19 +691,106 @@ local function UseLook(id)
     state.look = id
 end
 
+-- The raid's own style settings (FrameStyle.lua, frame "raid"). A default raid reads LOOKS as it always did; a stored
+-- width gives a copy of the look's spec with that width (look C keeps its ratio to look A).
+local specCache = {}
+local function EffSpec(spec)
+    if spec.eff then return spec end
+    if not (Style and Style.IsStored("raid", "w")) then return spec end
+    local w = Style.Number("raid", "w")
+    local want = spec == LOOKS.C and math.floor(w * LOOKS.C.w / LOOKS.A.w + 0.5) or w
+    local hit = specCache[spec]
+    if hit and hit.w == want then return hit end
+    local copy = {}
+    for k, v in pairs(spec) do copy[k] = v end
+    copy.w, copy.eff = want, true
+    specCache[spec] = copy
+    return copy
+end
+
+-- The look a roster of n draws: Auto is mini boxes up to SMALL_RAID and tiles above; the setting can force either.
+local function LookIdFor(n)
+    local pick = Style and Style.Get("raid", "raidLook") or "auto"
+    if pick == "boxes" then return "A" end
+    if pick == "tiles" then return "C" end
+    return n <= SMALL_RAID and "A" or "C"
+end
+
+local function RaidScale()
+    local pct = tonumber(FS.Config.Get("raid.scale")) or 100
+    return FS.Layout.Scale() * pct / 100
+end
+
 local function SeatCell(host, cell, spec, column, row)
+    spec = EffSpec(spec)
     cell:ClearAllPoints()
     cell:SetPoint("TOPLEFT", host, "TOPLEFT", column * (spec.w + spec.gx), -(spec.hdr + row * (spec.h + spec.gy)))
     cell:SetSize(spec.w, spec.h)
 end
 
+local SORT_ROLE = { TANK = 1, HEALER = 2, DAMAGER = 3 }
+
+-- Member indexes 1..n in the order the Sort setting names. infoOf(i) answers { class, role, name } as plain values.
+local function SortedMembers(n, infoOf)
+    local list = {}
+    for i = 1, n do list[i] = i end
+    local by = FS.Config.Get("raid.sort") or "group"
+    if by == "group" or not infoOf then return list end
+    local function key(i)
+        local m = infoOf(i) or {}
+        if by == "role" then return SORT_ROLE[m.role] or 4 end
+        if by == "class" then return type(m.class) == "string" and m.class or "~" end
+        return type(m.name) == "string" and m.name:lower() or "~"
+    end
+    table.sort(list, function(a, b)
+        local ka, kb = key(a), key(b)
+        if ka ~= kb then return ka < kb end
+        return a < b
+    end)
+    return list
+end
+
 -- Lays out one grid (`grid` holds its cells, labels, content and container: the real one or the editor preview's):
--- one column per group in `columns`, five cells down; the cells past the roster are parked in further columns to the
--- right, five down, so a member who joins in combat (the unit watch shows the cell, nothing may move it) never lands
--- on a member's cell. The grid is sized from the cells it shows.
-local function PlaceGrid(grid, spec, columns, groups, playerGroup)
+-- one column per group in `columns`, five cells down (Arrange: Group columns), or rows of Frames per row in Sort order
+-- (Arrange: Grid); the cells past the roster are parked in further columns to the right, five down, so a member who
+-- joins in combat (the unit watch shows the cell, nothing may move it) never lands on a member's cell. The grid is sized
+-- from the cells it shows.
+local function PlaceGrid(grid, spec, columns, groups, playerGroup, infoOf)
     local host, gridCells, gridLabels = grid.content, grid.cells, grid.labels
+    local eff = EffSpec(spec)
     local placed, rows = {}, 0
+    local count, wide = 0, 0
+    if FS.Config.Get("raid.arrange") == "grid" then
+        local n = 0
+        for _, group in ipairs(columns) do n = n + #groups[group] end
+        local perRow = math.max(1, (tonumber(FS.Config.Get("raid.perRow")) or 5))
+        local order = SortedMembers(n, infoOf)
+        local bare = {}   -- no group labels, so no header gap
+        for k, v in pairs(eff) do bare[k] = v end
+        bare.hdr, bare.eff = 0, true
+        for k, index in ipairs(order) do
+            SeatCell(host, gridCells[index], bare, (k - 1) % perRow, math.floor((k - 1) / perRow))
+            placed[index] = true
+        end
+        for k = 1, GROUP_COUNT do gridLabels[k]:Hide() end
+        count = math.min(perRow, math.max(n, 1))
+        rows = math.ceil(n / perRow)
+        wide = math.max(count, 1)
+        local spare = 0
+        for i = 1, RAID_SIZE do
+            if not placed[i] then
+                SeatCell(host, gridCells[i], bare, perRow + math.floor(spare / GROUP_SIZE), spare % GROUP_SIZE)
+                spare = spare + 1
+            end
+        end
+        local w = wide * eff.w + math.max(wide - 1, 0) * eff.gx
+        local h = rows * eff.h + math.max(rows - 1, 0) * eff.gy
+        local scale = RaidScale()
+        host:SetScale(scale)
+        host:SetSize(w, h)
+        grid.container:SetSize(w * scale, h * scale)
+        return w, h
+    end
     for k, group in ipairs(columns) do
         local members = groups[group]
         for row, index in ipairs(members) do
@@ -692,22 +800,23 @@ local function PlaceGrid(grid, spec, columns, groups, playerGroup)
         rows = math.max(rows, #members)
         local label = gridLabels[k]
         label:ClearAllPoints()
-        label:SetPoint("LEFT", host, "TOPLEFT", (k - 1) * (spec.w + spec.gx) + LABEL_X, LABEL_Y)
+        label:SetPoint("LEFT", host, "TOPLEFT", (k - 1) * (eff.w + eff.gx) + LABEL_X, LABEL_Y)
         label:SetText("G" .. group)
         SetColor(label, group == playerGroup and COLOR_HEALTH or COLOR_BORDER, LABEL_ALPHA)
         label:Show()
     end
     for k = #columns + 1, GROUP_COUNT do gridLabels[k]:Hide() end
-    local count, spare = #columns, 0
+    count = #columns
+    local spare = 0
     for i = 1, RAID_SIZE do
         if not placed[i] then
             SeatCell(host, gridCells[i], spec, count + math.floor(spare / GROUP_SIZE), spare % GROUP_SIZE)
             spare = spare + 1
         end
     end
-    local w = count * spec.w + math.max(count - 1, 0) * spec.gx
-    local h = spec.hdr + rows * spec.h + math.max(rows - 1, 0) * spec.gy
-    local scale = FS.Layout.Scale()
+    local w = count * eff.w + math.max(count - 1, 0) * eff.gx
+    local h = eff.hdr + rows * eff.h + math.max(rows - 1, 0) * eff.gy
+    local scale = RaidScale()
     host:SetScale(scale)
     host:SetSize(w, h)
     grid.container:SetSize(w * scale, h * scale)
@@ -716,8 +825,17 @@ end
 
 local realGrid = { cells = cells, labels = labels }   -- content and container are set at Init
 
+-- { class, role, name } of raid member i as plain values (the Sort setting reads them); a secret or missing answer is nil.
+local function RosterInfo(i)
+    if not HAS.ROSTER then return nil end
+    local ok, name, _, _, _, _, classFile, _, _, _, _, _, role = pcall(GetRaidRosterInfo, i)
+    if not ok then return nil end
+    local function plain(v) if IsSecret(v) or type(v) ~= "string" then return nil end return v end
+    return { name = plain(name), class = plain(classFile), role = plain(role) }
+end
+
 local function Place()
-    PlaceGrid(realGrid, LOOKS[state.look], state.columns, state.groups, state.playerGroup)
+    PlaceGrid(realGrid, LOOKS[state.look], state.columns, state.groups, state.playerGroup, RosterInfo)
 end
 
 -- The layout entry of the smallest size that fits `n` members: 1 to 5 raid5, 6 to 10 raid10, ... 26 to 40 raid40. Nobody
@@ -804,7 +922,7 @@ local function Reflow()
         container:Hide()
         return
     end
-    UseLook(n <= SMALL_RAID and "A" or "C")
+    UseLook(LookIdFor(n))
     ReadRoster(n)
     Place()
     Seat()
@@ -975,7 +1093,7 @@ end
 -- Re-draws the preview for its size: the look, the group columns, the cells' contents. Hidden cells are left alone.
 local function PreviewDraw()
     local n = Preview.Size()
-    local id = n <= SMALL_RAID and "A" or "C"
+    local id = LookIdFor(n)
     local groups, columns = pv.groups, pv.columns
     for g = 1, GROUP_COUNT do
         for k = #groups[g], 1, -1 do groups[g][k] = nil end
@@ -989,7 +1107,7 @@ local function PreviewDraw()
         if #groups[g] > 0 then columns[#columns + 1] = g end
     end
     -- The player is member 1, in group 1, the first column.
-    PlaceGrid(pv.grid, LOOKS[id], columns, groups, 1)
+    PlaceGrid(pv.grid, LOOKS[id], columns, groups, 1, PreviewMember)
     for i = 1, RAID_SIZE do
         local cell = pv.cells[i]
         cell:SetShown(i <= n)
@@ -1064,6 +1182,50 @@ function Preview.Reseat()
     if not pv.shown or InCombatLockdown() then return end
     PreviewDraw()
     PreviewNotify()
+end
+
+-- A small raid for the config window's Style tab: the real cells and looks (LookCell, PlaceGrid, PaintPreviewCell) on fake
+-- members, drawn for the picked layout size (at most two groups of it). Returns { frame, Restyle }.
+local STYLE_PREVIEW_MEMBERS = 10
+function RaidFrames.NewStylePreview(parent)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetSize(1, 1)
+    local host = CreateFrame("Frame", nil, frame)
+    host:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    local grid = { cells = {}, labels = {}, content = host, container = frame }
+    for k = 1, GROUP_COUNT do
+        local label = host:CreateFontString(nil, "OVERLAY")
+        Theme.ApplyFontGeneric(label, Theme.FONT_ORBITRON, LABEL_SIZE, COLOR_BORDER, "")
+        label:SetWordWrap(false)
+        label:Hide()
+        grid.labels[k] = label
+    end
+    for i = 1, RAID_SIZE do grid.cells[i] = NewPreviewCell(host) end
+    local groups, columns = {}, {}
+    for g = 1, GROUP_COUNT do groups[g] = {} end
+    local function Restyle()
+        local n = Preview.Size()
+        local shown = math.min(n, STYLE_PREVIEW_MEMBERS)
+        local id = LookIdFor(n)
+        for g = 1, GROUP_COUNT do for k = #groups[g], 1, -1 do groups[g][k] = nil end end
+        for k = #columns, 1, -1 do columns[k] = nil end
+        for i = 1, shown do
+            local list = groups[math.floor((i - 1) / GROUP_SIZE) + 1]
+            list[#list + 1] = i
+        end
+        for g = 1, GROUP_COUNT do if #groups[g] > 0 then columns[#columns + 1] = g end end
+        PlaceGrid(grid, LOOKS[id], columns, groups, 1, PreviewMember)
+        for i = 1, RAID_SIZE do
+            local cell = grid.cells[i]
+            cell:SetShown(i <= shown)
+            if i <= shown then
+                if not (cell.parts and cell.parts.look == id) then LookCell(cell, id) end
+                ApplyCellStyle(cell)
+                PaintPreviewCell(cell, i, 1)
+            end
+        end
+    end
+    return { frame = frame, Restyle = Restyle }
 end
 
 FS.Config.OnChange(Preview.KEY, function()
@@ -1269,6 +1431,18 @@ local function Init()
     -- A UI scale or display change, or a move or reset of a raid seat (the editor), re-seats the grid through Layout's
     -- re-seat list; this puts it on its pixel again at once out of combat, so it does not show at the unsnapped seat
     -- Layout just wrote, and in step with the roster's size.
+    if Style then
+        local function Restyle()
+            for _, cell in ipairs(cells) do ApplyCellStyle(cell) end
+            for _, cell in ipairs(pv.cells or {}) do ApplyCellStyle(cell) end
+            QueueReflow()
+            Preview.Reseat()
+        end
+        Style.OnChange("raid", Restyle)
+        -- the layout settings are raid.* keys, not bars.raid.*
+        for _, key in ipairs({ "raid.scale", "raid.arrange", "raid.perRow", "raid.sort" }) do FS.Config.OnChange(key, Restyle) end
+    end
+
     FS.Layout.OnRescale(function()
         if flags.active then
             if not InCombatLockdown() then Seat() end

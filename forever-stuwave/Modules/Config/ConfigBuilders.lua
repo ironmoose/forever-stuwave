@@ -480,7 +480,7 @@ function UI.Toggle(content, o)
     local row = NewRow(content, {
         label = o.label, tip = o.tip, half = o.half, height = master and S.ROW_H + 2 or S.ROW_H,
         size = master and 12 or S.TEXT, inset = master and 10 or o.inset, sub = o.sub,
-        key = o.key, needs = o.needs, nl = o.nl, reason = o.reason, enabled = o.enabled, reload = o.reload,
+        key = o.key, regKey = o.regKey, needs = o.needs, nl = o.nl, reason = o.reason, enabled = o.enabled, reload = o.reload,
         target = o.target, when = o.when, inverted = o.inverted, nodot = o.nodot,
         isChanged = o.isChanged, reset = o.reset,
     }, "switch")

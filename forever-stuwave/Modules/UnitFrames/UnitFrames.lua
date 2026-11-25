@@ -93,6 +93,20 @@ local BAR_GAP          = 6 -- mock: .bars gap (between the two bars)
 local PANEL_HEIGHT     = PAD_Y * 2 + NAME_ROW_HEIGHT + NAME_GAP + HEALTH_HEIGHT + BAR_GAP + POWER_HEIGHT
 local PANEL_HEIGHT_NO_POWER = PANEL_HEIGHT - POWER_HEIGHT - BAR_GAP -- power bar hidden (unit has no power type)
 
+-- The per frame look (FrameStyle.lua): size, bars, text, data row. Every default equals the constants above.
+local Style = FS.FrameStyle
+
+-- The panel height for a frame from its settings: pads, the data row, the health bar and, with a power bar, the gap and
+-- the power bar. At the defaults this is PANEL_HEIGHT (73), or PANEL_HEIGHT_NO_POWER (51) with the power bar hidden.
+local function PanelHeight(frame, showPower)
+    local key = frame.styleKey
+    local fixed, gap = Style.FixedHeight(key)
+    local height = fixed + Style.Number(key, "hpH")
+    local power = Style.Number(key, "mpH")
+    if showPower and power > 0 then height = height + gap + power end
+    return height
+end
+
 -------------------------------------------------------------------------------
 -- Feature detection (module scope, checked once)
 -------------------------------------------------------------------------------
@@ -310,22 +324,182 @@ local function CreateClassIcon(parent, size)
 end
 
 -------------------------------------------------------------------------------
+-- Style: the settings of FrameStyle.lua applied to a built frame
+-------------------------------------------------------------------------------
+
+-- Secure sizes cannot change in combat: they wait for PLAYER_REGEN_ENABLED, one pending apply per frame and part, the
+-- latest wins (the function reads the settings when it runs).
+local pendingSecure = {}
+local regenWatcher = CreateFrame("Frame")
+regenWatcher:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+    local list = pendingSecure
+    pendingSecure = {}
+    for _, fn in pairs(list) do pcall(fn) end
+end)
+local function RunOutOfCombat(frame, tag, fn)
+    local id = tag .. tostring(frame)
+    if InCombatLockdown() and not frame.preview then
+        pendingSecure[id] = fn
+        regenWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+    else
+        pendingSecure[id] = nil
+        fn()
+    end
+end
+
+local SetPanelHeight   -- assigned with the power visibility code below
+
+-- Focus and boss are sized in design px by Layout (scaled); player and target in UI units.
+local function PanelWidth(frame)
+    local width = Style.Number(frame.styleKey, "w")
+    if frame.unit and (frame.unit == "focus" or frame.unit:match("^boss%d$")) then
+        local scale = FS.Layout.Scale and FS.Layout.Scale() or 1
+        return width * (type(scale) == "number" and scale or 1)
+    end
+    return width
+end
+
+local function SeatPanelWidth(frame)
+    if frame.followsWidth then return end   -- boss 2 to 5 take boss 1's edges
+    RunOutOfCombat(frame, "w", function() frame:SetWidth(PanelWidth(frame)) end)
+end
+
+-- The data row: where the class icon, raid marker, name and level chip sit, with the sizes and nudges of the settings.
+-- Hidden parts give their space to the name. Player is [icon][marker][name]...[level]; the others are mirrored.
+local function SeatDataRow(f)
+    local key, row = f.styleKey, f.nameRow
+    local icon, marker, name, badge = f.classIcon, f.raidMarker, f.name, f.levelBadge
+    local rowHeight = Style.RowHeight(key)
+    row:SetHeight(rowHeight)
+    row:SetShown(rowHeight > 0)
+
+    local size = Style.Number(key, "iconSize")
+    icon:SetSize(size, size)
+    local iconX, markX = Style.Number(key, "iconX"), Style.Number(key, "markX")
+    local nameX, levelX = Style.Number(key, "nameX"), Style.Number(key, "levelX")
+    local hasIcon = Style.Get(key, "classIcon") or Style.Get(key, "portrait")
+    local hasLevel = Style.Get(key, "level")
+
+    ApplyOrbitron(name, Style.Number(key, "nameSize"))
+    name:SetShown(Style.Get(key, "name") == true)
+    badge:SetShown(hasLevel == true)
+    if f.levelText then
+        ApplyFontGeneric(f.levelText, FONT_ORBITRON, Style.Number(key, "levelSize"), COLOR_BORDER)
+        f.levelText:SetShadowOffset(1.5, -1.5)
+    end
+
+    icon:ClearAllPoints()
+    marker:ClearAllPoints()
+    badge:ClearAllPoints()
+    name:ClearAllPoints()
+    if f.mirrored then
+        -- [level badge] .... [name, right-aligned] [raid marker] [class icon]
+        badge:SetPoint("LEFT", row, "LEFT", levelX, 0)
+        icon:SetPoint("RIGHT", row, "RIGHT", iconX, 0)
+        if hasIcon then
+            marker:SetPoint("RIGHT", icon, "LEFT", -4 + markX, 0)
+        else
+            marker:SetPoint("RIGHT", row, "RIGHT", markX, 0)
+        end
+        name:SetPoint("RIGHT", marker, "LEFT", -4 + nameX, 0)
+        if hasLevel then
+            name:SetPoint("LEFT", badge, "RIGHT", 6 + nameX, 0)
+        else
+            name:SetPoint("LEFT", row, "LEFT", nameX, 0)
+        end
+        name:SetJustifyH("RIGHT")
+    else
+        -- [class icon] [raid marker] [name] .... [level badge]
+        icon:SetPoint("LEFT", row, "LEFT", iconX, 0)
+        badge:SetPoint("RIGHT", row, "RIGHT", levelX, 0)
+        if hasIcon then
+            marker:SetPoint("LEFT", icon, "RIGHT", 4 + markX, 0)
+        else
+            marker:SetPoint("LEFT", row, "LEFT", markX, 0)
+        end
+        name:SetPoint("LEFT", marker, "RIGHT", 4 + nameX, 0)
+        if hasLevel then
+            name:SetPoint("RIGHT", badge, "LEFT", -6 + nameX, 0)
+        else
+            name:SetPoint("RIGHT", row, "RIGHT", nameX, 0)
+        end
+        name:SetJustifyH("LEFT")
+    end
+end
+
+-- The bars: height (pill chrome re-cut at the new chamfer), the gap under the data row, the value text.
+local function SeatBars(f)
+    local key = f.styleKey
+    local health, power = f.health, f.power
+    local rowHeight = Style.RowHeight(key)
+    local gap = rowHeight > 0 and NAME_GAP or 0
+
+    health.shell:ClearAllPoints()
+    health.shell:SetPoint("TOPLEFT", f.nameRow, "BOTTOMLEFT", 0, -gap)
+    health.shell:SetPoint("TOPRIGHT", f.nameRow, "BOTTOMRIGHT", 0, -gap)
+    power.shell:ClearAllPoints()
+    power.shell:SetPoint("TOPLEFT", health.shell, "BOTTOMLEFT", 0, -BAR_GAP)
+    power.shell:SetPoint("TOPRIGHT", health.shell, "BOTTOMRIGHT", 0, -BAR_GAP)
+
+    local healthHeight, powerHeight = Style.Number(key, "hpH"), Style.Number(key, "mpH")
+    if health.fsPillHeight ~= healthHeight then
+        health:SetPillHeight(healthHeight)
+        local glow = health.healOverlay and health.healOverlay.glow
+        if glow then glow:SetHeight(math.max(2, healthHeight - 2)) end
+    end
+    if powerHeight > 0 and power.fsPillHeight ~= powerHeight then power:SetPillHeight(powerHeight) end
+
+    Style.ApplyLook(key, health, "hpStyle")
+    Style.ApplyLook(key, power, "mpStyle")
+    Style.SeatBarText(health.text, health, Style.Number(key, "hpTs"), Style.Get(key, "hpTa"), Style.Number(key, "hpTx"))
+    Style.SeatBarText(power.text, power, Style.Number(key, "mpTs"), Style.Get(key, "mpTa"), Style.Number(key, "mpTx"))
+end
+
+-- Everything a setting can change on a built frame. The visual child is plain, so all of it but the secure button's own
+-- size runs in combat too.
+local function ApplyStyle(f)
+    local key = f.styleKey
+    if not key then return end
+    f.visual:SetAlpha(Style.Number(key, "alpha") / 100)
+    f.fillHost:SetAlpha(Style.Number(key, "bgAlpha") / 100)
+    f.glowHost:SetAlpha(0.38 * Style.Number(key, "glowAmt") / 100)
+    f.glowHost:SetShown(Style.Get(key, "glow") == true)
+    SeatDataRow(f)
+    if FS.FrameExtras then FS.FrameExtras.Seat(f) end
+    SeatBars(f)
+    SeatPanelWidth(f)
+    SetPanelHeight(f, f.powerShown ~= false)
+    if FS.FrameExtras and f.unit and UnitExists(f.unit) then FS.FrameExtras.Update(f) end
+end
+
+-------------------------------------------------------------------------------
 -- Frame assembly
 -------------------------------------------------------------------------------
 
-local function BuildUnitFrame(unitToken, frameName, mirrored)
+-- With no unit token the frame is a PREVIEW: the same drawing on a plain frame inside `previewParent` (the config window's
+-- Style tab), so the picture is built by this code and not copied from it.
+local function BuildUnitFrame(unitToken, frameName, mirrored, styleKey, previewParent)
     -- Secure click surface. Attributes set explicitly rather than relying on
     -- SecureUnitButton_OnLoad, whose internal attribute names differ by
     -- client version. Must run out of combat (enforced by the caller).
-    local f = CreateFrame("Button", frameName, UIParent, "SecureUnitButtonTemplate")
-    f:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
-    f:RegisterForClicks("AnyUp")
-    f:SetAttribute("unit", unitToken)
-    f:SetAttribute("*type1", "target")
-    f:SetAttribute("*type2", "togglemenu")
+    local f
+    if previewParent then
+        f = CreateFrame("Frame", nil, previewParent)
+        f:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
+        f.preview = true
+    else
+        f = CreateFrame("Button", frameName, UIParent, "SecureUnitButtonTemplate")
+        f:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
+        f:RegisterForClicks("AnyUp")
+        f:SetAttribute("unit", unitToken)
+        f:SetAttribute("*type1", "target")
+        f:SetAttribute("*type2", "togglemenu")
+    end
 
     f.unit = unitToken
-    f.isPlayer = (unitToken == "player")
+    f.isPlayer = (unitToken == "player") or (previewParent ~= nil and styleKey == "player")
+    f.styleKey = styleKey
 
     -- Everything drawable lives on this non-secure child so it keeps updating
     -- in combat; only the click/target attributes above are protected. Its
@@ -347,12 +521,25 @@ local function BuildUnitFrame(unitToken, frameName, mirrored)
     -- so there is no interior fill for the bg below to hide; called before
     -- the bg purely for creation-order consistency with the rest of this
     -- function.
-    AddOuterGlow(visual, COLOR_BORDER[1], COLOR_BORDER[2], COLOR_BORDER[3], 8, 0.38, PANEL_RADIUS)
+    -- The glow, the fill and the border each sit on their own child frame (created first, so every piece of the data row and
+    -- the bars draws above them, as it did above the regions of `visual`): a frame's alpha is the Glow strength and the
+    -- Background opacity settings, and Border glow off hides the glow frame. Built at alpha 1, the frame alpha is the
+    -- value the pieces drew at before (0.38 and the fill's own 0.8), so the default frame is unchanged.
+    local glowHost = CreateFrame("Frame", nil, visual)
+    glowHost:SetAllPoints(visual)
+    AddOuterGlow(glowHost, COLOR_BORDER[1], COLOR_BORDER[2], COLOR_BORDER[3], 8, 1, PANEL_RADIUS)
+    f.glowHost = glowHost
 
     -- Cut-rect fill (flat rects + two corner triangles; discs under "round"). Not a
     -- MaskTexture: masking is unavailable on this client (confirmed in-game).
-    AddRoundedFill(visual, COLOR_BG, PANEL_RADIUS)
-    AddGradientBorder(visual, COLOR_BORDER, BORDER_THICK)
+    local fillHost = CreateFrame("Frame", nil, visual)
+    fillHost:SetAllPoints(visual)
+    AddRoundedFill(fillHost, { COLOR_BG[1], COLOR_BG[2], COLOR_BG[3], 1 }, PANEL_RADIUS)
+    f.fillHost = fillHost
+    local borderHost = CreateFrame("Frame", nil, visual)
+    borderHost:SetAllPoints(visual)
+    AddGradientBorder(borderHost, COLOR_BORDER, BORDER_THICK)
+    f.borderHost = borderHost
 
     -- Name row.
     local nameRow = CreateFrame("Frame", nil, visual)
@@ -383,23 +570,11 @@ local function BuildUnitFrame(unitToken, frameName, mirrored)
     raidMarker:Hide()
     f.raidMarker = raidMarker
 
-    if mirrored then
-        -- TARGET: [level badge] .... [name, right-aligned] [raid marker] [class icon]
-        badge:SetPoint("LEFT", nameRow, "LEFT", 0, 0)
-        icon:SetPoint("RIGHT", nameRow, "RIGHT", 0, 0)
-        raidMarker:SetPoint("RIGHT", icon, "LEFT", -4, 0)
-        name:SetPoint("RIGHT", raidMarker, "LEFT", -4, 0)
-        name:SetPoint("LEFT", badge, "RIGHT", 6, 0)
-        name:SetJustifyH("RIGHT")
-    else
-        -- PLAYER: [class icon] [raid marker] [name] .... [level badge]
-        icon:SetPoint("LEFT", nameRow, "LEFT", 0, 0)
-        badge:SetPoint("RIGHT", nameRow, "RIGHT", 0, 0)
-        raidMarker:SetPoint("LEFT", icon, "RIGHT", 4, 0)
-        name:SetPoint("LEFT", raidMarker, "RIGHT", 4, 0)
-        name:SetPoint("RIGHT", badge, "LEFT", -6, 0)
-        name:SetJustifyH("LEFT")
-    end
+    -- Where the pieces sit (mirrored for target, focus and boss) is SeatDataRow, called once the frame is assembled and
+    -- again whenever a data row setting changes.
+    f.mirrored = mirrored
+    f.nameRow, f.badgeAnchor = nameRow, nil
+    f.classIconTex, f.markerTex = icon, raidMarker
 
     f.classIcon, f.classGlow = icon, glow
     f.levelBadge, f.levelText = badge, badge.text
@@ -420,8 +595,6 @@ local function BuildUnitFrame(unitToken, frameName, mirrored)
 
     -- Health bar (both bars fill left-to-right regardless of name-row mirroring).
     local health = CreateStatBar(visual, HEALTH_HEIGHT, COLOR_HEALTH, 11)
-    health.shell:SetPoint("TOPLEFT", nameRow, "BOTTOMLEFT", 0, -NAME_GAP)
-    health.shell:SetPoint("TOPRIGHT", nameRow, "BOTTOMRIGHT", 0, -NAME_GAP)
     -- Chained overlay bars: heal rides the health fill's own edge, absorb
     -- rides heal's edge, so they stack left-to-right with zero arithmetic on
     -- the secret cur/max/incoming/absorb values -- see CreateOverlayBar above
@@ -480,11 +653,11 @@ local function BuildUnitFrame(unitToken, frameName, mirrored)
 
     -- Power bar.
     local power = CreateStatBar(visual, POWER_HEIGHT, COLOR_POWER, 11)
-    power.shell:SetPoint("TOPLEFT", health.shell, "BOTTOMLEFT", 0, -BAR_GAP)
-    power.shell:SetPoint("TOPRIGHT", health.shell, "BOTTOMRIGHT", 0, -BAR_GAP)
     power.caret = CreateCaret(power, COLOR_CARET_POWER)
     f.power = power
 
+    if FS.FrameExtras then FS.FrameExtras.Build(f) end
+    ApplyStyle(f)
     return f
 end
 
@@ -625,7 +798,7 @@ local function UpdateHealthBar(frame)
     -- free), this file's health bar color is fixed at construction and never
     -- reassigned elsewhere, so it has to be explicitly restored here.
     SetBarDesaturated(bar, false)
-    if bar.cornerMask then bar.cornerMask:Show() end
+    if bar.cornerMask and (bar.fsLook == nil or bar.fsLook == "cut") then bar.cornerMask:Show() end
     bar:SetStatusBarColor(COLOR_HEALTH[1], COLOR_HEALTH[2], COLOR_HEALTH[3], COLOR_HEALTH[4] or 1)
     frame.name:SetAlpha(1)
     bar.shell:SetAlpha(1)
@@ -642,7 +815,7 @@ local function UpdateHealthBar(frame)
 
     bar:SetMinMaxValues(0, max)
     bar:SetValue(cur)
-    bar.text:SetFormattedText("%d / %d", cur, max)
+    Style.WriteBarText(bar.text, Style.Get(frame.styleKey, "hpFmt"), unit, "health", cur, max)
     UpdateHealOverlay(frame, max)
     UpdateAbsorbOverlay(frame, max)
     -- FS.FrameHelpers.UpdateCaretFull's normal (curve) path only calls
@@ -672,33 +845,23 @@ end
 -- blocked-in-combat list, but out of caution that half defers to
 -- PLAYER_REGEN_ENABLED if combat is active rather than risk it; a slightly
 -- tall click region until combat ends is harmless.
-local function SetPanelHeight(frame, showPower)
-    local targetHeight = showPower and PANEL_HEIGHT or PANEL_HEIGHT_NO_POWER
+SetPanelHeight = function(frame, showPower)
+    frame.powerShown = showPower
+    local targetHeight = PanelHeight(frame, showPower)
 
     if frame.visual:GetHeight() ~= targetHeight then
         frame.visual:SetHeight(targetHeight)
     end
 
-    if frame:GetHeight() == targetHeight then return end
-
-    local function apply()
-        frame:SetHeight(targetHeight)
+    if frame:GetHeight() == targetHeight then
+        pendingSecure["h" .. tostring(frame)] = nil
+        return
     end
 
-    if InCombatLockdown() then
-        if not frame.pendingHeightFix then
-            frame.pendingHeightFix = true
-            local regen = CreateFrame("Frame")
-            regen:RegisterEvent("PLAYER_REGEN_ENABLED")
-            regen:SetScript("OnEvent", function(self)
-                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                frame.pendingHeightFix = false
-                apply()
-            end)
-        end
-    else
-        apply()
-    end
+    -- The secure button waits out combat; the height is read again when it runs, so the latest settings win.
+    RunOutOfCombat(frame, "h", function()
+        frame:SetHeight(PanelHeight(frame, frame.powerShown ~= false))
+    end)
 end
 
 local function UpdatePowerVisibility(frame)
@@ -729,6 +892,8 @@ local function UpdatePowerVisibility(frame)
     -- Toggle the pill shell, not just the inner fill bar: the shell carries
     -- the cut track/border/glow chrome, so hiding only the fill would
     -- leave an empty bar outline floating in the collapsed panel space.
+    -- A power bar height of 0 is "off": the bar hides and the frame shrinks, whatever the unit has.
+    show = show and Style.Number(frame.styleKey, "mpH") > 0
     if frame.power.shell:IsShown() ~= show then
         frame.power.shell:SetShown(show)
     end
@@ -749,7 +914,7 @@ local function UpdatePowerBar(frame)
 
     bar:SetMinMaxValues(0, max)
     bar:SetValue(cur)
-    bar.text:SetFormattedText("%d / %d", cur, max)
+    Style.WriteBarText(bar.text, Style.Get(frame.styleKey, "mpFmt"), unit, "power", cur, max)
 
     -- Dead/offline: mirrors UpdateHealthBar's own caret handling above. A
     -- static caret sitting at the bar's 0% edge (e.g. a warrior's rage,
@@ -925,6 +1090,7 @@ local function UpdateResting(frame)
     local icon = frame.restingIcon
     if not icon then return end
     local resting = (IsResting and IsResting()) or false
+    if not Style.Get(frame.styleKey, "resting") then resting = false end
     icon:SetShown(resting)
 end
 
@@ -935,6 +1101,7 @@ local function UpdateClassIcon(frame)
     -- A secret answer (a battleground) draws the badge without a class: the stock cut and the border glow.
     local isPlayer = UnitIsPlayer(unit)
     local show = frame.isPlayer or IsSecret(isPlayer) or isPlayer
+    if not Style.Get(frame.styleKey, "classIcon") then show = false end
     if not show then
         frame.classIcon:Hide()
         frame.classGlow:Hide()
@@ -967,6 +1134,10 @@ end
 local function UpdateRaidMarker(frame)
     local marker = frame.raidMarker
     if not marker then return end
+    if not Style.Get(frame.styleKey, "raidMark") then
+        marker:Hide()
+        return
+    end
 
     if not HAS_GET_RAID_TARGET_INDEX or not HAS_RAID_TARGET_TEXTURE_SETTER then
         marker:Hide()
@@ -992,6 +1163,70 @@ local function UpdateAll(frame)
     TryStep(frame, "classIcon", UpdateClassIcon)
     TryStep(frame, "raidMarker", UpdateRaidMarker)
     TryStep(frame, "resting", UpdateResting)
+    if FS.FrameExtras then TryStep(frame, "extras", FS.FrameExtras.Update) end
+end
+
+-------------------------------------------------------------------------------
+-- Preview (the config window's Style tab draws the real frame)
+-------------------------------------------------------------------------------
+
+-- What a preview frame shows: a name (and the surname tint of the player), a reaction colour, a level and two readings.
+local PREVIEW_SAMPLE = {
+    player = { name = "Stu", surname = "Shockalaka", color = COLOR_TEXT_WHITE, level = "22", hp = { 2481, 3000 }, mp = { 1620, 2200 } },
+    target = { name = "Stu Shockalaka", color = COLOR_REACTION_FRIEND, level = "22", hp = { 2481, 3000 }, mp = { 1620, 2200 } },
+    focus = { name = "Kolkar Packhound", color = COLOR_REACTION_HOSTILE, level = "20", hp = { 1840, 2400 }, mp = { 900, 1500 } },
+    boss = { name = "Hezrul Bloodmark", color = COLOR_REACTION_HOSTILE, level = "??", hp = { 61200, 72000 }, mp = { 5200, 8000 } },
+}
+
+local function PreviewFill(f)
+    local key = f.styleKey
+    local sample = PREVIEW_SAMPLE[key] or PREVIEW_SAMPLE.target
+    local text = sample.name
+    local c = sample.color
+    if sample.surname then
+        text = Colorize(sample.name .. " ", c[1], c[2], c[3])
+            .. Colorize(sample.surname, COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3])
+    else
+        text = Colorize(text, c[1], c[2], c[3])
+    end
+    f.name:SetText(text)
+    f.levelText:SetText(sample.level)
+    f.levelBadge:SetWidth(math.max(LEVEL_BADGE_MIN_WIDTH, f.levelText:GetStringWidth() + LEVEL_BADGE_PAD))
+    local icon = f.classIcon
+    if HAS_CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS.SHAMAN then icon:SetTexCoord(unpack(CLASS_ICON_TCOORDS.SHAMAN)) end
+    icon:SetShown(Style.Get(key, "classIcon") == true)
+    f.classGlow:SetShown(Style.Get(key, "classIcon") == true)
+    if HAS_RAID_TARGET_TEXTURE_SETTER and f.raidMarker then
+        SetRaidTargetIconTexture(f.raidMarker, 8)
+        f.raidMarker:SetShown(Style.Get(key, "raidMark") == true)
+    end
+    if f.restingIcon then f.restingIcon:SetShown(Style.Get(key, "resting") == true) end
+    for _, part in ipairs({ { f.health, "hp", "hpFmt" }, { f.power, "mp", "mpFmt" } }) do
+        local bar, reading = part[1], sample[part[2]]
+        bar:SetMinMaxValues(0, reading[2])
+        bar:SetValue(reading[1])
+        local fmt = Style.Get(key, part[3])
+        bar.text:SetText(Style.TextFor(fmt, reading[1], reading[2]))
+        bar.text:SetShown(fmt ~= "none")
+    end
+    if f.health.caret and f.health.caret.host then f.health.caret.host:Hide() end
+    if f.power.caret and f.power.caret.host then f.power.caret.host:Hide() end
+end
+
+FS.UnitFrames = FS.UnitFrames or {}
+
+-- A plain frame inside `parent` drawn as the unit frame `key` ("player", "target", "focus", "boss"). Call Restyle after a
+-- setting changed. The frame is not secure, not registered for any event and never shows a unit.
+function FS.UnitFrames.NewPreview(parent, key)
+    local f = BuildUnitFrame(nil, nil, key ~= "player", key, parent)
+    local base = ApplyStyle
+    function f.Restyle()
+        base(f)
+        PreviewFill(f)
+        if FS.FrameExtras then FS.FrameExtras.Preview(f) end
+    end
+    f.Restyle()
+    return f
 end
 
 -------------------------------------------------------------------------------
@@ -1099,6 +1334,7 @@ local function WireEvents(frame)
         end
     end)
     frame.events = events
+    if FS.FrameExtras then FS.FrameExtras.Wire(frame) end
 end
 
 -------------------------------------------------------------------------------
@@ -1206,17 +1442,17 @@ local function Init()
         end
     end
 
-    local player = BuildUnitFrame("player", "ForeverSTUwavePlayerFrame", false)
+    local player = BuildUnitFrame("player", "ForeverSTUwavePlayerFrame", false, "player")
     FS.Layout.Apply(player, "player")
     player:Show() -- "player" always exists; shown unconditionally, no watch needed
 
-    local target = BuildUnitFrame("target", "ForeverSTUwaveTargetFrame", true)
+    local target = BuildUnitFrame("target", "ForeverSTUwaveTargetFrame", true, "target")
     FS.Layout.Apply(target, "target")
     RegisterUnitWatch(target) -- shows/hides securely based on whether "target" exists
 
     -- Focus sits at its own design position (FS.Layout.focus), away from the
     -- player/target corner, and seats from the layout table like they do.
-    local focus = BuildUnitFrame("focus", "ForeverSTUwaveFocusFrame", true)
+    local focus = BuildUnitFrame("focus", "ForeverSTUwaveFocusFrame", true, "focus")
     FS.Layout.Apply(focus, "focus")
     RegisterUnitWatch(focus) -- shows/hides securely based on whether "focus" exists
 
@@ -1229,7 +1465,8 @@ local function Init()
 
     local boss = {}
     for i = 1, 5 do
-        boss[i] = BuildUnitFrame("boss" .. i, "ForeverSTUwaveBoss" .. i .. "Frame", true)
+        boss[i] = BuildUnitFrame("boss" .. i, "ForeverSTUwaveBoss" .. i .. "Frame", true, "boss")
+        if i > 1 then boss[i].followsWidth = true end
     end
     FS.Layout.Apply(boss[1], "boss")
     for i = 2, 5 do
@@ -1253,6 +1490,27 @@ local function Init()
     for i = 1, 5 do
         RegisterUnitWatch(boss[i]) -- shows/hides securely based on whether "bossN" exists
     end
+
+    -- Layout.Apply sized focus and boss 1 from the layout table; the Width setting takes the size back.
+    local function StyleSizes()
+        for _, frame in ipairs({ player, target, focus, boss[1] }) do SeatPanelWidth(frame) end
+    end
+    StyleSizes()
+    if FS.Layout.OnRescale then FS.Layout.OnRescale(StyleSizes) end
+
+    -- A setting of any frame page (or a profile switch) applies to the built frames at once, in combat too.
+    local function Restyle(styled)
+        return function()
+            for _, frame in ipairs(styled) do
+                ApplyStyle(frame)
+                if UnitExists(frame.unit) then UpdateAll(frame) end
+            end
+        end
+    end
+    Style.OnChange("player", Restyle({ player }))
+    Style.OnChange("target", Restyle({ target }))
+    Style.OnChange("focus", Restyle({ focus }))
+    Style.OnChange("boss", Restyle(boss))
 
     WireEvents(player)
     WireEvents(target)
