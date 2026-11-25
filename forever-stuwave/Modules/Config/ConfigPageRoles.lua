@@ -2,7 +2,7 @@
 -- Four tabs (Tank, Healer, Melee, Ranged). Every tab carries the same pinned "Your role" bar: Auto (your group role, else your
 -- talents, else your class) or a hand pick, with what Auto chose beside the label. A section is tagged YOUR ROLE (cyan) when
 -- it belongs to the role in use and "<ROLE> ONLY" (amber) when it belongs to another; the rows of another role stay
--- editable, they act once that role is the one in use. The tab of the role in use carries a small cyan arrow.
+-- editable, they act once that role is the one in use. The tab of the role in use carries a small cyan arrow (CW.TabMark).
 -- The settings live in Core/Role.lua (FS.Role.SETTINGS), the plate side in Modules/Nameplates/PlateThreat.lua.
 -- Left out of the page when the role module is absent; the swatch rows when the plate threat module is.
 
@@ -13,7 +13,6 @@ local UI, I, C, S = CW.UI, CW.I, CW.C, CW.Spec
 local Theme = FS.Theme
 
 local BAR_H = 24            -- the pinned bar: the segmented control is S.SEG_H tall
-local ARROW_GAP = 2         -- tab label to the arrow (the arrow sits in the tab's right padding)
 
 -- The prototype's words (mockups/proto-src-2026-11-25/proto-pages.js, page "role").
 local TIP_ROLE = "Auto uses your group role when one is set, else your talents: most points in Enhancement makes you Melee. "
@@ -206,20 +205,12 @@ end
 -- The arrow on the tab of the role in use
 -------------------------------------------------------------------------------
 
--- The strip is built the first time the page is selected, so this runs with every refresh and finds it then.
+-- CW.TabMark remembers a mark per tab, so this works before the strip exists and the window repaints it on every select.
+local TAB_KEYS = { "tank", "healer", "melee", "ranged" }
+
 local function PaintArrows()
-    local strips = I.ui and I.ui.strips
-    local strip = strips and strips.role
-    if not strip then return end
     local role = RoleNow()
-    for _, button in ipairs(strip.fsButtons or {}) do
-        if not button.fsRoleArrow and button.fsLabel then
-            local arrow = I.Label(button, "<", S.TEXT, C.cyan)
-            arrow:SetPoint("LEFT", button.fsLabel, "RIGHT", ARROW_GAP, 0)
-            button.fsRoleArrow = arrow
-        end
-        if button.fsRoleArrow then button.fsRoleArrow:SetShown(role ~= nil and button.fsTabKey == role) end
-    end
+    for _, key in ipairs(TAB_KEYS) do CW.TabMark("role", key, role == key and "left" or nil) end
 end
 
 I.Track(PaintArrows)

@@ -58,7 +58,8 @@ AREAS_FILE = ADDON / "Modules/CombatHud/GunsightAreas.lua"
 TOC_FILE = ADDON / "forever-stuwave.toc"
 HELP_FILE = ADDON / "Modules/Config/HelpModules.lua"
 HELP_ART_FILE = ADDON / "Modules/Config/HelpPicturesArt.lua"
-MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "config-window-2026-10-07.html"
+# FS_MOCKUPS_DIR points at the main checkout's mockups/ from a worktree (check.py links it in for a full run).
+MOCKUP = Path(os.environ.get("FS_MOCKUPS_DIR", Path(__file__).resolve().parent.parent / "mockups")) / "config-window-2026-10-07.html"
 
 MOCK = r"""
 ALL = {}            -- every frame and region, in creation order
@@ -154,6 +155,7 @@ end
 function Obj:ClearAllPoints() self.points = {} end
 function Obj:SetAllPoints(rel) self.points = { { point = "ALL", rel = rel or self.parent, x = 0, y = 0 } } end
 function Obj:GetParent() return self.parent end
+function Obj:SetParent(parent) self.parent = parent end
 -- Geometry the mock does not lay out: a check sets .left on a frame and __cursorX for the mouse.
 function Obj:GetLeft() return self.left end
 function Obj:GetTop() return self.top end
@@ -1324,6 +1326,108 @@ function T.a_changed_row_shows_a_dot_a_reset_and_counts_and_reset_puts_it_back()
     no(findText(BULLET .. "1", win()), "no chip left")
     no(tabButton("unit", "frames").fsDot:IsShown(), "tab dot gone")
     no(owner(findText("Unit Frames", win()), "fsCategory").fsNdot:IsShown(), "nav dot gone")
+end
+
+-- ---- tab marks (CW.TabMark): the small triangle after a tab's label ----
+
+local function tabMarkFixture(W)
+    W.RegisterCategory({ key = "tm", label = "Marks", order = 40, tabs = {
+        { key = "a", label = "Alpha", build = function(c) W.UI.Section(c, { title = "A" }) end },
+        { key = "b", label = "Beta", build = function(c) W.UI.Section(c, { title = "B" }) end },
+        { key = "c", label = "Gamma", build = function(c) W.UI.Section(c, { title = "C" }) end },
+    } })
+end
+local function markOf(button) return button.fsMark end
+local function markShown(button) return button.fsMark ~= nil and button.fsMark:IsShown() end
+
+function T.a_tab_mark_is_a_cyan_pixel_triangle_right_after_the_tab_label()
+    local W = boot()
+    tabMarkFixture(W)
+    W.Open("tm", "a")
+    local a, b = tabButton("tm", "a"), tabButton("tm", "b")
+    no(markShown(a)); no(markShown(b))
+    W.TabMark("tm", "b", "left")
+    yes(markShown(b), "the mark shows on its tab")
+    no(markShown(a), "and on no other")
+    local mark = markOf(b)
+    eq(mark.w, 4); eq(mark.h, 8)
+    local p = mark.points[1]
+    eq(p.point, "LEFT"); eq(p.rel, b.fsLabel); eq(p.relPoint, "RIGHT")
+    yes(p.x >= 1 and p.x <= 4, "a small gap after the label")
+    eq(#mark.fsGlyph.textures, 4, "a pixel glyph, not a typed character")
+    eq(mark.fsGlyph.direction, "left")
+    for _, t in ipairs(mark.fsGlyph.textures) do
+        for i = 1, 3 do yes(math.abs(t.color[i] - W.C.cyan[i]) < 0.002, "cyan") end
+    end
+    -- it sits inside the tab: the label, the gap and the mark fit in the text padding
+    yes(b.w >= b.fsLabel:GetStringWidth() + p.x + mark.w + 8, "the tab is wide enough for the mark")
+    W.TabMark("tm", "b", "right")
+    eq(markOf(b).fsGlyph.direction, "right", "the direction can change")
+    eq(#markOf(b).fsGlyph.textures, 4)
+    for name, glyph in pairs(markOf(b).fsGlyphs) do
+        for _, t in ipairs(glyph.textures) do eq(t:IsShown(), name == "right", name .. " triangle shown only when asked for") end
+    end
+    W.TabMark("tm", "b", nil)
+    no(markShown(b), "nil clears it")
+end
+
+function T.a_tab_mark_moves_between_tabs_and_survives_a_tab_change()
+    local W = boot()
+    tabMarkFixture(W)
+    W.Open("tm", "a")
+    W.TabMark("tm", "a", "left")
+    W.TabMark("tm", "c", "left")
+    yes(markShown(tabButton("tm", "a")) and markShown(tabButton("tm", "c")), "more than one tab can carry one")
+    W.TabMark("tm", "a", nil)
+    no(markShown(tabButton("tm", "a"))); yes(markShown(tabButton("tm", "c")))
+    W.Open("tm", "b")
+    yes(markShown(tabButton("tm", "c")), "selecting another tab keeps it")
+    W.RefreshAll()
+    yes(markShown(tabButton("tm", "c")), "so does a refresh")
+end
+
+function T.a_tab_mark_set_before_the_strip_exists_is_there_when_the_page_opens()
+    local W = boot()
+    tabMarkFixture(W)
+    W.TabMark("tm", "b", "right")
+    W.Open("tm", "a")
+    local b = tabButton("tm", "b")
+    yes(markShown(b), "set before the page was ever selected")
+    eq(markOf(b).fsGlyph.direction, "right")
+    no(markShown(tabButton("tm", "a")))
+end
+
+function T.a_tab_mark_on_an_unknown_tab_or_page_or_with_a_bad_value_is_ignored_and_reported_once()
+    local W = boot()
+    tabMarkFixture(W)
+    W.Open("tm", "a")
+    W.TabMark("tm", "nope", "left")
+    W.TabMark("nope", "a", "left")
+    eq(#__errors, 0, "an unknown tab or page waits quietly (its page may register later)")
+    W.TabMark("tm", "a", "up")
+    eq(#__errors, 1, "a value that is not left or right is reported")
+    no(markShown(tabButton("tm", "a")))
+    for k in pairs(__errors) do __errors[k] = nil end
+    W.TabMark("tm", "b", 5)
+    eq(#__errors, 1)
+    for k in pairs(__errors) do __errors[k] = nil end
+end
+
+function T.a_tab_mark_through_an_old_page_name_lands_on_the_page()
+    local W = boot({ preWindow = unitFramesDefaults })
+    W.TabMark("unitframes", "frames", "left")
+    W.Open("unit", "bars")
+    yes(markShown(tabButton("unit", "frames")), "the alias reaches the Unit Frames page")
+    no(markShown(tabButton("unit", "bars")))
+end
+
+function T.a_tab_mark_on_a_page_with_one_tab_does_nothing_and_does_not_fail()
+    local W = boot()
+    W.RegisterCategory({ key = "one", label = "One", order = 41, build = function(c) W.UI.Section(c, { title = "S" }) end })
+    W.TabMark("one", "main", "left")
+    W.Open("one")
+    W.TabMark("one", "main", nil)
+    eq(#__errors, 0)
 end
 
 function T.the_reset_brightens_on_row_hover()

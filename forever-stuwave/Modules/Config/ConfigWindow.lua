@@ -37,7 +37,7 @@ local ALIASES = { unitframes = "unit" }     -- page keys the first release used
 
 local categories = {}        -- key -> { key, label, group, order, tabs = { { key, label, build, tip } } }
 local sorted = {}            -- the same, by group then order then key
-local ui = { tabs = {}, strips = {}, nav = {}, groups = {} }
+local ui = { tabs = {}, strips = {}, nav = {}, groups = {}, marks = {} }
 local controls = {}          -- refresh functions of every control built
 local cursors = setmetatable({}, { __mode = "k" })
 local registry = {}          -- every row builder run, in build order
@@ -883,9 +883,39 @@ local function SetSelected(key)
     end
 end
 
+-- A tab's mark (CW.TabMark): a small cyan pixel triangle after the label, standing in the tab's right padding. The mark
+-- frame is built the first time a tab is given one, with both triangles, and only the one asked for shows.
+local TAB_MARK_GAP = 2      -- label to mark; the prototype sets its triangle inline after the text, with no size of its own
+
+local function PaintMark(b, direction)
+    local mark = b.fsMark
+    if direction == nil then
+        if mark then mark:Hide() end
+        return
+    end
+    if not mark then
+        if not (I.NewArrowGlyph and I.ARROW_W) then return end
+        mark = CreateFrame("Frame", nil, b)
+        mark:SetSize(I.ARROW_W, I.ARROW_H)
+        mark:SetPoint("LEFT", b.fsLabel, "RIGHT", TAB_MARK_GAP, 0)
+        mark.fsGlyphs = {}
+        for _, name in ipairs({ "left", "right" }) do
+            local glyph = I.NewArrowGlyph(mark, name)
+            glyph.SetColor(C.cyan)
+            glyph.SetShown(false)
+            mark.fsGlyphs[name] = glyph
+        end
+        b.fsMark = mark
+    end
+    for name, glyph in pairs(mark.fsGlyphs) do glyph.SetShown(name == direction) end
+    mark.fsGlyph = mark.fsGlyphs[direction]
+    mark:Show()
+end
+
 -- Tab buttons: width is the text rounded up to TEXT_SNAP; the active one cyan with a pink underline.
 local function PaintTabs(strip)
     for _, b in ipairs(strip.fsButtons) do
+        PaintMark(b, ui.marks[(strip.fsPage or "") .. "/" .. b.fsTabKey])
         local on = b.fsTabKey == ui.tab
         b.fsSelected = on
         b.fsUnderline:SetShown(on)
@@ -906,6 +936,7 @@ local function BuildStrip(cat)
     rule:SetPoint("BOTTOMLEFT", strip, "BOTTOMLEFT", 0, 0)
     rule:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", 0, 0)
     strip.fsButtons = {}
+    strip.fsPage = cat.key
     local x = S.CONTENT_L
     for _, def in ipairs(cat.tabs) do
         local b = CreateFrame("Button", nil, strip)
@@ -944,6 +975,25 @@ local function BuildStrip(cat)
     end
     strip:Hide()
     return strip
+end
+
+-- CW.TabMark(page, tab, mark): puts a small cyan triangle after a tab's label ("left" or "right"; the client fonts have no
+-- triangle glyphs, so it is drawn from rects), or takes it off with nil. The Roles page marks the role in use. The mark is
+-- remembered per tab, so it can be set before the page's strip exists (the strip is built when the page is first selected)
+-- and on a tab that is not shown; a page with one tab has no strip and shows none. A value that is not left or right is
+-- reported and changes nothing.
+function CW.TabMark(page, tab, mark)
+    if type(page) ~= "string" or type(tab) ~= "string" then return end
+    page = ALIASES[page] or page
+    if mark ~= nil and mark ~= "left" and mark ~= "right" then
+        Forward("tab mark '" .. tostring(mark) .. "' is not left or right")
+        return
+    end
+    local id = page .. "/" .. tab
+    if ui.marks[id] == mark then return end
+    ui.marks[id] = mark
+    local strip = ui.strips[page]
+    if strip then PaintTabs(strip) end
 end
 
 -- Seats the content area under the tab strip (or the top of the well when the page has one tab).

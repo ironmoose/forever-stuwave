@@ -1137,9 +1137,12 @@ local function NewArrowGlyph(button, direction)
     function glyph.SetColor(color)
         for _, t in ipairs(glyph.textures) do t:SetColorTexture(color[1], color[2], color[3], color[4] or 1) end
     end
+    function glyph.SetShown(shown)
+        for _, t in ipairs(glyph.textures) do t:SetShown(shown) end
+    end
     return glyph
 end
-I.NewArrowGlyph = NewArrowGlyph
+I.NewArrowGlyph, I.ARROW_W, I.ARROW_H = NewArrowGlyph, ARROW_W, ARROW_H
 
 -- The prototype's .mv: a plain arrow is cyan on the ink fill, hover lights the ring and lifts the fill, pressed darkens the
 -- fill, disabled takes the dim violet glyph on the darkest fill and ring (--dis, --disfill, --disedge) and answers nothing.

@@ -612,8 +612,6 @@ PAGE_CHECKS = r"""
 local function roles(opts)
     opts = opts or {}
     return function()
-        -- the config window mock does not move a frame to a new parent: this does, as the client does
-        getmetatable(UIParent).SetParent = function(self, parent) self.parent = parent end
         FS.IsSecret = function() return false end
         UnitClass = function() return "Shaman", opts.class or "SHAMAN" end
         UnitGroupRolesAssigned = function() return opts.group or "NONE" end
@@ -641,7 +639,7 @@ local function arrows()
     local strip = FS.ConfigWindow.I.ui.strips.role
     local out = {}
     for _, b in ipairs(strip.fsButtons) do
-        if b.fsRoleArrow and b.fsRoleArrow:IsShown() then out[#out + 1] = b.fsTabKey end
+        if b.fsMark and b.fsMark:IsShown() then out[#out + 1] = b.fsTabKey end
     end
     return table.concat(out, ",")
 end
@@ -830,16 +828,21 @@ function T.a_role_change_retags_the_sections_and_moves_the_arrow_at_once()
     eq(arrows(), "melee", "back on Auto")
 end
 
-function T.the_tab_arrow_is_a_small_cyan_mark_in_the_tab_and_only_one_shows()
+function T.the_tab_arrow_is_a_small_cyan_pixel_triangle_in_the_tab_and_only_one_shows()
     local W = boot({ preWindow = roles() })
     W.Open("role", "tank")
     local strip = FS.ConfigWindow.I.ui.strips.role
     local shown = 0
     for _, b in ipairs(strip.fsButtons) do
-        yes(b.fsRoleArrow, "every tab has an arrow object")
-        eq(b.fsRoleArrow:GetText(), "<")
-        eq(b.fsRoleArrow.themeColor, FS.ConfigWindow.C.cyan)
-        if b.fsRoleArrow:IsShown() then shown = shown + 1 end
+        if b.fsMark and b.fsMark:IsShown() then
+            shown = shown + 1
+            eq(b.fsMark.fsGlyph.direction, "left", "it points left, as the prototype's does")
+            eq(#b.fsMark.fsGlyph.textures, 4, "drawn from rects, not typed")
+            for _, t in ipairs(b.fsMark.fsGlyph.textures) do
+                for i = 1, 3 do yes(math.abs(t.color[i] - FS.ConfigWindow.C.cyan[i]) < 0.002, "cyan") end
+            end
+        end
+        no(b.fsRoleArrow, "the page no longer reaches into the strip's buttons")
     end
     eq(shown, 1)
 end
@@ -1059,6 +1062,18 @@ def run_page_checks(role_source: str, threat_source: str, rows: dict) -> int:
     return failed
 
 
+def check_arrow_goes_through_the_window_hook() -> list[str]:
+    """The tab arrow is set with CW.TabMark; the page does not walk the window's strips or tab buttons."""
+    code = "\n".join(line.split("--", 1)[0] for line in PAGE.read_text(encoding="utf-8").splitlines())
+    problems = []
+    if "CW.TabMark" not in code:
+        problems.append("ConfigPageRoles.lua does not use CW.TabMark")
+    for needle in ("I.ui", "fsButtons", "fsRoleArrow"):
+        if needle in code:
+            problems.append(f"ConfigPageRoles.lua reaches into the window with {needle}")
+    return problems
+
+
 def check_page_text_stays_neutral() -> list[str]:
     """Client visible text keeps to the neutral wording."""
     problems = []
@@ -1092,6 +1107,7 @@ def main() -> int:
         ("party_frames_reads_the_healer_switches", check_party_frames_gates()),
         ("party_frames_local_count", check_party_frames_local_count_did_not_grow()),
         ("roles_page_text_uses_neutral_words", check_page_text_stays_neutral()),
+        ("roles_page_arrow_goes_through_the_window_hook", check_arrow_goes_through_the_window_hook()),
     ):
         total += 1
         if problems:
