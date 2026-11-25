@@ -675,12 +675,15 @@ function Helpers.SetBarLook(bar, look)
     local tex = bar:GetStatusBarTexture()
     if tex then
         local tile = Helpers.BAR_LOOK_TILES[look]
+        -- SetHorizTile alone only asks for texture coordinates past 1; the file must be loaded with the REPEAT wrap
+        -- mode (as a plain Texture tile is, see Theme's scanlines) or the engine clamps and smears the last column
+        -- of the tile into a flat bar. A look that does not tile goes back to the default CLAMP wrap.
         if tile then
-            tex:SetTexture(tile)
+            tex:SetTexture(tile, "REPEAT", "CLAMP")
         elseif look == "stock" then
-            tex:SetTexture(Helpers.BAR_LOOK_STOCK)
+            tex:SetTexture(Helpers.BAR_LOOK_STOCK, "CLAMP", "CLAMP")
         else
-            tex:SetTexture(Theme.FLAT_TEXTURE)
+            tex:SetTexture(Theme.FLAT_TEXTURE, "CLAMP", "CLAMP")
         end
         if tex.SetHorizTile then tex:SetHorizTile(tile ~= nil) end
     end
