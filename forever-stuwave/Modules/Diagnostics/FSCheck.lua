@@ -49,6 +49,14 @@
 --                  `destroy` (DestroyTotem from addon code). Stored in ForeverSTUwaveDB.fscheck.shaman;
 --                  survives a re-arm like gunsight (see the SH block below).
 --
+--   reads          `/fscheck reads` (any time) / `/fscheck reads off`: what an addon can read about group threat,
+--                  spell range, other units' cast info, C_EncodingUtil round trips, bag families, talent trees and
+--                  roles, pets, weapon enchants and aura container filters. Saved once out of combat, then three
+--                  samples into the next pull and the first 8 casts of target, focus and nameplates. One record
+--                  per group state (solo, party, raid) in ForeverSTUwaveDB.fscheck.reads (see the RD block).
+--   panels         `/fscheck panels` (out of combat, then again in combat): opens each of a few stock panels once
+--                  and closes it, recording only whether the calls were allowed. The only command that opens one.
+--
 -- Read it after /reload or logout: WTF/Account/<id>/SavedVariables/forever-stuwave.lua
 -- (ForeverSTUwaveDB.fscheck).
 --
@@ -214,6 +222,8 @@ local USAGE = {
     "fscheck: /fscheck shaman = shaman totem check: snapshot now, the other (ooc/combat) one on the next pull or fight end, plus 30 min of bounded totem/cast/click logs, and a list of the checks that could not run (spell not known yet) | /fscheck shaman off = stop",
     "fscheck: /fscheck shaman buttons = temporary totem button row (dismiss slots 1-4, castsequence, Totemic Recall; out of combat) | /fscheck shaman buttons off = hide it | /fscheck shaman setslot = SetMultiCastSpell from addon code, run it IN COMBAT yourself | /fscheck shaman destroy [slot] = DestroyTotem from addon code",
     "fscheck: /fscheck hot = party row HoT check: an engine aura container per party token (icon, short buffs, HoT timer bar) for 120s (out of combat to start) | /fscheck hot off = remove it",
+    "fscheck: /fscheck reads = what group threat, spell range, other units' cast info, encoding, bags, roles, pets and weapon enchants let an addon read: saved at once (out of combat), then 3 samples 4, 12 and 24s into your next pull, and the first 8 casts of target, focus and nameplates | /fscheck reads off = stop | run it solo, then again in a group",
+    "fscheck: /fscheck panels = opens each panel once and closes it again (out of combat, then run it again in combat) and saves whether the calls were allowed",
 }
 
 -------------------------------------------------------------------------------
@@ -2659,6 +2669,1329 @@ function GS.Start()
     end
     Say("gunsight results: ForeverSTUwaveDB.fscheck.gunsight, /reload or log out to save to "
         .. "WTF/Account/<id>/SavedVariables/forever-stuwave.lua (late results print as they finish)")
+end
+
+-------------------------------------------------------------------------------
+-- /fscheck reads and /fscheck panels: what a group, a bag, a cast bar and a pet let an addon read
+-------------------------------------------------------------------------------
+-- `/fscheck reads` (any time) saves ONE record per group state, ForeverSTUwaveDB.fscheck.reads[solo | party | raid], so
+-- a solo run and a group run do not replace each other (a second run in the same state does):
+--   meta     when, mode, class, build, whether it started in combat, status, errors
+--   ooc      taken at once, out of combat: encoding round trip, bags, roles, range, cast info, threat, pet, weapon
+--            enchant, aura container filters
+--   combat   s1, s2, s3: the time sensitive parts again 4, 12 and 24 s into the next pull (a sample is skipped when
+--            combat ended first; a run started in combat measures from that moment)
+--   casts    the first 8 UNIT_SPELLCAST_START / UNIT_SPELLCAST_CHANNEL_START seen on target, focus, a nameplate or a
+--            boss (what the cast reads of that unit hand back, and whether its duration object drives a bar)
+-- `/fscheck reads off` stops it. `/fscheck panels` is separate: it opens each panel once and closes it again, out of
+-- combat (ooc) or in combat (combat), into ForeverSTUwaveDB.fscheck.panels[ooc | combat]; only that command opens one.
+--
+-- A value is stored as text: the plain value, "secret" for a secret one, "nil" for none, "absent" for a missing API,
+-- "error: ..." for a call that threw. Nothing secret is stored, compared or truth-tested. The aura container part runs out of combat
+-- only and tears down out of combat (a combat start only fades it and waits for PLAYER_REGEN_ENABLED). Events are
+-- registered by `/fscheck reads` and all dropped when the run finishes, is stopped or is reset. Every helper hangs
+-- off the one table RD (this file is near Lua's limit of 200 locals per chunk).
+
+local RD = {}
+
+RD.NS = select(2, ...)         -- the addon table (FS): CharBackdrop and TalentBgArt are read from it when present
+RD.DELAYS = { 4, 12, 24 }      -- seconds into a pull for combat samples s1..s3
+RD.CAST_CAP = 8
+RD.BAR_CAP = 3                 -- cast captures that also feed their duration object to a bar
+RD.SECRET_UNIT_CAP = 2         -- captures whose unit argument was secret (every unit would otherwise fill the list)
+RD.NAMEPLATES = 40
+RD.NAMEPLATE_KEEP = 12         -- nameplate units stored in full (the rest are only counted)
+RD.RAID = 40
+RD.TIMEOUT = 1800
+RD.NODE_CAP = 400
+RD.NAME_CAP = 12
+RD.TEXT_CAP = 300
+RD.AC_NAME = "FSCheckReadsAuraContainer"
+RD.AC_SECONDS = 0.5
+RD.BAR_KEY = "readsCastBar"
+RD.PET_SLOTS = 5
+RD.CALL_PET_IDS = { 883, 83242, 83243, 83244, 83245 }
+-- Aura container groups: { key, filter string, extra }. The first two are the filters G1 asked about; extras are
+-- recorded as well because they cost nothing (RAID_IN_COMBAT is documented as "self-cast HoTs on raid frames").
+RD.FILTERS = {
+    { "dispellable", "HARMFUL|RAID_PLAYER_DISPELLABLE", false },
+    { "mine", "HELPFUL|PLAYER", false },
+    { "raidInCombat", "HELPFUL|PLAYER|RAID_IN_COMBAT", true },
+    { "dispellableAny", "HARMFUL|DISPELLABLE", true },
+    { "raidHarmful", "HARMFUL|RAID", true },
+}
+-- A ranged or melee spell per class to ask C_Spell.IsSpellInRange about (the first one the player knows).
+RD.RANGE_SPELLS = {
+    PRIEST = { "Smite", "Shadow Word: Pain", "Shoot" },
+    SHAMAN = { "Lightning Bolt", "Earth Shock", "Flame Shock" },
+    MAGE = { "Fireball", "Frostbolt", "Arcane Missiles", "Fire Blast" },
+    WARLOCK = { "Shadow Bolt", "Corruption", "Immolate" },
+    DRUID = { "Wrath", "Moonfire", "Healing Touch" },
+    HUNTER = { "Auto Shot", "Arcane Shot", "Raptor Strike" },
+    PALADIN = { "Judgement", "Hammer of Justice", "Holy Light" },
+    ROGUE = { "Sinister Strike", "Throw", "Eviscerate" },
+    WARRIOR = { "Heroic Strike", "Rend", "Throw" },
+}
+-- Panels `/fscheck panels` opens: the Blizzard function, its argument and the frames that tell whether it opened.
+RD.PANELS = {
+    { key = "reputation", call = "ToggleCharacter", arg = "ReputationFrame", frames = { "CharacterFrame", "ReputationFrame" } },
+    { key = "paperDoll", call = "ToggleCharacter", arg = "PaperDollFrame", frames = { "CharacterFrame", "PaperDollFrame" } },
+    { key = "professions", call = "ToggleProfessionsBook", frames = { "ProfessionsBookFrame", "ProfessionsFrame" } },
+    { key = "spellBook", call = "ToggleSpellBook", arg = "spell", frames = { "SpellBookFrame", "PlayerSpellsFrame" }, headers = true },
+    { key = "playerSpells", call = "TogglePlayerSpellsFrame", frames = { "PlayerSpellsFrame" }, headers = true },
+    { key = "calendar", call = "ToggleCalendar", frames = { "CalendarFrame" } },
+}
+
+RD.id = 0                      -- bumped by every start and stop: a timer from an older run does nothing
+RD.fightId = 0
+RD.n = { taken = 0, skips = 0, bars = 0, secretCasts = 0 }
+RD.live = nil                  -- the run record being filled (the table saved under reads[mode])
+RD.fight = nil                 -- { id, start, over } of the pull the samples are measured from
+RD.frame = nil
+RD.ac = nil                    -- the cached aura container: { frame, groups, live, deferred, inits }
+
+-- Small readers -------------------------------------------------------------------------------
+
+-- fn(...) under pcall as one short text: every return joined by commas ("secret" for a secret one, "nil" for none),
+-- "none" for no returns at all, "absent" for a missing function, "error: ..." for a call that threw. The second result
+-- counts the returns ({ n, secret, missing }); it is nil when the call failed.
+function RD.Line(fn, ...)
+    if type(fn) ~= "function" then return "absent", nil end
+    local n, t = Pack(pcall(fn, ...))
+    if t[1] ~= true then return "error: " .. ErrText(t[2]), nil end
+    local count = n - 1
+    if count < 1 then return "none", { n = 0, secret = 0, missing = 0 } end
+    local out, stat = {}, { n = math.min(count, MAX_RETURNS), secret = 0, missing = 0 }
+    for i = 1, stat.n do
+        local item = t[i + 1]
+        if IsSecret(item) then stat.secret = stat.secret + 1 end
+        if type(item) == "nil" then stat.missing = stat.missing + 1 end
+        out[i] = tostring(GS.Plain(item))
+    end
+    return string.sub(table.concat(out, ","), 1, RD.TEXT_CAP), stat
+end
+
+function RD.NewTally()
+    return { units = 0, plain = 0, secret = 0, missing = 0, failed = 0 }
+end
+
+function RD.Add(tally, stat)
+    if type(stat) ~= "table" then
+        tally.failed = tally.failed + 1
+        return
+    end
+    tally.secret = tally.secret + stat.secret
+    tally.missing = tally.missing + stat.missing
+    tally.plain = tally.plain + stat.n - stat.secret - stat.missing
+end
+
+function RD.TallyText(tally)
+    return string.format("%d units, plain %d, secret %d, nil %d, failed calls %d",
+        tally.units, tally.plain, tally.secret, tally.missing, tally.failed)
+end
+
+-- A plain number from fn(...), or nil.
+function RD.Number(fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, result = pcall(fn, ...)
+    if ok and type(result) == "number" and not IsSecret(result) then return result end
+    return nil
+end
+
+-- fn(...) under pcall: true and its first return, or false and the reason ("absent" for a missing function).
+function RD.Call(fn, ...)
+    if type(fn) ~= "function" then return false, "absent" end
+    local ok, result = pcall(fn, ...)
+    if not ok then return false, ErrText(result) end
+    return true, result
+end
+
+-- True only for a plain true.
+function RD.Truth(fn, ...)
+    if type(fn) ~= "function" then return false end
+    local ok, result = pcall(fn, ...)
+    return ok and not IsSecret(result) and result == true
+end
+
+function RD.Exists(who)
+    return RD.Truth(Api("UnitExists"), who)
+end
+
+-- The plain class token of the player, or nil.
+function RD.ClassToken()
+    local fn = Api("UnitClass")
+    if not fn then return nil end
+    local ok, _, token = pcall(fn, "player")
+    if ok and type(token) == "string" and not IsSecret(token) then return string.sub(token, 1, MAX_STR) end
+    return nil
+end
+
+-- tbl[key] as a plain table, or nil.
+function RD.TableOf(tbl, key)
+    if not IsPlainTable(tbl) then return nil end
+    local ok, item = pcall(function() return tbl[key] end)
+    if ok and IsPlainTable(item) then return item end
+    return nil
+end
+
+-- tbl[key] as a GS.Plain value, "absent" when it is missing.
+function RD.Field(tbl, key)
+    if not IsPlainTable(tbl) then return "unreadable" end
+    local ok, item = pcall(function() return tbl[key] end)
+    if not ok then return "error: " .. ErrText(item) end
+    return GS.Plain(item)
+end
+
+-- The sorted string keys of a plain table, as one text.
+function RD.KeyList(tbl)
+    if not IsPlainTable(tbl) then return "unreadable" end
+    local keys = {}
+    pcall(function()
+        for k in pairs(tbl) do
+            if type(k) == "string" and not IsSecret(k) then keys[#keys + 1] = string.sub(k, 1, 40) end
+        end
+    end)
+    table.sort(keys)
+    local cap = math.min(#keys, MAX_EXTRA_KEYS)
+    local out = {}
+    for i = 1, cap do out[i] = keys[i] end
+    return table.concat(out, ",")
+end
+
+-- Every scalar field of a plain table as GS.Plain values (a nested table shows as "(table)").
+function RD.Scalars(tbl)
+    local out = {}
+    if not IsPlainTable(tbl) then
+        out.note = "unreadable"
+        return out
+    end
+    local keys = {}
+    pcall(function()
+        for k in pairs(tbl) do
+            if type(k) == "string" and not IsSecret(k) then keys[#keys + 1] = k end
+        end
+    end)
+    table.sort(keys)
+    for i = 1, math.min(#keys, MAX_EXTRA_KEYS) do
+        local name = keys[i]
+        local ok, item = pcall(function() return tbl[name] end)
+        if ok then out[string.sub(name, 1, 40)] = GS.Plain(item) end
+    end
+    return out
+end
+
+-- The keys and values of a global enum table as "Name=1,...".
+function RD.EnumKeys(name)
+    local enum = _G[name]
+    if type(enum) ~= "table" then return "absent" end
+    if not IsPlainTable(enum) then return "unreadable" end
+    local items = {}
+    pcall(function()
+        for k, item in pairs(enum) do
+            if type(k) == "string" and not IsSecret(k) then
+                items[#items + 1] = string.sub(k, 1, 40) .. "=" .. tostring(GS.Plain(item))
+            end
+        end
+    end)
+    table.sort(items)
+    local out = {}
+    for i = 1, math.min(#items, RD.NAME_CAP) do out[i] = items[i] end
+    return table.concat(out, ",")
+end
+
+-- A plain number from Enum[enumName][field], or nil.
+function RD.EnumValue(enumName, field)
+    local enum = _G.Enum
+    if type(enum) ~= "table" then return nil end
+    local okT, group = pcall(function() return enum[enumName] end)
+    if not okT or type(group) ~= "table" then return nil end
+    local okV, item = pcall(function() return group[field] end)
+    if okV and type(item) == "number" and not IsSecret(item) then return item end
+    return nil
+end
+
+-- Seconds since the pull the samples are measured from (a number), else "n/a".
+function RD.Since()
+    local fight = RD.fight
+    local now = PlainTime()
+    if fight and type(fight.start) == "number" and now then
+        return math.floor((now - fight.start) * 10 + 0.5) / 10
+    end
+    return "n/a"
+end
+
+-- Appends text to a meta field of the live run (capped).
+function RD.Note(key, text)
+    local live = RD.live
+    if not live then return end
+    local old = live.meta[key]
+    if type(old) == "string" and old ~= "" then text = old .. " | " .. text end
+    live.meta[key] = string.sub(text, 1, MAX_REGISTER_ERR)
+end
+
+function RD.Say(text)
+    Say("reads: " .. text)
+end
+
+function RD.Root()
+    local db = DB()
+    if type(db.reads) ~= "table" then db.reads = {} end
+    return db.reads
+end
+
+-- Group state: raid, party or solo (a failing or secret answer counts as solo).
+function RD.Mode()
+    if RD.Truth(Api("IsInRaid")) then return "raid" end
+    if RD.Truth(Api("IsInGroup")) then return "party" end
+    return "solo"
+end
+
+-- 1. Threat in a group ------------------------------------------------------------------------
+
+-- UnitDetailedThreatSituation, UnitThreatSituation and UnitThreatPercentageOfLead for (who, mob) as one text.
+function RD.ThreatFor(who, mob, tally)
+    local detailed, ds = RD.Line(Api("UnitDetailedThreatSituation"), who, mob)
+    local situation, ss = RD.Line(Api("UnitThreatSituation"), who, mob)
+    local lead, ls = RD.Line(Api("UnitThreatPercentageOfLead"), who, mob)
+    RD.Add(tally, ds)
+    RD.Add(tally, ss)
+    RD.Add(tally, ls)
+    tally.units = tally.units + 1
+    return "D:" .. detailed .. "|S:" .. situation .. "|L:" .. lead
+end
+
+-- C_Secrets threat predicates for a unit: State(who) and Values(who, "target"), with and without the mob argument.
+function RD.ThreatPredicates(out, who)
+    for _, name in ipairs({ "ShouldUnitThreatStateBeSecret", "ShouldUnitThreatValuesBeSecret" }) do
+        local fn = Api("C_Secrets", name)
+        out[name .. "(" .. who .. ")"] = RD.Line(fn, who)
+        out[name .. "(" .. who .. ",target)"] = RD.Line(fn, who, "target")
+    end
+end
+
+-- D = UnitDetailedThreatSituation (isTanking, status, scaledPercent, rawPercent, threatValue),
+-- S = UnitThreatSituation (status), L = UnitThreatPercentageOfLead.
+-- mobs: my threat on each enemy (player, mob). members: each group member's threat on MY target (member, "target").
+function RD.PartThreat(sec)
+    sec.inCombat = LockedDown(false)
+    sec.fields = "D:isTanking,status,scaledPercent,rawPercent,threatValue | S:status | L:percentOfLead"
+    sec.targetExists = RD.Exists("target")
+    local mobs, members = {}, {}
+    sec.mobs, sec.members = mobs, members
+    local mobTally, memberTally = RD.NewTally(), RD.NewTally()
+
+    for _, who in ipairs({ "target", "focus", "boss1", "boss2", "boss3", "boss4", "boss5" }) do
+        if RD.Exists(who) then mobs[who] = RD.ThreatFor("player", who, mobTally) end
+    end
+    local plates, kept = 0, 0
+    for i = 1, RD.NAMEPLATES do
+        local who = "nameplate" .. i
+        if RD.Exists(who) then
+            plates = plates + 1
+            if kept < RD.NAMEPLATE_KEEP then
+                kept = kept + 1
+                mobs[who] = RD.ThreatFor("player", who, mobTally)
+            end
+        end
+    end
+
+    local party, raid = 0, 0
+    for _, who in ipairs({ "player", "pet" }) do
+        if RD.Exists(who) then members[who] = RD.ThreatFor(who, "target", memberTally) end
+    end
+    for i = 1, 4 do
+        local who = "party" .. i
+        if RD.Exists(who) then
+            party = party + 1
+            members[who] = RD.ThreatFor(who, "target", memberTally)
+        end
+    end
+    for i = 1, RD.RAID do
+        local who = "raid" .. i
+        if RD.Exists(who) then
+            raid = raid + 1
+            members[who] = RD.ThreatFor(who, "target", memberTally)
+        end
+    end
+
+    local group = {}
+    sec.group = group
+    group.inGroup = RD.Line(Api("IsInGroup"))
+    group.inRaid = RD.Line(Api("IsInRaid"))
+    group.numMembers = RD.Line(Api("GetNumGroupMembers"))
+    group.partyUnits, group.raidUnits = party, raid
+    group.nameplateUnits, group.nameplatesStored = plates, kept
+
+    local predicates = {}
+    sec.predicates = predicates
+    RD.ThreatPredicates(predicates, "player")
+    if party > 0 then RD.ThreatPredicates(predicates, "party1") end
+    if raid > 0 then RD.ThreatPredicates(predicates, "raid1") end
+
+    sec.mobsTally = RD.TallyText(mobTally)
+    sec.membersTally = RD.TallyText(memberTally)
+end
+
+-- 2. Spell range ------------------------------------------------------------------------------
+
+-- The first spell of the class list the player knows: its English name and id, or nil.
+function RD.RangeSpell()
+    local class = RD.ClassToken()
+    local names = class and RD.RANGE_SPELLS[class] or nil
+    if type(names) ~= "table" then return nil end
+    local isKnown = Api("IsPlayerSpell")
+    for _, name in ipairs(names) do
+        local id = KnownRankID(name)
+        if id and RD.Truth(isKnown, id) then return name, id end
+    end
+    return nil
+end
+
+function RD.PartRange(sec)
+    sec.inCombat = LockedDown(false)
+    sec.targetExists = RD.Exists("target")
+    local name, id = RD.RangeSpell()
+    sec.spell = name or "none known from the class list"
+    sec.spellId = id or "none"
+    sec.globalIsSpellInRange = type(_G.IsSpellInRange)
+    local inRange = Api("C_Spell", "IsSpellInRange")
+    if name then
+        sec.byId = RD.Line(inRange, id, "target")
+        sec.byName = RD.Line(inRange, name, "target")
+        if RD.Exists("focus") then sec.focusById = RD.Line(inRange, id, "focus") end
+    else
+        sec.byId = "no known spell"
+        sec.apiOnly = RD.Line(inRange, 75, "target")
+    end
+    sec.unitInRangeTarget = RD.Line(Api("UnitInRange"), "target")
+    if RD.Exists("party1") then sec.unitInRangeParty1 = RD.Line(Api("UnitInRange"), "party1") end
+end
+
+-- 7. Other units' cast info --------------------------------------------------------------------
+
+-- fn(who) for a duration object: its type, "secret", "nil", and for an object its remaining time (plain or secret).
+function RD.DurationLine(fn, who)
+    if type(fn) ~= "function" then return "absent" end
+    local ok, obj = pcall(fn, who)
+    if not ok then return "error: " .. ErrText(obj) end
+    if IsSecret(obj) then return "secret" end
+    local kind = type(obj)
+    if kind == "nil" then return "nil" end
+    if kind == "table" or kind == "userdata" then
+        return kind .. " remaining=" .. tostring(GS.Read(obj, "GetRemainingDuration"))
+    end
+    return kind
+end
+
+function RD.PartCasts(sec)
+    sec.inCombat = LockedDown(false)
+    sec.note = "none = the unit is not casting; the capture list (casts) holds real casts"
+    local units = { "target", "focus" }
+    for i = 1, RD.NAMEPLATES do
+        if RD.Exists("nameplate" .. i) then
+            units[#units + 1] = "nameplate" .. i
+            break
+        end
+    end
+    for _, who in ipairs(units) do
+        local rec = { exists = RD.Exists(who) }
+        sec[who] = rec
+        rec.casting = RD.Line(Api("UnitCastingInfo"), who)
+        rec.channeling = RD.Line(Api("UnitChannelInfo"), who)
+        rec.castDuration = RD.DurationLine(Api("UnitCastingDuration"), who)
+        rec.channelDuration = RD.DurationLine(Api("UnitChannelDuration"), who)
+    end
+end
+
+-- target, focus, nameplateN or bossN as "target", "focus", "nameplate", "boss"; nil for any other unit.
+function RD.UnitKind(tok)
+    if type(tok) ~= "string" or IsSecret(tok) then return nil end
+    if tok == "target" or tok == "focus" then return tok end
+    if string.match(tok, "^nameplate%d+$") then return "nameplate" end
+    if string.match(tok, "^boss%d$") then return "boss" end
+    return nil
+end
+
+function RD.OnCast(event, ...)
+    local live = RD.live
+    if not live or #live.casts >= RD.CAST_CAP then return end
+    local unitArg = ...
+    local secretUnit = IsSecret(unitArg)
+    local kind = "secret"
+    if not secretUnit then kind = RD.UnitKind(unitArg) end
+    if not kind then return end
+    if secretUnit then
+        if RD.n.secretCasts >= RD.SECRET_UNIT_CAP then return end
+        RD.n.secretCasts = RD.n.secretCasts + 1
+    end
+    local rec = { event = tostring(GS.Plain(event)), kind = kind, inCombat = LockedDown(false), at = RD.Since() }
+    live.casts[#live.casts + 1] = rec
+    if secretUnit then
+        rec.unitSecret = true
+        return
+    end
+    rec.casting = RD.Line(Api("UnitCastingInfo"), unitArg)
+    rec.channeling = RD.Line(Api("UnitChannelInfo"), unitArg)
+    local durationName = "UnitCastingDuration"
+    if type(event) == "string" and not IsSecret(event) and string.find(event, "CHANNEL", 1, true) then
+        durationName = "UnitChannelDuration"
+    end
+    rec.duration = RD.DurationLine(Api(durationName), unitArg)
+    -- The duration object into a hidden bar, for the first few captures: does it move?
+    local fn = Api(durationName)
+    if fn and RD.n.bars < RD.BAR_CAP then
+        local okD, duration = pcall(fn, unitArg)
+        if okD and type(duration) ~= "nil" then
+            RD.n.bars = RD.n.bars + 1
+            local bar = GS.Bar(RD.BAR_KEY)
+            rec.bar = {}
+            GS.BarTrial(rec.bar, bar, duration, state.gsRun, function() GS.Hide(bar) end)
+        end
+    end
+    RD.Say("cast " .. #live.casts .. "/" .. RD.CAST_CAP .. " saved (" .. kind .. ")")
+end
+
+-- 8. Pet reads --------------------------------------------------------------------------------
+
+-- A list-returning API as { call, count, names, keys } (names only, never more than NAME_CAP).
+function RD.PetList(fn)
+    local out = {}
+    local ok, list = RD.Call(fn)
+    if not ok then
+        out.call = list == "absent" and "absent" or "error: " .. list
+        return out
+    end
+    if IsSecret(list) then
+        out.call = "secret"
+        return out
+    end
+    if not IsPlainTable(list) then
+        out.call = type(list)
+        return out
+    end
+    out.call = "table"
+    local names = {}
+    for i = 1, RD.NAME_CAP do
+        local okE, entry = pcall(function() return list[i] end)
+        if not okE or type(entry) == "nil" then break end
+        if IsPlainTable(entry) then
+            if i == 1 then out.keys = RD.KeyList(entry) end
+            names[#names + 1] = tostring(RD.Field(entry, "name"))
+        else
+            names[#names + 1] = tostring(GS.Plain(entry))
+        end
+    end
+    out.count = #names
+    out.names = table.concat(names, ",")
+    return out
+end
+
+function RD.PartPet(sec)
+    sec.inCombat = LockedDown(false)
+    sec.petExists = RD.Exists("pet")
+    sec.hasPetUI = RD.Line(Api("HasPetUI"))
+    sec.globalHappiness = RD.Line(Api("GetPetHappiness"))
+    sec.infoHappiness = RD.Line(Api("C_PetInfo", "GetPetHappiness"))
+    sec.infoLoyalty = RD.Line(Api("C_PetInfo", "GetPetLoyalty"))
+    sec.creatureFamily = RD.Line(Api("UnitCreatureFamily"), "pet")
+    local stable = {}
+    sec.stable = stable
+    stable.atMaster = RD.Line(Api("C_StableInfo", "IsAtStableMaster"))
+    stable.numActive = RD.Line(Api("C_StableInfo", "GetNumActivePets"))
+    stable.numStabled = RD.Line(Api("C_StableInfo", "GetNumStablePets"))
+    stable.numSlots = RD.Line(Api("C_StableInfo", "GetNumStableSlots"))
+    stable.active = RD.PetList(Api("C_StableInfo", "GetActivePetList"))
+    stable.stabled = RD.PetList(Api("C_StableInfo", "GetStabledPetList"))
+    local slots = {}
+    stable.slots = slots
+    local slotFn = Api("C_StableInfo", "GetStablePetInfo")
+    for i = 1, RD.PET_SLOTS do
+        local okS, got = RD.Call(slotFn, i)
+        if not okS then
+            slots["slot" .. i] = got == "absent" and "absent" or "error: " .. got
+        elseif IsPlainTable(got) then
+            slots["slot" .. i] = tostring(RD.Field(got, "name"))
+            if not stable.slotKeys then stable.slotKeys = RD.KeyList(got) end
+        else
+            slots["slot" .. i] = tostring(GS.Plain(got))
+        end
+    end
+    local callPet = {}
+    sec.callPet = callPet
+    for _, id in ipairs(RD.CALL_PET_IDS) do
+        callPet["s" .. id] = RD.Line(Api("GetCallPetSpellInfo"), id)
+    end
+end
+
+-- 9. Weapon enchants (rogue poisons) -----------------------------------------------------------
+
+function RD.PartWeapon(sec)
+    sec.inCombat = LockedDown(false)
+    sec.note = "GetWeaponEnchantInfo: hasMainHand, mainHandExpiration, mainHandCharges, mainHandEnchantID, then the same four for the off hand"
+    sec.global = RD.Line(Api("GetWeaponEnchantInfo"))
+    sec.itemApi = RD.Line(Api("C_Item", "GetWeaponEnchantInfo"))
+    sec.engineSlots = RD.EnumKeys("AuraContainerItemEnchantmentSlot")
+    sec.enginePlacement = RD.EnumKeys("CustomAuraContainerItemEnchantmentPlacement")
+    sec.engineSortMethod = RD.EnumKeys("AuraContainerItemEnchantmentSortMethod")
+end
+
+-- 3. Encoding round trip ----------------------------------------------------------------------
+
+-- A fixed table of about 2 KB once serialized: nested tables, strings, whole numbers, fractions, booleans.
+function RD.Payload()
+    local rows = {}
+    for i = 1, 24 do
+        rows[i] = { id = i, name = "row" .. i, on = i % 2 == 0, ratio = i / 8, list = { i, i * 2, i * 3 }, tag = "tag-" .. i }
+    end
+    return { version = 3, name = "reads", flags = { a = true, b = false }, big = 1234567, rows = rows }
+end
+
+-- The first difference between two plain values as a path text, or nil when they are equal.
+function RD.Same(a, b, path, depth)
+    if depth > 6 then return path .. ": too deep" end
+    local ta, tb = type(a), type(b)
+    if ta ~= tb then return path .. ": " .. ta .. " vs " .. tb end
+    if ta == "table" then
+        for k, item in pairs(a) do
+            local diff = RD.Same(item, b[k], path .. "." .. tostring(k), depth + 1)
+            if diff then return diff end
+        end
+        for k in pairs(b) do
+            if a[k] == nil then return path .. "." .. tostring(k) .. ": extra" end
+        end
+        return nil
+    end
+    if a ~= b then return path .. ": " .. tostring(a) .. " vs " .. tostring(b) end
+    return nil
+end
+
+-- serialize -> compress -> base64 and back, each step's output size recorded. `names` = { serialize, deserialize }.
+function RD.RoundTrip(names, payload)
+    local rec = { sizes = {} }
+    local method = RD.EnumValue("CompressionMethod", "Deflate")
+    local fns = {
+        serialize = Api("C_EncodingUtil", names[1]),
+        compress = Api("C_EncodingUtil", "CompressString"),
+        encode = Api("C_EncodingUtil", "EncodeBase64"),
+        decode = Api("C_EncodingUtil", "DecodeBase64"),
+        decompress = Api("C_EncodingUtil", "DecompressString"),
+        deserialize = Api("C_EncodingUtil", names[2]),
+    }
+    local steps = {
+        { "serialize", nil }, { "compress", method }, { "encode", nil },
+        { "decode", nil }, { "decompress", method }, { "deserialize", nil },
+    }
+    local current = payload
+    for _, step in ipairs(steps) do
+        local label = step[1]
+        local fn = fns[label]
+        if type(fn) ~= "function" then
+            rec.failedAt = label
+            rec.error = "absent"
+            return rec
+        end
+        local ok, result
+        if step[2] ~= nil then ok, result = pcall(fn, current, step[2]) else ok, result = pcall(fn, current) end
+        if not ok then
+            rec.failedAt = label
+            rec.error = ErrText(result)
+            return rec
+        end
+        if IsSecret(result) then
+            rec.failedAt = label
+            rec.error = "secret"
+            return rec
+        end
+        if type(result) == "string" then rec.sizes[label] = #result end
+        current = result
+    end
+    if not IsPlainTable(current) then
+        rec.failedAt = "deserialize"
+        rec.error = "returned " .. type(current)
+        return rec
+    end
+    local diff = RD.Same(payload, current, "payload", 0)
+    rec.equal = diff == nil
+    rec.firstDifference = diff or "none"
+    return rec
+end
+
+function RD.PartEncoding(sec)
+    sec.inCombat = LockedDown(false)
+    local names = {}
+    for _, name in ipairs({ "SerializeCBOR", "DeserializeCBOR", "SerializeJSON", "DeserializeJSON", "CompressString",
+        "DecompressString", "EncodeBase64", "DecodeBase64", "EncodeHex", "DecodeHex" }) do
+        names[#names + 1] = name .. "=" .. type(Api("C_EncodingUtil", name))
+    end
+    sec.apis = table.concat(names, ",")
+    sec.compressionMethod = tostring(GS.Plain(RD.EnumValue("CompressionMethod", "Deflate")))
+    sec.cbor = RD.RoundTrip({ "SerializeCBOR", "DeserializeCBOR" }, RD.Payload())
+    sec.json = RD.RoundTrip({ "SerializeJSON", "DeserializeJSON" }, RD.Payload())
+end
+
+-- 4. Bag families -----------------------------------------------------------------------------
+
+function RD.PartBags(sec)
+    sec.inCombat = LockedDown(false)
+    sec.numBagSlots = tostring(GS.Plain(_G.NUM_BAG_SLOTS))
+    sec.numTotalEquippedBagSlots = tostring(GS.Plain(_G.NUM_TOTAL_EQUIPPED_BAG_SLOTS))
+    sec.reagentBagIndex = tostring(GS.Plain(RD.EnumValue("BagIndex", "ReagentBag")))
+    sec.note = "free = freeSlots,bagFamily from GetContainerNumFreeSlots; family = C_Item.GetItemFamily of the bag item (a bit mask)"
+    local bags = {}
+    sec.bags = bags
+    for bag = 0, 5 do
+        local rec = {}
+        bags["b" .. bag] = rec
+        rec.free = RD.Line(Api("C_Container", "GetContainerNumFreeSlots"), bag)
+        rec.slots = RD.Line(Api("C_Container", "GetContainerNumSlots"), bag)
+        rec.name = RD.Line(Api("C_Container", "GetBagName"), bag)
+        if bag > 0 then
+            local invSlot = RD.Number(Api("C_Container", "ContainerIDToInventoryID"), bag)
+            rec.inventorySlot = invSlot or "none"
+            local itemId = invSlot and RD.Number(Api("GetInventoryItemID"), "player", invSlot) or nil
+            rec.itemId = itemId or "none"
+            if itemId then rec.family = RD.Line(Api("C_Item", "GetItemFamily"), itemId) end
+        end
+    end
+end
+
+-- 6. Roles: trees and specs --------------------------------------------------------------------
+
+-- The three spec headers of the stock talent window, left to right, by name (nil when it is not loaded).
+function RD.HeaderNames()
+    local window = _G.PlayerSpellsFrame
+    if type(window) ~= "table" then return "absent: PlayerSpellsFrame" end
+    local talents = RD.TableOf(window, "TalentsFrame")
+    if not talents then return "absent: TalentsFrame" end
+    local exists, ok, res, n = GS.Call(talents, "GetChildren")
+    if not exists then return "absent: GetChildren" end
+    if not ok then return "error: " .. res end
+    local heads = {}
+    for i = 1, n do
+        local child = res[i + 1]
+        local okH, name = pcall(function()
+            if child.MainRing and child.TextBackground and child.Name then return child.Name end
+            return nil
+        end)
+        if okH and name then
+            local left = GS.Read(child, "GetLeft")
+            heads[#heads + 1] = { left = type(left) == "number" and left or 0, text = tostring(GS.Read(name, "GetText")) }
+        end
+    end
+    table.sort(heads, function(a, b) return a.left < b.left end)
+    local out = {}
+    for i = 1, math.min(#heads, 6) do out[i] = heads[i].text end
+    if #out == 0 then return "none found" end
+    return table.concat(out, ",")
+end
+
+-- The talent trees the way the character backdrop reads them: one trait tree whose three trees are told apart by
+-- node column (the two widest gaps between the distinct columns split them). Recorded: ids, node counts, the
+-- columns and the split, points per tree left to right, the top tree, any sub trees with their fields.
+function RD.Trees()
+    local out = {}
+    local CT, T = _G.C_ClassTalents, _G.C_Traits
+    if type(CT) ~= "table" or type(T) ~= "table" then
+        out.status = "absent: C_ClassTalents or C_Traits"
+        return out
+    end
+    local cfg = RD.Number(Api("C_ClassTalents", "GetActiveConfigID"))
+    out.configId = cfg or "none"
+    if not cfg then return out end
+    local okC, info = RD.Call(Api("C_Traits", "GetConfigInfo"), cfg)
+    if not okC or not IsPlainTable(info) then
+        out.status = "no plain config info"
+        return out
+    end
+    out.configKeys = RD.KeyList(info)
+    local treeIds = RD.TableOf(info, "treeIDs")
+    if not treeIds then
+        out.status = "no treeIDs"
+        return out
+    end
+    local ids = {}
+    local nodes, xs, seenX, subs = {}, {}, {}, {}
+    local subCount = 0
+    for i = 1, math.min(#treeIds, 6) do
+        local treeId = treeIds[i]
+        if type(treeId) == "number" and not IsSecret(treeId) then
+            ids[#ids + 1] = treeId
+            if i == 1 then
+                local okT, treeInfo = RD.Call(Api("C_Traits", "GetTreeInfo"), cfg, treeId)
+                if okT then out.treeInfo = RD.Scalars(treeInfo) else out.treeInfo = { note = treeInfo } end
+            end
+            local okN, list = RD.Call(Api("C_Traits", "GetTreeNodes"), treeId)
+            if okN and IsPlainTable(list) then
+                for k = 1, math.min(#list, RD.NODE_CAP) do
+                    local nodeId = list[k]
+                    local okI, node = RD.Call(Api("C_Traits", "GetNodeInfo"), cfg, nodeId)
+                    if okI and IsPlainTable(node) then
+                        if not out.nodeKeys then
+                            out.nodeKeys = RD.KeyList(node)
+                            out.firstNode = RD.Scalars(node)
+                        end
+                        local x = PlainNumberField(node, "posX")
+                        local rank = PlainNumberField(node, "activeRank") or PlainNumberField(node, "currentRank")
+                            or PlainNumberField(node, "ranksPurchased") or 0
+                        if x then
+                            nodes[#nodes + 1] = { x = x, rank = rank }
+                            if not seenX[x] then
+                                seenX[x] = true
+                                xs[#xs + 1] = x
+                            end
+                        end
+                        local sub = PlainNumberField(node, "subTreeID")
+                        if sub and not subs[sub] and subCount < 6 then
+                            subs[sub] = true
+                            subCount = subCount + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+    out.treeIds = table.concat(ids, ",")
+    out.nodeCount = #nodes
+    table.sort(xs)
+    out.columns = #xs
+    if #xs >= 3 then
+        local gaps = {}
+        for i = 1, #xs - 1 do gaps[i] = { d = xs[i + 1] - xs[i], at = xs[i] } end
+        table.sort(gaps, function(a, b)
+            if a.d ~= b.d then return a.d > b.d end
+            return a.at < b.at
+        end)
+        local c1, c2 = math.min(gaps[1].at, gaps[2].at), math.max(gaps[1].at, gaps[2].at)
+        local pts = { 0, 0, 0 }
+        for _, node in ipairs(nodes) do
+            local t = node.x <= c1 and 1 or (node.x <= c2 and 2 or 3)
+            pts[t] = pts[t] + node.rank
+        end
+        out.split = c1 .. "," .. c2
+        out.points = table.concat(pts, ",")
+        local best, top = 0, 0
+        for i = 1, 3 do
+            if pts[i] > best then best, top = pts[i], i end
+        end
+        out.top = top
+    else
+        out.status = "fewer than 3 node columns"
+    end
+    local subOut = {}
+    for sub in pairs(subs) do
+        local okS, subInfo = RD.Call(Api("C_Traits", "GetSubTreeInfo"), cfg, sub)
+        if okS then subOut["s" .. sub] = RD.Scalars(subInfo) else subOut["s" .. sub] = { note = subInfo } end
+    end
+    if subCount > 0 then out.subTrees = subOut end
+    local ns = RD.NS
+    local points = type(ns) == "table" and type(ns.CharBackdrop) == "table" and ns.CharBackdrop.TreePoints or nil
+    if type(points) == "function" then
+        local okP, got = pcall(points)
+        if okP and IsPlainTable(got) then
+            out.charBackdropPoints = tostring(GS.Plain(got[1])) .. "," .. tostring(GS.Plain(got[2])) .. "," .. tostring(GS.Plain(got[3]))
+        else
+            out.charBackdropPoints = "unreadable"
+        end
+    else
+        out.charBackdropPoints = "absent"
+    end
+    return out
+end
+
+function RD.PartRoles(sec)
+    sec.inCombat = LockedDown(false)
+    local class = RD.ClassToken()
+    sec.class = class or "unknown"
+    local okU, _, _, classId = pcall(Api("UnitClass") or function() end, "player")
+    if okU and type(classId) == "number" and not IsSecret(classId) then sec.classId = classId end
+    sec.trees = RD.Trees()
+    local ns = RD.NS
+    local art = type(ns) == "table" and type(ns.TalentBgArt) == "table" and ns.TalentBgArt.sheets or nil
+    local names = type(art) == "table" and class and art[class] or nil
+    if type(names) == "table" then
+        local out = {}
+        for i = 1, #names do out[i] = tostring(GS.Plain(names[i])) end
+        sec.talentArtSheets = table.concat(out, ",")
+    else
+        sec.talentArtSheets = "none"
+    end
+    sec.headerNames = RD.HeaderNames()
+    local specs = {}
+    sec.specs = specs
+    specs.count = RD.Line(Api("GetNumSpecializations"))
+    specs.active = RD.Line(Api("C_SpecializationInfo", "GetSpecialization"))
+    local infoFn = Api("C_SpecializationInfo", "GetSpecializationInfo")
+    for i = 1, 4 do
+        specs["info" .. i] = RD.Line(infoFn, i)
+        specs["role" .. i] = RD.Line(Api("GetSpecializationRole"), i)
+    end
+    -- Every class's specs from the client, so the class -> tree -> role table can be built from real names.
+    local byClass = {}
+    sec.byClass = byClass
+    local forClass = Api("GetSpecializationInfoForClassID")
+    for id = 1, 13 do
+        local rec = { class = RD.Line(Api("GetClassInfo"), id) }
+        byClass["c" .. id] = rec
+        for i = 1, 4 do
+            local line = RD.Line(forClass, id, i)
+            if line == "absent" or line == "none" or string.find(line, "^error") then
+                rec["s" .. i] = line
+                break
+            end
+            rec["s" .. i] = line
+        end
+    end
+end
+
+-- 10. Aura container filters ------------------------------------------------------------------
+
+-- The group's initializeFrame: an icon and a cooldown, counted. Runs once per button the engine builds.
+function RD.InitButton(button)
+    Quiet(button, "SetMouseMotionEnabled", false)
+    Quiet(button, "SetMouseClickEnabled", false)
+    Quiet(button, "SetHideTooltipInCombat", true)
+    local ac = RD.ac
+    if ac then ac.inits = (ac.inits or 0) + 1 end
+    pcall(function()
+        local icon = button:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(button)
+        button:SetIcon(icon)
+    end)
+    pcall(function()
+        local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+        Quiet(cooldown, "EnableMouse", false)
+        cooldown:SetAllPoints(button)
+        Quiet(cooldown, "SetHideCountdownNumbers", true)
+        button:SetDurationCooldown(cooldown)
+    end)
+end
+
+-- Builds (once) the hidden container. Returns the cache table, or nil with the reason in sec.status.
+function RD.Container(sec)
+    if RD.ac and RD.ac.frame then return RD.ac end
+    local getTemplate = Api("C_XMLUtil", "GetTemplateInfo")
+    if not getTemplate then
+        sec.status = "absent: C_XMLUtil.GetTemplateInfo"
+        return nil
+    end
+    local okT, tmpl = pcall(getTemplate, TEMPLATE)
+    if not okT then
+        sec.status = "template check errored: " .. ErrText(tmpl)
+        return nil
+    end
+    if not IsSecret(tmpl) and (type(tmpl) == "nil" or tmpl == false) then
+        sec.status = "template absent: " .. TEMPLATE
+        return nil
+    end
+    local ok, frame = pcall(CreateFrame, "AuraContainer", RD.AC_NAME, UIParent, TEMPLATE)
+    sec.createFrame = ok and "ok" or ErrText(frame)
+    if not ok then
+        sec.status = "AuraContainer frame type refused"
+        return nil
+    end
+    RD.ac = { frame = frame, groups = {}, inits = 0 }
+    sec.setSize = GS.Step(frame, "SetSize", 1, 1)
+    sec.setPoint = GS.Step(frame, "SetPoint", "CENTER", UIParent, "CENTER", 0, 150)
+    sec.setAlpha = GS.Step(frame, "SetAlpha", 0)
+    return RD.ac
+end
+
+function RD.PartFilters(sec)
+    -- Fail closed: a combat check that cannot be read counts as combat, since SetEnabled and Show are protected there.
+    if LockedDown(true) then
+        sec.status = "skipped: the container is built, enabled and shown only when out of combat is certain"
+        return
+    end
+    local who = RD.Exists("party1") and "party1" or "player"
+    sec.unit = who
+    sec.grouped = who == "party1"
+    local ac = RD.Container(sec)
+    if not ac then return end
+    local frame = ac.frame
+    local util = _G.AuraUtil
+    local validFn = type(util) == "table" and util.IsValidFilterString or nil
+    local sortMethod = type(_G.AuraContainerSortMethod) == "table" and _G.AuraContainerSortMethod.Default or nil
+    local sortDirection = type(_G.AuraContainerSortDirection) == "table" and _G.AuraContainerSortDirection.Normal or nil
+    local layout = { elementSpacing = 2, lineSpacing = 2, groupLineSpacing = 2, elementWidth = 24, elementHeight = 24 }
+    local options = {
+        maxFrameCount = 3, sortMethod = sortMethod, sortDirection = sortDirection,
+        initializeFrame = RD.InitButton, layout = layout,
+    }
+    for _, entry in ipairs(RD.FILTERS) do
+        local key, filter = entry[1], entry[2]
+        local rec = { filter = filter, extra = entry[3] }
+        sec[key] = rec
+        rec.valid = RD.Line(validFn, filter)
+        if ac.groups[key] then
+            rec.accepted = GS.Step(frame, "SetAuraGroupFilterString", key, filter)
+        else
+            rec.accepted = GS.Step(frame, "AddAuraGroup", key, filter, options)
+            if rec.accepted == "ok" then ac.groups[key] = true end
+        end
+    end
+    sec.setUnit = GS.Step(frame, "SetUnit", who)
+    sec.setEnabled = GS.Step(frame, "SetEnabled", true)
+    sec.show = GS.Step(frame, "Show")
+    sec.updateAll = GS.Step(frame, "UpdateAllAuras")
+    ac.live = true
+    ac.sec = sec
+    sec.note = "frames/shown are counted " .. RD.AC_SECONDS .. " s after the container was pointed at the unit"
+    local id = RD.id
+    if not GS.Timer(RD.AC_SECONDS, function()
+        local okC, err = pcall(RD.AcSample, id)
+        if not okC then pcall(function() RD.Note("filterError", ErrText(err)) end) end
+    end) then
+        sec.sample = "C_Timer.After unavailable: counted at once"
+        RD.AcSample(id)
+    end
+end
+
+-- Counts the buttons each filter group built, then tears the container down.
+function RD.AcSample(id)
+    local ac = RD.ac
+    if id ~= RD.id or not ac or not ac.live or type(ac.sec) ~= "table" then return end
+    local sec = ac.sec
+    sec.inits = ac.inits
+    for _, entry in ipairs(RD.FILTERS) do
+        local rec = sec[entry[1]]
+        if type(rec) == "table" and ac.groups[entry[1]] then
+            rec.frames = tostring(GS.Read(ac.frame, "GetAuraGroupFrameCount", entry[1]))
+        end
+    end
+    sec.children = GS.AcCountButtons(ac.frame)
+    RD.TearDown()
+end
+
+-- Out of combat: disable and hide the container. In combat (or when that cannot be told): alpha 0 and wait for
+-- PLAYER_REGEN_ENABLED, because SetEnabled and Hide are protected there.
+function RD.TearDown()
+    local ac = RD.ac
+    if not ac or not ac.live then return end
+    if LockedDown() then
+        GS.Step(ac.frame, "SetAlpha", 0)
+        ac.deferred = true
+        if RD.frame then pcall(RD.frame.RegisterEvent, RD.frame, "PLAYER_REGEN_ENABLED") end
+        return
+    end
+    GS.Step(ac.frame, "SetEnabled", false)
+    GS.Step(ac.frame, "Hide")
+    ac.live = false
+    ac.deferred = false
+end
+
+-- Parts, arming and samples ---------------------------------------------------------------------
+
+RD.OOC_PARTS = {
+    { "encoding", RD.PartEncoding }, { "bags", RD.PartBags }, { "roles", RD.PartRoles }, { "range", RD.PartRange },
+    { "casts", RD.PartCasts }, { "threat", RD.PartThreat }, { "pet", RD.PartPet }, { "weapon", RD.PartWeapon },
+    { "auraFilters", RD.PartFilters },
+}
+RD.COMBAT_PARTS = {
+    { "range", RD.PartRange }, { "casts", RD.PartCasts }, { "threat", RD.PartThreat },
+    { "pet", RD.PartPet }, { "weapon", RD.PartWeapon },
+}
+
+-- Runs each part into sec[name] under its own pcall: a failing part is recorded and the next one still runs.
+function RD.RunParts(sec, parts)
+    for _, part in ipairs(parts) do
+        local rec = {}
+        sec[part[1]] = rec
+        local ok, err = pcall(part[2], rec)
+        if not ok then rec.partError = ErrText(err) end
+    end
+end
+
+function RD.EnsureFrame()
+    if RD.frame then return true end
+    local ok, frame = pcall(CreateFrame, "Frame")
+    if not ok or type(frame) ~= "table" then return false end
+    RD.frame = frame
+    return (pcall(frame.SetScript, frame, "OnEvent", RD.OnEvent))
+end
+
+function RD.Register(event)
+    local ok, err = pcall(RD.frame.RegisterEvent, RD.frame, event)
+    if not ok then RD.Note("registerError", ErrText(err)) end
+end
+
+-- Quiet teardown: a newer id makes every pending timer a no-op, all events go, the cast bar is hidden and the aura
+-- container is taken down (or faded and queued when combat started).
+function RD.Halt()
+    RD.id = RD.id + 1
+    RD.fight = nil
+    CallOn(RD.frame, "UnregisterAllEvents")
+    GS.Hide(state.gsObjs[RD.BAR_KEY])
+    RD.TearDown()
+end
+
+function RD.Stop(reason, quiet)
+    local live = RD.live
+    RD.Halt()
+    if live then
+        pcall(function()
+            live.meta.status = reason
+            live.meta.stopped = SafeDate()
+        end)
+    end
+    RD.live = nil
+    if not quiet then
+        if live then RD.Say(reason) else RD.Say("nothing is running") end
+    end
+end
+
+function RD.Finish()
+    local live = RD.live
+    if not live then return end
+    RD.Halt()
+    pcall(function()
+        live.meta.status = "done"
+        live.meta.stopped = SafeDate()
+    end)
+    RD.live = nil
+    RD.Say("done, /reload or log out to save")
+end
+
+function RD.StatusLine()
+    local live = RD.live
+    local mode = live and live.meta.mode or "?"
+    return string.format("armed (%s). combat samples %d/%d, casts %d/%d, next pull starts them | /fscheck reads off to stop",
+        tostring(mode), RD.n.taken, #RD.DELAYS, live and #live.casts or 0, RD.CAST_CAP)
+end
+
+-- One combat sample: the time sensitive parts again, tagged with the seconds since the pull.
+function RD.TakeSample()
+    local live = RD.live
+    RD.n.taken = RD.n.taken + 1
+    local sec = { at = RD.Since() }
+    live.combat["s" .. RD.n.taken] = sec
+    RD.RunParts(sec, RD.COMBAT_PARTS)
+    RD.Say("combat sample " .. RD.n.taken .. "/" .. #RD.DELAYS .. " saved")
+    if RD.n.taken >= #RD.DELAYS then
+        live.meta.combatDone = true
+        CallOn(RD.frame, "UnregisterEvent", "PLAYER_REGEN_DISABLED")
+        if not LockedDown(false) then RD.Finish() end
+    end
+end
+
+-- A combat sample came due: take it only while the same pull still holds the lockdown.
+function RD.Due(id, fid)
+    local live = RD.live
+    if id ~= RD.id or not live or fid ~= RD.fightId then return end
+    local fight = RD.fight
+    if not fight or fight.over then return end
+    if not LockedDown() then
+        fight.over = true
+        RD.n.skips = RD.n.skips + 1
+        live.meta.combatSkips = RD.n.skips
+        return
+    end
+    RD.TakeSample()
+end
+
+-- PLAYER_REGEN_DISABLED (or the command typed in combat): schedule the samples still missing, measured from now.
+function RD.Pull()
+    local live = RD.live
+    if not live or RD.n.taken >= #RD.DELAYS then return end
+    if RD.fight and not RD.fight.over then return end
+    RD.fightId = RD.fightId + 1
+    RD.fight = { id = RD.fightId, start = PlainTime() }
+    local id, fid = RD.id, RD.fightId
+    for k = RD.n.taken + 1, #RD.DELAYS do
+        local scheduled = GS.Timer(RD.DELAYS[k], function()
+            local ok, err = pcall(RD.Due, id, fid)
+            if not ok then pcall(function() RD.Note("timerError", ErrText(err)) end) end
+        end)
+        if not scheduled then
+            RD.Note("timerError", "C_Timer.After unavailable: one sample taken at once")
+            RD.Due(id, fid)
+            return
+        end
+    end
+end
+
+-- PLAYER_REGEN_ENABLED: the pull is over; a deferred container teardown runs; a finished run ends.
+function RD.Calm()
+    if RD.fight then RD.fight.over = true end
+    local ac = RD.ac
+    if ac and ac.deferred then RD.TearDown() end
+    if RD.live and RD.n.taken >= #RD.DELAYS then
+        RD.Finish()
+    elseif not RD.live and not (RD.ac and RD.ac.live) then
+        CallOn(RD.frame, "UnregisterAllEvents")
+    end
+end
+
+function RD.Handle(event, ...)
+    if event == "PLAYER_REGEN_DISABLED" then
+        RD.Pull()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        RD.Calm()
+    elseif event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
+        RD.OnCast(event, ...)
+    end
+end
+
+function RD.OnEvent(_, event, ...)
+    local ok, err = pcall(RD.Handle, event, ...)
+    if not ok then pcall(function() RD.Note("lastError", ErrText(err)) end) end
+end
+
+function RD.Start()
+    RD.Halt()
+    local mode = RD.Mode()
+    local locked = LockedDown(false)
+    local live = { meta = {}, ooc = {}, combat = {}, casts = {} }
+    local root = RD.Root()
+    root[mode] = live
+    root.lastMode = mode
+    RD.live = live
+    RD.n = { taken = 0, skips = 0, bars = 0, secretCasts = 0 }
+    local meta = live.meta
+    meta.started = SafeDate()
+    meta.mode = mode
+    meta.run = RD.id
+    meta.status = "armed"
+    meta.startedInCombat = locked
+    meta.canTestSecret = Invoke(false, Api("issecretvalue"), 0).ok == true
+    meta.class = RD.ClassToken() or "unknown"
+    local okB, version, build = pcall(function() return _G.GetBuildInfo() end)
+    if okB then
+        meta.buildVersion = GS.Plain(version)
+        meta.buildNumber = GS.Plain(build)
+    else
+        meta.buildVersion = "error: " .. ErrText(version)
+    end
+
+    if locked then
+        meta.oocSkipped = "started in combat: run /fscheck reads again out of combat for the rest"
+    else
+        RD.RunParts(live.ooc, RD.OOC_PARTS)
+    end
+
+    if not RD.EnsureFrame() then
+        meta.frameError = "event frame could not be created: no combat samples, no cast captures"
+        meta.status = "done (no events)"
+        RD.live = nil
+        RD.Say("saved the out of combat part (" .. mode .. "); " .. meta.frameError)
+        return
+    end
+    RD.Register("PLAYER_REGEN_DISABLED")
+    RD.Register("PLAYER_REGEN_ENABLED")
+    RD.Register("UNIT_SPELLCAST_START")
+    RD.Register("UNIT_SPELLCAST_CHANNEL_START")
+    if locked then RD.Pull() end
+    local id = RD.id
+    if not GS.Timer(RD.TIMEOUT, function()
+        if id == RD.id then RD.Stop("timeout") end
+    end) then
+        meta.timeout = "none (C_Timer.After unavailable)"
+    end
+    if locked then
+        RD.Say("armed in combat (" .. mode .. "): samples at " .. table.concat(RD.DELAYS, ", ") .. " s from now")
+    else
+        RD.Say("saved the out of combat part (" .. mode .. "). Armed: pull a mob, samples come " .. table.concat(RD.DELAYS, ", ")
+            .. " s in; the first " .. RD.CAST_CAP .. " casts of your target, focus or nameplates are recorded too")
+    end
+end
+
+-- /fscheck panels ------------------------------------------------------------------------------
+
+-- true when any of the frames is shown, "unknown" when a read was secret and none was plainly shown, else false.
+function RD.AnyShown(names)
+    local unknown = false
+    for _, name in ipairs(names) do
+        local panel = _G[name]
+        if type(panel) == "table" then
+            local ok, shown = pcall(function() return panel:IsShown() end)
+            if ok and IsSecret(shown) then
+                unknown = true
+            elseif ok and shown == true then
+                return true
+            end
+        end
+    end
+    if unknown then return "unknown" end
+    return false
+end
+
+-- Closes one stock frame: HideUIPanel when there is one, else Hide. Returns the call's result as text.
+function RD.HideFrame(name)
+    local panel = _G[name]
+    if type(panel) ~= "table" then return "absent" end
+    local hide = _G.HideUIPanel
+    local ok, err
+    if type(hide) == "function" then
+        ok, err = pcall(hide, panel)
+    else
+        ok, err = pcall(panel.Hide, panel)
+    end
+    if ok then return "ok" end
+    return ErrText(err)
+end
+
+-- One panel: skipped when already open (it is left alone), else opened once and closed again.
+function RD.TryPanel(item, rec)
+    local fn = Api(item.call)
+    if not fn then
+        rec.status = "absent: " .. item.call
+        return
+    end
+    local before = RD.AnyShown(item.frames)
+    if before ~= false then
+        rec.status = "skipped: already open or unreadable"
+        return
+    end
+    local ok, err = pcall(fn, item.arg)
+    rec.open = ok and "ok" or ErrText(err)
+    local after = RD.AnyShown(item.frames)
+    rec.shown = tostring(after)
+    if item.headers and after == true then rec.headerNames = RD.HeaderNames() end
+    if after == true then
+        local okClose, errClose = pcall(fn, item.arg)
+        rec.close = okClose and "ok" or ErrText(errClose)
+        if RD.AnyShown(item.frames) ~= false then
+            local out = {}
+            for _, name in ipairs(item.frames) do out[#out + 1] = name .. ":" .. RD.HideFrame(name) end
+            rec.fallbackHide = table.concat(out, ",")
+        end
+    end
+    rec.closed = tostring(RD.AnyShown(item.frames) == false)
+    rec.status = "tried"
+end
+
+function RD.Panels()
+    local combat = LockedDown(false)
+    local kind = combat and "combat" or "ooc"
+    local db = DB()
+    if type(db.panels) ~= "table" then db.panels = {} end
+    local run = { started = SafeDate(), inCombat = combat }
+    db.panels[kind] = run
+    local startShown = {}
+    for _, item in ipairs(RD.PANELS) do
+        for _, name in ipairs(item.frames) do
+            if startShown[name] == nil then startShown[name] = RD.AnyShown({ name }) end
+        end
+    end
+    local summary = {}
+    for _, item in ipairs(RD.PANELS) do
+        local rec = {}
+        run[item.key] = rec
+        local ok, err = pcall(RD.TryPanel, item, rec)
+        if not ok then rec.partError = ErrText(err) end
+        summary[#summary + 1] = item.key .. " " .. tostring(rec.open or rec.status)
+    end
+    -- Whatever this run opened and did not close is closed now.
+    local left = {}
+    for name, was in pairs(startShown) do
+        if was == false and RD.AnyShown({ name }) ~= false then
+            RD.HideFrame(name)
+            if RD.AnyShown({ name }) ~= false then left[#left + 1] = name end
+        end
+    end
+    table.sort(left)
+    run.leftOpen = #left == 0 and "none" or table.concat(left, ",")
+    Say("panels (" .. kind .. "): " .. table.concat(summary, ", ") .. "; left open: " .. run.leftOpen
+        .. " | /reload or log out to save" .. (combat and "" or " | run it again in combat for the combat half"))
 end
 
 -------------------------------------------------------------------------------
@@ -5573,7 +6906,11 @@ end
 -------------------------------------------------------------------------------
 
 -- keepGunsight: the main run re-arming must not wipe a saved `/fscheck gunsight`, `/fscheck hot`,
--- `/fscheck priest` or `/fscheck shaman` result or disarm their pending parts; only an explicit `/fscheck reset` clears those.
+-- `/fscheck priest`, `/fscheck shaman`, `/fscheck reads` or `/fscheck panels` result or disarm their pending parts;
+-- only an explicit `/fscheck reset` clears those.
+-- The saved results a main run re-arming keeps (one key each under ForeverSTUwaveDB.fscheck).
+local KEPT_RESULTS = { "gunsight", "hot", "priest", "shaman", "reads", "panels" }
+
 local function Reset(keepGunsight)
     state.runId = state.runId + 1
     state.armed = false
@@ -5602,23 +6939,23 @@ local function Reset(keepGunsight)
     if state.label then pcall(function() state.label:Hide() end) end
     local root = _G.ForeverSTUwaveDB
     if type(root) == "table" then
-        local kept, keptHot, keptPriest, keptShaman = nil, nil, nil, nil
+        local kept = {}
+        local any = false
         if keepGunsight and type(root[KEY]) == "table" then
-            kept = root[KEY].gunsight
-            keptHot = root[KEY].hot
-            keptPriest = root[KEY].priest
-            keptShaman = root[KEY].shaman
+            for _, name in ipairs(KEPT_RESULTS) do
+                kept[name] = root[KEY][name]
+                if type(kept[name]) == "table" then any = true end
+            end
         end
         root[KEY] = nil
-        if type(kept) == "table" or type(keptHot) == "table" or type(keptPriest) == "table" or type(keptShaman) == "table" then
-            root[KEY] = { gunsight = kept, hot = keptHot, priest = keptPriest, shaman = keptShaman }
-        end
+        if any then root[KEY] = kept end
     end
     if not keepGunsight then
         -- First, and on its own: a failure in the gunsight or hot teardown must not leave the priest
         -- check's events registered.
         PP.Stop("reset", true)
         SH.Stop("reset", true)
+        RD.Stop("reset", true)
         GS.Disarm()
         HP.Off(true)
     end
@@ -5695,6 +7032,16 @@ local function Command(msg)
         SH.Destroy(nil)
     elseif string.match(arg, "^shaman destroy %S+$") then
         SH.Destroy(string.match(arg, "^shaman destroy (%S+)$"))
+    elseif arg == "reads" then
+        if RD.live then
+            Say("reads: " .. RD.StatusLine())
+        else
+            RD.Start()
+        end
+    elseif arg == "reads off" then
+        RD.Stop("stopped")
+    elseif arg == "panels" then
+        RD.Panels()
     elseif arg == "hot" then
         HP.Start()
     elseif arg == "hot off" then
