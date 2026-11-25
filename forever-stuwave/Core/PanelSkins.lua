@@ -50,6 +50,20 @@ end
 -- ends, is not gated: nothing reaches it unless the file-scope registration ran.
 local MS = FS.ModuleSwitch
 
+-- Runs fn when the Window skins switch is on: at ADDON_LOADED for a call made at file scope (never, with the switch off), at
+-- once for a call made later. For the file-scope listeners, hooks and direct skin calls that do not go through DeferCombat
+-- or WatchAddonLoad.
+function PanelSkins.WhenSkinsOn(fn, key)
+    if MS and not MS.Loaded() then
+        MS.WhenOn(key or "m.skins", fn)
+        return
+    end
+    fn()
+end
+
+-- Marks the skins built once the switch is known to be on (the first call this file queues, so it runs before any skin's).
+if MS then MS.WhenOn("m.skins", function() MS.MarkBuilt("m.skins") end) end
+
 function PanelSkins.DeferCombat(fn, key)
     if MS and not MS.Loaded() then
         MS.WhenOn(key or "m.skins", function() RunDeferred(fn) end)

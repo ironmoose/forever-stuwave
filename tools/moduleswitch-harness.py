@@ -1397,6 +1397,80 @@ function T.bags_on_builds_the_bar_dims_the_stock_bag_bar_and_skins_the_bag_frame
     yes(TouchesOn("ContainerFrame1", "Modules/Bags/Bags.lua") ~= "", "the bag frames are skinned")
 end
 
+local SKINS_BLIZZARD = { "CharacterFrame", "InspectFrame", "MailFrame", "PlayerSpellsFrame", "QuestFrame", "GossipFrame",
+    "MerchantFrame", "StaticPopup1", "GameTooltip", "LossOfControlFrame", "ChatAlertFrame", "ZoneTextFrame", "ErrorsFrame",
+    "ShardTransferImminentFrame", "DamageMeter", "HelpTip", "WorldMapFrame", "AddonList", "FriendsFrame", "TokenFrame" }
+local function skinsWorld(off)
+    Boot({ off = off, watch = SKINS_BLIZZARD, pre = function()
+        for _, name in ipairs({ "CharacterFrame", "InspectFrame", "MailFrame", "PlayerSpellsFrame", "QuestFrame", "GossipFrame",
+            "MerchantFrame", "StaticPopup1", "WorldMapFrame", "AddonList", "FriendsFrame", "TokenFrame" }) do
+            WatchPanel(name)
+        end
+        rawset(_G.GossipFrame, "GreetingPanel", false)   -- the game builds this child later; the skin tests it before use
+        function GameTooltip_SetDefaultAnchor() end
+        function PaperDollFrame_UpdateStats() end
+        function EquipmentFlyout_Show() end
+        function GetProfessions() return 1 end
+        function GetProfessionInfo() return "Mining", "icon", 10, 75 end
+    end })
+    Fire("PLAYER_ENTERING_WORLD", false, false); Fire("PLAYER_REGEN_ENABLED"); Fire("MAIL_SHOW"); Fire("INSPECT_READY")
+    Fire("UI_SCALE_CHANGED"); Fire("SKILL_LINES_CHANGED")
+    for _, e in ipairs({ "Blizzard_PlayerSpells", "Blizzard_InspectUI", "Blizzard_Communities" }) do Fire("ADDON_LOADED", e) end
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+function T.window_skins_off_builds_none_hooks_nothing_and_touches_no_blizzard_window()
+    skinsWorld({ "m.skins" })
+    eq(FS.ModuleSwitch.Built("m.skins"), false)
+    for _, f in ipairs(__skinFiles) do
+        loaded(f)
+        eq(BuiltBy(f), 0, f .. " built nothing")
+        eq(TouchesOn("hooksecurefunc", f), "", f .. " hooked nothing")
+        for _, name in ipairs(SKINS_BLIZZARD) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+    no(MadeNamed("FSTooltipAnchor"), "no tooltip anchor")
+    no(MadeNamed("ForeverSTUwaveProfessions"), "no professions panel")
+    eq(SlashCmdList["FSPROF"], nil, "no /fsprof while the panel is off")
+end
+
+function T.window_skins_off_keeps_the_shared_helpers_defined()
+    skinsWorld({ "m.skins" })
+    eq(type(FS.PanelSkins.DeferCombat), "function"); eq(type(FS.PanelSkins.WatchAddonLoad), "function")
+    eq(type(FS.PanelSkins.WhenSkinsOn), "function"); eq(type(FS.PanelSkins.RegisterInspect), "function")
+    eq(type(FS.TooltipAnchor.Repoint), "function"); eq(type(FS.TooltipAnchor.Install), "function")
+    eq(type(FS.DamageMeterSkin), "table")
+    FS.PanelSkins.DeferCombat(function() end)   -- a runtime call is not refused
+    local ran = false
+    FS.PanelSkins.WhenSkinsOn(function() ran = true end)
+    eq(ran, true, "a call made after ADDON_LOADED runs at once")
+    eq(TouchesOn("GameTooltip"), "")
+end
+
+function T.window_skins_on_builds_and_skins_the_game_windows_as_before()
+    skinsWorld({})
+    eq(FS.ModuleSwitch.Built("m.skins"), true)
+    -- only the files this gate edits are held to a clean load here: the rest of the skin files are exercised against real
+    -- window shapes by their own harnesses, and this world's stand-in windows are only deep enough for the first few
+    for _, f in ipairs({ "Modules/Skins/Popups.lua", "Modules/Skins/Character.lua", "Modules/Skins/TooltipAnchor.lua",
+        "Modules/Skins/Professions.lua", "Core/PanelSkins.lua" }) do loaded(f) end
+    yes(MadeNamed("FSTooltipAnchor"), "the tooltip anchor")
+    yes(TouchesOn("StaticPopup1", "Modules/Skins/Popups.lua") ~= "", "the popup is skinned")
+    yes(TouchesOn("CharacterFrame", "Modules/Skins/Character.lua") ~= "", "the character window is skinned")
+    yes(TouchesOn("hooksecurefunc", "Modules/Skins/TooltipAnchor.lua") ~= "", "the default anchor hook is installed")
+    yes(MadeNamed("ForeverSTUwaveProfessions"), "the professions panel")
+    eq(type(SlashCmdList["FSPROF"]), "function")
+end
+
+function T.the_layout_editor_gives_the_tooltip_and_professions_no_handle_while_window_skins_are_off()
+    skinsWorld({ "m.skins" })
+    local LE = FS.LayoutEdit
+    if type(LE) == "table" and type(LE.HasHandle) == "function" then
+        eq(LE.HasHandle("tooltip"), false); eq(LE.HasHandle("professions"), false)
+    end
+end
+
 return T
 """
 
@@ -1426,6 +1500,7 @@ def run_gate_checks() -> int:
             lua.execute(GATE_WORLD)
             lua.globals().__toc = lua.table_from(toc_files())
             lua.globals().__read = read_toc_file
+            lua.globals().__skinFiles = lua.table_from([f for f in toc_files() if f.startswith("Modules/Skins/")])
             checks = lua.execute(GATE_CHECKS)
             checks[name]()
             print(f"ok    {name}")

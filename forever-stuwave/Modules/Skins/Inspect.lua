@@ -411,19 +411,22 @@ local function Build()
     Step("refresh", Insp.Refresh)
 end
 
-local watcher = CreateFrame("Frame")
-for _, event in ipairs({ "INSPECT_READY", "PLAYER_EQUIPMENT_CHANGED", "UNIT_INVENTORY_CHANGED", "GET_ITEM_INFO_RECEIVED",
-    "PLAYER_AVG_ITEM_LEVEL_UPDATE", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }) do
-    pcall(watcher.RegisterEvent, watcher, event)
-end
-watcher:SetScript("OnEvent", function(_, event)
-    if not S.done then return end
-    if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then Kit.Reseat() return end
-    -- A closed window catches up in its OnShow hook. Ungated, GET_ITEM_INFO_RECEIVED bursts (loot, AH, chat links) and
-    -- any unit's UNIT_INVENTORY_CHANGED ran the full pass on the target's gear all session (2026-11-24 hitch audit).
-    local win = _G.InspectFrame
-    if not (win and win:IsShown()) then return end
-    Step("refresh", Insp.Refresh)
+-- Module power: this listener starts only with the Window skins switch on.
+PanelSkins.WhenSkinsOn(function()
+    local watcher = CreateFrame("Frame")
+    for _, event in ipairs({ "INSPECT_READY", "PLAYER_EQUIPMENT_CHANGED", "UNIT_INVENTORY_CHANGED", "GET_ITEM_INFO_RECEIVED",
+        "PLAYER_AVG_ITEM_LEVEL_UPDATE", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }) do
+        pcall(watcher.RegisterEvent, watcher, event)
+    end
+    watcher:SetScript("OnEvent", function(_, event)
+        if not S.done then return end
+        if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then Kit.Reseat() return end
+        -- A closed window catches up in its OnShow hook. Ungated, GET_ITEM_INFO_RECEIVED bursts (loot, AH, chat links) and
+        -- any unit's UNIT_INVENTORY_CHANGED ran the full pass on the target's gear all session (2026-11-24 hitch audit).
+        local win = _G.InspectFrame
+        if not (win and win:IsShown()) then return end
+        Step("refresh", Insp.Refresh)
+    end)
 end)
 
 PanelSkins.RegisterInspect("Inspect", { { name = "InspectFrame", guard = "fsInspectSkin" } })

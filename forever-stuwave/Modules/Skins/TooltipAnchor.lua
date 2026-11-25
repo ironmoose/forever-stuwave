@@ -29,12 +29,18 @@ function TooltipAnchor.Install()
     hooksecurefunc("GameTooltip_SetDefaultAnchor", TooltipAnchor.Repoint)
 end
 
--- The frame is plain and unprotected, so seating it is legal in combat.
-if not TooltipAnchor.frame then
-    local anchor = CreateFrame("Frame", "FSTooltipAnchor", UIParent)
-    anchor:EnableMouse(false)
-    TooltipAnchor.frame = anchor
-    FS.Layout.Apply(anchor, "tooltip")
-end
+-- Module power (Core/ModuleSwitch.lua): the anchor frame and the hook on the game's default tooltip anchor belong to the Window
+-- skins switch. Off, tooltips sit where the game puts them and /fsedit shows no tooltip handle.
+local function Start()
+    -- The frame is plain and unprotected, so seating it is legal in combat.
+    if not TooltipAnchor.frame then
+        local anchor = CreateFrame("Frame", "FSTooltipAnchor", UIParent)
+        anchor:EnableMouse(false)
+        TooltipAnchor.frame = anchor
+        FS.Layout.Apply(anchor, "tooltip")
+    end
 
-TooltipAnchor.Install()
+    TooltipAnchor.Install()
+end
+local MS = FS.ModuleSwitch
+if MS then MS.WhenOn("m.skins", Start) else Start() end

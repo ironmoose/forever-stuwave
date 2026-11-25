@@ -282,7 +282,7 @@ end
 -- so it gets no handle. The other pieces answer from their applied frame as before.
 local MODULE_OF = {
     tcast = "m.cast", pcast = "m.cast", buffs = "m.auras", debuffs = "m.auras", minimap = "m.mini",
-    objectives = "m.track", professions = "m.skins",
+    objectives = "m.track", professions = "m.skins", tooltip = "m.skins",
 }
 
 local function ModuleNotBuilt(id)

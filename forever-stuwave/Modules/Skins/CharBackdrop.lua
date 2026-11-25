@@ -228,11 +228,21 @@ Char.OnWellLayout = function(w)
     if prior then pcall(prior, w) end
     SafeSeat()
 end
-Config.OnChange(M.SETTING.key, SafeSeat)
--- A talent change can move the top tree. The texture is set only when the sheet changes.
-local listener = CreateFrame("Frame")
-for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "TRAIT_CONFIG_UPDATED", "PLAYER_TALENT_UPDATE", "CHARACTER_POINTS_CHANGED" }) do
-    pcall(listener.RegisterEvent, listener, event)
+
+-- File-scope work waits for the Window skins switch (Core/ModuleSwitch.lua); without the switch store it runs at once.
+local function WhenSkinsOn(fn)
+    local MS = FS.ModuleSwitch
+    if MS then MS.WhenOn("m.skins", fn) else fn() end
 end
-listener:SetScript("OnEvent", SafeSeat)
-SafeSeat()
+
+-- Module power: the setting watch, the listener and the first seat start only with the Window skins switch on.
+WhenSkinsOn(function()
+    Config.OnChange(M.SETTING.key, SafeSeat)
+    -- A talent change can move the top tree. The texture is set only when the sheet changes.
+    local listener = CreateFrame("Frame")
+    for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "TRAIT_CONFIG_UPDATED", "PLAYER_TALENT_UPDATE", "CHARACTER_POINTS_CHANGED" }) do
+        pcall(listener.RegisterEvent, listener, event)
+    end
+    listener:SetScript("OnEvent", SafeSeat)
+    SafeSeat()
+end)

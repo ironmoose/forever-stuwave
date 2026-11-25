@@ -1982,33 +1982,36 @@ local function Build()
     Refresh()
 end
 
-local watcher = CreateFrame("Frame")
-for _, event in ipairs({ "UPDATE_INVENTORY_DURABILITY", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_AVG_ITEM_LEVEL_UPDATE",
-    "UNIT_INVENTORY_CHANGED", "PLAYER_ENTERING_WORLD", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_LEVEL_UP",
-    "PLAYER_REGEN_ENABLED" }) do
-    pcall(watcher.RegisterEvent, watcher, event)
-end
-watcher:SetScript("OnEvent", function(_, event)
-    if not S.done then return end
-    if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then
-        Kit.Reseat()
-        return
+-- Module power: the listeners and the hooks on the game's own functions start only with the Window skins switch on.
+PanelSkins.WhenSkinsOn(function()
+    local watcher = CreateFrame("Frame")
+    for _, event in ipairs({ "UPDATE_INVENTORY_DURABILITY", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_AVG_ITEM_LEVEL_UPDATE",
+        "UNIT_INVENTORY_CHANGED", "PLAYER_ENTERING_WORLD", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_LEVEL_UP",
+        "PLAYER_REGEN_ENABLED" }) do
+        pcall(watcher.RegisterEvent, watcher, event)
     end
-    -- A closed window is refreshed by its OnShow hook, so nothing here while it is shut: the full pass allocates hundreds
-    -- of KB, and durability, inventory and regen events land after every fight.
-    local win = _G.CharacterFrame
-    if not (win and win:IsShown()) then return end
-    if event == "PLAYER_REGEN_ENABLED" then Step("extend", ExtendWindow, win) end
-    Step("refresh", Refresh)
+    watcher:SetScript("OnEvent", function(_, event)
+        if not S.done then return end
+        if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then
+            Kit.Reseat()
+            return
+        end
+        -- A closed window is refreshed by its OnShow hook, so nothing here while it is shut: the full pass allocates hundreds
+        -- of KB, and durability, inventory and regen events land after every fight.
+        local win = _G.CharacterFrame
+        if not (win and win:IsShown()) then return end
+        if event == "PLAYER_REGEN_ENABLED" then Step("extend", ExtendWindow, win) end
+        Step("refresh", Refresh)
+    end)
+
+    if type(_G.PaperDollFrame_UpdateStats) == "function" then
+        Kit.HookFunc(_G, "PaperDollFrame_UpdateStats", function() if S.done then Kit.Later(function() Step("stats", SkinStats) end) end end)
+    end
+
+    for _, name in ipairs({ "EquipmentFlyout_Show", "EquipmentFlyout_UpdateItems" }) do
+        Kit.HookFunc(_G, name, function() if S.done then Step("flyout", SkinFlyout) end end)
+    end
 end)
-
-if type(_G.PaperDollFrame_UpdateStats) == "function" then
-    Kit.HookFunc(_G, "PaperDollFrame_UpdateStats", function() if S.done then Kit.Later(function() Step("stats", SkinStats) end) end end)
-end
-
-for _, name in ipairs({ "EquipmentFlyout_Show", "EquipmentFlyout_UpdateItems" }) do
-    Kit.HookFunc(_G, name, function() if S.done then Step("flyout", SkinFlyout) end end)
-end
 
 -- Exports the other windows read (Inspect shares the slot skin; the pages share the holds).
 Char.Box, Char.PaintBox, Char.SkinSquare, Char.PaintSquare, Char.PinColor = Box, PaintBox, SkinSquare, PaintSquare, PinColor
