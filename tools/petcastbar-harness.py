@@ -32,7 +32,7 @@ spellcast events and a stepped clock:
     and nothing throws;
   * the timer size (Player: "if both casts are 10s or more... temporarily decrease the font size"):
     the timer FontString wears the small size (TIMER_SMALL_FONT_SIZE, parsed from the source; the
-    largest half point that fits "99.9 / 99.9" in the 48 px box at scales 1, 0.8333 and 0.64) while the
+    largest half point that fits "99.9/99.9" in the 48 px box at scales 1, 0.8333 and 0.64) while the
     FIRST number of the readout (elapsed for a cast, remaining for a channel; never above the total) is
     at least TIMER_SMALL_FIRST_FROM, 9.95 (where "%.1f" turns to "10.0"), so it can flip mid cast; 8.5
     returns below that and at every cast start and stop; the font is re-applied only on a flip. A
@@ -662,10 +662,10 @@ function T.timer_reads_elapsed_over_total_at_the_mockup_font_size()
     W.cast("C1"); W.fire("UNIT_SPELLCAST_START")
     ok(W.ticker, "the timer ticker exists")
     W.ticker._scripts.OnUpdate(W.ticker, 0.2)
-    eq(W.timerText._text, "0.0 / 2.5", "elapsed over total, read through the duration object")
+    eq(W.timerText._text, "0.0/2.5", "elapsed over total, read through the duration object")
     __now = 101
     W.ticker._scripts.OnUpdate(W.ticker, 0.2)
-    eq(W.timerText._text, "1.0 / 2.5")
+    eq(W.timerText._text, "1.0/2.5")
     W.clean()
 end
 
@@ -674,7 +674,7 @@ function T.a_channel_timer_counts_down_over_total()
     W.channel(100, 4); W.fire("UNIT_SPELLCAST_CHANNEL_START")
     __now = 101
     W.ticker._scripts.OnUpdate(W.ticker, 0.2)
-    eq(W.timerText._text, "3.0 / 4.0", "a channel shows what is left over the total")
+    eq(W.timerText._text, "3.0/4.0", "a channel shows what is left over the total")
     W.clean()
 end
 
@@ -743,7 +743,7 @@ local function geometry_at(s, wantCount)
     near(W.nameText._w, m.NAMEMAXW * s, 1e-6, "the name FontString is NAME_MAX_W wide at scale " .. s)
     eq(W.nameText._wordWrap, false, "the name does not wrap")
     -- The timer is NAME_MAX_W + RUN_GAP wide (the gap is free: the run ends before it): its values may
-    -- be secret, so the readout cannot be shortened by comparing them; a wider one ("10.0 / 12.5",
+    -- be secret, so the readout cannot be shortened by comparing them; a wider one ("10.0/12.5",
     -- about 52 px) is cut at the box, right justified, and never grows leftwards over the chevrons.
     near(W.timerText._w, (m.NAMEMAXW + m.GAP) * s, 1e-6, "the timer FontString is NAME_MAX_W + RUN_GAP wide at scale " .. s)
     eq(W.timerText._wordWrap, false, "the timer does not wrap")
@@ -788,7 +788,7 @@ function T.name_max_w_is_a_fixed_constant_that_fits_the_timer_and_nine_name_char
     local m = __mock
     ok(m.NAMEMAXW >= m.TIMERW, "NAME_MAX_W " .. m.NAMEMAXW .. " holds the timer sample " .. m.TIMERW)
     ok(m.NAMEMAXW >= 9 * m.NAMEFS * m.ADV, "NAME_MAX_W holds 9 characters of the 8 pt name")
-    -- The timer box is NAME_MAX_W + RUN_GAP wide: "0.0 / 12.0" (10 characters) fits whole.
+    -- The timer box is NAME_MAX_W + RUN_GAP wide: "0.0/12.0" (10 characters) fits whole.
     ok(m.NAMEMAXW + m.GAP >= 10 * m.TIMERFS * m.ADV, "the timer box holds \"0.0 / 12.0\" (" .. 10 * m.TIMERFS * m.ADV .. ")")
     local need = (m.COUNT - 1) * m.PITCH + m.CW + m.RUNH / 2
     local track = track_at(1)
@@ -900,7 +900,7 @@ function T.the_spell_name_shows_above_the_timer_while_casting()
     eq(W.nameText._fontSize, m.NAMEFS, "name text size")
     eq(W.nameText._color, FS.Theme.COLOR_POWER, "the name is cyan")
     W.ticker._scripts.OnUpdate(W.ticker, 0.2)
-    eq(W.timerText._text, "0.0 / 2.5", "the timer still sits under it")
+    eq(W.timerText._text, "0.0/2.5", "the timer still sits under it")
     near(W.plate._alpha, m.PLATECAST, 1e-9, "the plate firms up while casting")
     near(W.outline._alpha, m.OUTLINECAST, 1e-9, "and so does the outline")
     __unit.cast = nil
@@ -1372,7 +1372,7 @@ function T.secret_times_fall_back_to_the_engine_timed_strip()
     -- Two chevrons per 32 wide tile: scale so the period is two engine pitches (20 at the pet pitch 10).
     near(W.strip._scale, 2 * __mock.PITCH / 32, 0.02, "tile scale matches the engine pitch")
     W.ticker._scripts.OnUpdate(W.ticker, 0.2)
-    eq(W.timerText._text, "0.5 / 2.0", "the timer still reads the duration object")
+    eq(W.timerText._text, "0.5/2.0", "the timer still reads the duration object")
     -- A verdict ends it.
     __unit.cast = nil
     local ok2, err2 = pcall(W.fire, "UNIT_SPELLCAST_STOP", "pet", __SECRET_ID)
@@ -1628,7 +1628,7 @@ end
 -- or more... temporarily decrease the font size") -----------------------------------------------------
 
 -- The timer box is NAME_MAX_W + RUN_GAP wide (48 px) and the readout is right justified with no wrap, so
--- "10.0 / 12.5" (11 characters, about 52 px at 8.5 pt) would clip. The first number (elapsed for a cast,
+-- "10.0/12.5" (11 characters, about 52 px at 8.5 pt) would clip. The first number (elapsed for a cast,
 -- remaining for a channel) is never above the total, so "both at least 10" is "the first at least 10",
 -- and the cutoff is 9.95 because "%.1f" prints 9.95 and up as "10.0". Plain first number: the same
 -- FontString is given the small size (ApplyMono) while it is, and the state flips mid cast. Secret first
@@ -1687,15 +1687,15 @@ function T.a_cast_wears_the_small_font_only_from_9_95_s_elapsed()
     local W = world()
     W.cast("C1", 100, 12.5); W.fire("UNIT_SPELLCAST_START")
     eq(W.timerText._fontSize, TIMERFS, "a long cast starts at 8.5: nothing has elapsed")
-    eq(W.timerText._text, "0.0 / 12.5")
+    eq(W.timerText._text, "0.0/12.5")
     __unit.cast.elapsed = FROM - 0.01; tick(W)
-    eq(W.timerText._text, "9.9 / 12.5"); eq(W.timerText._fontSize, TIMERFS, "9.94 s in")
+    eq(W.timerText._text, "9.9/12.5"); eq(W.timerText._fontSize, TIMERFS, "9.94 s in")
     __unit.cast.elapsed = FROM; tick(W)
     eq(W.timerText._fontSize, SMALL, "9.95 s in: the readout is about to print 10.0")
     __unit.cast.elapsed = 9.96; tick(W)
-    eq(W.timerText._text, "10.0 / 12.5"); eq(W.timerText._fontSize, SMALL)
+    eq(W.timerText._text, "10.0/12.5"); eq(W.timerText._fontSize, SMALL)
     __unit.cast.elapsed = 12.5; tick(W)
-    eq(W.timerText._text, "12.5 / 12.5"); eq(W.timerText._fontSize, SMALL, "and small to the end")
+    eq(W.timerText._text, "12.5/12.5"); eq(W.timerText._fontSize, SMALL, "and small to the end")
     near(W.timerText._alpha or 1, 1, 1e-9, "fully visible")
     eq(W.timerSmall._text, "", "the second FontString is not used on the plain path")
     eq(__evalCalls, 0, "a plain number is compared, not curved")
@@ -1703,7 +1703,7 @@ function T.a_cast_wears_the_small_font_only_from_9_95_s_elapsed()
     stop_at_once(W, "C1")
     W.cast("C2", 110, 9); W.fire("UNIT_SPELLCAST_START")
     __unit.cast.elapsed = 9; tick(W)
-    eq(W.timerText._text, "9.0 / 9.0"); eq(W.timerText._fontSize, TIMERFS, "a 9 s cast reads at 8.5 to the end")
+    eq(W.timerText._text, "9.0/9.0"); eq(W.timerText._fontSize, TIMERFS, "a 9 s cast reads at 8.5 to the end")
     W.clean()
 end
 
@@ -1712,9 +1712,9 @@ function T.a_long_channel_counts_out_of_the_small_font()
     W.channel(100, 12); W.fire("UNIT_SPELLCAST_CHANNEL_START")
     eq(W.timerText._fontSize, SMALL, "12 s left of 12: small from the first frame")
     __now = 102; tick(W)
-    eq(W.timerText._text, "10.0 / 12.0", "remaining over total"); eq(W.timerText._fontSize, SMALL)
+    eq(W.timerText._text, "10.0/12.0", "remaining over total"); eq(W.timerText._fontSize, SMALL)
     __now = 102.1; tick(W)
-    eq(W.timerText._text, "9.9 / 12.0"); eq(W.timerText._fontSize, TIMERFS, "under 9.95 s left the 8.5 returns, mid channel")
+    eq(W.timerText._text, "9.9/12.0"); eq(W.timerText._fontSize, TIMERFS, "under 9.95 s left the 8.5 returns, mid channel")
     W.clean()
 end
 
@@ -1724,9 +1724,9 @@ function T.the_font_follows_the_first_number_both_ways_and_every_stop_restores_8
     local W = world()
     W.cast("C1", 100, 12.5); W.fire("UNIT_SPELLCAST_START")
     __unit.cast.elapsed = 11; tick(W)
-    eq(W.timerText._fontSize, SMALL, "the tick alone shrinks it"); eq(W.timerText._text, "11.0 / 12.5")
+    eq(W.timerText._fontSize, SMALL, "the tick alone shrinks it"); eq(W.timerText._text, "11.0/12.5")
     __unit.cast.elapsed = 5; tick(W)
-    eq(W.timerText._fontSize, TIMERFS, "and the tick alone restores it"); eq(W.timerText._text, "5.0 / 12.5")
+    eq(W.timerText._fontSize, TIMERFS, "and the tick alone restores it"); eq(W.timerText._text, "5.0/12.5")
     __unit.cast.elapsed = 11; tick(W)
     eq(W.timerText._fontSize, SMALL)
     __now = 101
@@ -1789,7 +1789,7 @@ function T.a_99_9_over_99_9_readout_fits_the_timer_box_at_every_scale(variant)
     W.cast("C1", 100, 99.9); W.fire("UNIT_SPELLCAST_START")
     __unit.cast.elapsed = 99.9
     tick(W)
-    eq(W.timerText._text, "99.9 / 99.9")
+    eq(W.timerText._text, "99.9/99.9")
     eq(W.timerText._fontSize, SMALL * s, "small size at scale " .. s)
     local width = W.timerText:GetStringWidth()
     ok(width <= W.timerText._w + 1e-9, "\"99.9 / 99.9\" is " .. width .. " px in a " .. W.timerText._w .. " px box at scale " .. s)
@@ -2129,7 +2129,7 @@ function T.the_preview_draws_the_idle_ghost_row_and_the_firebolt_cast()
         eq(c.ghost._shown, false, "no ghost while casting")
         near(c.fill._vc[4], k <= 6 and 1 or 0.2, 1e-9, "chevron " .. k .. " lit or unlit")
     end
-    eq(P.parts.icon._shown, true); eq(P.parts.name._text, "Firebolt"); eq(P.parts.timer._text, "1.2 / 2.0")
+    eq(P.parts.icon._shown, true); eq(P.parts.name._text, "Firebolt"); eq(P.parts.timer._text, "1.2/2.0")
     local x1, x2 = P.parts.chevrons[1].fill._points.TOPLEFT.x, P.parts.chevrons[2].fill._points.TOPLEFT.x
     eq(x1, 28, "the run starts at 28"); eq(x2 - x1, 10, "pitch 10")
     P.Restyle({ casting = true, icon = false, name = false, timer = false })

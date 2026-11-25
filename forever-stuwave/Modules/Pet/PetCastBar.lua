@@ -118,7 +118,7 @@
 -- one tile equals two engine pitches. A secret value is never compared, formatted or
 -- used in arithmetic here. The timer text reads "elapsed / total" (for a channel, what is left
 -- over the total): the duration object's GetElapsedDuration() (GetRemainingDuration() for a
--- channel) and GetTotalDuration() go straight into SetFormattedText("%.1f / %.1f") on a 0.1s
+-- channel) and GetTotalDuration() go straight into SetFormattedText("%.1f/%.1f") on a 0.1s
 -- ticker, inside a pcall; the values are never truth-tested or used in arithmetic, and the first
 -- number is compared only once IsSecret has said it is plain (TIMER SIZE below). One colour: the
 -- mockup's muted " / total" would need a colour escape around a value that may be secret.
@@ -257,7 +257,7 @@ local TIMER_SMALL_FONT_SIZE = 7.5
 local TIMER_SMALL_FIRST_FROM = 9.95
 
 -- The one format both timer FontStrings are written with.
-local TIMER_FORMAT = "%.1f / %.1f"
+local TIMER_FORMAT = "%.1f/%.1f"   -- no spaces: "1.3 / 1.5" was cut to "1.3 / ..." live (2026-11-25)
 
 -- Where the two lines sit, as design px from the bar's TOP edge to the glyph middle: the mockup's
 -- baseline (10 and 21) less about 0.36 em.
@@ -1146,7 +1146,7 @@ function PetCastBar.NewPreview(parent)
     parts.timer:SetJustifyH("RIGHT")
     parts.timer:SetPoint("RIGHT", frame, "TOPRIGHT", -RIGHT_PAD, -TIMER_Y)
     parts.timer:SetWidth(NAME_MAX_W + RUN_GAP)
-    parts.timer:SetText("1.2 / 2.0")
+    parts.timer:SetText("1.2/2.0")
 
     local function Restyle(state)
         local casting = type(state) == "table" and state.casting == true
