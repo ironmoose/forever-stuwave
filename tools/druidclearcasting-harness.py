@@ -231,9 +231,11 @@ case("the_config_preview_loops_enter_hold_exit_gap_and_stops_on_hide_and_in_comb
             if P.Phase() then seen[P.Phase()] = true end
         end
     end
-    step(4)
+    step(15 - 0.5)
+    assert(seen.hold and not seen.exit, "the alert holds for the real 15 s window before it exits")
+    step(2.5)
     assert(seen.enter and seen.hold and seen.exit and seen.gap, "ignite, hold, exit and gap all ran")
-    step(6)
+    step(18)
     assert(P.Phase() ~= nil, "and it keeps repeating")
     P.Hide()
     assert(P.Phase() == nil and not d.scripts.OnUpdate, "the loop stops on hide")

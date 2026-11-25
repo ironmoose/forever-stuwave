@@ -489,15 +489,16 @@ local function OnEditChanged(editing)
 end
 
 
--- The preview plays like a fight: the baked enter animation, a hold of PREVIEW_HOLD seconds on the held loop, the baked exit,
--- a PREVIEW_GAP of nothing, again. Plain frames and the module's own sequences; it runs only while the preview is up.
-local PREVIEW_HOLD, PREVIEW_GAP = 1.5, 0.6
+-- The preview plays like a fight, on the real clock: the baked enter animation, then the held loop while the drain bar empties
+-- over the spell's whole window (amber in its last stretch, as live), the baked exit when it runs dry, a PREVIEW_GAP of nothing,
+-- again. Plain frames and the module's own sequences; it runs only while the preview is up.
+local PREVIEW_GAP = 0.6
 local loop = { phase = nil, t = 0 }
 local loopFrame
 
 local function LoopBegin()
     loop.phase, loop.t = "enter", 0
-    StartSeq("overpower", "enter", 1, ART_SPELLS.overpower.win * PREVIEW_REM)
+    StartSeq("overpower", "enter", 1, ART_SPELLS.overpower.win)
 end
 
 local function LoopTick(_, dt)
@@ -512,22 +513,27 @@ local function LoopTick(_, dt)
         if loop.t >= PREVIEW_GAP then LoopBegin() end
         return
     end
+    if loop.phase ~= "exit" and curRem then
+        curRem = curRem - dt
+        if curRem <= 0 then
+            curRem = 0
+            loop.phase = "exit"
+            StartSeq("overpower", "exp", 1, 0)
+        elseif curSeq == "held" and curRem <= Art.AMBER then
+            local idx = curSpell.amberStart == curSpell.heldStart and curIdx or 1
+            StartSeq("overpower", "amber", idx, curRem)
+        end
+    end
     curAcc = curAcc + dt
     while curAcc >= FRAME_S and curKey do
         curAcc = curAcc - FRAME_S
         Step()
     end
     if curKey then Commit() end
-    if loop.phase == "enter" and curSeq ~= "enter" then
-        loop.phase, loop.t = "hold", 0
-    elseif loop.phase == "hold" then
-        loop.t = loop.t + dt
-        if loop.t >= PREVIEW_HOLD then
-            loop.phase = "exit"
-            StartSeq("overpower", "exp", 1, curRem)
-        end
-    elseif loop.phase == "exit" and not curKey then
+    if loop.phase == "exit" and not curKey then
         loop.phase, loop.t = "gap", 0
+    elseif loop.phase == "enter" and curSeq ~= "enter" then
+        loop.phase = "hold"
     end
 end
 
