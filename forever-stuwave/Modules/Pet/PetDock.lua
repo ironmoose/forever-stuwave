@@ -836,6 +836,20 @@ function PetDock.GetFillAlpha()
     return fillAlpha
 end
 
+-- The Pet bar page's preview wears the float panel's art without the live layers, edges or events: the same two
+-- nine-sliced textures BuildFloat draws (the COLOR_POWER outline, the scrim fill at inset 0), and the action button plate,
+-- on frames the caller owns. The caller retints the fill for Background opacity.
+function PetDock.NewPreviewChrome(panel)
+    return {
+        outline = Theme.AddCut2Texture(panel, Theme.SLICE_CUT2_OUTLINE_TEXTURE, Theme.COLOR_POWER, "BORDER"),
+        fill = Theme.AddCut2Texture(panel, Theme.SLICE_CUT2_FILL_TEXTURE, Theme.COLOR_HUD_SCRIM, "BACKGROUND", nil, 0),
+    }
+end
+
+function PetDock.NewPreviewPlate(button)
+    return Theme.AddCut2Texture(button, Theme.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND")
+end
+
 -------------------------------------------------------------------------------
 -- Docking onto the Console
 -------------------------------------------------------------------------------

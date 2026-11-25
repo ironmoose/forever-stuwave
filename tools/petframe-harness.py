@@ -1385,7 +1385,7 @@ def check_docked_the_dock_sets_the_size_and_float_takes_the_style_back() -> None
     approx(p["hp"]["h"], 30, "floating again: the stored health height is back")
 
 
-def check_a_size_change_in_combat_waits_for_regen_and_text_changes_do_not() -> None:
+def check_in_combat_the_container_waits_for_regen_while_rail_heights_and_text_apply_live() -> None:
     rt = runtime(1.0)
     pf = rt.globals().FS.PetFrame
     rt.execute("__combat = true")
@@ -1393,7 +1393,9 @@ def check_a_size_change_in_combat_waits_for_regen_and_text_changes_do_not() -> N
     assert not list(rt.globals().__blocked.values()), list(rt.globals().__blocked.values())
     p = _pieces(rt)
     approx(p["box"]["w"], 348, "container untouched in combat")
-    approx(p["hp"]["h"], 7, "rail untouched in combat")
+    approx(p["status"]["h"], 26, "the status slot waits for the end of combat")
+    approx(p["status"]["w"], 134, "the status slot width waits for the end of combat")
+    approx(p["hp"]["h"], 12, "the rail height applies live in combat (a plain child of the status slot)")
     approx(pf.healthBar.text.fontSize, 10, "text size applies live in combat")
     approx(pf.nameText.fontSize, 12, "name size applies live in combat")
     rt.execute("__combat = false; __fire('PLAYER_REGEN_ENABLED')")
@@ -1644,9 +1646,24 @@ end }
 """
 
 
+# PetDock.lua's two preview helpers (checked against the real file in petdock-harness), on this world's Theme stub.
+DOCK_PREVIEW_STUB = """
+FS.PetDock = FS.PetDock or {}
+function FS.PetDock.NewPreviewChrome(panel)
+    local T = FS.Theme
+    return { outline = T.AddCut2Texture(panel, T.SLICE_CUT2_OUTLINE_TEXTURE, T.COLOR_POWER, 'BORDER'),
+        fill = T.AddCut2Texture(panel, T.SLICE_CUT2_FILL_TEXTURE, T.COLOR_HUD_SCRIM, 'BACKGROUND', nil, 0) }
+end
+function FS.PetDock.NewPreviewPlate(button)
+    return FS.Theme.AddCut2Texture(button, FS.Theme.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, 'BACKGROUND')
+end
+"""
+
+
 def preview(rt: LuaRuntime):
     """The preview over the booted world, drawn once."""
     rt.execute(CAST_PREVIEW_STUB)
+    rt.execute(DOCK_PREVIEW_STUB)
     made = rt.eval("FS.PetFrame.NewStylePreview(UIParent)")
     made.Restyle()
     return made
@@ -1686,6 +1703,18 @@ def check_the_preview_draws_a_demon_with_a_firebolt_cast_and_a_blue_rail() -> No
     put(rt, pet_happy=True)
     p.Restyle()
     assert block.dot.shown is False, "a demon has no happiness"
+
+
+def check_the_preview_draws_without_the_dock_file() -> None:
+    """The panel art is PetDock.lua's: with no PetDock the preview still draws its block and cast plate, without art."""
+    rt = runtime(1.0)
+    rt.execute(CAST_PREVIEW_STUB)
+    assert rt.eval("FS.PetDock") is None
+    made = rt.eval("FS.PetFrame.NewStylePreview(UIParent)")
+    made.Restyle()
+    assert made.parts.fill is None and made.parts.outline is None
+    assert made.parts.block.nameText.text == "Wolf"
+    approx(made.frame.w, 348, "the panel keeps its size")
 
 
 def check_the_preview_follows_sizes_wider_and_the_dock() -> None:
@@ -1800,7 +1829,7 @@ def main() -> int:
         ("style: width grows the panel past 134", check_width_grows_the_panel_past_134_and_keeps_the_plate_at_the_right),
         ("style: width below 134 keeps the panel 348", check_width_below_134_keeps_the_panel_348_and_the_plate_right_aligned),
         ("style: the dock sets the size, float takes the style back", check_docked_the_dock_sets_the_size_and_float_takes_the_style_back),
-        ("style: a size change in combat waits, text does not", check_a_size_change_in_combat_waits_for_regen_and_text_changes_do_not),
+        ("style: in combat the container waits, rail heights and text apply live", check_in_combat_the_container_waits_for_regen_while_rail_heights_and_text_apply_live),
         ("style: Wider only when the plate is gone for good", check_wider_takes_the_freed_space_only_when_the_plate_is_gone_for_good),
         ("style: text sizes follow the settings and the scale", check_text_sizes_follow_the_settings_and_the_scale),
         ("style: value text formats use the whitelisted setters", check_value_text_formats_go_through_the_whitelisted_setters),
@@ -1814,6 +1843,7 @@ def main() -> int:
         ("preview: a hunter pet as the panel draws it", check_the_preview_draws_a_hunter_pet_as_the_panel_does),
         ("preview: a demon with a Firebolt cast and a blue rail", check_the_preview_draws_a_demon_with_a_firebolt_cast_and_a_blue_rail),
         ("preview: sizes, Wider and the dock", check_the_preview_follows_sizes_wider_and_the_dock),
+        ("preview: draws without the dock file", check_the_preview_draws_without_the_dock_file),
         ("preview: text, opacity and the hover override", check_the_preview_follows_text_opacity_and_the_hover_override),
         ("preview: the live panel is left alone", check_building_the_preview_leaves_the_live_panel_alone),
     ]

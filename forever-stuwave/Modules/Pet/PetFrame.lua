@@ -22,8 +22,16 @@
 -- Show/Hide is therefore out of combat only, deferred to PLAYER_REGEN_ENABLED
 -- (`pendingRescale`, `pendingLockApply`, `pendingReset`).
 --
--- Headless check: python3 addons/petframe-harness.py (geometry against the numbers
--- parsed back out of the mockup's dc branch, at scale 1 and 0.64).
+-- THE PET BAR PAGE (bars.pet.*, FrameStyle.lua; pet.cast* and pet.happy, Config.lua): Plan() turns the settings into the
+-- panel's numbers (block width and rail heights, the Wider health and mana case when the cast plate is gone for good),
+-- ApplySlotGeometry() seats the slots from it, and FS.PetFrame.ApplyStyle() applies the rest. While docked beside the
+-- Console the dock sets the size, so Plan() uses today's numbers there. The container and the slots wait for
+-- PLAYER_REGEN_ENABLED (the pendingStyle flag); rail heights, text sizes, formats, name and level, looks, opacity, the
+-- happiness dot and the dock fill alpha apply in combat too, as they touch no protected frame. FS.PetFrame.NewStylePreview(parent) draws the same panel from the same
+-- block code for the Pet bar page's preview band, with sample data and no events.
+--
+-- Headless check: python3 tools/petframe-harness.py (geometry against the numbers
+-- parsed back out of the mockup's dc branch, at scale 1 and 0.64, then the page's settings).
 
 local _, FS = ...
 FS.PetFrame = FS.PetFrame or {}
@@ -1124,6 +1132,10 @@ end
 function FS.PetFrame.ApplyStyle()
     if not (container and block) then return end
     local scale = FS.Layout.Scale()
+    local inCombat = InCombatLockdown()
+    -- The rails and the name row are plain children of the status slot (not an ancestor of a secure button), so their size
+    -- is legal in combat; the slots and the container wait for the end of it.
+    if inCombat then SeatBlockGeometry(block, LivePlan(), scale) end
     SeatBlockText(block, scale)
     UpdateStatusHealth()
     UpdateStatusPower()
@@ -1133,7 +1145,7 @@ function FS.PetFrame.ApplyStyle()
         local value = stored and Bounded("bgAlpha", 47, 0, 100) / 100 or nil
         pcall(FS.PetDock.SetFillAlpha, value)
     end
-    if InCombatLockdown() then
+    if inCombat then
         pendingStyle = true
         return
     end
@@ -1300,7 +1312,7 @@ local PREVIEW_PETS = {
 }
 
 -- The panel on a still frame, drawn from the same plan and the same block code as the live one: the float chrome
--- (PetDock.lua's two cut textures), the status block (NewBlock, SeatBlockGeometry, SeatBlockText), the cast plate
+-- (PetDock.NewPreviewChrome), the status block (NewBlock, SeatBlockGeometry, SeatBlockText), the cast plate
 -- (PetCastBar.lua's NewPreview) and ten button plates. Returns { frame, Restyle, parts }; Restyle reads the settings
 -- again (Style.override included, for the row the pointer is on) and takes no unit.
 function FS.PetFrame.NewStylePreview(parent)
@@ -1309,8 +1321,12 @@ function FS.PetFrame.NewStylePreview(parent)
     local panel = CreateFrame("Frame", nil, frame)
     panel:SetAllPoints(frame)
     local parts = { panel = panel, buttons = {} }
-    parts.outline = Theme.AddCut2Texture(panel, Theme.SLICE_CUT2_OUTLINE_TEXTURE, COLOR_POWER, "BORDER")
-    parts.fill = Theme.AddCut2Texture(panel, Theme.SLICE_CUT2_FILL_TEXTURE, Theme.COLOR_HUD_SCRIM, "BACKGROUND", nil, 0)
+    -- The chrome is PetDock.lua's (it loads after this file, so it is read now); without it the preview has no panel art.
+    local dock = FS.PetDock
+    if dock and dock.NewPreviewChrome then
+        local chrome = dock.NewPreviewChrome(panel)
+        parts.outline, parts.fill = chrome.outline, chrome.fill
+    end
     parts.status = CreateFrame("Frame", nil, panel)
     parts.block = NewBlock(parts.status, 1)
     local castMaker = FS.PetCastBar and FS.PetCastBar.NewPreview
@@ -1318,7 +1334,7 @@ function FS.PetFrame.NewStylePreview(parent)
     for i = 1, 10 do
         local button = CreateFrame("Frame", nil, panel)
         button:SetSize(BAR_HEIGHT, BAR_HEIGHT)
-        Theme.AddCut2Texture(button, Theme.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND")
+        if dock and dock.NewPreviewPlate then dock.NewPreviewPlate(button) end
         parts.buttons[i] = button
     end
 
@@ -1334,7 +1350,9 @@ function FS.PetFrame.NewStylePreview(parent)
         frame:SetAlpha(Bounded("alpha", 100, 0, 100) / 100)
         local fillAlpha = Theme.COLOR_HUD_SCRIM[4]
         if Style and Style.IsStored("pet", "bgAlpha") then fillAlpha = Bounded("bgAlpha", 47, 0, 100) / 100 end
-        parts.fill:SetVertexColor(Theme.COLOR_HUD_SCRIM[1], Theme.COLOR_HUD_SCRIM[2], Theme.COLOR_HUD_SCRIM[3], fillAlpha)
+        if parts.fill then
+            parts.fill:SetVertexColor(Theme.COLOR_HUD_SCRIM[1], Theme.COLOR_HUD_SCRIM[2], Theme.COLOR_HUD_SCRIM[3], fillAlpha)
+        end
 
         parts.status:ClearAllPoints()
         parts.status:SetPoint("TOPLEFT", panel, "TOPLEFT", INSET_SIDE, -INSET_TOP)
