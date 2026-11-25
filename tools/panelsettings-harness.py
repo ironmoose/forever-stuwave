@@ -169,26 +169,249 @@ def chat_boot() -> "LuaRuntime":
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Minimap: size and scale
+# ---------------------------------------------------------------------------------------------------------------------
+
+def load_minimap_harness():
+    """The minimap harness's worlds (the real Theme, FrameHelpers, Layout and Minimap on a mock client)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("minimap_harness", Path(__file__).resolve().parent / "minimap-harness.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["minimap_harness"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+CONFIG_STUB = r"""
+__cfg, __cfgDefault, __cfgWatch = {}, {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) __cfgDefault[k] = v end,
+    Get = function(k) if __cfg[k] ~= nil then return __cfg[k] end; return __cfgDefault[k] end,
+    IsStored = function(k) return __cfg[k] ~= nil end,
+    Set = function(k, v)
+        local old = FS.Config.Get(k)
+        if v == __cfgDefault[k] then v = nil end
+        __cfg[k] = v
+        for _, fn in ipairs(__cfgWatch[k] or {}) do fn(FS.Config.Get(k), old, k) end
+    end,
+    OnChange = function(k, fn) __cfgWatch[k] = __cfgWatch[k] or {}; table.insert(__cfgWatch[k], fn) end,
+}
+"""
+
+MM_TOL = 0.01
+
+
+def mm_seated(mh, extra: str = "", pixel: float | None = None, config: bool = True):
+    """A geometry world (Edit Mode shaped cluster) that has logged in and settled; the real Config API when asked."""
+    setup = (CONFIG_STUB if config else "") + extra
+    if pixel is not None:
+        setup += mh.pixel_setup(pixel)
+    lua = mh.geo_world(setup)
+    lua.execute('FireEvent("PLAYER_LOGIN")')
+    lua.execute("__frames(4, false)")
+    return lua, lua.globals()
+
+
+def mm_set(lua, key, value, frames: int = 4):
+    lua.execute(f"FS.Config.Set({key!r}, {value!r}) __frames({frames}, false)")
+
+
+MM_ON_TARGET = r"""
+-- The map's top-left corner and centre against the layout seat for the minimap scale `m` (a CENTER seat).
+function __mmCenter()
+    local l, b, w, h = __rect(Minimap)
+    return l + w / 2, b + h / 2, w, h
+end
+function __mmSeat()
+    local L, s = FS.Layout.minimap, FS.Layout.Scale()
+    return UIParent.w / 2 + L.x * s, UIParent.h / 2 + L.y * s
+end
+"""
+
+
+def need(ok: bool, msg: str) -> None:
+    if not ok:
+        raise AssertionError(msg)
+
+
+def near(a, b, tol: float = MM_TOL) -> bool:
+    return a is not None and b is not None and abs(a - b) <= tol
+
+
+def minimap_cases(mh) -> list[tuple[str, "callable"]]:
+    out = []
+
+    def case(fn):
+        out.append((fn.__name__, fn))
+        return fn
+
+    @case
+    def minimap_keys_register_with_the_prototype_defaults():
+        lua, g = mm_seated(mh)
+        for key, default in (("minimap.w", 250), ("minimap.h", 252), ("minimap.scale", 100)):
+            need(lua.eval(f"FS.Config.Get({key!r})") == default, f"{key} default")
+        spec = g.FS.MinimapSettings
+        need((spec.w.min, spec.w.max, spec.h.min, spec.h.max) == (150, 400, 150, 400), "width and height range")
+        need((spec.scale.min, spec.scale.max, spec.scale.step) == (50, 200, 5), "scale range and step")
+
+    @case
+    def minimap_defaults_leave_today_s_seat_untouched():
+        lua, g = mm_seated(mh)
+        L, s = g.FS.Layout.minimap, g.FS.Layout.Scale()
+        need((L.w, L.h) == (250, 252), f"layout entry {L.w}x{L.h}")
+        need(near(g.Minimap.w, 250 * s) and near(g.Minimap.h, 252 * s), f"map size {g.Minimap.w}x{g.Minimap.h}")
+        need(g.Minimap.scale is None, f"a default profile wrote a scale ({g.Minimap.scale})")
+
+    @case
+    def minimap_width_slider_resizes_the_map_live_and_keeps_its_centre():
+        lua, g = mm_seated(mh)
+        lua.execute(MM_ON_TARGET)
+        cx0, cy0, _, h0 = g.__mmCenter()
+        mm_set(lua, "minimap.w", 320)
+        s = g.FS.Layout.Scale()
+        cx, cy, w, h = g.__mmCenter()
+        need(g.FS.Layout.minimap.w == 320, "the layout entry follows the slider")
+        need(near(g.Minimap.w, 320 * s), f"Minimap width {g.Minimap.w} want {320 * s}")
+        need(near(w, 320 * s) and near(h, h0), f"on screen {w}x{h}")
+        sx, sy = g.__mmSeat()
+        need(near(cx, sx) and near(cy, sy), f"centre {cx:.2f},{cy:.2f} want {sx:.2f},{sy:.2f}")
+
+    @case
+    def minimap_height_slider_is_independent_of_width():
+        lua, g = mm_seated(mh)
+        mm_set(lua, "minimap.h", 190)
+        s = g.FS.Layout.Scale()
+        need(g.FS.Layout.minimap.h == 190 and g.FS.Layout.minimap.w == 250, "only the height moved")
+        need(near(g.Minimap.h, 190 * s) and near(g.Minimap.w, 250 * s), f"{g.Minimap.w}x{g.Minimap.h}")
+
+    @case
+    def minimap_size_survives_an_edit_mode_reseat_and_a_ui_rescale():
+        lua, g = mm_seated(mh)
+        lua.execute(MM_ON_TARGET)
+        mm_set(lua, "minimap.w", 300)
+        mm_set(lua, "minimap.h", 210)
+        lua.execute("EditModeManagerFrame:UpdateLayoutInfo(); MinimapCluster:MarkDirty(); __frames(5, false)")
+        s = g.FS.Layout.Scale()
+        need(near(g.Minimap.w, 300 * s) and near(g.Minimap.h, 210 * s), f"after the reseat {g.Minimap.w}x{g.Minimap.h}")
+        lua.execute("UIParent.h = 1080; UIParent.w = 1080 * 16 / 9; FireEvent('UI_SCALE_CHANGED'); __frames(4, false)")
+        s = g.FS.Layout.Scale()
+        need(near(g.Minimap.w, 300 * s) and near(g.Minimap.h, 210 * s), f"after the rescale {g.Minimap.w}x{g.Minimap.h}")
+        cx, cy, _, _ = g.__mmCenter()
+        sx, sy = g.__mmSeat()
+        need(near(cx, sx) and near(cy, sy), "centre after the rescale")
+
+    @case
+    def minimap_size_is_applied_from_the_saved_value_at_login():
+        lua = mh.geo_world(CONFIG_STUB + 'FS.Config.Set("minimap.w", 330) FS.Config.Set("minimap.scale", 125)')
+        lua.execute('FireEvent("PLAYER_LOGIN")')
+        lua.execute("__frames(4, false)")
+        g = lua.globals()
+        s = g.FS.Layout.Scale()
+        need(g.FS.Layout.minimap.w == 330 and near(g.Minimap.w, 330 * s), f"width {g.Minimap.w}")
+        need(near(g.Minimap.scale, 1.25), f"scale {g.Minimap.scale}")
+
+    @case
+    def minimap_size_is_clamped_and_junk_reads_as_the_default():
+        lua, g = mm_seated(mh)
+        mm_set(lua, "minimap.w", 9999)
+        need(g.FS.Layout.minimap.w == 400, f"above the range gave {g.FS.Layout.minimap.w}")
+        mm_set(lua, "minimap.w", 3)
+        need(g.FS.Layout.minimap.w == 150, f"below the range gave {g.FS.Layout.minimap.w}")
+        mm_set(lua, "minimap.w", "wide")
+        need(g.FS.Layout.minimap.w == 250, f"a string gave {g.FS.Layout.minimap.w}")
+        mm_set(lua, "minimap.scale", 999)
+        need(near(g.Minimap.scale, 2.0), f"scale above the range gave {g.Minimap.scale}")
+        mm_set(lua, "minimap.scale", 1)
+        need(near(g.Minimap.scale, 0.5), f"scale below the range gave {g.Minimap.scale}")
+
+    @case
+    def minimap_scale_grows_the_whole_map_about_its_centre():
+        lua, g = mm_seated(mh)
+        lua.execute(MM_ON_TARGET)
+        s = g.FS.Layout.Scale()
+        mm_set(lua, "minimap.scale", 150)
+        need(near(g.Minimap.scale, 1.5), f"Minimap scale {g.Minimap.scale}")
+        cx, cy, w, h = g.__mmCenter()
+        need(near(w, 250 * s * 1.5) and near(h, 252 * s * 1.5), f"on screen {w}x{h}")
+        sx, sy = g.__mmSeat()
+        need(near(cx, sx) and near(cy, sy), f"centre {cx:.2f},{cy:.2f} want {sx:.2f},{sy:.2f}")
+        mm_set(lua, "minimap.scale", 100)
+        need(near(g.Minimap.scale, 1.0), f"back to the default left scale {g.Minimap.scale}")
+        cx, cy, w, h = g.__mmCenter()
+        need(near(w, 250 * s) and near(cx, sx) and near(cy, sy), "back at the default size and place")
+
+    @case
+    def minimap_scale_grows_the_key_row_with_the_map():
+        lua, g = mm_seated(mh, pixel=1.0)
+        # Physical pixels: the row's height in the map's own units over the pixel the map's scale leaves.
+        def row_px() -> tuple[float, float]:
+            px = lua.eval("FS.FrameHelpers.PixelUnit(Minimap)")
+            return g.Minimap.fsBezel.h / px, g.Minimap.fsSTUKey.w / px
+        row0, key0 = row_px()
+        mm_set(lua, "minimap.scale", 150)
+        row1, key1 = row_px()
+        need(row1 > row0 * 1.35, f"the key row is {row1:g} px tall at 150% against {row0:g} px at 100%")
+        need(key1 > key0 * 1.35, f"a key is {key1:g} px wide at 150% against {key0:g} px at 100%")
+
+    @case
+    def minimap_furniture_sized_at_login_follows_a_new_width():
+        lua, g = mm_seated(mh)
+        s = g.FS.Layout.Scale()
+        need(near(g.Minimap.fsHighlight.w, 250 * s * 0.55), f"highlight at login {g.Minimap.fsHighlight.w}")
+        mm_set(lua, "minimap.w", 350)
+        need(near(g.Minimap.fsHighlight.w, 350 * s * 0.55), f"the highlight glow is {g.Minimap.fsHighlight.w}")
+        need(near(g.Minimap.fsZoneLabel.w, 350 * s - 18), f"the zone label is {g.Minimap.fsZoneLabel.w} wide")
+
+    @case
+    def minimap_height_follows_width_when_the_map_can_only_draw_square():
+        src = mh.MINIMAP_SRC
+        need("HEIGHT_FOLLOWS_WIDTH = false" in src, "the fallback switch is in the file, off")
+        mh.MINIMAP_SRC = src.replace("HEIGHT_FOLLOWS_WIDTH = false", "HEIGHT_FOLLOWS_WIDTH = true")
+        try:
+            lua, g = mm_seated(mh)
+            mm_set(lua, "minimap.w", 300)
+            need(g.FS.Layout.minimap.h == round(300 * 252 / 250), f"height {g.FS.Layout.minimap.h} follows width 300")
+            mm_set(lua, "minimap.h", 150)
+            need(g.FS.Layout.minimap.h == round(300 * 252 / 250), "the height slider is ignored while it follows")
+            need(g.FS.MinimapSettings.heightFollowsWidth is True, "the page can read why the height row is locked")
+        finally:
+            mh.MINIMAP_SRC = src
+
+    @case
+    def minimap_size_in_combat_waits_for_regen():
+        lua, g = mm_seated(mh)
+        lua.execute("MinimapCluster.protected = true; __combat = true")
+        mm_set(lua, "minimap.w", 310)
+        s = g.FS.Layout.Scale()
+        need(near(g.Minimap.w, 250 * s), f"a protected cluster was resized in combat ({g.Minimap.w})")
+        lua.execute("__combat = false; FireEvent('PLAYER_REGEN_ENABLED'); __frames(4, false)")
+        need(near(g.Minimap.w, 310 * s), f"after combat {g.Minimap.w} want {310 * s}")
+
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------------------------------------------------
 
-GROUPS = (("chat", chat_boot),)
+def run_lua_group(boot) -> list[tuple[str, "callable"]]:
+    names = sorted(k for k in boot().eval("__checks").keys())
+    return [(name, (lambda n=name: boot().eval("__checks")[n]())) for name in names]
 
 
 def main() -> int:
-    total = failed = 0
-    for label, boot in GROUPS:
-        names = sorted(k for k in boot().eval("__checks").keys())
-        for name in names:
-            total += 1
-            try:
-                # A fresh client per check: the saved variable, frames and callbacks must not leak.
-                boot().eval("__checks")[name]()
-                print(f"ok    {name}")
-            except LuaError as err:
-                failed += 1
-                print(f"FAIL  {name}: {err}")
-    print(f"{total - failed}/{total} checks passed")
+    cases = run_lua_group(chat_boot)
+    mh = load_minimap_harness()
+    cases += minimap_cases(mh)
+    failed = 0
+    for name, fn in cases:
+        try:
+            fn()
+            print(f"ok    {name}")
+        except (LuaError, AssertionError, TypeError, AttributeError) as err:
+            failed += 1
+            print(f"FAIL  {name}: {err}")
+    print(f"{len(cases) - failed}/{len(cases)} checks passed")
     return 1 if failed else 0
 
 
