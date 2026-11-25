@@ -126,10 +126,14 @@ function Banner.Build()
     return true
 end
 
-Kit.OnReseat(Reseat)
-
-PanelSkins.DeferCombat(Banner.Build)
-
-local watch = CreateFrame("Frame")
-watch:RegisterEvent("PLAYER_ENTERING_WORLD")
-watch:SetScript("OnEvent", function() Kit.Defer(Banner.Build) end)
+-- Module power (Core/ModuleSwitch.lua): the banner is part of the Minimap switch. Off, Blizzard's difficulty banner keeps
+-- its own shield: nothing here is hooked, held or drawn on it. Banner.Build stays defined; nothing calls it.
+local function Start()
+    Kit.OnReseat(Reseat)
+    PanelSkins.DeferCombat(Banner.Build, "m.mini")
+    local watch = CreateFrame("Frame")
+    watch:RegisterEvent("PLAYER_ENTERING_WORLD")
+    watch:SetScript("OnEvent", function() Kit.Defer(Banner.Build) end)
+end
+local MS = FS.ModuleSwitch
+if MS then MS.WhenOn("m.mini", Start) else Start() end

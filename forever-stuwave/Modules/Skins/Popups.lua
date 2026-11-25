@@ -292,10 +292,13 @@ local function SkinActiveTips()
     end
 end
 
-if type(_G.HelpTip) == "table" and type(_G.HelpTip.Show) == "function" and type(hooksecurefunc) == "function" then
-    hooksecurefunc(_G.HelpTip, "Show", SkinActiveTips)
-    SkinActiveTips()
-end
+-- Module power: the hook on the game's tutorial tips and the first pass start only with the Window skins switch on.
+FS.PanelSkins.WhenSkinsOn(function()
+    if type(_G.HelpTip) == "table" and type(_G.HelpTip.Show) == "function" and type(hooksecurefunc) == "function" then
+        hooksecurefunc(_G.HelpTip, "Show", SkinActiveTips)
+        SkinActiveTips()
+    end
+end)
 
 
 -------------------------------------------------------------------------------
@@ -350,19 +353,22 @@ function SeatChatAlerts()
     alerts:SetPoint("BOTTOMLEFT", panel, "TOPLEFT", 0, ALERT_GAP)
 end
 
-local seatWatch = CreateFrame("Frame")
-seatWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
-seatWatch:SetScript("OnEvent", function() pcall(SeatChatAlerts) end)
-pcall(SkinBNToast)
-if not toastSkinned then
-    local toastWatch = CreateFrame("Frame")
-    toastWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
-    toastWatch:RegisterEvent("ADDON_LOADED")
-    toastWatch:SetScript("OnEvent", function(self)
-        pcall(SkinBNToast)
-        if toastSkinned then self:UnregisterAllEvents() end
-    end)
-end
+-- Module power: the chat alert seat and the toast skin start only with the Window skins switch on.
+FS.PanelSkins.WhenSkinsOn(function()
+    local seatWatch = CreateFrame("Frame")
+    seatWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+    seatWatch:SetScript("OnEvent", function() pcall(SeatChatAlerts) end)
+    pcall(SkinBNToast)
+    if not toastSkinned then
+        local toastWatch = CreateFrame("Frame")
+        toastWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+        toastWatch:RegisterEvent("ADDON_LOADED")
+        toastWatch:SetScript("OnEvent", function(self)
+            pcall(SkinBNToast)
+            if toastSkinned then self:UnregisterAllEvents() end
+        end)
+    end
+end)
 
 
 -------------------------------------------------------------------------------
@@ -408,13 +414,16 @@ local function SkinShardNotice()
     if arrow and Theme.SkinButton then pcall(Theme.SkinButton, arrow) end
 end
 
-pcall(SkinShardNotice)
-if not shardSkinned then
-    local shardWatch = CreateFrame("Frame")
-    shardWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
-    shardWatch:RegisterEvent("ADDON_LOADED")
-    shardWatch:SetScript("OnEvent", function(self)
-        pcall(SkinShardNotice)
-        if shardSkinned then self:UnregisterAllEvents() end
-    end)
-end
+-- Module power: the world refresh notice skin starts only with the Window skins switch on.
+FS.PanelSkins.WhenSkinsOn(function()
+    pcall(SkinShardNotice)
+    if not shardSkinned then
+        local shardWatch = CreateFrame("Frame")
+        shardWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+        shardWatch:RegisterEvent("ADDON_LOADED")
+        shardWatch:SetScript("OnEvent", function(self)
+            pcall(SkinShardNotice)
+            if shardSkinned then self:UnregisterAllEvents() end
+        end)
+    end
+end)

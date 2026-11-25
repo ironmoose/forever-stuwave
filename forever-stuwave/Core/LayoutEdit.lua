@@ -278,7 +278,21 @@ local function StackAIdle(id)
     return type(castBars) == "table" and type(castBars.IsStackActive) == "function" and castBars.IsStackActive() == false
 end
 
+-- Module power (Core/ModuleSwitch.lua): the piece of a module that is off, or not built yet, has no frame of ours to move,
+-- so it gets no handle. The other pieces answer from their applied frame as before.
+local MODULE_OF = {
+    tcast = "m.cast", pcast = "m.cast", buffs = "m.auras", debuffs = "m.auras", minimap = "m.mini",
+    objectives = "m.track", professions = "m.skins", tooltip = "m.skins",
+}
+
+local function ModuleNotBuilt(id)
+    local key = MODULE_OF[id]
+    local MS = FS.ModuleSwitch
+    return key ~= nil and MS ~= nil and not MS.Built(key)
+end
+
 local function HasHandle(id)
+    if ModuleNotBuilt(id) then return false end
     if RAID_IDS[id] then return RaidSeatUp(id) end
     local provider = Provider(id)
     if provider then return provider.Ready() == true and provider.Rect() ~= nil end

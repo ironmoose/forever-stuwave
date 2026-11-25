@@ -1564,4 +1564,15 @@ local function Init()
     TryStep(target, "refresh", ResetFromUnit)
 end
 
-Init()
+-- Module power (Core/ModuleSwitch.lua): with the Cast bars switch off nothing above runs, so ours are never built and
+-- Blizzard's player and target bars stay as the client draws them. FS.CastBars is defined either way (the idle row API
+-- answers false and changes nothing without a bar; a Gunsight tape can still take the state machine through SetView).
+local MS = FS.ModuleSwitch
+if MS then
+    MS.WhenOn("m.cast", function()
+        Init()
+        MS.MarkBuilt("m.cast")
+    end)
+else
+    Init()
+end

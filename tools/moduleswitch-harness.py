@@ -724,6 +724,792 @@ def run_lua_checks() -> int:
     return failed
 
 
+# ---- the module gates (B5a): the real .toc in a tolerant mock client -------------------------------------------------------
+#
+# The checks above run Core/ModuleSwitch.lua inside the config window harness. These run EVERY file of the real .toc, in
+# order, in a mock client whose frames accept any call, then fire ADDON_LOADED, PLAYER_LOGIN and PLAYER_ENTERING_WORLD.
+# Each Blizzard frame a module may dim, hook or reparent is a stub that records every call that is not a read. A module
+# that is off must build nothing of its own, leave every one of those stubs untouched and keep its API tables defined; the
+# same module on must build and take over as before. One row per gated module.
+
+GATE_WORLD = r"""
+-- Gate world: a tolerant mock client for loading real module files and watching Blizzard frames.
+__touched, __made, __errors, __printed, __evFrames, __timers = {}, {}, {}, {}, {}, {}
+__phase, __loadFailed = "load", {}
+local watched = {}                 -- stub -> label
+local ownMT = {}
+
+-- the files whose code is on the stack (the .toc path is each chunk's name)
+local function stackFiles()
+    local set, level = {}, 3
+    while true do
+        local info = debug.getinfo(level, "S")
+        if not info then break end
+        set[(info.source:gsub("^@", ""))] = true
+        level = level + 1
+    end
+    return set
+end
+__touchedBy = {}
+local function touch(entry)
+    __touched[#__touched + 1] = entry
+    __touchedBy[#__touched] = stackFiles()
+end
+
+local NUMBERS = {
+    GetWidth = 250, GetHeight = 252, GetScale = 1, GetEffectiveScale = 1, GetLeft = 100, GetRight = 350,
+    GetTop = 700, GetBottom = 450, GetAlpha = 1, GetFrameLevel = 1, GetNumPoints = 0, GetNumChildren = 0,
+    GetNumRegions = 0, GetStringWidth = 40, GetStringHeight = 10, GetValue = 0, GetID = 0, GetDrawLayer = nil,
+}
+local STRINGS = { GetFrameStrata = "MEDIUM", GetObjectType = "Frame", GetText = "", GetTexture = "", GetFont = "x" }
+
+local function isRead(name)
+    return name:find("^Get") or name:find("^Is") or name:find("^Has") or name:find("^Can") or name == "Hide" and false
+end
+
+local function Sponge(label, isWatched)
+    local self = { _label = label, _scripts = {}, _events = {}, _hooks = {}, _regions = {}, _points = {} }
+    if isWatched then watched[self] = label end
+    return setmetatable(self, ownMT)
+end
+
+ownMT.__index = function(t, k)
+    if type(k) ~= "string" or not k:find("^%u") then return nil end
+    if k == "SetScript" then
+        return function(self, name, fn)
+            if watched[self] then touch(self._label .. ":SetScript") end
+            self._scripts[name] = fn
+        end
+    elseif k == "HookScript" then
+        return function(self, name, fn)
+            if watched[self] then touch(self._label .. ":HookScript") end
+            self._hooks[name] = self._hooks[name] or {}
+            table.insert(self._hooks[name], fn)
+        end
+    elseif k == "GetScript" then
+        return function(self, name) return self._scripts[name] end
+    elseif k == "RegisterEvent" or k == "RegisterUnitEvent" then
+        return function(self, event)
+            if watched[self] then touch(self._label .. ":" .. k) end
+            self._events[event] = true
+            if not self._listed then self._listed = true; __evFrames[#__evFrames + 1] = self end
+        end
+    elseif k == "UnregisterEvent" then
+        return function(self, event)
+            if watched[self] then touch(self._label .. ":UnregisterEvent") end
+            self._events[event] = nil
+        end
+    elseif k == "UnregisterAllEvents" then
+        return function(self)
+            if watched[self] then touch(self._label .. ":UnregisterAllEvents") end
+            self._events = {}
+        end
+    elseif k == "GetName" then
+        return function(self) return self._name end
+    elseif k == "GetParent" then
+        return function(self) return self._parent end
+    elseif k == "GetChildren" or k == "GetRegions" then
+        return function() end
+    elseif k == "SetPoint" then
+        return function(self, point, rel, relPoint, x, y)
+            if watched[self] then touch(self._label .. ":SetPoint") end
+            self._points[#self._points + 1] = { point, rel, relPoint, x, y }
+        end
+    elseif k == "ClearAllPoints" then
+        return function(self)
+            if watched[self] then touch(self._label .. ":ClearAllPoints") end
+            self._points = {}
+        end
+    elseif k == "GetPoint" then
+        return function(self, i)
+            local p = self._points[i or 1]
+            if p then return p[1], p[2], p[3], p[4], p[5] end
+        end
+    elseif k == "GetNumPoints" then
+        return function(self) return #self._points end
+    elseif k == "SetParent" then
+        return function(self, p)
+            if watched[self] then touch(self._label .. ":SetParent") end
+            self._parent = p
+        end
+    elseif k == "Show" or k == "Hide" or k == "SetShown" then
+        return function(self, v)
+            if watched[self] then touch(self._label .. ":" .. k) end
+            if k == "Show" then self._shown = true elseif k == "Hide" then self._shown = false else self._shown = v and true or false end
+        end
+    elseif k == "IsShown" or k == "IsVisible" then
+        return function(self) return self._shown ~= false end
+    elseif k:find("^Create") then
+        return function(self, ...)
+            local child = Sponge((self._label or "?") .. "." .. k)
+            child._parent = self
+            return child
+        end
+    elseif NUMBERS[k] ~= nil then
+        return function() return NUMBERS[k] end
+    elseif STRINGS[k] ~= nil then
+        return function() return STRINGS[k] end
+    elseif k:find("^Is") or k:find("^Has") or k:find("^Can") then
+        return function() return false end
+    elseif k:find("^Get") then
+        return function() end
+    end
+    return function(self, ...)
+        if watched[self] then touch(self._label .. ":" .. k) end
+    end
+end
+ownMT.__newindex = function(t, k, v)
+    -- a script field or method written on a watched Blizzard stub counts as a touch
+    if watched[t] and type(k) == "string" and k:sub(1, 1) ~= "_" then
+        touch(t._label .. ":write:" .. k)
+    end
+    rawset(t, k, v)
+end
+
+-- A Blizzard frame the module under test may only read: every non-read call on it is recorded.
+function Watch(name, fields)
+    local f = Sponge(name, true)
+    f._name = name
+    if fields then for k, v in pairs(fields) do rawset(f, k, v) end end
+    _G[name] = f
+    return f
+end
+
+function CreateFrame(kind, name, parent, template)
+    local f = Sponge(name or ("(" .. tostring(kind) .. ")"))
+    f._name, f._kind, f._parent = name, kind, parent
+    __made[#__made + 1] = { name = name, phase = __phase, files = stackFiles() }
+    if name then _G[name] = f end
+    return f
+end
+
+function hooksecurefunc(a, b, c)
+    if type(a) == "string" then
+        touch("hooksecurefunc:" .. a)
+    elseif type(a) == "table" and watched[a] then
+        touch(watched[a] .. ":hooksecurefunc:" .. tostring(b))
+    end
+end
+
+UIParent = Sponge("UIParent")
+UIParent._name = "UIParent"
+Minimap = nil
+function InCombatLockdown() return false end
+function GetTime() return 100 end
+function geterrorhandler() return function(e) __errors[#__errors + 1] = tostring(e) end end
+function print(...) local t = {} for i = 1, select("#", ...) do t[#t + 1] = tostring((select(i, ...))) end __printed[#__printed + 1] = table.concat(t, " ") end
+__tickers = {}
+C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end, NewTicker = function(_, fn)
+    local t = { fn = fn, Cancel = function(self) self.cancelled = true end }
+    __tickers[#__tickers + 1] = t
+    return t
+end }
+function wipe(t) for k in pairs(t) do t[k] = nil end return t end
+function tinsert(t, v) table.insert(t, v) end
+function strtrim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+function GetPhysicalScreenSize() return 2560, 1440 end
+function GetScreenWidth() return 2560 end
+function GetScreenHeight() return 1440 end
+PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1440 end }
+function issecretvalue() return false end
+function CopyTable(t) local c = {} for k, v in pairs(t) do c[k] = type(v) == "table" and CopyTable(v) or v end return c end
+SlashCmdList = {}
+Enum = {}
+function InterfaceOptions_AddCategory() end
+function GetCVar() return nil end
+function IsLoggedIn() return false end
+function UnitClass() return "Shaman", "SHAMAN", 7 end
+function UnitName() return "Stu" end
+function UnitExists() return false end
+function RegisterUnitWatch() end
+function UnitGUID() return "Player-1" end
+time = os.time
+function GetLocale() return "enUS" end
+function GetAddOnMetadata() return "1.0.0" end
+C_AddOns = { GetAddOnMetadata = function() return "1.0.0" end, IsAddOnLoaded = function() return false end }
+
+function Fire(event, ...)
+    local list = {}
+    for i, f in ipairs(__evFrames) do list[i] = f end
+    for _, f in ipairs(list) do
+        if f._events[event] and f._scripts.OnEvent then
+            local ok, err = pcall(f._scripts.OnEvent, f, event, ...)
+            if not ok then __errors[#__errors + 1] = tostring(err) end
+        end
+    end
+end
+
+FS = {}
+function __load(path, src)
+    local fn, err = loadstring(src, "@" .. path)
+    if not fn then error(err, 0) end
+    return fn("forever-stuwave", FS)
+end
+
+-- assertions
+function yes(v, msg) if not v then error(msg or "expected true", 2) end end
+function no(v, msg) if v then error(msg or "expected false", 2) end end
+function eq(a, b, msg) if a ~= b then error((msg or "") .. " expected " .. tostring(b) .. " got " .. tostring(a), 2) end end
+
+-- The real .toc, in order, the way the client runs it: files, then the saved variables, then ADDON_LOADED and login.
+-- opts.off = module keys the saved store holds as false; opts.watch = Blizzard frames to record every non-read call on.
+function Boot(opts)
+    opts = opts or {}
+    for _, name in ipairs(opts.watch or {}) do Watch(name) end
+    if opts.pre then opts.pre() end
+    __phase = "load"
+    for _, rel in ipairs(__toc) do
+        local ok, err = pcall(__load, rel, __read(rel))
+        if not ok then __loadFailed[rel] = tostring(err) end
+    end
+    local modules = {}
+    for _, key in ipairs(opts.off or {}) do modules[key] = false end
+    ForeverSTUwaveDB = { modules = modules }
+    __phase = "run"
+    Fire("ADDON_LOADED", "forever-stuwave")
+    IsLoggedIn = function() return true end
+    Fire("PLAYER_LOGIN")
+    Fire("PLAYER_ENTERING_WORLD", true, false)
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+    if not opts.noRegen then Fire("PLAYER_REGEN_ENABLED") end
+end
+
+-- Child frames of a watched Blizzard frame ({ Child = { GrandChild = true } }): each is a stub that records its own touches
+-- under "Parent.Child", and TouchesOn("Parent") reports them with the parent's own.
+local function attach(parent, label, tree)
+    for child, sub in pairs(tree) do
+        local stub = Sponge(label .. "." .. child, true)
+        rawset(parent, child, stub)
+        if type(sub) == "table" then attach(stub, label .. "." .. child, sub) end
+    end
+end
+function WatchTree(name, tree)
+    attach(_G[name] or Watch(name), name, tree)
+end
+
+-- A Blizzard panel the way Theme.SkinPanel meets it: the art children a stripped panel is searched for are absent (false), so
+-- the skin finds nothing to hide; `children` adds real (watched) child frames.
+local CHROME_KEYS = { "NineSlice", "Bg", "BG", "Background", "TitleBg", "TitleContainer", "TopTileStreaks", "TopBorder",
+    "BottomBorder", "LeftBorder", "RightBorder", "PortraitContainer", "PortraitFrame", "portrait", "PortraitOverlay",
+    "Inset", "InsetFrame", "ScrollFrameInset", "ListInset", "CloseButton", "Close", "TitleText", "TitleBar" }
+function WatchPanel(name, children)
+    local f = _G[name] or Watch(name)
+    for _, key in ipairs(CHROME_KEYS) do rawset(f, key, false) end
+    if children then attach(f, name, children) end
+    return f
+end
+
+-- every touch recorded on a watched Blizzard frame (and its watched children), as one string ("" when it was left alone);
+-- `file` keeps the touches made by code of that file (a frame several modules hook, like EditModeManagerFrame)
+function TouchesOn(label, file)
+    local list = {}
+    for i, t in ipairs(__touched) do
+        if (t:find("^" .. label .. "[:.]") or t:find(label .. ":hooksecurefunc", 1, true)) and (file == nil or __touchedBy[i][file]) then
+            list[#list + 1] = t
+        end
+    end
+    return table.concat(list, ", ")
+end
+
+-- frames this file's code created after the files finished loading (at ADDON_LOADED, login or later); `except` names a
+-- file whose calls into this one do not count (another module using this module's API)
+function BuiltBy(file, except)
+    local n = 0
+    for _, m in ipairs(__made) do
+        if m.phase == "run" and m.files[file] and not (except and m.files[except]) then n = n + 1 end
+    end
+    return n
+end
+
+function MadeNamed(name)
+    for _, m in ipairs(__made) do if m.name == name then return true end end
+    return false
+end
+
+-- errors the client's handler heard from this file (its chunk name is the .toc path)
+function ErrorsFrom(file)
+    local list = {}
+    for _, e in ipairs(__errors) do
+        if e:find(file, 1, true) then list[#list + 1] = e end
+    end
+    return table.concat(list, " | ")
+end
+
+"""
+
+GATE_CHECKS = r"""
+local T = {}
+local TOCPATH = "forever-stuwave"
+
+-- the whole load must not have thrown inside the files this lane gates
+local function loaded(file)
+    eq(__loadFailed[file], nil, file .. " loads")
+    eq(ErrorsFrom(file), "", file .. " raised no error")
+end
+
+local CAST_FILE = "Modules/CastBars/CastBars.lua"
+local CAST_BLIZZARD = { "PlayerCastingBarFrame", "TargetFrameSpellBar" }
+
+function T.cast_bars_off_builds_none_of_its_frames_and_leaves_the_stock_bars_alone()
+    Boot({ off = { "m.cast" }, watch = CAST_BLIZZARD })
+    loaded(CAST_FILE)
+    eq(FS.ModuleSwitch.On("m.cast"), false)
+    eq(FS.ModuleSwitch.Built("m.cast"), false, "nothing was built")
+    eq(BuiltBy(CAST_FILE, "Modules/CombatHud/GunsightTape.lua"), 0, "no frame made after the files loaded")
+    no(MadeNamed("ForeverSTUwavePlayerCastBar"), "no player bar")
+    no(MadeNamed("ForeverSTUwaveTargetCastBar"), "no target bar")
+    eq(FS.playerCastBar, nil)
+    eq(FS.targetCastBar, nil)
+    for _, name in ipairs(CAST_BLIZZARD) do eq(TouchesOn(name), "", name .. " untouched") end
+end
+
+function T.cast_bars_off_keeps_the_api_so_a_reader_can_still_call_it()
+    Boot({ off = { "m.cast" }, watch = CAST_BLIZZARD })
+    local C = FS.CastBars
+    eq(type(C), "table", "FS.CastBars stays defined")
+    eq(C.SetIdleHint("player", "x"), false, "no bar to hint")
+    eq(C.SetRestAlpha(0.5), true)
+    C.SetIdleVisible(true)
+    eq(type(C.IsStackActive()), "boolean")
+    eq(FS.playerCastBar == nil and FS.targetCastBar == nil, true)
+    loaded(CAST_FILE)
+end
+
+function T.cast_bars_off_still_lets_the_gunsight_tapes_take_the_cast_state_machine()
+    Boot({ off = { "m.cast" }, watch = CAST_BLIZZARD })
+    eq(FS.CastBars.IsStackActive(), false, "the tapes hold the view")
+    eq(ErrorsFrom("Modules/CombatHud/GunsightTape.lua"), "")
+    for _, name in ipairs(CAST_BLIZZARD) do eq(TouchesOn(name), "", name .. " untouched") end
+end
+
+function T.cast_bars_on_builds_both_bars_and_dims_the_stock_ones_as_before()
+    Boot({ watch = CAST_BLIZZARD })
+    loaded(CAST_FILE)
+    eq(FS.ModuleSwitch.Built("m.cast"), true)
+    yes(MadeNamed("ForeverSTUwavePlayerCastBar"), "player bar")
+    yes(MadeNamed("ForeverSTUwaveTargetCastBar"), "target bar")
+    yes(FS.playerCastBar and FS.targetCastBar, "exported")
+    for _, name in ipairs(CAST_BLIZZARD) do yes(TouchesOn(name) ~= "", name .. " dimmed") end
+end
+
+local AURAS_FILE = "Modules/Auras/Buffs.lua"
+local AURAS_BLIZZARD = { "BuffFrame", "DebuffFrame", "TemporaryEnchantFrame" }
+
+function T.buffs_off_builds_none_of_its_frames_and_leaves_the_stock_frames_alone()
+    Boot({ off = { "m.auras" }, watch = AURAS_BLIZZARD })
+    loaded(AURAS_FILE)
+    eq(FS.ModuleSwitch.Built("m.auras"), false)
+    eq(BuiltBy(AURAS_FILE), 0, "no frame made after the files loaded")
+    no(MadeNamed("ForeverSTUwaveBuffsContainer"))
+    no(MadeNamed("ForeverSTUwaveDebuffsContainer"))
+    eq(FS.buffsContainer, nil)
+    eq(FS.debuffsContainer, nil)
+    for _, name in ipairs(AURAS_BLIZZARD) do eq(TouchesOn(name), "", name .. " untouched") end
+end
+
+function T.buffs_off_keeps_the_snapshot_api_and_says_it_is_frozen_so_a_reader_never_sees_a_missing_buff()
+    Boot({ off = { "m.auras" }, watch = AURAS_BLIZZARD })
+    local A = FS.PlayerAuras
+    eq(type(A), "table", "FS.PlayerAuras stays defined")
+    local snap = A.Get()
+    eq(type(snap), "table"); eq(#snap.buffs, 0); eq(#snap.debuffs, 0)
+    eq(A.IsFrozen(), true, "never refreshed, so a reader must treat it as unknown")
+    eq(A.IsEngineDrawn(), false)
+    loaded(AURAS_FILE)
+end
+
+function T.buffs_on_builds_both_containers_and_dims_the_stock_frames_as_before()
+    Boot({ watch = AURAS_BLIZZARD })
+    loaded(AURAS_FILE)
+    eq(FS.ModuleSwitch.Built("m.auras"), true)
+    yes(MadeNamed("ForeverSTUwaveBuffsContainer"))
+    yes(MadeNamed("ForeverSTUwaveDebuffsContainer"))
+    yes(FS.buffsContainer and FS.debuffsContainer)
+    for _, name in ipairs({ "BuffFrame", "DebuffFrame" }) do yes(TouchesOn(name) ~= "", name .. " dimmed") end
+    eq(FS.PlayerAuras.IsFrozen(), false, "a built module is as frozen as the client says (readable here)")
+end
+
+function T.the_shaman_shield_tile_shows_unknown_not_missing_while_buffs_are_off()
+    Boot({ off = { "m.auras" }, watch = AURAS_BLIZZARD })
+    yes(type(FS.ShamanBuffs) == "table" and type(FS.ShamanBuffs.Update) == "function", "the reader is loaded")
+    local view = FS.ShamanBuffs.Update(200)
+    yes(view and view.shield, "a view")
+    eq(view.shield.mode, "hollow", "a hollow ? while the snapshot is not kept")
+    eq(view.shield.text, "?")
+end
+
+function T.the_shaman_shield_tile_still_says_missing_while_buffs_are_on()
+    Boot({})
+    local view = FS.ShamanBuffs.Update(200)
+    eq(view.shield.mode, "warn", "unchanged with the module on")
+end
+
+local MINI_FILE = "Modules/Minimap/Minimap.lua"
+local BANNER_FILE = "Modules/Minimap/InstanceBanner.lua"
+local MINI_BLIZZARD = { "Minimap", "MinimapCluster", "MinimapBackdrop", "GameTimeFrame", "TimeManagerClockButton",
+    "ExpansionLandingPageMinimapButton", "EditModeManagerFrame", "MinimapInstanceDifficulty" }
+local function miniWorld(off)
+    Boot({ off = off, watch = MINI_BLIZZARD, pre = function()
+        rawset(MinimapCluster, "InstanceDifficulty", MinimapInstanceDifficulty)
+        rawset(MinimapInstanceDifficulty, "ContentModes", {})
+        WatchTree("MinimapCluster", { MinimapContainer = true, Tracking = true, BorderTop = true, DielFrame = true,
+            IndicatorFrame = { MailFrame = true } })
+    end })
+    -- what the client does later: a rescale pass, a display change, the timers the build armed, the end of a fight
+    Fire("UI_SCALE_CHANGED"); Fire("DISPLAY_SIZE_CHANGED"); Fire("EDIT_MODE_LAYOUTS_UPDATED"); Fire("PLAYER_REGEN_ENABLED")
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+function T.minimap_off_builds_nothing_and_leaves_every_blizzard_minimap_frame_alone()
+    miniWorld({ "m.mini" })
+    loaded(MINI_FILE); loaded(BANNER_FILE)
+    eq(FS.ModuleSwitch.Built("m.mini"), false)
+    eq(BuiltBy(MINI_FILE), 0, "no frame made after the files loaded")
+    eq(BuiltBy(BANNER_FILE), 0, "no banner plate")
+    eq(_G.GetMinimapShape, nil, "the round map keeps its round answer")
+    for _, name in ipairs(MINI_BLIZZARD) do
+        eq(TouchesOn(name, MINI_FILE), "", name .. " untouched by the map")
+        eq(TouchesOn(name, BANNER_FILE), "", name .. " untouched by the banner")
+    end
+    eq(Minimap.fsBezel, nil)
+    eq(Minimap.fsPlaced, nil)
+end
+
+function T.minimap_off_keeps_its_settings_and_coords_tables()
+    miniWorld({ "m.mini" })
+    local S = FS.MinimapSettings
+    eq(type(S), "table")
+    eq(S.Width(), S.w.default); eq(S.Height(), S.h.default); eq(S.Scale(), 1)
+    eq(type(FS.MinimapCoords), "table")
+    eq(FS.MinimapCoords.KEY, "minimap.coords")
+    FS.Config.Set("minimap.scale", 150)
+    FS.Config.Set("minimap.coords", false)
+    eq(TouchesOn("Minimap"), "", "a changed setting does not reach the stock map")
+    eq(TouchesOn("MinimapCluster"), "")
+end
+
+function T.minimap_on_builds_the_body_defines_the_shape_and_marks_itself_built()
+    miniWorld({})
+    loaded(MINI_FILE); loaded(BANNER_FILE)
+    eq(FS.ModuleSwitch.Built("m.mini"), true)
+    eq(type(_G.GetMinimapShape), "function")
+    eq(_G.GetMinimapShape(), "SQUARE")
+    yes(Minimap.fsPlaced, "the map was seated")
+    yes(TouchesOn("Minimap") ~= "", "the stock map was reshaped")
+    yes(TouchesOn("MinimapInstanceDifficulty") ~= "", "the banner was skinned")
+end
+
+local TRACK_FILES = { "Modules/Tracker/Tracker.lua", "Modules/Tracker/TrackerSeat.lua", "Modules/Tracker/QuestTimer.lua",
+    "Modules/ActionBars/ConsoleKeys.lua" }
+local TRACK_BLIZZARD = { "ObjectiveTrackerFrame", "QuestTimerFrame", "RightManagedFrameContainer",
+    "ObjectiveTrackerHeaderFont", "ObjectiveTrackerLineFont", "QuestObjectiveTracker", "CampaignQuestObjectiveTracker",
+    "ScenarioObjectiveTracker", "ProfessionsRecipeTracker" }
+local editModeSaves
+local function trackWorld(off, extraWatch, boot)
+    local watch = {}
+    for _, n in ipairs(TRACK_BLIZZARD) do watch[#watch + 1] = n end
+    for _, n in ipairs(extraWatch or {}) do watch[#watch + 1] = n end
+    editModeSaves = 0
+    boot = boot or {}
+    Boot({ off = off, watch = watch, noRegen = boot.noRegen, pre = function()
+        WatchPanel("QuestTimerFrame")
+        if boot.combat then InCombatLockdown = function() return true end end
+        WatchTree("ObjectiveTrackerFrame", { Header = { MinimizeButton = true, Background = true, Text = true }, NineSlice = true })
+        for _, module in ipairs({ "QuestObjectiveTracker", "CampaignQuestObjectiveTracker", "ScenarioObjectiveTracker", "ProfessionsRecipeTracker" }) do
+            WatchTree(module, { Header = { Background = true, Text = true, MinimizeButton = true } })
+        end
+        Enum.EditModeSystem = { ObjectiveTracker = 7 }
+        Enum.EditModeLayoutType = { Preset = 0, Account = 1 }
+        local system = { system = 7, isInDefaultPosition = true, anchorInfo = { point = "TOPRIGHT", relativeTo = "UIParent", relativePoint = "TOPRIGHT", offsetX = 0, offsetY = -200 } }
+        local layout = { layoutType = 1, layoutName = "Mine", systems = { system } }
+        C_EditMode = {
+            GetLayouts = function() return { layouts = { layout }, activeLayout = 1 } end,
+            SaveLayouts = function() editModeSaves = editModeSaves + 1 end,
+            SetActiveLayout = function() end,
+        }
+        EditModePresetLayoutManager = { GetCopyOfPresetLayouts = function() return {} end }
+        C_QuestLog = {
+            GetNumQuestLogEntries = function() return 1 end,
+            GetInfo = function() return { questID = 77, title = "Hurry", isHeader = false } end,
+            GetTimeAllowed = function() return 600, 30 end,
+        }
+    end })
+    Fire("QUEST_LOG_UPDATE"); Fire("UPDATE_QUEST_TIMERS"); if not boot.noRegen then Fire("PLAYER_REGEN_ENABLED") end; Fire("UI_SCALE_CHANGED")
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+function T.quest_tracker_off_builds_nothing_hooks_nothing_and_writes_no_edit_mode_layout()
+    trackWorld({ "m.track" })
+    for _, f in ipairs(TRACK_FILES) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.track"), false)
+    eq(BuiltBy("Modules/Tracker/Tracker.lua"), 0, "no panel frame")
+    eq(BuiltBy("Modules/Tracker/QuestTimer.lua"), 0, "no timer drawer, no event frame")
+    no(MadeNamed("ForeverSTUwaveQuestTimer"))
+    for _, name in ipairs(TRACK_BLIZZARD) do
+        for _, f in ipairs(TRACK_FILES) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+    eq(FS.Tracker.Panel(), nil)
+    FS.Tracker.Refresh()
+    eq(FS.TrackerSeat.Ready(), false, "no seat to report, so the layout editor shows no handle")
+    eq(FS.TrackerSeat.Rect(), nil)
+    local ok, why = FS.TrackerSeat.Move(10, -10)
+    eq(ok, false); yes(why:find("off", 1, true), why)
+    ok = FS.TrackerSeat.Reset()
+    eq(ok, false)
+    eq(editModeSaves, 0, "nothing saved into the Edit Mode layout")
+end
+
+function T.quest_tracker_off_keeps_its_api_and_settings_defined()
+    trackWorld({ "m.track" })
+    eq(type(FS.Tracker.SIZE), "table"); eq(type(FS.Tracker.SIZE_LOCKED), "string")
+    eq(FS.Tracker.SIZE.scale.key, "tracker.scale")
+    eq(type(FS.QuestTimer.Digits), "function")
+    eq(FS.QuestTimer.Read(100) ~= nil, true)
+    FS.Config.Set("tracker.scale", 150); FS.Config.Set("tracker.alpha", 50); FS.Config.Set("questTimer.shown", false)
+    for _, name in ipairs(TRACK_BLIZZARD) do eq(TouchesOn(name), "", name .. " untouched by a changed setting") end
+end
+
+function T.quest_tracker_on_builds_the_panel_and_the_seat_writes_the_layout_as_before()
+    trackWorld({})
+    for _, f in ipairs(TRACK_FILES) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.track"), true)
+    yes(FS.Tracker.Panel(), "the panel exists")
+    yes(TouchesOn("ObjectiveTrackerFrame", "Modules/Tracker/Tracker.lua") ~= "", "the stock tracker is skinned")
+    eq(FS.TrackerSeat.Ready(), true)
+    eq(FS.TrackerSeat.Move(10, -10), true)
+    eq(editModeSaves, 1)
+end
+
+function T.the_console_quests_key_does_not_hook_the_stock_tracker_while_the_quest_tracker_is_off()
+    trackWorld({ "m.track" })
+    eq(TouchesOn("ObjectiveTrackerFrame", "Modules/ActionBars/ConsoleKeys.lua"), "")
+    trackWorld({})
+    -- on: the key follows a collapse made some other way (a post-hook on SetCollapsed)
+    yes(TouchesOn("ObjectiveTrackerFrame", "Modules/ActionBars/ConsoleKeys.lua"):find("SetCollapsed", 1, true), "hooked when on")
+end
+
+local function timerDrawer()
+    local drawer = _G.ForeverSTUwaveQuestTimer
+    yes(drawer, "the timer drawer was built")
+    return drawer
+end
+
+function T.the_quest_timer_hangs_from_the_minimap_key_row_while_the_minimap_is_ours()
+    trackWorld({}, { "Minimap" })
+    local d = timerDrawer()
+    eq(d._parent, Minimap.fsBezel, "a child of the key row, so it scales with the map")
+    eq(d._points[1][2], Minimap.fsBezel)
+    eq(d._points[1][3], "BOTTOMLEFT")
+end
+
+function T.the_quest_timer_falls_back_to_the_stock_minimap_while_the_minimap_module_is_off()
+    trackWorld({ "m.mini" }, { "Minimap" })
+    loaded("Modules/Tracker/QuestTimer.lua")
+    local d = timerDrawer()
+    eq(Minimap.fsBezel, nil)
+    eq(d._parent, UIParent)
+    eq(#d._points, 1)
+    eq(d._points[1][1], "TOPRIGHT"); eq(d._points[1][2], Minimap); eq(d._points[1][3], "BOTTOMRIGHT")
+    eq(TouchesOn("Minimap", "Modules/Tracker/QuestTimer.lua"), "", "anchored to, never written to")
+end
+
+function T.the_quest_timer_waits_for_a_minimap_that_is_ours_but_not_built_yet()
+    -- logged in during a fight: the minimap's build waits for the end of it, and the timer must not seat under the stock map
+    trackWorld({}, { "Minimap" }, { combat = true, noRegen = true })
+    eq(Minimap.fsBezel, nil, "the map is not built yet")
+    no(MadeNamed("ForeverSTUwaveQuestTimer"), "no drawer under the stock map while ours is coming")
+    InCombatLockdown = function() return false end
+    Fire("PLAYER_REGEN_ENABLED")
+    yes(Minimap.fsBezel, "built at the end of the fight")
+    FS.QuestTimer.Refresh()
+    local d = timerDrawer()
+    eq(d._parent, Minimap.fsBezel)
+end
+
+function T.the_quest_timer_lays_out_again_on_a_new_grid_when_the_minimap_scale_changes()
+    trackWorld({}, { "Minimap" })
+    local d = timerDrawer()
+    local before = FS.QuestTimer.Pixels()
+    yes(#__tickers > 0, "a paint ticker runs while a timer shows")
+    rawset(d, "GetEffectiveScale", function() return 1.5 end)   -- the map's Scale is now 150%: the drawer inherits it
+    for _, t in ipairs(__tickers) do if not t.cancelled then t.fn() end end
+    local after = FS.QuestTimer.Pixels()
+    eq(after.scale, 1.5)
+    yes(math.abs(after.k / before.k - 1.5) < 0.001, "a design px is 1.5 times as many physical pixels: " .. after.k .. " vs " .. before.k)
+    yes(after.n >= before.n)
+end
+
+local BAGS_FILES = { "Modules/Bags/Bags.lua", "Modules/Bags/BagBar.lua" }
+local BAGS_BLIZZARD = { "MicroButtonAndBagsBar", "BagsBar", "MainMenuBarBackpackButton", "CharacterBag0Slot", "CharacterBag1Slot",
+    "KeyRingButton", "BagBarExpandToggle", "ContainerFrame1", "ContainerFrameCombinedBags", "BankFrame" }
+local bagCallbacks
+local function bagsWorld(off)
+    bagCallbacks = 0
+    Boot({ off = off, watch = BAGS_BLIZZARD, pre = function()
+        WatchPanel("ContainerFrame1"); WatchPanel("ContainerFrameCombinedBags"); WatchPanel("BankFrame")
+        EventRegistry = { RegisterCallback = function() bagCallbacks = bagCallbacks + 1 end }
+    end })
+    Fire("BAG_UPDATE"); Fire("BAG_UPDATE_DELAYED"); Fire("GAME_PAD_ACTIVE_CHANGED"); Fire("PLAYER_REGEN_ENABLED"); Fire("PLAYER_MONEY")
+    Fire("UI_SCALE_CHANGED")
+end
+
+function T.bags_off_builds_no_bar_hooks_no_bag_frame_and_dims_nothing()
+    bagsWorld({ "m.bags" })
+    for _, f in ipairs(BAGS_FILES) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.bags"), false)
+    eq(BuiltBy("Modules/Bags/Bags.lua"), 0)
+    eq(BuiltBy("Modules/Bags/BagBar.lua"), 0, "no bar, no secure slot buttons")
+    no(MadeNamed("ForeverSTUwaveBagBar"))
+    eq(bagCallbacks, 0, "no container open or close callback")
+    for _, name in ipairs(BAGS_BLIZZARD) do
+        for _, f in ipairs(BAGS_FILES) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+end
+
+function T.bags_off_keeps_its_tables_defined_and_inert()
+    bagsWorld({ "m.bags" })
+    eq(type(FS.BagBar), "table"); eq(FS.BagBar.bar, nil); eq(#FS.BagBar.slots, 0)
+    FS.BagBar.Refresh()
+    FS.BagBar.HideBlizzardBar()
+    eq(type(FS.BagHighlight), "table")
+    FS.BagHighlight.Set(1); FS.BagHighlight.Clear()
+    eq(type(FS.BagsWindow), "table")
+    -- (the bank window is also a Window skins frame, so only the bag files' own touches are counted)
+    for _, name in ipairs(BAGS_BLIZZARD) do
+        for _, f in ipairs(BAGS_FILES) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+end
+
+function T.bags_on_builds_the_bar_dims_the_stock_bag_bar_and_skins_the_bag_frames_as_before()
+    bagsWorld({})
+    for _, f in ipairs(BAGS_FILES) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.bags"), true)
+    yes(MadeNamed("ForeverSTUwaveBagBar"))
+    yes(FS.BagBar.bar and #FS.BagBar.slots > 0)
+    yes(bagCallbacks > 0, "the open and close callbacks are installed")
+    yes(TouchesOn("MicroButtonAndBagsBar", "Modules/Bags/BagBar.lua") ~= "", "the stock bag bar is dimmed")
+    yes(TouchesOn("ContainerFrame1", "Modules/Bags/Bags.lua") ~= "", "the bag frames are skinned")
+end
+
+local SKINS_BLIZZARD = { "CharacterFrame", "InspectFrame", "MailFrame", "PlayerSpellsFrame", "QuestFrame", "GossipFrame",
+    "MerchantFrame", "StaticPopup1", "GameTooltip", "LossOfControlFrame", "ChatAlertFrame", "ZoneTextFrame", "ErrorsFrame",
+    "ShardTransferImminentFrame", "DamageMeter", "HelpTip", "WorldMapFrame", "AddonList", "FriendsFrame", "TokenFrame" }
+local function skinsWorld(off)
+    Boot({ off = off, watch = SKINS_BLIZZARD, pre = function()
+        for _, name in ipairs({ "CharacterFrame", "InspectFrame", "MailFrame", "PlayerSpellsFrame", "QuestFrame", "GossipFrame",
+            "MerchantFrame", "StaticPopup1", "WorldMapFrame", "AddonList", "FriendsFrame", "TokenFrame" }) do
+            WatchPanel(name)
+        end
+        rawset(_G.GossipFrame, "GreetingPanel", false)   -- the game builds this child later; the skin tests it before use
+        function GameTooltip_SetDefaultAnchor() end
+        function PaperDollFrame_UpdateStats() end
+        function EquipmentFlyout_Show() end
+        function GetProfessions() return 1 end
+        function GetProfessionInfo() return "Mining", "icon", 10, 75 end
+    end })
+    Fire("PLAYER_ENTERING_WORLD", false, false); Fire("PLAYER_REGEN_ENABLED"); Fire("MAIL_SHOW"); Fire("INSPECT_READY")
+    Fire("UI_SCALE_CHANGED"); Fire("SKILL_LINES_CHANGED")
+    for _, e in ipairs({ "Blizzard_PlayerSpells", "Blizzard_InspectUI", "Blizzard_Communities" }) do Fire("ADDON_LOADED", e) end
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+function T.window_skins_off_builds_none_hooks_nothing_and_touches_no_blizzard_window()
+    skinsWorld({ "m.skins" })
+    eq(FS.ModuleSwitch.Built("m.skins"), false)
+    for _, f in ipairs(__skinFiles) do
+        loaded(f)
+        eq(BuiltBy(f), 0, f .. " built nothing")
+        eq(TouchesOn("hooksecurefunc", f), "", f .. " hooked nothing")
+        for _, name in ipairs(SKINS_BLIZZARD) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+    no(MadeNamed("FSTooltipAnchor"), "no tooltip anchor")
+    no(MadeNamed("ForeverSTUwaveProfessions"), "no professions panel")
+    eq(SlashCmdList["FSPROF"], nil, "no /fsprof while the panel is off")
+end
+
+function T.window_skins_off_keeps_the_shared_helpers_defined()
+    skinsWorld({ "m.skins" })
+    eq(type(FS.PanelSkins.DeferCombat), "function"); eq(type(FS.PanelSkins.WatchAddonLoad), "function")
+    eq(type(FS.PanelSkins.WhenSkinsOn), "function"); eq(type(FS.PanelSkins.RegisterInspect), "function")
+    eq(type(FS.TooltipAnchor.Repoint), "function"); eq(type(FS.TooltipAnchor.Install), "function")
+    eq(type(FS.DamageMeterSkin), "table")
+    FS.PanelSkins.DeferCombat(function() end)   -- a runtime call is not refused
+    local ran = false
+    FS.PanelSkins.WhenSkinsOn(function() ran = true end)
+    eq(ran, true, "a call made after ADDON_LOADED runs at once")
+    eq(TouchesOn("GameTooltip"), "")
+end
+
+function T.window_skins_on_builds_and_skins_the_game_windows_as_before()
+    skinsWorld({})
+    eq(FS.ModuleSwitch.Built("m.skins"), true)
+    -- only the files this gate edits are held to a clean load here: the rest of the skin files are exercised against real
+    -- window shapes by their own harnesses, and this world's stand-in windows are only deep enough for the first few
+    for _, f in ipairs({ "Modules/Skins/Popups.lua", "Modules/Skins/Character.lua", "Modules/Skins/TooltipAnchor.lua",
+        "Modules/Skins/Professions.lua", "Core/PanelSkins.lua" }) do loaded(f) end
+    yes(MadeNamed("FSTooltipAnchor"), "the tooltip anchor")
+    yes(TouchesOn("StaticPopup1", "Modules/Skins/Popups.lua") ~= "", "the popup is skinned")
+    yes(TouchesOn("CharacterFrame", "Modules/Skins/Character.lua") ~= "", "the character window is skinned")
+    yes(TouchesOn("hooksecurefunc", "Modules/Skins/TooltipAnchor.lua") ~= "", "the default anchor hook is installed")
+    yes(MadeNamed("ForeverSTUwaveProfessions"), "the professions panel")
+    eq(type(SlashCmdList["FSPROF"]), "function")
+end
+
+function T.the_layout_editor_gives_the_tooltip_and_professions_no_handle_while_window_skins_are_off()
+    skinsWorld({ "m.skins" })
+    local LE = FS.LayoutEdit
+    if type(LE) == "table" and type(LE.HasHandle) == "function" then
+        eq(LE.HasHandle("tooltip"), false); eq(LE.HasHandle("professions"), false)
+    end
+end
+
+return T
+"""
+
+_TOC_SOURCES: dict[str, str] = {}
+GATE_NAMES: list[str] = []
+
+
+def toc_files() -> list[str]:
+    return [ln.strip() for ln in (ADDON / "forever-stuwave.toc").read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.startswith("##") and ln.strip().endswith(".lua")]
+
+
+def read_toc_file(rel: str) -> str:
+    if rel not in _TOC_SOURCES:
+        _TOC_SOURCES[rel] = (ADDON / rel).read_text(encoding="utf-8")
+    return _TOC_SOURCES[rel]
+
+
+def run_gate_checks() -> int:
+    """Each gate row runs in a fresh mock client (the whole .toc loads in about 0.2 s). Returns the failure count."""
+    global GATE_NAMES
+    GATE_NAMES = re.findall(r"^function T\.([a-z0-9_]+)\(", GATE_CHECKS, re.M)
+    failed = 0
+    for name in GATE_NAMES:
+        try:
+            lua = base.LuaRuntime(unpack_returned_tuples=True, register_eval=False)
+            lua.execute(GATE_WORLD)
+            lua.globals().__toc = lua.table_from(toc_files())
+            lua.globals().__read = read_toc_file
+            lua.globals().__skinFiles = lua.table_from([f for f in toc_files() if f.startswith("Modules/Skins/")])
+            checks = lua.execute(GATE_CHECKS)
+            checks[name]()
+            print(f"ok    {name}")
+        except LuaError as err:
+            failed += 1
+            print(f"FAIL  {name}: {' '.join(str(err).splitlines()[:2])[:500]}")
+    return failed
+
+
 # ---- python level checks ----------------------------------------------------------------------------------------------
 
 def check_the_files_are_clean() -> list[str]:
@@ -770,12 +1556,13 @@ def check_the_footer_count_reads_the_pending_switches() -> list[str]:
 
 def main() -> int:
     failed = run_lua_checks()
+    failed += run_gate_checks()
     py_checks = [
         ("the_files_are_clean", check_the_files_are_clean),
         ("the_footer_count_reads_the_pending_switches", check_the_footer_count_reads_the_pending_switches),
         ("the_toc_loads_the_store_before_the_pages_that_gate_on_it", check_the_toc_loads_the_store_before_the_pages_that_gate_on_it),
     ]
-    total = len(CHECK_NAMES) + len(py_checks)
+    total = len(CHECK_NAMES) + len(GATE_NAMES) + len(py_checks)
     for name, fn in py_checks:
         try:
             problems = fn()

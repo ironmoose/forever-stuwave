@@ -169,5 +169,14 @@ local function SafeSeat()
     end
 end
 
-hooksecurefunc(Tal, "Layout", SafeSeat)
-Config.OnChange(M.SETTING.key, SafeSeat)
+-- File-scope work waits for the Window skins switch (Core/ModuleSwitch.lua); without the switch store it runs at once.
+local function WhenSkinsOn(fn)
+    local MS = FS.ModuleSwitch
+    if MS then MS.WhenOn("m.skins", fn) else fn() end
+end
+
+-- Module power: the hook on the talent window and the setting watch start only with the Window skins switch on.
+WhenSkinsOn(function()
+    hooksecurefunc(Tal, "Layout", SafeSeat)
+    Config.OnChange(M.SETTING.key, SafeSeat)
+end)

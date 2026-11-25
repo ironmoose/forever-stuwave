@@ -535,27 +535,37 @@ local function RequestVisible(visible)
     return true
 end
 
--- A change from the config window or a profile switch. Until Setup has run, Setup reads the setting itself.
-Config.OnChange(CFG_SHOWN, function(value)
-    if not (panel and panel.fsRestoredVisibility) then return end
-    RequestVisible(value == true)
-end)
-
-SLASH_FSPROF1 = "/fsprof"
-SlashCmdList["FSPROF"] = function()
-    local visible = not CurrentlyVisible()
-
-    if not Config.Set(CFG_SHOWN, visible) then
-        print("|cff22e0ffForever STUwave|r: settings are read-only this session")
-        return
-    end
-
-    if not RequestVisible(visible) then
-        print(("|cff22e0ffForever STUwave|r: professions panel will be %s after combat"):format(visible and "shown" or "hidden"))
-        return
-    end
-    print(("|cff22e0ffForever STUwave|r: professions panel %s"):format(visible and "shown" or "hidden"))
+-- File-scope work waits for the Window skins switch (Core/ModuleSwitch.lua); without the switch store it runs at once.
+local function WhenSkinsOn(fn)
+    local MS = FS.ModuleSwitch
+    if MS then MS.WhenOn("m.skins", fn) else fn() end
 end
+
+-- Module power (Core/ModuleSwitch.lua): the panel belongs to the Window skins switch. Off, nothing below listens and /fsprof is
+-- not defined, so the panel is never built.
+WhenSkinsOn(function()
+    -- A change from the config window or a profile switch. Until Setup has run, Setup reads the setting itself.
+    Config.OnChange(CFG_SHOWN, function(value)
+        if not (panel and panel.fsRestoredVisibility) then return end
+        RequestVisible(value == true)
+    end)
+
+    SLASH_FSPROF1 = "/fsprof"
+    SlashCmdList["FSPROF"] = function()
+        local visible = not CurrentlyVisible()
+
+        if not Config.Set(CFG_SHOWN, visible) then
+            print("|cff22e0ffForever STUwave|r: settings are read-only this session")
+            return
+        end
+
+        if not RequestVisible(visible) then
+            print(("|cff22e0ffForever STUwave|r: professions panel will be %s after combat"):format(visible and "shown" or "hidden"))
+            return
+        end
+        print(("|cff22e0ffForever STUwave|r: professions panel %s"):format(visible and "shown" or "hidden"))
+    end
+end)
 
 -------------------------------------------------------------------------------
 -- Minimise glyph + persisted minimised state
@@ -575,9 +585,11 @@ local function RequestMinimized()
     return true
 end
 
-Config.OnChange(CFG_MINIMIZED, function()
-    RefreshGlyphTooltip()
-    RequestMinimized()
+WhenSkinsOn(function()
+    Config.OnChange(CFG_MINIMIZED, function()
+        RefreshGlyphTooltip()
+        RequestMinimized()
+    end)
 end)
 
 -- A reseat (UI scale, resolution, /fsedit move or reset) re-applies the full seat first; this folds it again.
@@ -634,41 +646,43 @@ end
 -- fsRestoredVisibility below are idempotent, so a PLAYER_ENTERING_WORLD that
 -- fires again on every later loading screen just re-runs RefreshRows
 -- harmlessly rather than double-building.
-local events = CreateFrame("Frame")
-events:RegisterEvent("PLAYER_LOGIN")
-events:RegisterEvent("PLAYER_ENTERING_WORLD")
-events:RegisterEvent("SKILL_LINES_CHANGED")
-events:RegisterEvent("PLAYER_REGEN_ENABLED")
+WhenSkinsOn(function()
+    local events = CreateFrame("Frame")
+    events:RegisterEvent("PLAYER_LOGIN")
+    events:RegisterEvent("PLAYER_ENTERING_WORLD")
+    events:RegisterEvent("SKILL_LINES_CHANGED")
+    events:RegisterEvent("PLAYER_REGEN_ENABLED")
 
-events:SetScript("OnEvent", function(_, event)
-    if event == "PLAYER_REGEN_ENABLED" then
-        if pendingInit then
-            pendingInit = false
-            Setup()
-        elseif pendingRefresh and panel then
-            RefreshRows()
+    events:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_ENABLED" then
+            if pendingInit then
+                pendingInit = false
+                Setup()
+            elseif pendingRefresh and panel then
+                RefreshRows()
+            end
+            if pendingMinimized and panel then RequestMinimized() end
+            if pendingVisible ~= nil then
+                local visible = pendingVisible
+                pendingVisible = nil
+                ApplyVisible(EnsurePanel(), visible)
+            end
+            return
         end
-        if pendingMinimized and panel then RequestMinimized() end
-        if pendingVisible ~= nil then
-            local visible = pendingVisible
-            pendingVisible = nil
-            ApplyVisible(EnsurePanel(), visible)
+
+        if event == "SKILL_LINES_CHANGED" then
+            if panel then RefreshRows() end
+            return
         end
-        return
-    end
 
-    if event == "SKILL_LINES_CHANGED" then
-        if panel then RefreshRows() end
-        return
-    end
+        MigrateLegacy()
 
-    MigrateLegacy()
-
-    -- The first build creates secure buttons and shows the panel, neither of which is
-    -- allowed in combat (a /reload mid-fight), so it waits for PLAYER_REGEN_ENABLED.
-    if InCombatLockdown() then
-        pendingInit = true
-        return
-    end
-    Setup()
+        -- The first build creates secure buttons and shows the panel, neither of which is
+        -- allowed in combat (a /reload mid-fight), so it waits for PLAYER_REGEN_ENABLED.
+        if InCombatLockdown() then
+            pendingInit = true
+            return
+        end
+        Setup()
+    end)
 end)

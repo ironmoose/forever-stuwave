@@ -302,13 +302,17 @@ local function SnapshotBuffRows()
     return math.ceil(#snapshot.buffs / BUFF_COLS)
 end
 
+-- False until the module has been built, and for good when its switch is off: nothing refreshes the snapshot then.
+local MS = FS.ModuleSwitch
+local function Alive() return MS == nil or MS.Built("m.auras") end
+
 FS.PlayerAuras = {
     -- { buffs = { {name, icon, count, dispelType, duration, expirationTime, sourceUnit}, ... }, debuffs = ... }
     -- Plain values only, in aura slot order. Read-only by convention; replaced, never mutated.
     Get = function() return snapshot end,
     -- True while the snapshot cannot refresh (auras are secret): what it holds is as of
     -- the last readable moment.
-    IsFrozen = function() return not FS.AurasReadable() end,
+    IsFrozen = function() return not Alive() or not FS.AurasReadable() end,
     -- True when the engine containers draw the row (false: the legacy row is drawn).
     IsEngineDrawn = function() return state.engine end,
 }
@@ -968,4 +972,14 @@ local function Init()
     end
 end
 
-Init()
+-- Module power (Core/ModuleSwitch.lua): with the Buffs and debuffs switch off nothing above runs, so Blizzard's own buff,
+-- debuff and weapon enchant frames stay exactly as the client draws them. FS.PlayerAuras stays defined (its readers never
+-- check for it first) but is never refreshed, so IsFrozen says so and a reader treats the list as unknown, not empty.
+if MS then
+    MS.WhenOn("m.auras", function()
+        Init()
+        MS.MarkBuilt("m.auras")
+    end)
+else
+    Init()
+end

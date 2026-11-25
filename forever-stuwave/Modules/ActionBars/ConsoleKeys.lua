@@ -172,7 +172,11 @@ end
 local hookedTracker, hookedChat = false, false
 function Switch.HookLate()
     local tracker = Tracker()
-    if not hookedTracker and type(tracker) == "table" and type(tracker.SetCollapsed) == "function" then
+    -- Module power: with the Quest tracker switch off the game's own tracker is left unhooked (the key still clicks its
+    -- minimise button, it just does not follow a collapse made some other way).
+    local MS = FS.ModuleSwitch
+    local trackerOurs = MS == nil or MS.On("m.track")
+    if trackerOurs and not hookedTracker and type(tracker) == "table" and type(tracker.SetCollapsed) == "function" then
         hookedTracker = pcall(hooksecurefunc, tracker, "SetCollapsed", function() Notify("quests", TrackerOpen()) end)
     end
     local Chat = FS.Chat

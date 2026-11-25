@@ -375,13 +375,22 @@ local function SafeApply()
     if not ok and FS.LogDegradeOnce then FS.LogDegradeOnce("losscontrol", "Loss of control alert: " .. tostring(err)) end
 end
 
-if InCombatLockdown() then
-    local regen = CreateFrame("Frame")
-    regen:RegisterEvent("PLAYER_REGEN_ENABLED")
-    regen:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-        SafeApply()
-    end)
-else
-    SafeApply()
+-- File-scope work waits for the Window skins switch (Core/ModuleSwitch.lua); without the switch store it runs at once.
+local function WhenSkinsOn(fn)
+    local MS = FS.ModuleSwitch
+    if MS then MS.WhenOn("m.skins", fn) else fn() end
 end
+
+-- Module power: applied only with the Window skins switch on.
+WhenSkinsOn(function()
+    if InCombatLockdown() then
+        local regen = CreateFrame("Frame")
+        regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        regen:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            SafeApply()
+        end)
+    else
+        SafeApply()
+    end
+end)

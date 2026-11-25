@@ -1712,25 +1712,28 @@ local function Build()
     RefreshInbox()
 end
 
-local watcher = CreateFrame("Frame")
-for _, event in ipairs({ "MAIL_INBOX_UPDATE", "MAIL_SHOW", "MAIL_SEND_INFO_UPDATE", "MAIL_SEND_SUCCESS", "PLAYER_MONEY",
-    "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }) do
-    pcall(watcher.RegisterEvent, watcher, event)
-end
-watcher:SetScript("OnEvent", function(_, event)
-    if not S.done.window then return end
-    if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then
-        Step("relayout", Relayout)
-        return
+-- Module power: this listener starts only with the Window skins switch on.
+PanelSkins.WhenSkinsOn(function()
+    local watcher = CreateFrame("Frame")
+    for _, event in ipairs({ "MAIL_INBOX_UPDATE", "MAIL_SHOW", "MAIL_SEND_INFO_UPDATE", "MAIL_SEND_SUCCESS", "PLAYER_MONEY",
+        "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }) do
+        pcall(watcher.RegisterEvent, watcher, event)
     end
-    -- A closed mailbox catches up in its OnShow hook; PLAYER_MONEY fires on every coin loot and vendor sale
-    -- (2026-11-24 hitch audit).
-    local win = _G.MailFrame
-    if not (win and win:IsShown()) then return end
-    Step("refresh", function()
-        RefreshInbox()
-        RefreshSend()
-        RefreshLetter()
+    watcher:SetScript("OnEvent", function(_, event)
+        if not S.done.window then return end
+        if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then
+            Step("relayout", Relayout)
+            return
+        end
+        -- A closed mailbox catches up in its OnShow hook; PLAYER_MONEY fires on every coin loot and vendor sale
+        -- (2026-11-24 hitch audit).
+        local win = _G.MailFrame
+        if not (win and win:IsShown()) then return end
+        Step("refresh", function()
+            RefreshInbox()
+            RefreshSend()
+            RefreshLetter()
+        end)
     end)
 end)
 

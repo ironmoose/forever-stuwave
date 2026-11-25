@@ -725,22 +725,31 @@ local function SkinExisting()
     end
 end
 
-local owner = _G.DamageMeter
-if type(owner) == "table" and type(owner.SetupSessionWindow) == "function" then
-    hooksecurefunc(owner, "SetupSessionWindow", function(_, _, windowData)
-        local window = type(windowData) == "table" and windowData.sessionWindow
-        if window then SkinWindow(window) end
-    end)
+-- File-scope work waits for the Window skins switch (Core/ModuleSwitch.lua); without the switch store it runs at once.
+local function WhenSkinsOn(fn)
+    local MS = FS.ModuleSwitch
+    if MS then MS.WhenOn("m.skins", fn) else fn() end
 end
-SkinExisting()
 
-local watcher = CreateFrame("Frame")
-watcher:RegisterEvent("PLAYER_LOGIN")
-watcher:SetScript("OnEvent", function()
+-- Module power: the hook on the game's meter, the first skin pass and the listeners start only with the Window skins switch on.
+WhenSkinsOn(function()
+    local owner = _G.DamageMeter
+    if type(owner) == "table" and type(owner.SetupSessionWindow) == "function" then
+        hooksecurefunc(owner, "SetupSessionWindow", function(_, _, windowData)
+            local window = type(windowData) == "table" and windowData.sessionWindow
+            if window then SkinWindow(window) end
+        end)
+    end
     SkinExisting()
-    Restyle()   -- the profile is loaded by now
+
+    local watcher = CreateFrame("Frame")
+    watcher:RegisterEvent("PLAYER_LOGIN")
+    watcher:SetScript("OnEvent", function()
+        SkinExisting()
+        Restyle()   -- the profile is loaded by now
+    end)
+    if Config and Config.OnChange then Config.OnChange(STYLE_SETTING.key, Restyle) end
 end)
-if Config and Config.OnChange then Config.OnChange(STYLE_SETTING.key, Restyle) end
 
 local function Style() return style end
 

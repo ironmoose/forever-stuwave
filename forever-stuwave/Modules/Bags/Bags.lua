@@ -1746,12 +1746,15 @@ SyncGamepadBagBar = function()
     end
 end
 
--- RegisterEvent throws on a name the client does not know, so each is its own pcall.
-local gamepadEvents = CreateFrame("Frame")
-for _, event in ipairs({ "GAME_PAD_CONNECTED", "GAME_PAD_DISCONNECTED", "GAME_PAD_ACTIVE_CHANGED", "PLAYER_ENTERING_WORLD" }) do
-    pcall(gamepadEvents.RegisterEvent, gamepadEvents, event)
+-- RegisterEvent throws on a name the client does not know, so each is its own pcall. Made with the build below, so with the
+-- Bags switch off nothing watches the gamepad and the game's own bag bar is never hidden.
+local function WatchGamepad()
+    local gamepadEvents = CreateFrame("Frame")
+    for _, event in ipairs({ "GAME_PAD_CONNECTED", "GAME_PAD_DISCONNECTED", "GAME_PAD_ACTIVE_CHANGED", "PLAYER_ENTERING_WORLD" }) do
+        pcall(gamepadEvents.RegisterEvent, gamepadEvents, event)
+    end
+    gamepadEvents:SetScript("OnEvent", SyncGamepadBagBar)
 end
-gamepadEvents:SetScript("OnEvent", SyncGamepadBagBar)
 
 -------------------------------------------------------------------------------
 -- Init
@@ -1778,4 +1781,13 @@ inspectEntries[#inspectEntries + 1] = { name = "ContainerFrameCombinedBags", gua
 inspectEntries[#inspectEntries + 1] = { name = "BankFrame", guard = "fsBagSkin" }
 FS.PanelSkins.RegisterInspect("Bags", inspectEntries)
 
-FS.PanelSkins.DeferCombat(Apply)
+-- Module power (Core/ModuleSwitch.lua): the skin, the window layout and the gamepad watch start only with the Bags switch
+-- on. Off, the game's own bags, bank and bag bar are left exactly as the client draws them (FS.BagHighlight and
+-- FS.BagsWindow stay defined and answer from an empty state).
+local MS = FS.ModuleSwitch
+local function Start()
+    if MS then MS.MarkBuilt("m.bags") end
+    WatchGamepad()
+    FS.PanelSkins.DeferCombat(Apply, "m.bags")
+end
+if MS then MS.WhenOn("m.bags", Start) else Start() end

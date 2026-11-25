@@ -253,23 +253,29 @@ local function Install()
             and tostring(Blizzard_PTRIssueReporter_Saved.x) or "nil"))
 end
 
-local events = CreateFrame("Frame")
-events:RegisterEvent("PLAYER_LOGIN")
-events:RegisterEvent("ADDON_LOADED")
-events:RegisterEvent("PLAYER_ENTERING_WORLD")
-events:SetScript("OnEvent", function(_, event, loadedAddon)
-    -- Blizzard_PTRFeedback can load after us, so this waits for it rather than
-    -- assuming PTR_IssueReporter exists at our own login.
-    if event == "ADDON_LOADED" then
-        -- Our OWN ADDON_LOADED is the moment the client is documented to have
-        -- injected saved globals. If x is nil here but present in the file on
-        -- disk, the restore is simply not happening for this addon.
-        if loadedAddon == addonName then
-            xAtAddonLoaded = type(ForeverSTUwaveIssueReporterPos) == "table"
-                and tostring(ForeverSTUwaveIssueReporterPos.x) or "NO-TABLE"
+-- Module power: the listener starts only with the Window skins switch on. It starts during this addon's own ADDON_LOADED, so the
+-- diagnostic that handler used to take from that event is taken here.
+FS.PanelSkins.WhenSkinsOn(function()
+    xAtAddonLoaded = type(ForeverSTUwaveIssueReporterPos) == "table"
+        and tostring(ForeverSTUwaveIssueReporterPos.x) or "NO-TABLE"
+    local events = CreateFrame("Frame")
+    events:RegisterEvent("PLAYER_LOGIN")
+    events:RegisterEvent("ADDON_LOADED")
+    events:RegisterEvent("PLAYER_ENTERING_WORLD")
+    events:SetScript("OnEvent", function(_, event, loadedAddon)
+        -- Blizzard_PTRFeedback can load after us, so this waits for it rather than
+        -- assuming PTR_IssueReporter exists at our own login.
+        if event == "ADDON_LOADED" then
+            -- Our OWN ADDON_LOADED is the moment the client is documented to have
+            -- injected saved globals. If x is nil here but present in the file on
+            -- disk, the restore is simply not happening for this addon.
+            if loadedAddon == addonName then
+                xAtAddonLoaded = type(ForeverSTUwaveIssueReporterPos) == "table"
+                    and tostring(ForeverSTUwaveIssueReporterPos.x) or "NO-TABLE"
+            end
+            if loadedAddon ~= "Blizzard_PTRFeedback" then return end
         end
-        if loadedAddon ~= "Blizzard_PTRFeedback" then return end
-    end
-    Install()
-    if hooked and event == "PLAYER_ENTERING_WORLD" then Seat("entering") end
+        Install()
+        if hooked and event == "PLAYER_ENTERING_WORLD" then Seat("entering") end
+    end)
 end)
