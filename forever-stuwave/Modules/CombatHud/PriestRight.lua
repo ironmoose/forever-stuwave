@@ -1,7 +1,7 @@
 -- Forever STUwave: the Priest's right slot, as plain state for the Gunsight Priest module
 --
 -- The right side of the Priest module is Prayer of Mending, a level 40 Holy talent, so until then it was a locked heart. This
--- file decides what lives there (the setting "Right side shows" and the group) and keeps the plain facts about the two watchers
+-- file decides what lives there (the setting "Show" on the Class modules page, Priest tab, and the group) and keeps the plain facts about the two watchers
 -- that fill it while leveling: Spirit Tap (a Shadow talent: a killing blow on a mob that gives experience doubles Spirit for 15 s)
 -- and Inner Fire (the self buff, 20 charges). The approved design is the mockup "Priest right slot, Spirit Tap and Inner Fire"
 -- (2026-11-10), variant A (two round medallions), a plain skull in spirit green and the flame shield in gold.
@@ -37,10 +37,18 @@ local Right = FS.PriestRight
 
 local IsSecret = FS.IsSecret or function() return false end
 
+-- values are what is stored; text is the label on the page's buttons; notes is the one line the page shows under the buttons for
+-- the picked choice (Nothing has none)
 Right.SETTING = {
-    key = "gunsight.priest.rightside", default = "auto", label = "Right side shows",
+    key = "gunsight.priest.rightside", default = "auto", label = "Show",
     values = { "auto", "spirit", "pom", "off" },
-    text = { auto = "Auto", spirit = "Spirit Tap + Inner Fire", pom = "Prayer of Mending", off = "Off" },
+    text = { auto = "Auto", spirit = "Spirit Tap and Inner Fire", pom = "Prayer of Mending", off = "Nothing" },
+    notes = {
+        auto = "Auto: Spirit Tap and Inner Fire when you play solo or in a small group, Prayer of Mending in a dungeon or raid "
+            .. "once you know it.",
+        spirit = "Two medallions: Spirit Tap time left on top, Inner Fire charges below.",
+        pom = "Heals left on the beads, and which party member holds it.",
+    },
     tip = "What the right side of the Priest module shows. Auto shows Spirit Tap and Inner Fire on your own or in a small group "
         .. "out in the world, and Prayer of Mending in a dungeon or a raid group once you have learned it. The other choices "
         .. "fix it. A change made in combat applies when the fight ends.",
@@ -49,7 +57,7 @@ local SETTING = Right.SETTING
 
 -- The reminder: Inner Fire missing breathes amber on its medallion. Every alert has its own off switch.
 Right.REMIND = {
-    key = "gunsight.priest.firenudge", default = true, label = "Remind me when Inner Fire is missing",
+    key = "gunsight.priest.firenudge", default = true, label = "Pulse Inner Fire when it is missing",
     tip = "The Inner Fire medallion breathes amber while the buff is not on you. Off leaves it calm and dim. It never "
         .. "shows before you have learned the spell.",
 }

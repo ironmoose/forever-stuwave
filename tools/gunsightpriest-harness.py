@@ -20,8 +20,9 @@ right slot", 2026-11-10, variant A) two round medallions for Spirit Tap and Inne
     and heals left, a plain holder change sparks a jump, the cooldown shade is the engine's timer;
   * the party strip: our own shield on a member fills its seat and draws its Weakened Soul line;
   * onHide stops the ticker and the subscription, onShow brings them back; the ticker stops when nothing moves;
-  * the right side (PriestRight.lua): the setting "Right side shows" (Auto, Spirit Tap + Inner Fire, Prayer of Mending, Off), Auto's
-    group switch (a raid or a dungeon with Mending learned), a change in combat waiting for the end of the fight;
+  * the right side (PriestRight.lua): the setting "Show" (Auto, Spirit Tap and Inner Fire, Prayer of Mending, Nothing; stored as
+    auto, spirit, pom, off), the one line note for each choice, Auto's group switch (a raid or a dungeon with Mending learned), a
+    change in combat waiting for the end of the fight;
   * the medallions: the hidden (locked), calm, nudge and plain lit BASE looks, the engine COVER (an AuraContainer per medallion with one
     aura slot filtered by the spell's ids, the cover regions anchored to our anchor and the engine's number through
     SetDurationText / SetApplicationCount), the proof that gates it (placed on the anchor, unreadable, a misplaced slot put back,
@@ -719,6 +720,26 @@ case("right_side_setting_chooses_the_look_and_unknown_values_read_as_auto", """
     check(R.Mode() == "off" and not Shown(p.mf) and not Shown(p.rf) and not Shown(p.pomLabel), "Off: nothing on the right")
     SetCfg(RIGHTSIDE, "bogus")
     check(R.Setting() == "auto", "an unknown value reads as auto")
+    NoLog()
+""")
+
+case("the_right_side_setting_wears_the_class_modules_page_labels_and_keeps_its_stored_values", """
+    local S = R.SETTING
+    check(S.key == "gunsight.priest.rightside" and S.default == "auto", "same key and default as before")
+    check(table.concat(S.values, ",") == "auto,spirit,pom,off", "the stored values are unchanged: " .. table.concat(S.values, ","))
+    check(S.label == "Show", "the row label is Show, got " .. tostring(S.label))
+    check(S.text.auto == "Auto" and S.text.spirit == "Spirit Tap and Inner Fire" and S.text.pom == "Prayer of Mending"
+        and S.text.off == "Nothing", "the four labels")
+    for _, v in ipairs(S.values) do
+        check(not S.text[v]:find("+", 1, true), v .. ": no plus sign in a label")
+    end
+    check(S.notes.auto:find("Spirit Tap and Inner Fire", 1, true) and S.notes.auto:find("Prayer of Mending", 1, true),
+        "the Auto note names both looks")
+    check(S.notes.spirit == "Two medallions: Spirit Tap time left on top, Inner Fire charges below.", "the medallions note")
+    check(S.notes.pom == "Heals left on the beads, and which party member holds it.", "the Prayer of Mending note")
+    check(S.notes.off == nil, "Nothing has no note line")
+    check(R.REMIND.key == "gunsight.priest.firenudge" and R.REMIND.default == true, "same reminder key and default")
+    check(R.REMIND.label == "Pulse Inner Fire when it is missing", "the reminder label, got " .. tostring(R.REMIND.label))
     NoLog()
 """)
 

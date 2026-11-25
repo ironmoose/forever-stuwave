@@ -87,7 +87,8 @@ local shSprite, shX, shY, shW, shAtlas = {}, {}, {}, {}, {}  -- what the texture
 local slotParent = {}             -- slot -> its child frame
 local ATLAS_PATH = {}
 local UL, UR, UT, UB, SW, SH, SA = {}, {}, {}, {}, {}, {}, {}   -- per sprite: texcoords, size in sprite px, atlas
-local unit = 1                    -- UI units per sprite px
+local unit = 1                    -- UI units per sprite px (the layout scale and the alert scale folded in)
+local offX, offY = 0, 0           -- UI units the alert scale moves every texture so the art grows about its canvas middle
 
 local cfgMaster = true
 local cfgSpell = { overpower = true, revenge = true, victoryrush = true }
@@ -141,9 +142,23 @@ local function SetTex(t, path)
     if not ok then t:SetTexture(path) end
 end
 
+-- The Class modules page's Alert scale (Areas.AlertScale, 0.5 to 2): anything that is not a finite number above 0 reads as 1,
+-- and so does a client where the Gunsight areas are absent.
+local function AlertScale()
+    local A = FS.GunsightAreas
+    local v = A and A.AlertScale and A.AlertScale()
+    if type(v) == "number" and v > 0 and v - v == 0 then return v end
+    return 1
+end
+
+-- The canvas is the frame's own size (GW x GH sprite px), so the art scales about its middle and the alert keeps its seat: at 1
+-- both offsets are 0 and every position and size is what it was.
 local function Rescale()
-    unit = Art.SPX * ((FS.Layout and FS.Layout.Scale and FS.Layout.Scale()) or 1)
-    for s = 1, maxSlots do shX[s], shY[s], shW[s] = nil, nil, nil end
+    local base = Art.SPX * ((FS.Layout and FS.Layout.Scale and FS.Layout.Scale()) or 1)
+    local scale = AlertScale()
+    unit = base * scale
+    offX, offY = Art.GW * base * (1 - scale) / 2, Art.GH * base * (1 - scale) / 2
+    for slot = 1, maxSlots do shX[slot], shY[slot], shW[slot] = nil, nil, nil end
 end
 
 local function BuildTextures()
@@ -239,12 +254,19 @@ local function Commit()
             end
             if fresh or shX[s] ~= wantX[s] or shY[s] ~= wantY[s] then
                 t:ClearAllPoints()
-                t:SetPoint("TOPLEFT", slotParent[s], "TOPLEFT", wantX[s] * unit, -wantY[s] * unit)
+                t:SetPoint("TOPLEFT", slotParent[s], "TOPLEFT", wantX[s] * unit + offX, -wantY[s] * unit - offY)
                 shX[s], shY[s] = wantX[s], wantY[s]
             end
             if fresh then t:Show() end
         end
     end
+end
+
+-- A new layout scale or alert scale: seat the textures again, and repaint the alert that is showing
+local function Reseat()
+    if not built then return end
+    Rescale()
+    if curKey or previewing then Commit() end
 end
 
 -------------------------------------------------------------------------------
@@ -483,17 +505,12 @@ function PU.Init()
     inited = true
     ReadConfig()
     driver = CreateFrame("Frame")
-    if FS.Layout and FS.Layout.OnRescale then
-        FS.Layout.OnRescale(function()
-            if not built then return end
-            Rescale()
-            if curKey or previewing then Commit() end
-        end)
-    end
+    if FS.Layout and FS.Layout.OnRescale then FS.Layout.OnRescale(Reseat) end
     if FS.Config and FS.Config.OnChange then
         local function Changed() ReadConfig(); sync(GetTime()) end
         FS.Config.OnChange(PU.SETTING.key, Changed)
         for _, key in ipairs(PU.ORDER) do FS.Config.OnChange(PU.SPELLS[key].key, Changed) end
+        if FS.GunsightAreas and FS.GunsightAreas.ALERT_SCALE_KEY then FS.Config.OnChange(FS.GunsightAreas.ALERT_SCALE_KEY, Reseat) end
     end
     if FS.Gunsight and FS.Gunsight.OnActiveChanged then
         FS.Gunsight.OnActiveChanged(function() sync(GetTime()) end)

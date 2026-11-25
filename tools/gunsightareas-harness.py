@@ -72,6 +72,14 @@ function Frame:SetParent(p)
     if p then p.children[#p.children + 1] = self end
 end
 function Frame:RegisterUnitEvent(e) self.events[e] = true end
+-- The client's GetRegions: the frame's textures and font strings (the mock keeps them in children beside the child frames).
+function Frame:GetRegions()
+    local list = {}
+    for _, c in ipairs(self.children) do
+        if c.kind == "Texture" or c.kind == "FontString" then list[#list + 1] = c end
+    end
+    return unpack(list)
+end
 -- The texture calls the real Theme.lua makes for a fill, a ring and a glow (the cases that load it); the plain mock
 -- draws nothing, so each is recorded or ignored.
 for _, name in ipairs({ "SetDrawLayer", "SetVertexColor", "SetBlendMode", "SetTexCoord", "SetTextureSliceMargins",
@@ -983,6 +991,146 @@ check(Areas.Plate("lower") == nil, "no plate without Theme.__MISSING__")
 check(cl.frame:IsShown() and Areas.AreaOf("class") == "lower", "the class module still shows")
 check(#FILLS == 0 and #SKINS == 0, "no half built plate: a fill or a ring on its own")
 """.replace("__MISSING__", _missing))
+
+
+# ---- the plate's Background and Border switches and the alert scale (ticket C4) --------------------------------------
+
+SWITCH_HELPERS = PLATE_HELPERS + r"""
+local function sw(name) return FS.GunsightAreas.SETTINGS[name] end
+local function fillOf(plate) for _, c in ipairs(FILLS) do if c.frame == plate then return c.tex end end end
+local function skinOf(plate) for _, c in ipairs(SKINS) do if c.frame == plate then return c end end end
+"""
+
+case("the_background_and_border_switches_are_on_by_default_and_pin_nothing")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass()
+check(sw("bg").key == "gunsight.classModule.bg", "the background switch key, got " .. tostring(sw("bg").key))
+check(sw("border").key == "gunsight.classModule.border", "the border switch key, got " .. tostring(sw("border").key))
+for _, name in ipairs({ "bg", "border" }) do
+    check(sw(name).default == true, name .. " is on by default")
+    check(FS.Config.Get(sw(name).key) == true, name .. " default is registered with Config")
+    check(not FS.Config.IsStored(sw(name).key), name .. " pins nothing in the profile")
+end
+""")
+
+case("a_fresh_plate_draws_the_fill_the_ring_and_the_glow_as_before")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+check(plate:IsShown() and fillOf(plate):IsShown(), "the fill shows")
+check(skinOf(plate).ring:IsShown() and skinOf(plate).glow:IsShown(), "the ring and the glow show")
+near(plate:GetAlpha(), 0.8, "at the default 80 percent")
+""")
+
+case("background_off_hides_only_the_fill_and_on_brings_it_back")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+FS.Config.Set(sw("bg").key, false)
+check(plate:IsShown(), "the plate frame stays: the border is still on")
+check(not fillOf(plate):IsShown(), "the dark fill is hidden")
+check(skinOf(plate).ring:IsShown() and skinOf(plate).glow:IsShown(), "the ring and the glow stay")
+near(plate:GetAlpha(), 0.8, "opacity still applies to what is on")
+FS.Config.Set(sw("bg").key, true)
+check(fillOf(plate):IsShown(), "the fill is back")
+check(skinOf(plate).ring:IsShown() and skinOf(plate).glow:IsShown(), "and the ring and glow never left")
+""")
+
+case("border_off_hides_the_ring_and_the_glow_and_keeps_the_fill")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+FS.Config.Set(sw("border").key, false)
+check(plate:IsShown() and fillOf(plate):IsShown(), "the fill stays")
+check(not skinOf(plate).ring:IsShown(), "the ring is hidden")
+check(not skinOf(plate).glow:IsShown(), "the glow is hidden")
+FS.Config.Set(sw("border").key, true)
+check(skinOf(plate).ring:IsShown() and skinOf(plate).glow:IsShown(), "ring and glow are back")
+""")
+
+case("both_off_hides_the_whole_plate_and_one_back_on_shows_just_that_part")(SWITCH_HELPERS + r"""
+local Gs, Areas, cl = bootClass()
+local plate = Areas.Plate("lower")
+FS.Config.Set(sw("bg").key, false)
+FS.Config.Set(sw("border").key, false)
+check(not plate:IsShown(), "nothing left to draw: the plate is hidden")
+check(cl.frame:IsShown() and Areas.AreaOf("class") == "lower", "the module itself is untouched")
+FS.Config.Set(sw("border").key, true)
+check(plate:IsShown() and skinOf(plate).ring:IsShown() and not fillOf(plate):IsShown(), "only the border is back")
+FS.Config.Set(sw("border").key, false)
+FS.Config.Set(sw("bg").key, true)
+check(plate:IsShown() and fillOf(plate):IsShown() and not skinOf(plate).ring:IsShown(), "only the background is back")
+""")
+
+case("opacity_scales_whatever_is_on_and_zero_hides_both")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+FS.Config.Set(sw("bg").key, false)
+setOpacity(40)
+near(plate:GetAlpha(), 0.4, "the border alone at 40 percent")
+FS.Config.Set(sw("bg").key, true)
+near(plate:GetAlpha(), 0.4, "both at 40 percent")
+setOpacity(0)
+check(not plate:IsShown(), "0 hides both")
+setOpacity(80)
+check(plate:IsShown() and fillOf(plate):IsShown() and skinOf(plate).ring:IsShown(), "and 80 brings both back")
+""")
+
+case("the_switches_apply_in_combat_and_on_a_profile_switch")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+IN_COMBAT = true
+FS.Config.Set(sw("bg").key, false)
+check(not fillOf(plate):IsShown(), "a change in combat applies")
+check(#BLOCKED == 0, "nothing protected was touched: " .. table.concat(BLOCKED, ","))
+IN_COMBAT = false
+FS.Config.NewProfile("Raid")
+FS.Config.SetActiveProfile("Raid")
+check(fillOf(plate):IsShown(), "a fresh profile reads the default: background on")
+FS.Config.Set(sw("border").key, false)
+check(not skinOf(plate).ring:IsShown() and fillOf(plate):IsShown(), "the new profile's own border switch")
+FS.Config.SetActiveProfile("Default")
+check(not fillOf(plate):IsShown() and skinOf(plate).ring:IsShown(), "switching back restores the first profile's switches")
+""")
+
+case("a_junk_switch_value_reads_as_on")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+FS.Config.Set(sw("bg").key, "no")
+check(fillOf(plate):IsShown(), "a string is not an off")
+FS.Config.Set(sw("border").key, 0)
+check(skinOf(plate).ring:IsShown(), "a number is not an off")
+""")
+
+case("the_switches_set_before_the_plate_builds_start_it_the_same_way")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass({ before = function() end, beforeLogin = function() FS.Config.Set("gunsight.classModule.bg", false) end })
+local plate = Areas.Plate("lower")
+check(plate:IsShown() and not fillOf(plate):IsShown() and skinOf(plate).ring:IsShown(), "built with the background already off")
+""")
+
+case("the_alert_scale_setting_has_its_range_default_and_a_clamped_reader")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass()
+local def = sw("alertScale")
+check(def.key == "gunsight.classModule.alertScale", "key, got " .. tostring(def.key))
+check(def.default == 100 and def.min == 50 and def.max == 200 and def.step == 5, "50 to 200 in steps of 5, default 100")
+check(FS.Config.Get(def.key) == 100 and not FS.Config.IsStored(def.key), "the default is registered and pins nothing")
+check(type(Areas.AlertScale) == "function", "Areas.AlertScale is exported")
+near(Areas.AlertScale(), 1, "100 percent is 1")
+FS.Config.Set(def.key, 150); near(Areas.AlertScale(), 1.5, "150 percent")
+FS.Config.Set(def.key, 50); near(Areas.AlertScale(), 0.5, "50 percent")
+FS.Config.Set(def.key, 200); near(Areas.AlertScale(), 2, "200 percent")
+FS.Config.Set(def.key, 400); near(Areas.AlertScale(), 2, "above the range clamps to 2")
+FS.Config.Set(def.key, 10); near(Areas.AlertScale(), 0.5, "below the range clamps to 0.5")
+FS.Config.Set(def.key, "big"); near(Areas.AlertScale(), 1, "a string reads as the default")
+FS.Config.Set(def.key, 0 / 0); near(Areas.AlertScale(), 1, "NaN reads as the default")
+""")
+
+case("the_alert_scale_never_touches_the_plate")(SWITCH_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+local w, h, a = plate:GetWidth(), plate:GetHeight(), plate:GetAlpha()
+FS.Config.Set(sw("alertScale").key, 175)
+near(plate:GetWidth(), w, "the plate keeps its width")
+near(plate:GetHeight(), h, "and its height")
+near(plate:GetAlpha(), a, "and its opacity")
+""")
+
 
 
 def static_checks() -> list[tuple[str, str | None]]:

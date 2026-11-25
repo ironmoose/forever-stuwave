@@ -21,6 +21,10 @@
 -- look, and not Target Debuffs) is the occupant, so it hides with the host (no target, the dot piece off). Its
 -- opacity is the Config setting SETTINGS.background (0 to 100 percent, 0 hides it): the plate frame's alpha, applied
 -- live from Config.OnChange, so a change or a profile switch needs no reload and nothing here is protected.
+-- Two more switches, SETTINGS.bg (the dark fill) and SETTINGS.border (the cyan ring and its glow), each default on, hide just
+-- that part (the fill's textures and the ring and glow regions are plain regions of the plate, kept at build); with both off
+-- the plate hides like opacity 0. The alert scale SETTINGS.alertScale (50 to 200 percent) is not drawn here: the pop up class
+-- alerts (Warrior power-ups, Clearcasting) read it through Areas.AlertScale().
 
 local _, FS = ...
 
@@ -37,10 +41,18 @@ local PREFIX = "|cffff4488Forever STUwave|r: gunsight areas: "
 local PLATE_PAD = 3        -- image px the backing plate reaches past the area rect on each side (the areas are 4 apart)
 local PLATE_CHAMFER = 6    -- the party frame box's BOX_CHAMFER: the fill's cut and the ring's
 local PLATE_GLOW_ALPHA = 0.5   -- the party frame box's BOX_GLOW_ALPHA
-local SETTINGS = { background = { key = "gunsight.classModule.background", default = 80, min = 0, max = 100, step = 5 } }
+local SETTINGS = {
+    background = { key = "gunsight.classModule.background", default = 80, min = 0, max = 100, step = 5 },
+    bg = { key = "gunsight.classModule.bg", default = true },
+    border = { key = "gunsight.classModule.border", default = true },
+    alertScale = { key = "gunsight.classModule.alertScale", default = 100, min = 50, max = 200, step = 5 },
+}
 Areas.SETTINGS = SETTINGS
 Areas.PLATE_PAD = PLATE_PAD
-if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(SETTINGS.background.key, SETTINGS.background.default) end
+Areas.ALERT_SCALE_KEY = SETTINGS.alertScale.key
+if FS.Config and FS.Config.RegisterDefault then
+    for _, def in pairs(SETTINGS) do FS.Config.RegisterDefault(def.key, def.default) end
+end
 local MODULE_IDS = { debuffsH = true, debuffsV = true, class = true, classSoon = true }
 local GATED = { debuffsH = true, debuffsV = true }     -- hidden while FS.TargetTakesDots() is false
 local NEEDS_TARGET = { class = true, classSoon = true }  -- hidden while FS.HasTarget() is false; onShow / onHide fire on the edge
@@ -53,6 +65,9 @@ local rects = {}          -- area -> { x, y, w, h } in image px, one table reuse
 local hostOn = {}         -- area -> whether the host is shown
 local plates = {}         -- area -> the backing plate frame (nil until built, or without the Theme box helpers)
 local plateOn = {}        -- area -> whether the plate is shown
+local plateFills = {}     -- area -> the fill's textures (the regions Theme.AddRoundedFill made on the plate)
+local plateRings = {}     -- area -> the ring and the glow (the regions Theme.SkinButton made on the plate)
+local fillOn, ringOn = {}, {}   -- area -> whether that part is shown
 local occupant = {}       -- area -> the record shown there
 local changedCallbacks = {}
 local pieceFrame, built, lastSnapshot, classToken
@@ -144,17 +159,51 @@ local function PlateOpacity()
     return math.min(def.max, math.max(def.min, v)) / 100
 end
 
--- Shows the plate behind a real class module at the setting's opacity, hides it for anything else and at 0. Plain
--- frames only, so it is legal in combat; run from Refresh (an occupant changed) and from the setting's OnChange.
+-- A part switch: on unless the stored value is exactly false (a hand edited string or number reads as the default, on).
+local function PlatePartOn(def)
+    local v = FS.Config and FS.Config.Get and FS.Config.Get(def.key)
+    return v ~= false
+end
+
+local function ShowRegions(list, on)
+    for i = 1, #list do
+        if on then list[i]:Show() else list[i]:Hide() end
+    end
+end
+
+-- The alert scale as a fraction of 1 (0.5 to 2), for the pop up class alerts: a number clamped into its range, anything
+-- else (a string, NaN) the default. Not drawn here; a module that scales an alert reads it on build, on a rescale and from
+-- Config.OnChange(Areas.ALERT_SCALE_KEY).
+function Areas.AlertScale()
+    local def = SETTINGS.alertScale
+    local v = FS.Config and FS.Config.Get and FS.Config.Get(def.key)
+    if type(v) ~= "number" or v ~= v then v = def.default end
+    return math.min(def.max, math.max(def.min, v)) / 100
+end
+
+-- Shows the plate behind a real class module at the setting's opacity, hides it for anything else, at 0 and with the
+-- Background and Border switches both off. Each switch hides just its part: the fill, or the ring and its glow. Plain
+-- frames and regions only, so it is legal in combat; run from Refresh (an occupant changed) and from the settings' OnChange.
 local function ApplyPlates()
     if not built then return end
     local opacity = PlateOpacity()
+    local bgOn, borderOn = PlatePartOn(SETTINGS.bg), PlatePartOn(SETTINGS.border)
     for _, area in ipairs(AREA_NAMES) do
         local plate = plates[area]
         if plate then
             local record = occupant[area]
-            local want = opacity > 0 and record ~= nil and record.id == "class"
-            if want then plate:SetAlpha(opacity) end
+            local want = opacity > 0 and record ~= nil and record.id == "class" and (bgOn or borderOn)
+            if want then
+                plate:SetAlpha(opacity)
+                if fillOn[area] ~= bgOn then
+                    fillOn[area] = bgOn
+                    ShowRegions(plateFills[area], bgOn)
+                end
+                if ringOn[area] ~= borderOn then
+                    ringOn[area] = borderOn
+                    ShowRegions(plateRings[area], borderOn)
+                end
+            end
             if plateOn[area] ~= want then
                 plateOn[area] = want
                 if want then plate:Show() else plate:Hide() end
@@ -336,7 +385,9 @@ function Areas.Plate(area)
     return plates[area]
 end
 
-if FS.Config and FS.Config.OnChange then FS.Config.OnChange(SETTINGS.background.key, ApplyPlates) end
+if FS.Config and FS.Config.OnChange then
+    for _, name in ipairs({ "background", "bg", "border" }) do FS.Config.OnChange(SETTINGS[name].key, ApplyPlates) end
+end
 
 Gunsight.OnAreaChanged(function() Refresh(true) end)
 
@@ -364,7 +415,18 @@ local function BuildPlate(area)
     if type(level) == "number" then plate:SetFrameLevel(level) end   -- a new child is host + 1, the level of a module frame
     local bg = Theme.COLOR_BG
     Theme.AddRoundedFill(plate, { bg[1], bg[2], bg[3], 1 }, PLATE_CHAMFER)
-    Theme.SkinButton(plate, { chamfer = PLATE_CHAMFER, glowAlpha = PLATE_GLOW_ALPHA, borderColor = Theme.COLOR_POWER })
+    -- the plate has no other region yet, so these are the fill's own textures: the Background switch hides them
+    local fills = {}
+    if plate.GetRegions then
+        fills = { plate:GetRegions() }
+        if #fills == 0 then LogOnce("fill", "the plate's fill has no regions to hide, the Background switch will do nothing") end
+    end
+    local skin = Theme.SkinButton(plate, { chamfer = PLATE_CHAMFER, glowAlpha = PLATE_GLOW_ALPHA, borderColor = Theme.COLOR_POWER })
+    local rings = {}
+    if skin and skin.glow then rings[#rings + 1] = skin.glow end
+    if skin and skin.border and skin.border.ring then rings[#rings + 1] = skin.border.ring end
+    plateFills[area], plateRings[area] = fills, rings
+    fillOn[area], ringOn[area] = true, true
     plate:Hide()
     plates[area] = plate
     plateOn[area] = false
