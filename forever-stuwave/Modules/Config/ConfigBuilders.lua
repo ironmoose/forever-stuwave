@@ -637,6 +637,36 @@ local function PaintSlider(track, lo, hi, value)
     if x > 0 then track.fsFill:SetWidth(x) end
 end
 
+-- One slider edit box has the keyboard at a time. A click anywhere else in the window or on the screen lets go of it, so the
+-- movement keys work again at once: a catcher behind the window takes clicks outside it, the window's own background takes
+-- clicks inside it, and hiding the window ends it.
+function I.SliderFocused(edit, lost)
+    if edit then
+        if I.sliderFocus and I.sliderFocus ~= edit then I.sliderFocus:ClearFocus() end
+        I.sliderFocus = edit
+        local win = ui.frame
+        if win and not I.focusCatcher then
+            local catcher = CreateFrame("Button", nil, UIParent)
+            catcher:SetAllPoints(UIParent)
+            catcher:EnableMouse(true)
+            catcher:RegisterForClicks("AnyDown", "AnyUp")
+            catcher:SetScript("OnClick", function() if I.sliderFocus then I.sliderFocus:ClearFocus() end end)
+            I.focusCatcher = catcher
+            win:HookScript("OnMouseDown", function() if I.sliderFocus then I.sliderFocus:ClearFocus() end end)
+            win:HookScript("OnHide", function() if I.sliderFocus then I.sliderFocus:ClearFocus() end end)
+        end
+        local catcher = I.focusCatcher
+        if catcher and win then
+            catcher:SetFrameStrata(win:GetFrameStrata() or "DIALOG")
+            catcher:SetFrameLevel(math.max(0, (win:GetFrameLevel() or 1) - 1))
+            catcher:Show()
+        end
+    elseif I.sliderFocus == lost then
+        I.sliderFocus = nil
+        if I.focusCatcher then I.focusCatcher:Hide() end
+    end
+end
+
 -- {label, key, get, set, min, max, step, fmt, tip}: a thin track with a cyan fill, a slab thumb and a mono readout.
 -- `fmt` is a format string or a function of the value. Click or drag the track, or use the mouse wheel. A step of 0.5
 -- and a format with no unit both work.
@@ -644,13 +674,33 @@ function UI.Slider(content, o)
     local lo, hi = o.min or 0, o.max or 100
     local step = (o.step and o.step > 0) and o.step or 1
     local row = NewRow(content, o, "slider")
-    local box = CreateFrame("Frame", nil, row)      -- the value box (the typed value ticket makes it an edit box)
+    -- The value box: a mono cyan edit box with the unit beside the number, outside the editable text.
+    local box = CreateFrame("Frame", nil, row)
     box:SetSize(S.VALUE_W, S.VALUE_H)
     box:SetPoint("RIGHT", row, "RIGHT", 0, 0)
     row.fsValueBox = box
+    local fill = box:CreateTexture(nil, "BACKGROUND")
+    fill:SetColorTexture(C.track[1], C.track[2], C.track[3], 1)
+    fill:SetAllPoints(box)
+    local edges = Outline(box, C.line, 1)
+    local unit = Label(box, "", S.TEXT, C.muted)
+    unit:SetPoint("RIGHT", box, "RIGHT", -6, 0)
+    unit:SetJustifyH("RIGHT")
+    row.fsUnit = unit
+    local edit = CreateFrame("EditBox", nil, box)
+    edit:SetPoint("LEFT", box, "LEFT", 6, 0)
+    edit:SetPoint("RIGHT", unit, "LEFT", -2, 0)
+    edit:SetHeight(S.VALUE_H - 4)
+    edit:SetFont(Theme.FONT_MONO, S.TEXT, "")
+    edit:SetTextColor(C.cyan[1], C.cyan[2], C.cyan[3], 1)
+    edit:SetJustifyH("RIGHT")
+    edit:SetAutoFocus(false)
+    edit:SetMaxLetters(12)
+    edit.fsSlider = true
+    row.fsEdit = edit
+    -- the full formatted text ("6 px", "80%"), kept for readers of the row; it is not drawn
     local readout = Label(box, "", S.TEXT, C.cyan)
-    readout:SetPoint("RIGHT", box, "RIGHT", -6, 0)
-    readout:SetJustifyH("RIGHT")
+    readout:Hide()
     row.fsReadout = readout
 
     local track = CreateFrame("Button", nil, row)
@@ -681,7 +731,14 @@ function UI.Slider(content, o)
         value = math.min(hi, math.max(lo, value))
         local text = o.fmt
         if type(text) == "function" then text = text(value) else text = (text or "%s"):format(value) end
-        readout:SetText(tostring(text))
+        text = tostring(text)
+        readout:SetText(text)
+        -- the number goes in the edit box, whatever surrounds it in the format (a unit, a bracket) beside it
+        local number = tostring(value)
+        local at = text:find(number, 1, true)
+        local rest = at and (text:sub(1, at - 1) .. text:sub(at + #number)) or ""
+        unit:SetText((rest:gsub("^%s+", ""):gsub("%s+$", "")))
+        if not edit:HasFocus() then edit:SetText(number) end
         PaintSlider(track, lo, hi, value)
         return value
     end
@@ -702,6 +759,78 @@ function UI.Slider(content, o)
         local fraction = CursorFraction(track)
         if fraction then Commit(SliderValue(lo, hi, step, fraction)) end
     end
+    -- ---- typed values -------------------------------------------------------------------------------------------
+    local function Flash()
+        box.fsFlash = true
+        for _, t in ipairs(edges) do Tint(t, C.pink) end
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0.4, function()
+                box.fsFlash = false
+                local color = edit:HasFocus() and C.cyan or C.line
+                for _, t in ipairs(edges) do Tint(t, color) end
+            end)
+        end
+    end
+    local function Seat(value) edit:SetText(tostring(value)) end
+    -- Parses what was typed. A number is clamped to the range and snapped to the step (pink when it had to move); text
+    -- that is not a number puts the old value back (pink).
+    local function Enter(text)
+        local typed = tonumber((tostring(text or ""):gsub("[%s,]", "")))
+        local current = ReadValue(o)
+        if not typed then
+            Flash()
+            Refresh()
+            return
+        end
+        local clamped = math.min(hi, math.max(lo, typed))
+        if clamped ~= typed then Flash() end
+        local snapped = SliderValue(lo, hi, step, hi > lo and (clamped - lo) / (hi - lo) or 0)
+        if snapped ~= current then Commit(snapped) end
+        Refresh()
+    end
+    local function Release() edit:ClearFocus() end
+    edit:SetScript("OnEditFocusGained", function(self)
+        for _, t in ipairs(edges) do Tint(t, C.cyan) end
+        self:HighlightText()
+        I.SliderFocused(self)
+    end)
+    edit:SetScript("OnEditFocusLost", function(self)
+        for _, t in ipairs(edges) do Tint(t, box.fsFlash and C.pink or C.line) end
+        self:HighlightText(0, 0)
+        I.SliderFocused(nil, self)
+        if self.fsEscaped then
+            self.fsEscaped = nil
+            Refresh()
+        elseif self.fsEntered then
+            self.fsEntered = nil
+        else
+            Enter(self:GetText())
+        end
+    end)
+    edit:SetScript("OnEnterPressed", function(self)
+        self.fsEntered = true
+        local text = self:GetText()
+        self:ClearFocus()
+        Enter(text)
+    end)
+    edit:SetScript("OnEscapePressed", function(self)
+        self.fsEscaped = true
+        self:ClearFocus()
+    end)
+    edit:SetScript("OnTabPressed", function(self) self:ClearFocus() end)
+    edit:SetScript("OnArrowPressed", function(self, key)
+        if key ~= "UP" and key ~= "DOWN" then return end
+        if not track:IsEnabled() then return end
+        local jump = (I.ShiftHeld() and 10 or 1) * step
+        local typed = tonumber((tostring(self:GetText() or ""):gsub("[%s,]", ""))) or ReadValue(o) or lo
+        local value = math.min(hi, math.max(lo, typed + (key == "UP" and jump or -jump)))
+        local snapped = SliderValue(lo, hi, step, hi > lo and (value - lo) / (hi - lo) or 0)
+        Seat(snapped)
+        Commit(snapped)
+    end)
+    edit:SetScript("OnHide", function(self) self:ClearFocus() end)
+    row.fsReleaseFocus = Release
+
     track:SetScript("OnMouseDown", function(self, button)
         if button ~= "LeftButton" or not self:IsEnabled() then return end
         self.fsDragging = true
@@ -726,6 +855,8 @@ function UI.Slider(content, o)
         Refresh()
         local on = Writable() and not I.RowOff(track)
         if on then track:Enable() else track:Disable() end
+        edit:EnableMouse(on)
+        if not on then edit:ClearFocus() end
         row:SetAlpha(on and 1 or 0.4)                    -- the label and the readout dim with the track
     end)
     I.AttachChanged(row, track)

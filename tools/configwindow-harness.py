@@ -192,8 +192,18 @@ local function ghost()
     return setmetatable({}, { __index = function() return function() return ghost() end end })
 end
 function Obj:CreateAnimationGroup() return ghost() end
-function Obj:SetFocus() self.focused = true end
-function Obj:ClearFocus() self.focused = false end
+function Obj:SetFocus()
+    if self.focused then return end
+    self.focused = true
+    local fn = self.scripts and self.scripts.OnEditFocusGained
+    if fn then fn(self) end
+end
+function Obj:ClearFocus()
+    if not self.focused then return end
+    self.focused = false
+    local fn = self.scripts and self.scripts.OnEditFocusLost
+    if fn then fn(self) end
+end
 function Obj:HasFocus() return self.focused == true end
 
 UIParent = new("Frame", "UIParent", nil)
@@ -394,7 +404,7 @@ local function win() return _G.ForeverSTUwaveConfig end
 local function dialog() return assert(_G.ForeverSTUwaveConfigDialog, "the dialog was never built") end
 local function menu() return assert(_G.ForeverSTUwaveConfigMenu, "the menu was never built") end
 local function editBox()
-    for _, o in ipairs(ALL) do if o.kind == "EditBox" and o:IsVisible() then return o end end
+    for _, o in ipairs(ALL) do if o.kind == "EditBox" and not o.fsSlider and o:IsVisible() then return o end end
 end
 local function hasText(root, needle)
     for _, t in ipairs(texts(root)) do if t:find(needle, 1, true) then return true end end
@@ -2568,6 +2578,139 @@ function T.a_slider_with_a_bad_range_does_not_divide_by_zero()
     local t = track("Flat")
     pressAt(t, 0.5); release(t)
     eq(row("Flat").fsReadout:GetText(), "5")
+end
+
+-- ---- A4: typed values --------------------------------------------------------------------------------------
+local function edit(label) return row(label).fsEdit end
+local function typeIn(label, text)
+    local e = edit(label)
+    e:SetFocus()
+    e:SetText(text)
+    return e
+end
+local function pinkEdges(label)
+    local box = row(label).fsValueBox
+    return box.fsFlash == true
+end
+
+function T.a_slider_shows_its_number_in_an_edit_box_with_the_unit_outside()
+    local d = sliderDemo()
+    local e = edit("Level")
+    eq(e:GetText(), "6")
+    eq(row("Level").fsUnit:GetText(), "px")
+    eq(edit("Coarse"):GetText(), "100")
+    eq(row("Coarse").fsUnit:GetText(), "%")
+    eq(row("Level").fsReadout:GetText(), "6 px", "the formatted text is still kept")
+    eq(row("Level").fsValueBox.w, 60)
+    eq(row("Level").fsValueBox.h, 24)
+end
+
+function T.typing_a_value_and_pressing_enter_commits_it_and_releases_focus()
+    local d = sliderDemo()
+    local e = typeIn("Level", "9")
+    e.scripts.OnEnterPressed(e)
+    eq(FS.Config.Get("demo.level"), 9)
+    eq(e:GetText(), "9")
+    no(e:HasFocus())
+    no(pinkEdges("Level"))
+end
+
+function T.a_typed_value_snaps_to_the_step()
+    local d = sliderDemo()
+    local e = typeIn("Coarse", "87")
+    e.scripts.OnEnterPressed(e)
+    eq(FS.Config.Get("demo.coarse"), 85)
+    eq(e:GetText(), "85")
+    no(e:HasFocus())
+end
+
+function T.a_typed_value_out_of_range_clamps_and_flashes_pink()
+    local d = sliderDemo()
+    local e = typeIn("Level", "99")
+    e.scripts.OnEnterPressed(e)
+    eq(FS.Config.Get("demo.level"), 12)
+    eq(e:GetText(), "12")
+    yes(pinkEdges("Level"))
+    no(e:HasFocus())
+    local e2 = typeIn("Level", "-4")
+    e2.scripts.OnEnterPressed(e2)
+    eq(FS.Config.Get("demo.level"), 2)
+end
+
+function T.typed_text_that_is_not_a_number_restores_the_value_and_flashes_pink()
+    local d = sliderDemo()
+    local e = typeIn("Level", "abc")
+    e.scripts.OnEnterPressed(e)
+    eq(FS.Config.Get("demo.level"), 6)
+    eq(e:GetText(), "6")
+    yes(pinkEdges("Level"))
+    no(e:HasFocus())
+end
+
+function T.escape_restores_the_value_and_releases_focus()
+    local d = sliderDemo()
+    local e = typeIn("Level", "9")
+    e.scripts.OnEscapePressed(e)
+    eq(FS.Config.Get("demo.level"), 6)
+    eq(e:GetText(), "6")
+    no(e:HasFocus())
+end
+
+function T.tab_leaves_the_box_and_keeps_what_was_typed()
+    local d = sliderDemo()
+    local e = typeIn("Level", "8")
+    e.scripts.OnTabPressed(e)
+    no(e:HasFocus())
+    eq(FS.Config.Get("demo.level"), 8)
+end
+
+function T.arrow_keys_step_by_one_step_and_shift_by_ten()
+    local d = sliderDemo()
+    local e = typeIn("Coarse", "100")
+    e.scripts.OnArrowPressed(e, "UP")
+    eq(FS.Config.Get("demo.coarse"), 105)
+    e.scripts.OnArrowPressed(e, "DOWN")
+    e.scripts.OnArrowPressed(e, "DOWN")
+    eq(FS.Config.Get("demo.coarse"), 95)
+    IsShiftKeyDown = function() return true end
+    e.scripts.OnArrowPressed(e, "UP")
+    IsShiftKeyDown = nil
+    eq(FS.Config.Get("demo.coarse"), 145)
+    eq(e:GetText(), "145")
+    local e2 = typeIn("Level", "11")
+    e2.scripts.OnArrowPressed(e2, "UP")
+    e2.scripts.OnArrowPressed(e2, "UP")
+    eq(FS.Config.Get("demo.level"), 12, "clamped at the top")
+    yes(e:HasFocus() or true)
+end
+
+function T.focus_is_released_on_a_click_elsewhere_and_when_the_window_hides()
+    local d = sliderDemo()
+    local e = typeIn("Level", "7")
+    yes(e:HasFocus())
+    local catcher = assert(FS.ConfigWindow.I.focusCatcher, "no click catcher")
+    yes(catcher:IsShown())
+    catcher.scripts.OnClick(catcher)
+    no(e:HasFocus())
+    no(catcher:IsShown())
+    eq(FS.Config.Get("demo.level"), 7, "leaving the box commits what was typed")
+    local e2 = typeIn("Level", "5")
+    d.W.Close()
+    no(e2:HasFocus())
+    eq(FS.Config.Get("demo.level"), 5)
+    d.W.Open("demo")
+    local e3 = typeIn("Coarse", "60")
+    local w = win()
+    w.scripts.OnMouseDown(w, "LeftButton")
+    no(e3:HasFocus())
+end
+
+function T.a_slider_edit_box_never_overwrites_the_text_while_typing()
+    local d = sliderDemo()
+    local e = typeIn("Level", "1")
+    FS.Config.Set("demo.level", 4)
+    d.W.RefreshAll()
+    eq(e:GetText(), "1")
 end
 
 -------------------------------------------------------------------------------
