@@ -1344,19 +1344,23 @@ end
 -- taint) and re-pins every anchor the way that override does, so the corner the player placed stays put; Blizzard's own anchor
 -- pass divides its offsets by the frame's scale, so a later re-seat agrees. A write to the scale waits for the end of combat.
 --
--- Width and Height are on the page but nothing applies them: the container's width is fixed by its modules and its height is
--- Edit Mode's own (400 to 1000, only off the default seat), and neither may be written without the taint path the file header
--- rules out. Their keys, ranges and defaults are kept so the rows exist; the page says why they are locked.
+-- Height is the game's own Edit Mode setting for the objective tracker (400 to 1000 by 10, the game's default 800; the
+-- prototype's 120 to 800 is not something Edit Mode accepts), written into the active Edit Mode layout through TrackerSeat:
+-- never a size on the tracker frame, which the file header rules out. The game only uses it once the tracker has been moved
+-- off its default seat, so a height is written for a moved tracker only (a Seat.Move carries it along otherwise), out of
+-- combat (held until PLAYER_REGEN_ENABLED), and not at all while the setting holds its default and was never changed: the
+-- layout keeps whatever height Edit Mode gave it. Width stays locked: Edit Mode has no width setting for this tracker and its
+-- width is fixed by its modules; the page says why.
 FS.Tracker = FS.Tracker or {}
 local SIZE = {
     w = { key = "tracker.w", min = 180, max = 500, step = 1, default = FS.Layout and FS.Layout.tracker and FS.Layout.tracker.w or 270 },
-    h = { key = "tracker.h", min = 120, max = 800, step = 1, default = FS.Layout and FS.Layout.tracker and FS.Layout.tracker.h or 320 },
+    h = { key = "tracker.h", min = 400, max = 1000, step = 10, default = 800 }, -- TrackerSeat.HEIGHT: what Edit Mode accepts
     scale = { key = "tracker.scale", min = 50, max = 200, step = 5, default = 100 },
     alpha = { key = "tracker.alpha", min = 10, max = 100, step = 5, default = 100 },
     bgAlpha = { key = "tracker.bgAlpha", min = 0, max = 100, step = 1, default = 80 }, -- COLOR_BG's alpha, in percent
 }
 FS.Tracker.SIZE = SIZE
-FS.Tracker.SIZE_LOCKED = "The tracker's width and height are set by the game's own tracker, which this addon may not resize."
+FS.Tracker.SIZE_LOCKED = "The game's Edit Mode has a Height for the tracker but no Width, and this addon may not resize the game's tracker itself."
 
 -- The setting held to its range; the default for anything that is not a plain number.
 local function SizeValue(spec)
@@ -1423,6 +1427,34 @@ local function ApplySizeSettings()
     ApplyScale()
 end
 
+-- The height the setting asks for, or nil while it holds its default (nothing stored: Edit Mode's own height stays).
+-- TrackerSeat.Move asks for it too, so a move writes it in the same save.
+function FS.Tracker.WantedHeight()
+    local config = FS.Config
+    if not (config and config.IsStored and config.IsStored(SIZE.h.key)) then return nil end
+    return SizeValue(SIZE.h)
+end
+
+-- `forced` is the player's own change of the row (it writes even the default, putting 800 back); the login and layout events
+-- write only a stored height. heightPending holds a write back from combat or from layouts that are not readable yet;
+-- heightSynced says the login pass reached an answer, after which a layout the player saves in Edit Mode is theirs again.
+local heightPending, heightForced, heightSynced = false, false, false
+local function ApplyHeight(forced)
+    local seat = FS.TrackerSeat
+    if not (seat and seat.SetHeight) then return end
+    local want = forced and SizeValue(SIZE.h) or FS.Tracker.WantedHeight()
+    if not want then
+        heightSynced = true
+        return
+    end
+    local _, _, wait = seat.SetHeight(want)
+    if wait then
+        heightPending, heightForced = true, heightForced or forced == true
+    else
+        heightPending, heightForced, heightSynced = false, false, true
+    end
+end
+
 if FS.Config and FS.Config.RegisterDefault then
     for _, spec in pairs(SIZE) do FS.Config.RegisterDefault(spec.key, spec.default) end
 end
@@ -1451,15 +1483,27 @@ local function Start()
         FS.Config.OnChange(SIZE.bgAlpha.key, Guard(ApplyBackground))
         FS.Config.OnChange(SIZE.alpha.key, Guard(ApplyOpacity))
         FS.Config.OnChange(SIZE.scale.key, Guard(ApplyScale))
+        FS.Config.OnChange(SIZE.h.key, Guard(function() ApplyHeight(true) end))
     end
 
-    -- The profile loads after the files run: apply what it holds at login, and a scale held back in combat when it ends.
+    -- The profile loads after the files run: apply what it holds at login, and a scale or height held back in combat when it
+    -- ends. Edit Mode's layouts may not be readable at PLAYER_LOGIN, so the height asks again when they arrive (and on
+    -- entering the world) until one pass has an answer.
     local sizeWatcher = CreateFrame("Frame")
     sizeWatcher:RegisterEvent("PLAYER_LOGIN")
     sizeWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+    sizeWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+    pcall(sizeWatcher.RegisterEvent, sizeWatcher, "EDIT_MODE_LAYOUTS_UPDATED")
     sizeWatcher:SetScript("OnEvent", Guard(function(_, event)
-        if event == "PLAYER_REGEN_ENABLED" and not scalePending then return end
-        ApplySizeSettings()
+        if event == "PLAYER_REGEN_ENABLED" then
+            if scalePending then ApplySizeSettings() end
+            if heightPending then ApplyHeight(heightForced) end
+        elseif event == "PLAYER_LOGIN" then
+            ApplySizeSettings()
+            ApplyHeight(false)
+        elseif not heightSynced then
+            ApplyHeight(false)
+        end
     end))
 
     FS.PanelSkins.DeferCombat(Apply, "m.track")

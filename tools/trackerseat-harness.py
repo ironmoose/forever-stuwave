@@ -11,7 +11,12 @@ never by anchoring the tracker. These checks pin that:
   * a full set of account layouts and combat both refuse with a reason and save nothing;
   * reset restores the preset's anchor and default seat, and a preset has nothing to reset;
   * the tracker frame itself is never anchored;
-  * while Questie's tracker is on, Blizzard's is hidden, so there is no seat to show or move.
+  * while Questie's tracker is on, Blizzard's is hidden, so there is no seat to show or move;
+  * the tracker's Height (Edit Mode's own setting, 400 to 1000 in steps of 10, stored as (height - 400) / 10) is written
+    into the active layout in place, never copying a preset and never anchoring the frame; it snaps to the step and clamps
+    to the range; it is refused while the tracker sits in its default seat (the game ignores it there) and held, with a
+    "wait" answer, in combat, before the layouts are loaded or without Edit Mode; a Move writes the height the player's
+    setting asks for in the same save.
 
     python3 tools/trackerseat-harness.py
 
@@ -39,6 +44,7 @@ __touched = 0
 Enum = {
     EditModeSystem = { ActionBar = 0, ObjectiveTracker = 12 },
     EditModeLayoutType = { Preset = 0, Account = 1, Character = 2 },
+    EditModeObjectiveTrackerSetting = { Height = 0, Opacity = 1, TextSize = 2 },
 }
 Constants = { EditModeConsts = { EditModeMaxLayoutsPerType = 5 } }
 
@@ -48,9 +54,12 @@ function CopyTable(t)
     return c
 end
 
+-- The tracker carries the three settings the game's own layouts do (Height 40 is 800 on screen, Opacity and Text size raw 0).
 local function system(id, x, y, default)
-    return { system = id, isInDefaultPosition = default,
+    local s = { system = id, isInDefaultPosition = default,
         anchorInfo = { point = "TOPRIGHT", relativeTo = "UIParent", relativePoint = "TOPRIGHT", offsetX = x, offsetY = y } }
+    if id == 12 then s.settings = { { setting = 0, value = 40 }, { setting = 1, value = 0 }, { setting = 2, value = 0 } } end
+    return s
 end
 local function preset(name)
     return { layoutName = name, layoutType = 0,
@@ -88,8 +97,8 @@ UIParent = setmetatable({ _scale = 1, _l = 0, _t = 1440, _w = 2560, _h = 1440 },
 -- The tracker at scale 0.8 of UIParent: its own units are 1.25x larger in number.
 ObjectiveTrackerFrame = setmetatable({ _scale = 0.8, _l = 2800, _t = 1425, _w = 300, _h = 250 }, Frame)
 
-function __load(src)
-    FS = {}
+function __load(src, pre)
+    FS = pre or {}
     assert(load(src, "@TrackerSeat.lua"))("forever-stuwave", FS)
     return FS.TrackerSeat
 end
@@ -106,9 +115,18 @@ end
 local function tracker(layout)
     for _, s in ipairs(layout.systems) do if s.system == 12 then return s end end
 end
-local function account(name)
+local function account(name, moved)
     return { layoutName = name, layoutType = 1, systems = { { system = 0, isInDefaultPosition = false, anchorInfo = { offsetX = 5 } },
-        { system = 12, isInDefaultPosition = true, anchorInfo = { point = "TOPRIGHT", relativeTo = "UIParent", relativePoint = "TOPRIGHT", offsetX = -110, offsetY = -260 } } } }
+        { system = 12, isInDefaultPosition = not moved, anchorInfo = { point = "TOPRIGHT", relativeTo = "UIParent", relativePoint = "TOPRIGHT", offsetX = -110, offsetY = -260 },
+          settings = { { setting = 0, value = 40 }, { setting = 1, value = 0 }, { setting = 2, value = 0 } } } } }
+end
+local function heightOf(layout)
+    for _, s in ipairs(tracker(layout).settings) do if s.setting == 0 then return s.value end end
+end
+-- An account layout with the tracker moved off its default seat, active.
+local function movedLayout(name)
+    __saved_layouts = { account(name or "Mine", true) }
+    __active = 3
 end
 
 function T.ready_with_the_edit_mode_api()
@@ -256,6 +274,176 @@ function T.questie_active_is_read_each_time_not_remembered()
     eq(seat.Ready(), false)
     on = false
     eq(seat.Ready(), true)
+end
+
+
+-- ---- the tracker's Height ---------------------------------------------------------------------------------------------
+
+function T.the_height_range_is_what_edit_mode_accepts()
+    local h = __load(__src).HEIGHT
+    eq(h.min, 400); eq(h.max, 1000); eq(h.step, 10); eq(h.default, 800, "the game's own layouts store 40, which is 800")
+end
+
+function T.the_height_reads_back_in_screen_units()
+    movedLayout()
+    local seat = __load(__src)
+    eq(seat.Height(), 800)
+    __saved_layouts[1].systems[2].settings[1].value = 50
+    eq(seat.Height(), 900)
+end
+
+function T.moved_is_false_on_a_preset_and_on_a_default_seat_and_true_once_it_is_moved()
+    local seat = __load(__src)
+    eq(seat.Moved(), false, "a preset keeps the tracker in its default seat")
+    __saved_layouts = { account("Mine", false) }
+    __active = 3
+    eq(seat.Moved(), false, "an account layout whose tracker was never moved")
+    movedLayout()
+    eq(seat.Moved(), true)
+    __active = 1
+    __saved_layouts = {}
+    seat.Move(-29, -286)
+    eq(seat.Moved(), true, "a move copies the preset and takes the tracker off its default seat")
+end
+
+function T.moved_is_unknown_while_the_layouts_are_not_loaded_or_edit_mode_is_missing()
+    local seat = __load(__src)
+    C_EditMode.GetLayouts = function() return nil end
+    eq(seat.Moved(), nil, "no layouts yet")
+    C_EditMode = nil
+    eq(seat.Moved(), nil, "no Edit Mode")
+end
+
+function T.a_height_on_a_moved_account_layout_is_written_in_place_as_the_raw_value()
+    movedLayout()
+    local seat = __load(__src)
+    eq(seat.SetHeight(900), true)
+    eq(#__saved, 1)
+    local info = __saved[1]
+    eq(#info.layouts, 3, "no layout was copied")
+    eq(info.activeLayout, 3); eq(__activated[1], 3)
+    eq(heightOf(info.layouts[3]), 50, "(900 - 400) / 10")
+    local t = tracker(info.layouts[3])
+    eq(t.isInDefaultPosition, false, "the seat is untouched")
+    eq(t.anchorInfo.offsetX, -110)
+    eq(#t.settings, 3, "no setting was added")
+    eq(t.settings[2].value, 0, "opacity is untouched"); eq(t.settings[3].value, 0, "text size is untouched")
+    eq(info.layouts[3].systems[1].anchorInfo.offsetX, 5, "the other system is untouched")
+    eq(__touched, 0, "the tracker frame is never anchored")
+end
+
+function T.a_height_snaps_to_the_step_and_clamps_to_the_range()
+    movedLayout()
+    local seat = __load(__src)
+    seat.SetHeight(855); eq(heightOf(__saved[#__saved].layouts[3]), 46, "855 rounds to 860")
+    seat.SetHeight(851); eq(heightOf(__saved[#__saved].layouts[3]), 45, "851 rounds to 850")
+    seat.SetHeight(5000); eq(heightOf(__saved[#__saved].layouts[3]), 60, "above the range is 1000")
+    seat.SetHeight(100); eq(heightOf(__saved[#__saved].layouts[3]), 0, "below the range is 400")
+    local n = #__saved
+    for _, junk in ipairs({ "tall", 0 / 0, 1 / 0, true }) do
+        local ok, why, wait = seat.SetHeight(junk)
+        eq(ok, false, "junk " .. tostring(junk)); eq(type(why), "string"); eq(wait, nil)
+    end
+    eq(#__saved, n, "junk saves nothing")
+end
+
+function T.an_unchanged_height_saves_nothing()
+    movedLayout()
+    local seat = __load(__src)
+    eq(seat.SetHeight(800), true, "it is already 800")
+    eq(#__saved, 0)
+    seat.SetHeight(900); seat.SetHeight(900)
+    eq(#__saved, 1, "the second write of the same value is not saved again")
+end
+
+function T.a_height_on_a_preset_or_a_default_seat_is_refused_for_good_and_copies_nothing()
+    local seat = __load(__src)
+    local ok, why, wait = seat.SetHeight(900)
+    eq(ok, false); eq(why:find("default seat") ~= nil, true, why); eq(wait, nil, "moving the tracker is the player's step, not a wait")
+    eq(#__saved, 0, "a preset is not copied for a slider")
+    __saved_layouts = { account("Mine", false) }
+    __active = 3
+    ok, why = seat.SetHeight(900)
+    eq(ok, false); eq(why:find("default seat") ~= nil, true, why)
+    eq(#__saved, 0)
+end
+
+function T.a_height_is_held_in_combat_before_the_layouts_load_and_without_edit_mode_and_says_to_wait()
+    movedLayout()
+    local seat = __load(__src)
+    __combat = true
+    local ok, why, wait = seat.SetHeight(900)
+    eq(ok, false); eq(why:find("combat") ~= nil, true, why); eq(wait, true)
+    __combat = false
+    local get = C_EditMode.GetLayouts
+    C_EditMode.GetLayouts = function() return nil end
+    ok, why, wait = seat.SetHeight(900)
+    eq(ok, false); eq(why:find("loaded") ~= nil, true, why); eq(wait, true)
+    C_EditMode.GetLayouts = get
+    C_EditMode.SaveLayouts = nil
+    ok, why, wait = seat.SetHeight(900)
+    eq(ok, false); eq(why:find("not available") ~= nil, true, why); eq(wait, true)
+    eq(#__saved, 0, "nothing was saved")
+end
+
+function T.questie_and_a_module_that_is_off_refuse_the_height_without_waiting()
+    movedLayout()
+    local seat = __load(__src)
+    FS.QuestieCompat = { TrackerActive = function() return true end }
+    local ok, why, wait = seat.SetHeight(900)
+    eq(ok, false); eq(why:find("Questie") ~= nil, true, why); eq(wait, nil)
+    eq(seat.Moved(), nil, "no seat to read while Questie has the tracker")
+    FS.QuestieCompat = nil
+    local off = __load(__src, { ModuleSwitch = { On = function() return false end } })
+    ok, why, wait = off.SetHeight(900)
+    eq(ok, false); eq(why:find("module is off") ~= nil, true, why); eq(wait, nil)
+    eq(off.Moved(), nil)
+    eq(#__saved, 0)
+end
+
+function T.a_client_without_the_height_setting_refuses_it()
+    movedLayout()
+    Enum.EditModeObjectiveTrackerSetting = nil
+    local ok, why, wait = __load(__src).SetHeight(900)
+    eq(ok, false); eq(type(why), "string"); eq(wait, nil)
+    eq(#__saved, 0)
+end
+
+function T.a_layout_with_no_height_entry_or_no_settings_list_gets_one()
+    movedLayout()
+    local t = tracker(__saved_layouts[1])
+    t.settings = { { setting = 1, value = 0 } }
+    local seat = __load(__src)
+    seat.SetHeight(900)
+    local got = tracker(__saved[1].layouts[3]).settings
+    eq(#got, 2); eq(heightOf(__saved[1].layouts[3]), 50, "an entry was added")
+    eq(got[1].setting, 1); eq(got[1].value, 0, "the opacity entry stays")
+    t = tracker(__saved_layouts[1])
+    t.settings = nil
+    seat.SetHeight(950)
+    eq(heightOf(__saved[2].layouts[3]), 55, "a list was made")
+end
+
+function T.a_move_writes_the_height_the_setting_asks_for_in_the_same_save()
+    FS = nil
+    local seat = __load(__src, { Tracker = { WantedHeight = function() return 900 end } })
+    eq(seat.Move(-29, -286), true)
+    eq(#__saved, 1, "one save for the seat and the height")
+    local new = __saved[1].layouts[3]
+    eq(tracker(new).isInDefaultPosition, false)
+    eq(heightOf(new), 50)
+end
+
+function T.a_move_leaves_the_layouts_height_alone_when_the_setting_holds_its_default()
+    local seat = __load(__src, { Tracker = { WantedHeight = function() return nil end } })
+    eq(seat.Move(-29, -286), true)
+    eq(heightOf(__saved[1].layouts[3]), 40, "the preset's own height stays")
+    local bare = __load(__src)
+    bare.Move(-30, -290)
+    eq(heightOf(__saved[2].layouts[3]), 40, "and with no Tracker module at all")
+    local broken = __load(__src, { Tracker = { WantedHeight = function() error("boom") end } })
+    eq(broken.Move(-31, -291), true, "a throwing setting read does not stop the move")
+    eq(heightOf(__saved[3].layouts[3]), 40)
 end
 
 __checks = T

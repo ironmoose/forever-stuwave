@@ -3,6 +3,7 @@
 -- frame manager places, so addon code never anchors it. A move is written into the active Edit
 -- Mode layout instead, and Blizzard applies that layout itself. A preset layout (Modern, Classic)
 -- cannot be edited, so the first move copies it to an account layout named "STUwave".
+-- The tracker's Height (Edit Mode's own slider, 400 to 1000) goes through the same layout: Moved, Height and SetHeight below.
 -- LayoutEdit drives this through Ready, Rect, Offsets, Move and Reset. Rect and offsets describe the
 -- visible panel (UIParent units, TOPRIGHT from UIParent's TOPRIGHT); Move converts that to the Blizzard
 -- frame's TOPRIGHT, which is what Edit Mode stores (also in UIParent units).
@@ -37,6 +38,7 @@ end
 
 local QUESTIE_REASON = "Questie's tracker is on, so there is no objectives tracker to move"
 local OFF_REASON = "the Quest tracker module is off, so the game's own tracker is left where it is"
+local DEFAULT_SEAT_REASON = "the game sizes the tracker itself while it sits in its default seat"
 
 local function SystemId()
     local systems = Enum and Enum.EditModeSystem
@@ -45,6 +47,28 @@ end
 
 local function LayoutTypes()
     return Enum and Enum.EditModeLayoutType
+end
+
+-- Enum.EditModeObjectiveTrackerSetting.Height: nil on a client whose tracker has none.
+local function HeightSetting()
+    local settings = Enum and Enum.EditModeObjectiveTrackerSetting
+    return settings and settings.Height
+end
+
+-- What Edit Mode accepts for the tracker's Height (Blizzard_EditMode EditModeSettingDisplayInfo: Slider, 400 to 1000, step
+-- 10), in screen units, and the game's own default (its preset layouts store 40, which is 800). A layout stores
+-- (height - min) / step, an integer from 0 to 60. The game only uses the setting while the tracker is off its default seat
+-- (EditModeObjectiveTrackerSystemMixin:ShouldShowSetting hides it there, ObjectiveTrackerContainerMixin:UpdateHeight sizes
+-- the tracker itself there), so a height is only written for a tracker that has been moved.
+Seat.HEIGHT = { min = 400, max = 1000, step = 10, default = 800 }
+
+-- The raw value a layout stores for a height in screen units, snapped to the step and held to the range; nil for anything
+-- that is not a finite number.
+local function RawHeight(value)
+    if type(value) ~= "number" or value - value ~= 0 then return nil end
+    local h = Seat.HEIGHT
+    local raw = math.floor((value - h.min) / h.step + 0.5)
+    return math.max(0, math.min((h.max - h.min) / h.step, raw))
 end
 
 function Seat.Ready()
@@ -152,6 +176,75 @@ local function Save(info)
     C_EditMode.SetActiveLayout(info.activeLayout)
 end
 
+-- Puts `raw` into the system's Height entry (adding the entry, or the whole settings list, when the layout has none).
+-- Returns whether the stored value changed.
+local function WriteHeight(system, raw)
+    local id = HeightSetting()
+    if not id then return false end
+    if type(system.settings) ~= "table" then system.settings = {} end
+    for _, entry in ipairs(system.settings) do
+        if entry.setting == id then
+            if entry.value == raw then return false end
+            entry.value = raw
+            return true
+        end
+    end
+    system.settings[#system.settings + 1] = { setting = id, value = raw }
+    return true
+end
+
+-- The active layout's tracker system, or nil and why (and whether waiting could help: the layouts or Edit Mode itself are
+-- not there yet).
+local function ActiveSystem()
+    local info = AllLayouts()
+    if not info then return nil, "Edit Mode layouts are not loaded yet", true end
+    local system = TrackerSystem(info.layouts[info.activeLayout])
+    if not system then return nil, "the active layout has no objectives tracker" end
+    return system, info
+end
+
+-- True once the active layout has the tracker off its default seat, false while it sits there (every preset, and an account
+-- layout it was never moved in), nil when that cannot be read (the module is off, Questie has the tracker, Edit Mode is not
+-- there or its layouts are not loaded yet).
+function Seat.Moved()
+    if not Seat.Ready() then return nil end
+    local system = ActiveSystem()
+    if not system or type(system.isInDefaultPosition) ~= "boolean" then return nil end
+    return not system.isInDefaultPosition
+end
+
+-- The active layout's tracker Height in screen units (400 to 1000), or nil when it cannot be read.
+function Seat.Height()
+    local id = HeightSetting()
+    if not id or not Seat.Ready() then return nil end
+    local system = ActiveSystem()
+    if not system then return nil end
+    for _, entry in ipairs(system.settings or {}) do
+        if entry.setting == id and type(entry.value) == "number" then
+            return entry.value * Seat.HEIGHT.step + Seat.HEIGHT.min
+        end
+    end
+end
+
+-- Writes a Height (screen units; snapped to the step, held to the range) into the active layout, in place. Returns true, or
+-- false, why and a third value that is true when waiting could help (combat, layouts not loaded, no Edit Mode yet). It never
+-- copies a preset and never anchors a frame: a preset or a tracker still in its default seat is refused, because the game
+-- does not use the setting there; the player's first move (Seat.Move) takes the tracker off it.
+function Seat.SetHeight(value)
+    if not Active() then return false, OFF_REASON end
+    if QuestieHasTheTracker() then return false, QUESTIE_REASON end
+    if not HeightSetting() then return false, "this client's Edit Mode has no tracker Height" end
+    local raw = RawHeight(value)
+    if not raw then return false, "a tracker height is a number from " .. Seat.HEIGHT.min .. " to " .. Seat.HEIGHT.max end
+    if InCombatLockdown() then return false, "can't change the tracker in combat", true end
+    if not Seat.Ready() then return false, "Edit Mode is not available", true end
+    local system, info, wait = ActiveSystem()
+    if not system then return false, info, wait end
+    if system.isInDefaultPosition then return false, DEFAULT_SEAT_REASON end
+    if WriteHeight(system, raw) then Save(info) end
+    return true
+end
+
 -- Seats the visible tracker's TOPRIGHT at (x, y) from UIParent's TOPRIGHT. Returns true, or false and why.
 function Seat.Move(x, y)
     if not Active() then return false, OFF_REASON end
@@ -166,6 +259,14 @@ function Seat.Move(x, y)
     system.isInDefaultPosition = false
     system.anchorInfo = { point = POINT, relativeTo = "UIParent", relativePoint = POINT, offsetX = x - dx, offsetY = y - dy }
     system.anchorInfo2 = nil
+    -- A height the player set while the tracker sat elsewhere (or in another layout) goes into the same save; a setting
+    -- still at its default leaves the layout's own height as it is.
+    local tracker = FS.Tracker
+    if type(tracker) == "table" and type(tracker.WantedHeight) == "function" then
+        local ok, wanted = pcall(tracker.WantedHeight)
+        local raw = ok and RawHeight(wanted) or nil
+        if raw then WriteHeight(system, raw) end
+    end
     Save(info)
     return true
 end

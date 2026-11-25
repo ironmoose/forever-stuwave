@@ -10,6 +10,9 @@ The Chat, Minimap and Quest tracker pages of /fsconfig carry the rows of the pro
     slider moves the map live and survives the Edit Mode reseat, and scale grows the map, the key row, the tray and the
     text together (one Minimap:SetScale), keeping the map's centre where the layout put it;
   * the Quest tracker opacity (tracker.alpha), background opacity (tracker.bgAlpha) and scale (tracker.scale);
+  * the Quest tracker height (tracker.h) is Edit Mode's own Height (400 to 1000 by 10, default 800), written into the
+    active layout through TrackerSeat out of combat, only for a tracker that has been moved off its default seat; the
+    row is greyed until then; Width stays locked with its reason;
   * every row of the three prototype pages is registered under the prototype's key, label, range, format and parent
     switch (parsed from proto-pages.js, FS_MOCKUPS_DIR names its folder); a row that cannot be applied says why.
 
@@ -446,6 +449,48 @@ function BuildBlizzard()
 end
 """
 
+# Edit Mode in the tracker world: one preset (Modern) and the saved layouts; EM_WRITES keeps a copy of every SaveLayouts.
+EDIT_MODE_MOCK = r"""
+Enum = { EditModeSystem = { ObjectiveTracker = 12 }, EditModeLayoutType = { Preset = 0, Account = 1 },
+    EditModeObjectiveTrackerSetting = { Height = 0, Opacity = 1, TextSize = 2 } }
+Constants = { EditModeConsts = { EditModeMaxLayoutsPerType = 5 } }
+function CopyTable(t)
+    local c = {}
+    for k, v in pairs(t) do c[k] = type(v) == "table" and CopyTable(v) or v end
+    return c
+end
+local function trackerSystem(default)
+    return { system = 12, isInDefaultPosition = default,
+        anchorInfo = { point = "TOPRIGHT", relativeTo = "UIParent", relativePoint = "TOPRIGHT", offsetX = -110, offsetY = -260 },
+        settings = { { setting = 0, value = 40 }, { setting = 1, value = 0 }, { setting = 2, value = 0 } } }
+end
+EditModePresetLayoutManager = { GetCopyOfPresetLayouts = function()
+    return { { layoutName = "Modern", layoutType = 0, systems = { trackerSystem(true) } } }
+end }
+EM_SAVED, EM_ACTIVE, EM_WRITES, EM_LOADED = {}, 1, {}, true
+C_EditMode = {
+    GetLayouts = function()
+        if not EM_LOADED then return nil end
+        return { activeLayout = EM_ACTIVE, layouts = CopyTable(EM_SAVED) }
+    end,
+    SaveLayouts = function(info)
+        EM_WRITES[#EM_WRITES + 1] = CopyTable(info)
+        EM_SAVED = {}
+        for _, l in ipairs(info.layouts) do if l.layoutType ~= 0 then EM_SAVED[#EM_SAVED + 1] = CopyTable(l) end end
+    end,
+    SetActiveLayout = function(i) EM_ACTIVE = i end,
+}
+-- An account layout with the tracker moved off its default seat, active (index 2: the preset is 1).
+function EM_Move(height)
+    local system = trackerSystem(false)
+    system.settings[1].value = height or 40
+    EM_SAVED = { { layoutName = "Mine", layoutType = 1, systems = { system } } }
+    EM_ACTIVE = 2
+end
+-- The raw Height the active saved layout holds.
+function EM_Height() return EM_SAVED[EM_ACTIVE - 1].systems[1].settings[1].value end
+"""
+
 TRACKER_PRE = r"""
     local S = FS.Tracker.state
     local C = S.chrome
@@ -461,7 +506,8 @@ def tracker_cases() -> list[tuple[str, "callable"]]:
     tsk = load_module("trackerskin-harness.py", "trackerskin_harness")
     from charskin_support import Harness
 
-    h = Harness({"Tracker": "Modules/Tracker/Tracker.lua"}, tsk.BLIZZARD + TRACKER_EXTRA)
+    h = Harness({"Tracker": "Modules/Tracker/Tracker.lua", "TrackerSeat": "Modules/Tracker/TrackerSeat.lua"},
+                tsk.BLIZZARD + TRACKER_EXTRA + EDIT_MODE_MOCK)
     h.sources["PanelConfig"] = "local _, FS = ...\n" + CONFIG_STUB
     h.extra_names.insert(0, "PanelConfig")
     cases: list[tuple[str, "callable"]] = []
@@ -475,10 +521,14 @@ def tracker_cases() -> list[tuple[str, "callable"]]:
         cases.append((name, run))
 
     case("tracker_keys_register_with_the_prototype_defaults", r"""
-    local want = { ['tracker.w'] = 270, ['tracker.h'] = 320, ['tracker.scale'] = 100, ['tracker.alpha'] = 100, ['tracker.bgAlpha'] = 80 }
+    -- Height is Edit Mode's own (400 to 1000 by 10, the game's default 800), not the prototype's 120 to 800 by 1 at 320.
+    local want = { ['tracker.w'] = 270, ['tracker.h'] = 800, ['tracker.scale'] = 100, ['tracker.alpha'] = 100, ['tracker.bgAlpha'] = 80 }
     for key, default in pairs(want) do assert(FS.Config.Get(key) == default, key .. ' default ' .. tostring(FS.Config.Get(key))) end
     local z = FS.Tracker.SIZE
-    assert(z.w.min == 180 and z.w.max == 500 and z.h.min == 120 and z.h.max == 800, 'width and height range')
+    assert(z.w.min == 180 and z.w.max == 500, 'width range')
+    assert(z.h.min == 400 and z.h.max == 1000 and z.h.step == 10 and z.h.default == 800, 'height is the range Edit Mode accepts')
+    local e = FS.TrackerSeat.HEIGHT
+    assert(e.min == z.h.min and e.max == z.h.max and e.step == z.h.step and e.default == z.h.default, 'the setting and TrackerSeat agree')
     assert(z.scale.min == 50 and z.scale.max == 200 and z.scale.step == 5, 'scale range')
     assert(z.alpha.min == 10 and z.alpha.max == 100 and z.alpha.step == 5, 'opacity range')
     assert(z.bgAlpha.min == 0 and z.bgAlpha.max == 100, 'background range')
@@ -561,6 +611,109 @@ def tracker_cases() -> list[tuple[str, "callable"]]:
     Fire('PLAYER_LOGIN')
     near(T2.alpha, 0.7); near(fill.vertex[4], 0.3); near(T2.scale, 1.2)
 """)
+
+    case("tracker_height_default_writes_nothing_to_edit_mode_even_for_a_moved_tracker", r"""
+    EM_Move(30)   -- the player's own Edit Mode height (700) is not ours to touch
+    Fire('PLAYER_LOGIN'); Fire('PLAYER_ENTERING_WORLD'); Fire('EDIT_MODE_LAYOUTS_UPDATED')
+    assert(#EM_WRITES == 0, 'a default profile saved the layout ' .. #EM_WRITES .. ' times')
+    assert(EM_Height() == 30, 'the height changed')
+    assert(FS.Tracker.WantedHeight() == nil, 'nothing is wanted while the setting holds its default')
+    assert(OVERRIDES == 0, 'an Edit Mode override ran')
+""")
+
+    case("tracker_height_is_written_into_the_active_edit_mode_layout_as_the_raw_value", r"""
+    EM_Move()
+    setting('tracker.h', 900)
+    assert(#EM_WRITES == 1, 'saves ' .. #EM_WRITES)
+    assert(EM_Height() == 50, 'raw ' .. tostring(EM_Height()) .. ' for 900')
+    assert(#EM_WRITES[1].layouts == 2 and EM_WRITES[1].activeLayout == 2, 'edited in place, the same layout stays active')
+    assert(OVERRIDES == 0, 'an Edit Mode override ran: the layout is the only way in')
+    setting('tracker.h', 1000); assert(EM_Height() == 60, 'the top of the range')
+    setting('tracker.h', 400); assert(EM_Height() == 0, 'the bottom of the range')
+    setting('tracker.h', 9999); assert(EM_Height() == 60, 'above the range holds at 1000')
+""")
+
+    case("tracker_height_moved_back_to_the_default_puts_the_layout_back", r"""
+    EM_Move()
+    setting('tracker.h', 900)
+    assert(EM_Height() == 50)
+    setting('tracker.h', 800)   -- the default: stored as nothing, but it is still a choice of the player
+    assert(EM_Height() == 40, 'back to 800 in the layout, got raw ' .. tostring(EM_Height()))
+    assert(#EM_WRITES == 2, 'saves ' .. #EM_WRITES)
+    assert(FS.Tracker.WantedHeight() == nil)
+""")
+
+    case("tracker_height_waits_for_combat_to_end", r"""
+    EM_Move()
+    __combat = true
+    setting('tracker.h', 900)
+    assert(#EM_WRITES == 0, 'the layout was saved in combat')
+    Fire('PLAYER_REGEN_ENABLED')
+    assert(#EM_WRITES == 0, 'still in combat')
+    __combat = false
+    Fire('PLAYER_REGEN_ENABLED')
+    assert(EM_Height() == 50, 'applied when combat ended')
+    Fire('PLAYER_REGEN_ENABLED')
+    assert(#EM_WRITES == 1, 'applied once, not again')
+    -- a choice of the default made in combat is held too, and wins after it
+    __combat = true
+    setting('tracker.h', 800)
+    __combat = false
+    Fire('PLAYER_REGEN_ENABLED')
+    assert(EM_Height() == 40, 'the default chosen in combat was put back')
+""")
+
+    case("tracker_height_in_the_default_seat_writes_nothing_and_a_move_carries_it", r"""
+    -- on a preset, the tracker in its default seat: the game ignores a height there, so nothing is copied for it
+    setting('tracker.h', 900)
+    assert(#EM_WRITES == 0, 'saved a layout for a tracker that is in its default seat')
+    assert(FS.Tracker.WantedHeight() == 900)
+    local ok = FS.TrackerSeat.Move(-20, -300)
+    assert(ok == true, 'the move')
+    assert(#EM_WRITES == 1, 'one save for the seat and the height: ' .. #EM_WRITES)
+    assert(EM_Height() == 50, 'the move carried the height the setting asks for')
+""")
+
+    case("tracker_saved_height_is_applied_at_login_once_the_layouts_can_be_read", r"""
+    Reset()
+    EM_LOADED = false
+    local FS2 = Load({ 'PanelConfig', 'Theme', 'Layout', 'HeldArt', 'PanelSkins', 'ControlKit', 'ItemSlotSkins', 'TabSkins', 'Tracker', 'TrackerSeat' })
+    EM_Move()
+    __cfg['tracker.h'] = 900
+    Fire('PLAYER_LOGIN')
+    assert(#EM_WRITES == 0, 'the layouts could not be read yet')
+    Fire('PLAYER_ENTERING_WORLD')
+    assert(#EM_WRITES == 0, 'still not readable')
+    EM_LOADED = true
+    Fire('EDIT_MODE_LAYOUTS_UPDATED')
+    assert(EM_Height() == 50 and #EM_WRITES == 1, 'applied once they could be read')
+    -- from here the player may use Edit Mode's own slider: the saved setting does not fight it
+    EM_SAVED[1].systems[1].settings[1].value = 20
+    Fire('EDIT_MODE_LAYOUTS_UPDATED'); Fire('PLAYER_ENTERING_WORLD')
+    assert(#EM_WRITES == 1 and EM_Height() == 20, 'the login sync ran again')
+""")
+
+    case("tracker_saved_height_is_applied_at_login_itself_when_the_layouts_are_readable", r"""
+    EM_Move()
+    __cfg['tracker.h'] = 700
+    Fire('PLAYER_LOGIN')
+    assert(#EM_WRITES == 1 and EM_Height() == 30, 'login alone applied it: saves ' .. #EM_WRITES)
+""")
+
+    case("tracker_saved_height_at_login_with_a_tracker_in_its_default_seat_is_left_for_the_move", r"""
+    __cfg['tracker.h'] = 900
+    Fire('PLAYER_LOGIN')
+    assert(#EM_WRITES == 0, 'a preset was copied at login')
+    Fire('EDIT_MODE_LAYOUTS_UPDATED')
+    assert(#EM_WRITES == 0)
+""")
+
+    case("tracker_height_does_nothing_while_the_module_has_no_seat", r"""
+    FS.TrackerSeat = nil
+    setting('tracker.h', 900)
+    Fire('PLAYER_LOGIN')
+    assert(#EM_WRITES == 0)
+""")
     return cases
 
 
@@ -571,9 +724,14 @@ def tracker_cases() -> list[tuple[str, "callable"]]:
 PROTO = Path(os.environ.get("FS_MOCKUPS_DIR", ADDON.parent / "mockups")) / "proto-src-2026-11-25/proto-pages.js"
 
 # Rows whose words differ from the prototype's on purpose, and why.
+# Rows whose range or default differ from the prototype's on purpose: the prototype's tracker height (120 to 800 by 1, 320) is
+# not something Edit Mode accepts; the game's own Height is 400 to 1000 by 10 and its default is 800.
+RANGE_DEVIATIONS = {"tracker.h": (400, 1000, 10)}
+DEFAULT_DEVIATIONS = {"tracker.h": 800}
+
 TIP_DEVIATIONS = {
     "tracker.w": "locked: the page gives the reason in place of the layout editor tip",
-    "tracker.h": "locked: the page gives the reason in place of the scroll tip",
+    "tracker.h": "real now: the tip says it is Edit Mode's own Height (the prototype's tip is about the list scrolling)",
     "chat.band.raid": "the prototype's tip is the one word 'New.'",
 }
 
@@ -657,18 +815,25 @@ FS.ConfigWindow = { UI = UI, RegisterCategory = function(c) __cat = c end }
 """
 
 
-def page_rows(fixtures: dict, page_file: str) -> list[dict]:
-    """Loads one real page file on a recorder and the given module fixtures; returns what its build asked for."""
+def page_world(fixtures: dict, page_file: str, setup: str = "") -> "LuaRuntime":
+    """One real page file loaded on a recorder and the given module fixtures, built; `setup` is Lua run before it loads."""
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute("FS = {}")
     for name, value in fixtures.items():
         lua.globals().__fixture = lua.table_from(to_lua_deep(lua, value)) if isinstance(value, (dict, list)) else value
         lua.execute(f"FS[{name!r}] = __fixture")
+    lua.execute(setup)
     lua.execute(PAGE_RECORDER)
     src = (ADDON / "Modules/Config" / page_file).read_text(encoding="utf-8")
     lua.execute("function __load(src) return assert(loadstring(src, '=page'))('forever-stuwave', FS) end")
     lua.eval("__load")(src)
     lua.execute("__cat.tabs[1].build({})")
+    return lua
+
+
+def page_rows(fixtures: dict, page_file: str) -> list[dict]:
+    """Loads one real page file on a recorder and the given module fixtures; returns what its build asked for."""
+    lua = page_world(fixtures, page_file)
     out = []
     for row in dump(lua.eval("__rows")):
         o = dict(row["o"])
@@ -760,13 +925,14 @@ def page_cases(mh) -> list[tuple[str, "callable"]]:
             need(mine["kind"] == KINDS[row["ty"]], f"{where}: a {mine['kind']} for a {row['ty']}")
             need(mine["label"] == row["l"], f"{where}: label {mine['label']!r} want {row['l']!r}")
             if row["ty"] == "sl":
-                need((mine["min"], mine["max"], mine["step"]) == (row["min"], row["max"], row["st"]),
-                     f"{where}: range {mine['min']}-{mine['max']} by {mine['step']}")
+                want_range = RANGE_DEVIATIONS.get(key, (row["min"], row["max"], row["st"]))
+                need((mine["min"], mine["max"], mine["step"]) == want_range,
+                     f"{where}: range {mine['min']}-{mine['max']} by {mine['step']}, want {want_range}")
                 need(mine.get("fmt") == UNITS[row["u"]], f"{where}: format {mine.get('fmt')!r}")
             if row["ty"] == "seg":
                 need([o["value"] for o in mine["options"]] == row["o"], f"{where}: options")
             if key in defaults:
-                want = row["d"]
+                want = DEFAULT_DEVIATIONS.get(key, row["d"])
                 if row["ty"] == "seg" or isinstance(want, bool) or not isinstance(want, str):
                     need(defaults[key] == want, f"{where}: default {defaults[key]!r}, prototype {want!r}")
             need(bool(mine.get("sub")) == bool(row.get("sub")), f"{where}: sub")
@@ -785,13 +951,46 @@ def page_cases(mh) -> list[tuple[str, "callable"]]:
     out.append(("page_minimap_registers_every_prototype_row", make("mini", "ConfigPageMinimap.lua")))
     out.append(("page_tracker_registers_every_prototype_row", make("track", "ConfigPageTracker.lua")))
 
-    def locked_rows():
+    def width_locked():
         rows = {r["key"]: r for r in page_rows({**tracker, **timer}, "ConfigPageTracker.lua")}
-        for key in ("tracker.w", "tracker.h"):
-            need(rows[key].get("reason") and rows[key].get("enabled") is not None, f"{key} is not locked with a reason")
-            need(rows[key]["reason"] == tracker["Tracker"]["SIZE_LOCKED"], f"{key} reason")
+        row = rows["tracker.w"]
+        need(row.get("reason") and row.get("enabled") is not None, "tracker.w is not locked with a reason")
+        need(row["reason"] == tracker["Tracker"]["SIZE_LOCKED"], "tracker.w reason")
+        need("Width" in row["reason"] and "Edit Mode" in row["reason"], f"the reason names the cause: {row['reason']!r}")
+        lua = page_world({**tracker, **timer}, "ConfigPageTracker.lua", "FS.TrackerSeat = { Moved = function() return true end }")
+        need(lua.eval("__rows[1].o.enabled()") is False, "the width row is live")
 
-    out.append(("page_tracker_width_and_height_say_why_they_are_locked", locked_rows))
+    out.append(("page_tracker_width_says_why_it_is_locked", width_locked))
+
+    def height_row():
+        rows = {r["key"]: r for r in page_rows({**tracker, **timer}, "ConfigPageTracker.lua")}
+        row = rows["tracker.h"]
+        need(row["kind"] == "slider" and row["label"] == "Height" and row["fmt"] == "%d px", "a Height slider in px")
+        need((row["min"], row["max"], row["step"]) == (400, 1000, 10), "the range Edit Mode accepts")
+        tip = row.get("tip", "")
+        for words in ("Edit Mode", "400 to 1000", "default seat", "after combat"):
+            need(words in tip, f"the tip says {words!r}: {tip!r}")
+        need(row.get("enabled") is not None and row.get("reason"), "the row greys out with a reason while it cannot apply")
+        reason = row.get("reason") or ""
+        for words in ("default seat", "/fsedit"):
+            need(words in reason, f"the reason says {words!r}: {reason!r}")
+        need("\u2014" not in tip + reason and "\u2013" not in tip + reason, "no em or en dash")
+
+    out.append(("page_tracker_height_is_edit_modes_own_with_a_tip_and_a_reason", height_row))
+
+    def height_enabled_follows_the_seat():
+        def enabled(setup: str):
+            lua = page_world({**tracker, **timer}, "ConfigPageTracker.lua", setup)
+            return lua.eval("__rows[2].o.enabled()")
+
+        need(enabled("FS.TrackerSeat = { Moved = function() return true end }") is True, "a moved tracker enables Height")
+        need(enabled("FS.TrackerSeat = { Moved = function() return false end }") is False, "a tracker in its default seat does not")
+        need(enabled("FS.TrackerSeat = { Moved = function() return nil end }") is False, "an unreadable layout does not")
+        need(enabled("FS.TrackerSeat = { Moved = function() error('boom') end }") is False, "a throwing seat does not")
+        need(enabled("FS.TrackerSeat = nil") is False, "no seat module does not")
+        need(enabled("FS.TrackerSeat = {}") is False, "a seat without Moved does not")
+
+    out.append(("page_tracker_height_is_live_only_for_a_tracker_that_has_been_moved", height_enabled_follows_the_seat))
 
     def tint_rows():
         rows = {r["key"]: r for r in page_rows(fixtures, "ConfigPageChat.lua")}

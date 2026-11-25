@@ -1,6 +1,9 @@
 -- Forever STUwave: Config page, Quest tracker
--- The Size section (FS.Tracker.SIZE, Tracker.lua) and the quest timer under the minimap (QuestTimer.lua). Width and Height are
--- on the page with the prototype's keys and ranges but locked: the game's own tracker owns both (see Tracker.lua).
+-- The Size section (FS.Tracker.SIZE, Tracker.lua) and the quest timer under the minimap (QuestTimer.lua). Height is the
+-- game's own Edit Mode Height for the tracker (400 to 1000; the prototype's range is not one Edit Mode accepts), written into
+-- the active Edit Mode layout by Tracker.lua through TrackerSeat; it is live only once the tracker has been moved off its
+-- default seat, which is also the only time the game shows or uses it. Width is on the page with the prototype's key and range
+-- but locked: Edit Mode has no width setting for this tracker (see Tracker.lua).
 
 local _, FS = ...
 
@@ -8,6 +11,20 @@ local CW = FS.ConfigWindow
 local UI = CW.UI
 
 local function Locked() return false end
+
+-- True once the active Edit Mode layout has the tracker off its default seat; false for anything else, a seat that cannot
+-- answer included.
+local function HeightLive()
+    local seat = FS.TrackerSeat
+    if type(seat) ~= "table" or type(seat.Moved) ~= "function" then return false end
+    local ok, moved = pcall(seat.Moved)
+    return ok and moved == true
+end
+
+local HEIGHT_TIP = "The tracker's height in the game's own Edit Mode, 400 to 1000 in steps of 10. It is saved in your active "
+    .. "Edit Mode layout, and the game only uses it once the tracker has been moved off its default seat. Applies after combat."
+local HEIGHT_REASON = "The game sizes the tracker itself while it sits in its default seat. Move it in the layout editor "
+    .. "(/fsedit) first. Needs the game's Edit Mode."
 
 local function BuildSize(content)
     local size = FS.Tracker and FS.Tracker.SIZE
@@ -20,7 +37,7 @@ local function BuildSize(content)
     })
     UI.Slider(content, {
         label = "Height", key = size.h.key, min = size.h.min, max = size.h.max, step = size.h.step, fmt = "%d px",
-        enabled = Locked, reason = why,
+        tip = HEIGHT_TIP, enabled = HeightLive, reason = HEIGHT_REASON,
     })
     UI.Slider(content, {
         label = "Scale", key = size.scale.key, min = size.scale.min, max = size.scale.max, step = size.scale.step,
