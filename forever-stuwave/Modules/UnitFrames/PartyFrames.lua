@@ -3022,7 +3022,7 @@ function PartyFrames.NewStylePreview(parent)
     local function Restyle()
         PartyFrames.StyleRow(row)
         PartyFrames.SizeRow(row)
-        row.name:SetText("BRENNA")
+        row.name:SetText("RIPLEY")
         row.name:SetTextColor(COLOR_HEALTH[1], COLOR_HEALTH[2], COLOR_HEALTH[3], HEADER.NAME_ALPHA)
         if HAS.CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS.PRIEST then
             row.classIcon:SetTexCoord(unpack(CLASS_ICON_TCOORDS.PRIEST))

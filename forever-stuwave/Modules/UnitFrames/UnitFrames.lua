@@ -551,7 +551,7 @@ local function BuildUnitFrame(unitToken, frameName, mirrored, styleKey, previewP
     local badge = CreateLevelBadge(nameRow)
     local name = nameRow:CreateFontString(nil, "OVERLAY")
     ApplyOrbitron(name, 15)
-    -- A space-separated name (this server allows them, e.g. "Father Stu")
+    -- A space-separated name (this server allows them, e.g. "Doc Brown")
     -- otherwise wraps at the space; the second line then renders under
     -- nameRow, hidden behind the health bar drawn after it. No word wrap on
     -- a single-line name row.
@@ -942,8 +942,8 @@ local function UpdatePowerBar(frame)
 end
 
 -- Full name (first + surname) resolver. Measured in-game on this Forever
--- server: UnitName(unit) returns first name only (e.g. "Father"), while
--- GetUnitName(unit, true) returns "First Surname" (e.g. "Father Stu") --
+-- server: UnitName(unit) returns first name only (e.g. "Doc"), while
+-- GetUnitName(unit, true) returns "First Surname" (e.g. "Doc Brown") --
 -- Forever delivers the surname the way a realm suffix normally comes
 -- through, and this is the call that yields it. Feature-detected since
 -- GetUnitName's boolean-realm-suffix argument form is not guaranteed on
@@ -1172,10 +1172,10 @@ end
 
 -- What a preview frame shows: a name (and the surname tint of the player), a reaction colour, a level and two readings.
 local PREVIEW_SAMPLE = {
-    player = { name = "Stu", surname = "Shockalaka", color = COLOR_TEXT_WHITE, level = "22", hp = { 2481, 3000 }, mp = { 1620, 2200 } },
-    target = { name = "Stu Shockalaka", color = COLOR_REACTION_FRIEND, level = "22", hp = { 2481, 3000 }, mp = { 1620, 2200 } },
-    focus = { name = "Kolkar Packhound", color = COLOR_REACTION_HOSTILE, level = "20", hp = { 1840, 2400 }, mp = { 900, 1500 } },
-    boss = { name = "Hezrul Bloodmark", color = COLOR_REACTION_HOSTILE, level = "??", hp = { 61200, 72000 }, mp = { 5200, 8000 } },
+    player = { name = "Marty", surname = "McFly", color = COLOR_TEXT_WHITE, level = "22", hp = { 2481, 3000 }, mp = { 1620, 2200 } },
+    target = { name = "Doc Brown", color = COLOR_REACTION_FRIEND, level = "22", hp = { 2481, 3000 }, mp = { 1620, 2200 } },
+    focus = { name = "Hans Gruber", color = COLOR_REACTION_HOSTILE, level = "20", hp = { 1840, 2400 }, mp = { 900, 1500 } },
+    boss = { name = "Skeletor", color = COLOR_REACTION_HOSTILE, level = "??", hp = { 61200, 72000 }, mp = { 5200, 8000 } },
 }
 
 local function PreviewFill(f)

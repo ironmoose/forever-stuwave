@@ -309,7 +309,7 @@ end
 local gates = {}          -- the target side parts' gates ({ gate, rule, on }), re-read on every target change
 
 -- Each rule is looked up at call time (Theme.lua loads before this file, but a rule is never captured).
-local function HasTargetRule() return FS.HasTarget() end
+local function HasTargetRule() return (FS.GateTarget or FS.HasTarget)() end
 local function TakesDotsRule() return FS.TargetTakesDots() end
 
 local function RefreshTargetLayer()
@@ -353,6 +353,7 @@ local function BuildHorizon()
     events:RegisterEvent("PLAYER_TARGET_CHANGED")
     events:RegisterEvent("PLAYER_ENTERING_WORLD")
     events:SetScript("OnEvent", RefreshTargetLayer)
+    if FS.OnTargetGate then FS.OnTargetGate(RefreshTargetLayer) end
     -- death, a duel and mind control change the dot rule with no target change; one frame, the target only
     local unitEvents = CreateFrame("Frame", NAME .. "target_unit_events", root)
     for _, name in ipairs({ "UNIT_HEALTH", "UNIT_FLAGS", "UNIT_FACTION" }) do

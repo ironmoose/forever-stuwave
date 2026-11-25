@@ -520,6 +520,54 @@ function FS.HasTarget()
     return exists and true or false
 end
 
+-- Target side preview (the /fsconfig hover on a Gunsight target row). While it is on, the NON-SECURE Gunsight gates (the
+-- target tape, info box, areas and horizon, all through FS.GateTarget) read "has a target" so the real pieces draw at their
+-- seats, with the sample below standing in for the unit's readings. FS.HasTarget itself never reads it (the protected
+-- target of target button and everything secure keep the real answer). It cannot be turned on in combat, and combat
+-- starting turns it off. Each gate registers its re-read with FS.OnTargetGate.
+local targetPreview = false
+local gateFns = {}
+local previewWatch
+FS.TARGET_SAMPLE = { name = "Hans Gruber", level = "22", hp = 7200, hpMax = 10000, mp = 3200, mpMax = 5000 }
+
+function FS.OnTargetGate(fn)
+    if type(fn) == "function" then gateFns[#gateFns + 1] = fn end
+end
+
+function FS.TargetPreviewOn()
+    return targetPreview
+end
+
+-- True when the player has a target, or the preview is up: the answer for a gate that is not secure.
+function FS.GateTarget()
+    return targetPreview or FS.HasTarget()
+end
+
+-- True when the readings should be the sample (preview up and no real target).
+function FS.TargetSampleOn()
+    if not targetPreview then return false end
+    if type(UnitExists) ~= "function" then return true end
+    local exists = UnitExists("target")
+    if FS.IsSecret(exists) then return false end
+    return not exists
+end
+
+function FS.SetTargetPreview(on)
+    on = on == true
+    if on == targetPreview then return true end
+    if on and type(InCombatLockdown) == "function" and InCombatLockdown() then return false end
+    targetPreview = on
+    if on and not previewWatch and type(CreateFrame) == "function" then
+        -- made on first use (not at load): combat starting turns the preview off
+        previewWatch = CreateFrame("Frame")
+        if previewWatch.RegisterEvent then pcall(previewWatch.RegisterEvent, previewWatch, "PLAYER_REGEN_DISABLED") end
+        previewWatch:SetScript("OnEvent", function() FS.SetTargetPreview(false) end)
+    end
+    for _, fn in ipairs(gateFns) do pcall(fn) end
+    return true
+end
+
+
 -- true or false from a PLAIN answer of a unit predicate, nil when it cannot be read: a missing API, a throw,
 -- a secret (checked before anything else touches it) or an odd type. The legacy forms read 1 as true, nil as false.
 local function PlainFlag(fn, ...)
@@ -538,6 +586,7 @@ end
 -- unattackable one (a friendly NPC) say no; anything unreadable says yes, so a piece is never hidden on a guess.
 -- HudLogic keeps its own HasAttackableTarget on purpose, see the comment there.
 function FS.TargetTakesDots()
+    if targetPreview then return true end
     if not FS.HasTarget() then return false end
     if PlainFlag(UnitIsDeadOrGhost, "target") == true then return false end
     if PlainFlag(UnitCanAttack, "player", "target") == false then return false end

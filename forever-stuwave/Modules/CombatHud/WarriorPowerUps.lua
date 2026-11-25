@@ -488,6 +488,31 @@ local function OnEditChanged(editing)
     if editing then ShowPreview() else EndPreview() end
 end
 
+-- The config window's preview (ConfigFlash.lua): the same still alert the layout editor shows, on screen at its seat while a row of
+-- the alert is pointed at or its Test button is on, whatever the class (the art is baked, nothing is read from the player).
+-- Out of combat only; plain frames, so legal anywhere, but the config window never starts it in a fight. Show answers true when
+-- this call put it up (false: it is already up, e.g. the layout editor owns it, or it cannot be built).
+PU.Preview = {}
+function PU.Preview.IsShown() return previewing end
+function PU.Preview.Show()
+    if previewing then return false end
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return false end
+    if not built then
+        Art = Art or FS.WarriorPowerUpArt
+        if not (Art and Art.SPELL) then return false end
+        ART_SPELLS = ART_SPELLS or Art.SPELL
+    end
+    if not Build() then return false end
+    ShowPreview()
+    return previewing
+end
+function PU.Preview.Hide()
+    if previewing then EndPreview() end
+end
+function PU.Preview.Restyle()
+    if previewing and built then pcall(Reseat) end
+end
+
 -------------------------------------------------------------------------------
 -- Init
 -------------------------------------------------------------------------------

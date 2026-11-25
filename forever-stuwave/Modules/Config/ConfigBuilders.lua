@@ -358,8 +358,11 @@ function UI.Section(content, o)
         local from = (sec.changed or 0) > 0 and chip or last
         rule:ClearAllPoints()
         rule:SetPoint("LEFT", from, "RIGHT", 8, 0)
-        if hasMeta then rule:SetPoint("RIGHT", meta, "LEFT", -8, 0) else rule:SetPoint("RIGHT", header, "RIGHT", 0, 0) end
+        if hasMeta then rule:SetPoint("RIGHT", meta, "LEFT", -8, 0)
+        elseif sec.button then rule:SetPoint("RIGHT", sec.button, "LEFT", -8, 0)
+        else rule:SetPoint("RIGHT", header, "RIGHT", 0, 0) end
     end
+    sec.SeatRule = function() SeatRule(metaOn) end
     SeatRule(false)
     function sec.SetChanged(count)
         count = count or 0
@@ -519,6 +522,30 @@ function UI.Button(content, o)
     end
     local b = BuildButton(content, o)
     return UI.Stack(content, b)
+end
+
+-- A small window style button in a section header's right end (the alert sections' Test toggle): { text, onClick, tip }. The
+-- header's meta text and rule make room for it. Returns the button; b.Relabel(text) changes its text and re-sizes it.
+function UI.SectionButton(sec, o)
+    local b = BuildButton(sec.header, o)
+    b:SetPoint("RIGHT", sec.header, "RIGHT", 0, 0)
+    sec.button = b
+    sec.meta:ClearAllPoints()
+    sec.meta:SetPoint("RIGHT", b, "LEFT", -8, 0)
+    if sec.SeatRule then sec.SeatRule() end
+    function b.Relabel(text)
+        b.fsLabel:SetText(text)
+        b:SetWidth(S.Snap(TextWidth(b.fsLabel) + 2 * S.BTN_PAD_X))
+    end
+    if o.tip then
+        b:HookScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(o.tip, 1, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        b:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    return b
 end
 
 -- A row of buttons side by side: a list of the same tables UI.Button takes.
@@ -830,6 +857,7 @@ function UI.Slider(content, o)
     row.fsReadout = readout
 
     local track = CreateFrame("Button", nil, row)
+    row.fsTrack = track
     track:SetSize(S.SLIDER_W, S.SLIDER_H)
     track:SetPoint("RIGHT", box, "LEFT", -S.CTL_GAP, 0)
     track:EnableMouse(true)

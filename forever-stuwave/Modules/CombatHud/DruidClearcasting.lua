@@ -602,6 +602,30 @@ local function EndPreview()
     sync(GetTime())
 end
 
+-- The config window's preview (ConfigFlash.lua): the same still alert the layout editor shows, at its seat while a row of the
+-- alert is pointed at or its Test button is on, whatever the class (the art is baked, nothing is read from the player). Out of
+-- combat only. Show answers true when this call put it up (false: already up, or it cannot be built).
+CC.Preview = {}
+function CC.Preview.IsShown() return previewing end
+function CC.Preview.Show()
+    if previewing then return false end
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return false end
+    if not built then
+        Art = Art or FS.DruidClearcastingArt
+        if not (Art and Art.KIND) then return false end
+        KINDS = KINDS or Art.KIND
+    end
+    if not Build() then return false end
+    ShowPreview()
+    return previewing
+end
+function CC.Preview.Hide()
+    if previewing then EndPreview() end
+end
+function CC.Preview.Restyle()
+    if previewing and built then pcall(Reseat) end
+end
+
 -------------------------------------------------------------------------------
 -- Init
 -------------------------------------------------------------------------------

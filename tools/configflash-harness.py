@@ -1059,6 +1059,128 @@ function T.the_party_pet_and_raid_previews_are_built_from_the_style_tab_samples_
     yes(pv.shown, "a preview Edit Mode owns is not hidden by the hover")
 end
 
+
+function T.the_gunsight_target_side_row_turns_the_target_preview_on_while_hovered_and_off_after()
+    local W = boot()
+    gunsightWith(false)
+    local calls = {}
+    FS.SetTargetPreview = function(on) calls[#calls + 1] = on; return true end
+    W.Flash.Show({ key = "gunsight.pieces.tgt" }); tick(W, 0.01)
+    eq(calls[1], true, "the shared gate is told")
+    local o = overlays(W)[1]
+    eq(captionOf(o), nil, "the real piece shows, so no caption")
+    for _, e in ipairs(o.fsEdges) do near(e.color[1], W.C.cyan[1]) end
+    tick(W, 0.06)
+    eq(#calls, 1, "told once, not every refresh")
+    W.Flash.Clear()
+    eq(calls[2], false, "and turned off when the hover ends")
+    __combat = true
+    calls = {}
+    FS.SetTargetPreview = function(on) calls[#calls + 1] = on; return not on or not __combat end
+    W.Flash.Show({ key = "gunsight.pieces.tgt" }); tick(W, 0.01)
+    eq(captionOf(overlays(W)[1]), "Shows with a target", "in combat the dimmed outline stands in")
+    W.Flash.Clear()
+    __combat = false
+end
+
+
+-- A stand-in for an alert module's Preview table.
+local function alertStub(W)
+    local p = { shown = false, shows = 0, hides = 0, restyles = 0 }
+    function p.Show() if __combat or p.shown then return false end p.shown = true; p.shows = p.shows + 1; return true end
+    function p.Hide() p.shown = false; p.hides = p.hides + 1 end
+    function p.Restyle() p.restyles = p.restyles + 1 end
+    function p.IsShown() return p.shown end
+    FS.WarriorPowerUps = FS.WarriorPowerUps or {}
+    FS.WarriorPowerUps.Preview = p
+    FS.GunsightAreas = FS.GunsightAreas or {}
+    FS.GunsightAreas.ALERT_SCALE_KEY = "gunsight.alertScale"
+    return p
+end
+
+local function alertTick(W, dt) local d = W.Flash.alertDriver; d.scripts.OnUpdate(d, dt) end
+
+function T.pointing_at_an_alert_row_shows_its_preview_and_leaving_hides_it()
+    local W = boot()
+    local p = alertStub(W)
+    local row = { fsTrack = { fsDragging = false }, fsEdit = { HasFocus = function() return false end } }
+    local entry = { key = "gunsight.warrior.powerups", row = row }
+    W.SetHover(entry)
+    yes(p.shown, "up while the row is pointed at"); eq(p.shows, 1)
+    W.SetHover(nil)
+    no(p.shown, "down when the pointer leaves"); eq(p.hides, 1)
+    local scale = { key = "gunsight.alertScale", row = row }
+    W.SetHover(scale)
+    yes(p.shown, "the shared scale row shows the class alert (no druid here: the warrior's)")
+    W.SetHover(nil)
+    W.SetHover({ key = "chat.w", row = row })
+    no(p.shown, "a row of another setting shows nothing")
+end
+
+function T.an_alert_preview_stays_up_while_its_slider_is_dragged_or_typed_in_and_follows_the_value()
+    local W = boot()
+    local p = alertStub(W)
+    local row = { fsTrack = { fsDragging = true }, fsEdit = { HasFocus = function() return false end } }
+    local entry = { key = "gunsight.alertScale", row = row }
+    W.SetHover(entry)
+    W.SetHover(nil)
+    yes(p.shown, "the pointer left mid drag: still up")
+    alertTick(W, 0.2)
+    yes(p.shown, "and stays up through the drag")
+    W.Flash.state.entry = nil
+    FS.Config.RegisterDefault("gunsight.alertScale", 100)
+    FS.Config.Set("gunsight.alertScale", 140)
+    yes(p.restyles >= 1, "a changed setting restyles it live")
+    row.fsTrack.fsDragging = false
+    alertTick(W, 0.2)
+    no(p.shown, "released: down")
+    row.fsEdit = { HasFocus = function() return true end }
+    W.SetHover(entry); W.SetHover(nil)
+    yes(p.shown, "the number box has the keyboard: up")
+    row.fsEdit = { HasFocus = function() return false end }
+    alertTick(W, 0.2)
+    no(p.shown, "focus gone: down")
+end
+
+function T.the_test_button_keeps_an_alert_up_until_clicked_again_the_page_changes_or_combat_starts()
+    local W = boot()
+    local p = alertStub(W)
+    local header = CreateFrame("Frame", nil, UIParent)
+    local sec = { header = header, meta = CreateFrame("Frame", nil, UIParent) }
+    local sound = 0
+    W.Flash.alertDefs.warrior.sound = function() sound = sound + 1 end
+    local b = W.UI.SectionButton and W.Flash.AddTest(sec, "warrior")
+    yes(b, "a Test button is added to the section header")
+    b.scripts.OnClick(b)
+    yes(p.shown, "Test turns it on"); eq(sound, 1, "one soft sound on the Test click")
+    eq(b.fsLabel.text, "Stop")
+    alertTick(W, 0.2)
+    yes(p.shown, "it stays up with the pointer anywhere")
+    b.scripts.OnClick(b)
+    no(p.shown, "clicked again: down"); eq(sound, 1, "turning it off is silent")
+    eq(b.fsLabel.text, "Test")
+    b.scripts.OnClick(b)
+    W.Open("profiles", "p")
+    no(p.shown, "a page change takes it down")
+    b.scripts.OnClick(b)
+    header.shown = false
+    alertTick(W, 0.2)
+    no(p.shown, "the section folding or hiding takes it down")
+    header.shown = true
+    b.scripts.OnClick(b)
+    yes(p.shown)
+    __combat = true
+    W.Flash.combatWatch.scripts.OnEvent(W.Flash.combatWatch, "PLAYER_REGEN_DISABLED")
+    no(p.shown, "combat starting takes it down")
+    b.scripts.OnClick(b)
+    no(p.shown, "and a Test click in combat starts nothing")
+    __combat = false
+    sound = 0
+    W.SetHover({ key = "gunsight.warrior.powerup.overpower", row = {} })
+    eq(sound, 0, "pointing at a row is silent")
+    W.SetHover(nil)
+end
+
 -- Plain data for the python level checks (the real files, booted once).
 __helpers = {
     prefixes = function()

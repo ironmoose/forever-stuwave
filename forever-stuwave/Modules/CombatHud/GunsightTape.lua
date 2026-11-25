@@ -610,7 +610,7 @@ end
 
 local function RefreshGate(t)
     if not (t and t.gate) then return end
-    t.gate:SetShown(FS.HasTarget())
+    t.gate:SetShown((FS.GateTarget or FS.HasTarget)())
     RelayoutIfDirty(t)
 end
 
@@ -867,6 +867,7 @@ local function Build()
     gateEvents:RegisterEvent("PLAYER_TARGET_CHANGED")
     gateEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
     gateEvents:SetScript("OnEvent", function() RefreshGate(tgt) end)
+    if FS.OnTargetGate then FS.OnTargetGate(function() RefreshGate(tgt) end) end
 
     if FS.Layout and FS.Layout.OnRescale then
         FS.Layout.OnRescale(function()

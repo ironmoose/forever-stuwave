@@ -1155,7 +1155,7 @@ for g = 1, GROUP_COUNT do pv.groups[g] = {} end
 FS.raidPreview = pv
 
 -- Forty fake members, five to a group, as { class, role }; member 1 is the player (their own class and role). The
--- names are first names only, as UnitName answers them, and none is a real player's.
+-- names are first names only, as UnitName answers them, and none is a real player's (80s and 90s film and game characters).
 local PREVIEW_CAST = {
     { nil, nil },             { "PRIEST", "HEALER" },   { "WARRIOR", "TANK" },    { "MAGE", "DAMAGER" },    { "ROGUE", "DAMAGER" },
     { "PALADIN", "TANK" },    { "DRUID", "HEALER" },    { "HUNTER", "DAMAGER" },  { "WARLOCK", "DAMAGER" }, { "SHAMAN", "HEALER" },
@@ -1167,10 +1167,10 @@ local PREVIEW_CAST = {
     { "ROGUE", "DAMAGER" },   { "DRUID", "HEALER" },    { "SHAMAN", "DAMAGER" },  { "HUNTER", "DAMAGER" },  { "WARLOCK", "DAMAGER" },
 }
 local PREVIEW_NAMES = {
-    "Aldric", "Brenna", "Corvin", "Dalia", "Edric", "Fenna", "Garrick", "Hilda", "Ivor", "Jorun",
-    "Kaela", "Lorcan", "Mirela", "Nolan", "Orsa", "Pavel", "Quill", "Rhona", "Soren", "Talia",
-    "Ulric", "Vesna", "Wynn", "Xander", "Yara", "Zephyr", "Bram", "Cato", "Dena", "Elric",
-    "Faye", "Gwen", "Holt", "Isla", "Jory", "Kane", "Lena", "Moss", "Nyx", "Orin",
+    "Marty", "Doc", "Ripley", "Ferris", "Indy", "Sarah", "Ash", "Max", "Samus", "Link",
+    "Mario", "Luigi", "Snake", "Ryu", "Chun-Li", "Cloud", "Sonic", "Tails", "Simon", "Duke",
+    "Leon", "Zelda", "Kirby", "Ken", "Guile", "Blanka", "Lara", "Crash", "Spyro", "Rayman",
+    "Axel", "Cody", "Guy", "Haggar", "Billy", "Jimmy", "Alucard", "Kain", "Terra", "Aeris",
 }
 -- Health fractions in a repeating spread, with a few members who show each state a real cell can wear: at or under 35%
 -- (the red edge and the percent; exactly 35% counts), dead, offline, out of range. The first five already carry one of

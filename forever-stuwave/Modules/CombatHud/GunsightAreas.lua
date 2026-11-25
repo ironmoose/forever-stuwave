@@ -136,7 +136,7 @@ end
 -- FS.HasTarget reads a secret or unreadable UnitExists as "has one", so a guess never hides the plate.
 local function HasTarget()
     if type(FS.HasTarget) ~= "function" then return true end
-    local ok, has = pcall(FS.HasTarget)
+    local ok, has = pcall(FS.GateTarget or FS.HasTarget)
     return not ok or has ~= false
 end
 
@@ -449,6 +449,7 @@ local function BuildFrames()
     events:RegisterEvent("PLAYER_TARGET_CHANGED")
     events:RegisterEvent("PLAYER_ENTERING_WORLD")
     events:SetScript("OnEvent", OnTargetEvent)
+    if FS.OnTargetGate then FS.OnTargetGate(function() OnTargetEvent() end) end
     local unitEvents = CreateFrame("Frame", nil, pieceFrame)
     for _, name in ipairs({ "UNIT_HEALTH", "UNIT_FLAGS", "UNIT_FACTION" }) do
         if unitEvents.RegisterUnitEvent then pcall(unitEvents.RegisterUnitEvent, unitEvents, name, "target") end

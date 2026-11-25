@@ -497,7 +497,7 @@ end
 
 -- The target's box follows the target alone.
 local function RefreshTargetShown(box)
-    SetBoxShown(box, FS.HasTarget())
+    SetBoxShown(box, (FS.GateTarget or FS.HasTarget)())
 end
 
 -------------------------------------------------------------------------------
@@ -986,6 +986,7 @@ end
 function Bars.UpdateHealth(box)
     local b = box.bars
     local cur, max = UnitHealth("target"), UnitHealthMax("target")
+    if (FS.TargetSampleOn and FS.TargetSampleOn()) then cur, max = FS.TARGET_SAMPLE.hp, FS.TARGET_SAMPLE.hpMax end
     Bars.SetBar(b.hp.green.sb, cur, max)
     Bars.SetBar(b.hp.red.sb, cur, max)
     if b.numbers then Bars.WriteValue(b, b.hpText, "health", cur, max) end
@@ -1030,9 +1031,11 @@ function Bars.UpdatePower(box)
     local rail = b.power
     local show = false
     local max
+    local sample = (FS.TargetSampleOn and FS.TargetSampleOn())
     if type(UnitPower) == "function" and type(UnitPowerMax) == "function" and type(UnitPowerType) == "function" then
         local color = Bars.PowerColor((UnitPowerType("target")))
         max = UnitPowerMax("target")
+        if sample then color, max = Bars.PowerColor(0), FS.TARGET_SAMPLE.mpMax end
         -- No power: a plain max of 0 (a secret max keeps the rule).
         show = color ~= nil and (IsSecret(max) or (max ~= nil and max ~= 0))
         if show then Bars.Tint(rail, color) end
@@ -1044,6 +1047,7 @@ function Bars.UpdatePower(box)
     end
     if show then
         local cur = UnitPower("target")
+        if sample then cur = FS.TARGET_SAMPLE.mp end
         Bars.SetBar(rail.sb, cur, max)
         if b.numbers then Bars.WriteValue(b, b.powerText, "power", cur, max) end
         -- The power tip hides at empty power through FrameHelpers' shared helper (its own curve, latch and log).
@@ -1068,7 +1072,7 @@ end
 
 -- Everything, for the target / world events and the build. Nothing is read without a target.
 function Bars.Refresh(box)
-    if box.retired or not box.bars or not FS.HasTarget() then return end
+    if box.retired or not box.bars or not (FS.GateTarget or FS.HasTarget)() then return end
     if type(UnitHealth) == "function" and type(UnitHealthMax) == "function" then Bars.UpdateHealth(box) end
     Bars.UpdatePower(box)
 end
@@ -1173,6 +1177,7 @@ end
 -------------------------------------------------------------------------------
 
 local function ReadTargetName()
+    if (FS.TargetSampleOn and FS.TargetSampleOn()) then return FS.TARGET_SAMPLE.name end
     local exists = UnitExists and UnitExists("target")
     if not IsSecret(exists) and not exists then return "" end
     local name
@@ -1647,6 +1652,14 @@ local function BuildBox(spec)
             events:RegisterEvent("PLAYER_ENTERING_WORLD")        -- as the tape, the dots and the horizon re-read it
             if not pcall(events.RegisterUnitEvent, events, "UNIT_NAME_UPDATE", "target") then
                 events:RegisterEvent("UNIT_NAME_UPDATE")
+            end
+            if FS.OnTargetGate then
+                FS.OnTargetGate(function()
+                    if box.retired then return end
+                    RefreshTargetName(box)
+                    RefreshTargetShown(box)
+                    Bars.Guard(Bars.Refresh, box)
+                end)
             end
             events:SetScript("OnEvent", function(_, event)
                 if event == "PLAYER_TARGET_CHANGED" then Bars.abbreviateBroken = false end

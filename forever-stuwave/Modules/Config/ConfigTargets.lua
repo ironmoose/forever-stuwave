@@ -192,7 +192,7 @@ local function Anchors(piece, ...)
                 if reason then
                     out[#out + 1] = { seat = frame, hidden = true, reason = reason }
                 elseif noTarget and TARGET_SIDE[name] then
-                    out[#out + 1] = { seat = frame, hidden = true, reason = "Shows with a target" }
+                    out[#out + 1] = { seat = frame, hidden = true, reason = "Shows with a target", preview = "gs.target" }
                 else
                     out[#out + 1] = frame
                 end

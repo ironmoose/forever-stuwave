@@ -262,7 +262,7 @@ function Extras.Preview(f)
         x.portrait:SetTexture("Interface\\CharacterFrame\\TemporaryPortrait"); x.portrait:Show()
         f.classIcon:Hide(); if f.classGlow then f.classGlow:Hide() end
     else x.portrait:Hide() end
-    x.tot:SetText("> Stu Shockalaka"); x.tot:SetShown(On(key, "tot"))
+    x.tot:SetText("> Doc Brown"); x.tot:SetShown(On(key, "tot"))
     x.cast.name:SetText("Lightning Bolt"); x.cast:SetMinMaxValues(0, 1); x.cast:SetValue(0.6); x.cast.timed = false
     x.cast:SetShown(On(key, "cast"))
     if On(key, "threat") then

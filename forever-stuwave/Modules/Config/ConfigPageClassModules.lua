@@ -41,10 +41,11 @@ local function PlateTab(content)
         enabled = function() return PlateOn(set.bg) or PlateOn(set.border) end,
         reason = "Requires |cffffffffBackground|r or |cffffffffBorder|r to be on.",
     })
-    UI.Section(content, {
+    local alertsSec = UI.Section(content, {
         title = "Alerts",
         tip = "The pop up alerts class modules show above your character: Overpower, Revenge and Victory Rush, and Clearcasting.",
     })
+    if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(alertsSec, CW.Flash.ScaleOwner()) end
     UI.Slider(content, {
         label = "Alert scale", key = set.alertScale.key, min = set.alertScale.min, max = set.alertScale.max,
         step = set.alertScale.step, fmt = "%d%%",
@@ -86,7 +87,8 @@ local tabs = {
     { key = "druid", label = "Druid", build = function(content)
         local CC = FS.DruidClearcasting
         if CC and CC.SETTING then
-            UI.Section(content, { title = "Druid alerts", tip = "The big alert above your character when Clearcasting makes your next spell or ability free." })
+            local sec = UI.Section(content, { title = "Druid alerts", tip = "The big alert above your character when Clearcasting makes your next spell or ability free." })
+            if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(sec, "druid") end
             UI.Toggle(content, { label = CC.SETTING.label, key = CC.SETTING.key, tip = CC.SETTING.tip })
         end
     end },
@@ -133,7 +135,8 @@ local tabs = {
         -- The power-up alerts (WarriorPowerUps.lua): the master switch, and one switch per spell
         local PU = FS.WarriorPowerUps
         if not (PU and PU.SETTING and PU.SPELLS and PU.ORDER) then return end
-        UI.Section(content, { title = "Warrior power-up alerts", tip = "The big alert above your character when Overpower, Revenge or Victory Rush lights up." })
+        local sec = UI.Section(content, { title = "Warrior power-up alerts", tip = "The big alert above your character when Overpower, Revenge or Victory Rush lights up." })
+        if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(sec, "warrior") end
         UI.Toggle(content, { label = PU.SETTING.label, key = PU.SETTING.key, tip = PU.SETTING.tip })
         for _, key in ipairs(PU.ORDER) do
             local def = PU.SPELLS[key]

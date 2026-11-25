@@ -256,11 +256,30 @@ local function HideRaid()
     if type(pv) == "table" and type(pv.Hide) == "function" then pcall(pv.Hide) end
 end
 
+-- The Gunsight's target side: the real pieces draw at their own seats once the shared gate reads "has a target" (Theme.lua,
+-- FS.SetTargetPreview), with sample readings in the info box. Non secure gates only; refused in combat.
+local gunsightByUs = false
+local function ShowGunsightTarget(rect)
+    if type(FS.SetTargetPreview) ~= "function" then return nil end
+    if not gunsightByUs then
+        if FS.SetTargetPreview(true) ~= true then return nil end
+        gunsightByUs = true
+    end
+    return rect, "gs.target"
+end
+
+local function HideGunsightTarget()
+    if not gunsightByUs then return end
+    gunsightByUs = false
+    if type(FS.SetTargetPreview) == "function" then pcall(FS.SetTargetPreview, false) end
+end
+
 -- Shows the sample for a hidden rect and answers the rect it fills (and its key), or nil when there is none to show.
 local function ShowGhost(rect)
     local key = rect.preview
     if not key or InCombat() then return nil end
     if key == "raid" then return ShowRaid() end
+    if key == "gs.target" then return ShowGunsightTarget(rect) end
     local maker = MAKERS[key]
     if not maker then return nil end
     local g = ghosts[key]
@@ -306,6 +325,7 @@ local function SweepGhosts(used)
         end
     end
     if raidByUs and not (used and used.raid) then HideRaid() end
+    if gunsightByUs and not (used and used["gs.target"]) then HideGunsightTarget() end
 end
 
 -- Draws the samples again with the settings as they are now (a setting changed while its row is hovered).
@@ -474,7 +494,7 @@ CW.On("select", F.Clear)
 -- Combat starts: every sample goes down now (they are plain frames, but nothing of this runs in a fight).
 local combatWatch = CreateFrame("Frame", nil, UIParent)
 pcall(combatWatch.RegisterEvent, combatWatch, "PLAYER_REGEN_DISABLED")
-combatWatch:SetScript("OnEvent", function() SweepGhosts(nil) end)
+combatWatch:SetScript("OnEvent", function() SweepGhosts(nil); if F.ClearAlerts then F.ClearAlerts() end end)
 F.combatWatch = combatWatch
 
 if Config and Config.OnChange then
@@ -482,6 +502,184 @@ if Config and Config.OnChange then
         if not F.Enabled() then F.Clear() end
     end)
 end
+
+
+-------------------------------------------------------------------------------
+-- Alert previews: an alert the config controls, drawn with sample data while its rows are in use
+-------------------------------------------------------------------------------
+-- An alert (the warrior and druid pop up alerts today) registers { id, label, api, match, sound }: `api()` answers the module's
+-- Preview table { Show() -> true when this call put it up, Hide(), Restyle() }, `match(entry)` says which rows belong to it
+-- (its switches and the shared scale row), and `sound` (optional) is a function that plays one soft sound. The preview is up
+-- while a matching row is pointed at, and STAYS up while its slider is dragged or its number box has the keyboard, even with
+-- the pointer off the row; the section's Test button keeps it up until it is clicked again, the section folds or hides, the
+-- page changes, the window closes or combat starts. Restyle runs on every setting change, so a scale moves it live. The previews are
+-- silent; a Test click plays the alert's one soft sound when it has one and its own sound switch is on (none of today's alerts
+-- has a sound, so none plays). Never started in combat.
+
+local alertDefs = {}
+F.alertDefs = alertDefs
+local alertState = {}
+F.alertState = alertState
+local alertDriver = CreateFrame("Frame", nil, UIParent)
+F.alertDriver = alertDriver
+
+function F.RegisterAlert(def)
+    if type(def) ~= "table" or type(def.id) ~= "string" then return false end
+    alertDefs[def.id] = def
+    alertState[def.id] = alertState[def.id] or { up = false }
+    return true
+end
+
+local function AlertApi(def)
+    if type(def.api) ~= "function" then return nil end
+    local ok, api = pcall(def.api)
+    if ok and type(api) == "table" and type(api.Show) == "function" and type(api.Hide) == "function" then return api end
+    return nil
+end
+
+-- True while the pointer is off a slider row but the slider is still in use: its thumb is held, or its box has the keyboard.
+local function InUse(entry)
+    local row = entry and entry.row
+    if not row then return false end
+    local track, edit = row.fsTrack, row.fsEdit
+    if track and track.fsDragging == true then return true end
+    if edit and type(edit.HasFocus) == "function" and edit:HasFocus() then return true end
+    return false
+end
+
+local AlertTick
+
+local function SyncAlerts()
+    local any = false
+    for id, def in pairs(alertDefs) do
+        local st = alertState[id]
+        local wanted = st.hover ~= nil or st.test == true
+        if wanted and not InCombat() then
+            any = true
+            if not st.up then
+                local api = AlertApi(def)
+                if api and api.Show() == true then st.up = true end
+            end
+        elseif st.up then
+            local api = AlertApi(def)
+            if api then pcall(api.Hide) end
+            st.up = false
+            if wanted then any = true end
+        end
+        if st.hover ~= nil or st.test == true then any = true end
+    end
+    alertDriver:SetScript("OnUpdate", any and AlertTick or nil)
+end
+
+local function PaintTest(id)
+    local st = alertState[id]
+    local b = st and st.button
+    if b and b.Relabel then b.Relabel(st.test and "Stop" or "Test") end
+end
+
+AlertTick = function(_, dt)
+    alertDriver.acc = (alertDriver.acc or 0) + dt
+    if alertDriver.acc < 0.1 then return end
+    alertDriver.acc = 0
+    for id, st in pairs(alertState) do
+        if st.hover and st.leaving and not InUse(st.hover) then st.hover, st.leaving = nil, nil end
+        if st.test and st.header and type(st.header.IsVisible) == "function" and not st.header:IsVisible() then
+            st.test = false
+            PaintTest(id)
+        end
+    end
+    SyncAlerts()
+end
+
+-- Every alert down: the window closed, the page changed, a fight began.
+function F.ClearAlerts()
+    for id, st in pairs(alertState) do
+        st.hover, st.leaving = nil, nil
+        if st.test then st.test = false; PaintTest(id) end
+    end
+    SyncAlerts()
+end
+
+local function AlertsOnEnter(entry)
+    for id, def in pairs(alertDefs) do
+        local ok, hit = pcall(def.match, entry)
+        if ok and hit == true then
+            alertState[id].hover, alertState[id].leaving = entry, nil
+        end
+    end
+    SyncAlerts()
+end
+
+local function AlertsOnLeave(entry)
+    for _, st in pairs(alertState) do
+        if st.hover == entry then
+            if InUse(entry) then st.leaving = true else st.hover, st.leaving = nil, nil end
+        end
+    end
+    SyncAlerts()
+end
+
+-- A Test button for an alert in a section header (UI.SectionButton). Clicking keeps the preview up; clicking again takes it down.
+function F.AddTest(sec, id)
+    local def = alertDefs[id]
+    if not (def and sec and sec.header and UI.SectionButton) then return nil end
+    local st = alertState[id]
+    local b = UI.SectionButton(sec, {
+        text = "Test",
+        tip = "Shows this alert on screen with sample values until you press it again, change the page or close the window. "
+            .. "Move the scale while it is up to tune it.",
+        onClick = function()
+            if InCombat() and not st.test then return end
+            st.test = not st.test
+            PaintTest(id)
+            if st.test and type(def.sound) == "function" then pcall(def.sound) end
+            SyncAlerts()
+        end,
+    })
+    st.button, st.header = b, sec.header
+    PaintTest(id)
+    return b
+end
+
+-- Which alert the shared scale row stands for: the player's own class when it has one, else the warrior's.
+local function ScaleOwner()
+    local DC = FS.DruidClearcasting
+    if DC and DC.Applies and DC.Applies() then return "druid" end
+    return "warrior"
+end
+
+F.ScaleOwner = ScaleOwner
+
+local function ScaleKey()
+    return FS.GunsightAreas and FS.GunsightAreas.ALERT_SCALE_KEY
+end
+
+local function Starts(key, prefix)
+    return type(key) == "string" and key:sub(1, #prefix) == prefix
+end
+
+F.RegisterAlert({
+    id = "warrior", label = "Warrior power-up alerts",
+    api = function() return FS.WarriorPowerUps and FS.WarriorPowerUps.Preview end,
+    match = function(entry)
+        return Starts(entry.key, "gunsight.warrior.powerup") or (entry.key == ScaleKey() and ScaleOwner() == "warrior")
+    end,
+})
+F.RegisterAlert({
+    id = "druid", label = "Druid alerts",
+    api = function() return FS.DruidClearcasting and FS.DruidClearcasting.Preview end,
+    match = function(entry)
+        return Starts(entry.key, "gunsight.druid.clearcasting") or (entry.key == ScaleKey() and ScaleOwner() == "druid")
+    end,
+})
+
+CW.On("rowEnter", AlertsOnEnter)
+CW.On("rowLeave", AlertsOnLeave)
+CW.On("hide", F.ClearAlerts)
+CW.On("select", F.ClearAlerts)
+CW.On("change", function() for id, st in pairs(alertState) do
+    if st.up then local api = AlertApi(alertDefs[id]); if api and api.Restyle then pcall(api.Restyle) end end
+end end)
 
 -------------------------------------------------------------------------------
 -- The switch
