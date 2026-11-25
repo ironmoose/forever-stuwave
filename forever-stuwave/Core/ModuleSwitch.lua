@@ -15,7 +15,8 @@
 --
 -- Keys, labels and the config page each switch sits on come from the prototype's NAV (mockups/proto-src-2026-11-25).
 
-local addonName, FS = ...
+local _, FS = ...
+local addonName = (...)   -- this addon's folder name: the ADDON_LOADED event names it
 
 local MS = FS.ModuleSwitch or {}
 FS.ModuleSwitch = MS
