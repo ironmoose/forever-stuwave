@@ -242,6 +242,21 @@ def _check_party_fill_width_looks():
     P._assert_quiet(rt)
 
 
+def _check_party_spark_follows_bar_height():
+    rt = _party()
+    row = P._party1(rt)
+    spark = row.health.fsRail.spark
+    assert (spark.w, spark.h) == (16, 16), f"default spark {spark.w}x{spark.h}"
+    rt.execute("FS.Config.Set('bars.party.hpH', 18); FS.Config.Set('bars.party.mpH', 18)")
+    assert (spark.w, spark.h) == (32, 32), f"spark did not grow with the bar: {spark.w}x{spark.h}"
+    assert row.power.fsRail.spark.w == 32, row.power.fsRail.spark.w
+    rt.execute("__combat=true FS.Config.Set('bars.party.hpH', 12)")
+    assert spark.w == 21 and spark.w == int(spark.w), f"spark in combat {spark.w}"
+    rt.execute("__combat=false FS.Config.Set('bars.party.hpH', nil)")
+    assert (spark.w, spark.h) == (16, 16), f"spark back at the default height: {spark.w}x{spark.h}"
+    P._assert_quiet(rt)
+
+
 def _check_party_preview():
     rt = _party()
     rt.execute("""
@@ -428,6 +443,11 @@ def _check_raid_bar_heights():
     R._roster(rt, 25)
     tile = R._cell(rt, 3)
     assert tile.h == round(36 * 40 / 30), tile.h
+    # the spark at the rail's tip grows with the core, whole pixels, and is 10 again at the default 6
+    assert parts.health.fsRail.spark.w == round(10 * 10 / 6), parts.health.fsRail.spark.w
+    rt.execute("FS.Config.Set('bars.raid.hpH', nil)")
+    R._settle(rt)
+    assert parts.health.fsRail.spark.w == 10 and parts.health.fsRail.spark.h == 10, parts.health.fsRail.spark.w
     R._assert_quiet(rt)
 
 
@@ -480,6 +500,7 @@ def main() -> int:
         ("party: the class buff switch", _check_party_class_buff_switch),
         ("party: aggro ring and share", _check_party_aggro),
         ("party: background opacity, bar looks and width", _check_party_fill_width_looks),
+        ("party: the spark follows the bar height", _check_party_spark_follows_bar_height),
         ("party: the Style tab preview", _check_party_preview),
         ("raid: defaults draw as today", _check_raid_defaults),
         ("raid: markers by type, mine or all", _check_raid_markers),

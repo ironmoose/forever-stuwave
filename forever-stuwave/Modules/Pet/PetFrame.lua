@@ -271,8 +271,8 @@ end
 local function SeatBlockGeometry(b, plan, scale)
     local SetLaserRailSize = FS.FrameHelpers.SetLaserRailSize
     local function Rail(bar, height)
-        SetLaserRailSize(bar, height * scale, RAIL_BLOOM_SIZE * scale, RAIL_SPARK_SIZE * scale,
-            RAIL_SPARK_SIZE * scale)
+        local spark = FS.FrameHelpers.RailSparkSize(RAIL_SPARK_SIZE * scale, RAIL_CORE_HEIGHT * scale, height * scale)
+        SetLaserRailSize(bar, height * scale, RAIL_BLOOM_SIZE * scale, spark, spark)
     end
     local nameGap = ROW_GAP * scale
     local railGap = RAIL_PAIR_GAP * scale

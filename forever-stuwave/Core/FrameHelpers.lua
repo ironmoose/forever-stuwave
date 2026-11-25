@@ -1123,6 +1123,13 @@ function Helpers.CreateLaserRail(parent, spec)
     return bar
 end
 
+-- The spark (the glow ball at the fill's tip) for a rail whose core is `core` thick, when the spark `base` was drawn for a
+-- core `baseCore`: it grows with the bar, in whole pixels. At the core it was drawn for it is `base` untouched.
+function Helpers.RailSparkSize(base, baseCore, core)
+    if not (base and baseCore and core) or baseCore <= 0 or core == baseCore then return base end
+    return math.max(1, math.floor(base * core / baseCore + 0.5))
+end
+
 -- Re-applies every size CreateLaserRail baked from its spec, for a caller that
 -- rescales (CreateLaserRail's literals are scaled pixels and do not follow a UI
 -- Scale change by themselves). Same four arguments as the spec's coreHeight,

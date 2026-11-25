@@ -108,6 +108,14 @@ function T.looks_swap_in_any_order()
     end
 end
 
+function T.the_rail_spark_grows_with_the_core_in_whole_pixels()
+    eq(H.RailSparkSize(16, 9, 9), 16, "the default core keeps the drawn spark")
+    eq(H.RailSparkSize(16, 9, 18), 32, "twice the core, twice the spark")
+    eq(H.RailSparkSize(10, 6, 10), 17, "rounded to a whole pixel")
+    eq(H.RailSparkSize(16, 9, 1), 2, "a thin core, a small spark")
+    eq(H.RailSparkSize(16, 9, 0), 1, "never under one pixel")
+end
+
 return T
 """
 

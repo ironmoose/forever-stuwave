@@ -792,13 +792,16 @@ local function ScaleText(region, want)
 end
 
 -- A rail's core thickness: the shell, the bar and both track halves.
-local function SetRailCore(bar, core)
+local function SetRailCore(bar, core, recipe)
     bar.shell:SetHeight(core)
     bar:SetHeight(core)
     local rail = bar.fsRail
     if rail then
         rail.trackLeft:SetHeight(core)
         rail.trackRight:SetHeight(core)
+        -- the spark grows with the core, from the recipe's size at the recipe's core
+        local spark = FS.FrameHelpers.RailSparkSize(recipe.sparkWidth, recipe.coreHeight, core)
+        rail.spark:SetSize(spark, spark)
     end
 end
 
@@ -828,11 +831,11 @@ local function ApplyCellStyle(cell)
         if parts.geomSig ~= sig then
             parts.geomSig = sig
             if id == "A" then
-                SetRailCore(parts.health, hp)
+                SetRailCore(parts.health, hp, RAIL_HEALTH)
                 parts.mana.shell:ClearAllPoints()
                 parts.mana.shell:SetPoint("TOPLEFT", parts.frame, "TOPLEFT", 4, -(15 + hp + 2))
                 parts.mana.shell:SetPoint("TOPRIGHT", parts.frame, "TOPRIGHT", -4, -(15 + hp + 2))
-                if mp > 0 then SetRailCore(parts.mana, mp) end
+                if mp > 0 then SetRailCore(parts.mana, mp, RAIL_MANA) end
                 parts.mana.shell:SetShown(mp > 0)
             else
                 parts.mana:SetHeight(math.min(4, mp * 0.75))

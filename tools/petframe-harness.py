@@ -36,6 +36,7 @@ Exit 0 = every check passed.
 
 from __future__ import annotations
 
+import math
 import importlib.util
 import os
 import re
@@ -1312,7 +1313,10 @@ def check_rail_heights_size_the_status_block_the_top_row_and_the_panel() -> None
         approx(pf.healthBar.h, 12 * s, f"health core at scale {s}")
         approx(pf.powerBar.h, 9 * s, f"power core at scale {s}")
         approx(pf.healthBar.fsRail.bloomTop.h, 4 * s, f"bloom stays 4 at scale {s}")
-        approx(pf.healthBar.fsRail.spark.w, 16 * s, f"spark stays 16 at scale {s}")
+        # the spark follows the core (drawn 16 for the default 7), in whole pixels
+        want = math.floor(16 * s * 12 / 7 + 0.5)
+        approx(pf.healthBar.fsRail.spark.w, want, f"spark grows with the health core at scale {s}")
+        approx(pf.healthBar.fsRail.spark.h, want, f"spark stays round at scale {s}")
         approx(pf.redHealthBar.h, 12 * s, f"the red twin follows the health core at scale {s}")
     rt = runtime(1.0)
     put(rt, hpH=12, mpH=9)

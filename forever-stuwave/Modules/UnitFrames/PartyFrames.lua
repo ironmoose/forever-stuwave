@@ -2598,12 +2598,15 @@ do
         local height = PartyFrames.RowHeight()
         row.visual:SetHeight(height)
         for _, frame in ipairs(row.boxSeats or {}) do frame:SetHeight(height - BOX_TOP) end
-        size(health, hp, RAIL_BLOOM_SIZE, RAIL_SPARK_SIZE, RAIL_SPARK_SIZE)
+        local sparkOf = FS.FrameHelpers.RailSparkSize
+        local hpSpark = sparkOf(RAIL_SPARK_SIZE, RAIL_CORE_HEIGHT, hp)
+        size(health, hp, RAIL_BLOOM_SIZE, hpSpark, hpSpark)
         local heal = health.healOverlay
         if heal and heal.glow then heal.glow:SetHeight(hp) end
         power.shell:ClearAllPoints()
         if mp > 0 then
-            size(power, mp, RAIL_BLOOM_SIZE, RAIL_SPARK_SIZE, RAIL_SPARK_SIZE)
+            local mpSpark = sparkOf(RAIL_SPARK_SIZE, RAIL_CORE_HEIGHT, mp)
+            size(power, mp, RAIL_BLOOM_SIZE, mpSpark, mpSpark)
             power.shell:SetPoint("TOPLEFT", health.shell, "BOTTOMLEFT", 0, -RAIL_PAIR_GAP)
             power.shell:SetPoint("TOPRIGHT", health.shell, "BOTTOMRIGHT", 0, -RAIL_PAIR_GAP)
             row.powerOff = false
