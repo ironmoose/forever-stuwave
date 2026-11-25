@@ -1354,6 +1354,19 @@ local SHOW_KEYS = { focus = "unitFrames.showFocus", boss = "unitFrames.showBoss"
 FS.Config.RegisterDefault(SHOW_KEYS.focus, true)
 FS.Config.RegisterDefault(SHOW_KEYS.boss, true)
 
+-- Each frame can be handed back to the game on its own: off means this addon builds no frame for that unit and leaves the
+-- game's frame as it is, while the rest of the Unit frames module (and party, raid, the HUD) keeps running. Read once when
+-- the frames are built, so a change takes a reload; UnitFrames.Built tells the config row whether one is due.
+local USE_KEYS = { player = "unitFrames.usePlayer", target = "unitFrames.useTarget",
+    focus = "unitFrames.useFocus", boss = "unitFrames.useBoss" }
+for _, key in pairs(USE_KEYS) do FS.Config.RegisterDefault(key, true) end
+local usedAtBuild = {}
+
+FS.UnitFrames = FS.UnitFrames or {}
+FS.UnitFrames.USE_KEYS = USE_KEYS
+-- What this session built for `frame` ("player", "target", "focus", "boss"): true, false, or nil before the build.
+function FS.UnitFrames.Built(frame) return usedAtBuild[frame] end
+
 local visibilityEvents = CreateFrame("Frame")
 local appliedHidden = {}
 
@@ -1434,32 +1447,46 @@ local function Init()
     -- and Hide()+OnShow-hook taints their secure Update path, the same class
     -- of bug Buffs.lua's BuffFrame/DebuffFrame fix addressed. See CLAUDE.md's
     -- Buffs.lua/FrameHelpers.lua entries (2026-09-25).
-    DimBlizzardFrame(PlayerFrame)
-    DimBlizzardFrame(TargetFrame)
-    if FocusFrame then
+    local use = {}
+    for frame, key in pairs(USE_KEYS) do
+        use[frame] = FS.Config.Get(key) ~= false
+        usedAtBuild[frame] = use[frame]
+    end
+
+    -- A frame handed back to the game (use[x] false) keeps the game's own frame as it is.
+    if use.player then DimBlizzardFrame(PlayerFrame) end
+    if use.target then DimBlizzardFrame(TargetFrame) end
+    if use.focus and FocusFrame then
         DimBlizzardFrame(FocusFrame) -- not confirmed present on every 16001 build
     end
     -- The game's pet frame is not dimmed here: it follows the Pet bar switch (DimPetFrame below).
     for i = 1, 5 do
         local bossFrame = _G["Boss" .. i .. "TargetFrame"]
-        if bossFrame then
+        if use.boss and bossFrame then
             DimBlizzardFrame(bossFrame) -- not confirmed present on every 16001 build
         end
     end
 
-    local player = BuildUnitFrame("player", "ForeverSTUwavePlayerFrame", false, "player")
-    FS.Layout.Apply(player, "player")
-    player:Show() -- "player" always exists; shown unconditionally, no watch needed
+    local player, target, focus
+    if use.player then
+        player = BuildUnitFrame("player", "ForeverSTUwavePlayerFrame", false, "player")
+        FS.Layout.Apply(player, "player")
+        player:Show() -- "player" always exists; shown unconditionally, no watch needed
+    end
 
-    local target = BuildUnitFrame("target", "ForeverSTUwaveTargetFrame", true, "target")
-    FS.Layout.Apply(target, "target")
-    RegisterUnitWatch(target) -- shows/hides securely based on whether "target" exists
+    if use.target then
+        target = BuildUnitFrame("target", "ForeverSTUwaveTargetFrame", true, "target")
+        FS.Layout.Apply(target, "target")
+        RegisterUnitWatch(target) -- shows/hides securely based on whether "target" exists
+    end
 
     -- Focus sits at its own design position (FS.Layout.focus), away from the
     -- player/target corner, and seats from the layout table like they do.
-    local focus = BuildUnitFrame("focus", "ForeverSTUwaveFocusFrame", true, "focus")
-    FS.Layout.Apply(focus, "focus")
-    RegisterUnitWatch(focus) -- shows/hides securely based on whether "focus" exists
+    if use.focus then
+        focus = BuildUnitFrame("focus", "ForeverSTUwaveFocusFrame", true, "focus")
+        FS.Layout.Apply(focus, "focus")
+        RegisterUnitWatch(focus) -- shows/hides securely based on whether "focus" exists
+    end
 
     -- Boss frames have no on-screen neighbor either (see focus above), so
     -- boss[1] seats from FS.Layout.boss the same way; boss[2..5] then stack
@@ -1469,12 +1496,13 @@ local function Init()
     local BOSS_STACK_GAP = 8 -- small vertical gap between stacked boss frames, same order of magnitude as BAR_GAP (6px)
 
     local boss = {}
-    for i = 1, 5 do
+    local bossCount = use.boss and 5 or 0
+    for i = 1, bossCount do
         boss[i] = BuildUnitFrame("boss" .. i, "ForeverSTUwaveBoss" .. i .. "Frame", true, "boss")
         if i > 1 then boss[i].followsWidth = true end
     end
-    FS.Layout.Apply(boss[1], "boss")
-    for i = 2, 5 do
+    if boss[1] then FS.Layout.Apply(boss[1], "boss") end
+    for i = 2, bossCount do
         -- Anchored to the frame ABOVE by point, not by a fixed SetSize: this
         -- keeps every slot's width locked to boss[1]'s (which FS.Layout.Apply
         -- sized from the "boss" entry) through UI Scale changes too, since
@@ -1492,13 +1520,13 @@ local function Init()
         boss[i]:SetPoint("TOPLEFT", boss[i - 1].visual, "BOTTOMLEFT", 0, -BOSS_STACK_GAP)
         boss[i]:SetPoint("TOPRIGHT", boss[i - 1].visual, "BOTTOMRIGHT", 0, -BOSS_STACK_GAP)
     end
-    for i = 1, 5 do
+    for i = 1, bossCount do
         RegisterUnitWatch(boss[i]) -- shows/hides securely based on whether "bossN" exists
     end
 
     -- Layout.Apply sized focus and boss 1 from the layout table; the Width setting takes the size back.
     local function StyleSizes()
-        for _, frame in ipairs({ player, target, focus, boss[1] }) do SeatPanelWidth(frame) end
+        for _, frame in pairs({ player, target, focus, boss[1] }) do SeatPanelWidth(frame) end
     end
     StyleSizes()
     if FS.Layout.OnRescale then FS.Layout.OnRescale(StyleSizes) end
@@ -1512,35 +1540,33 @@ local function Init()
             end
         end
     end
-    Style.OnChange("player", Restyle({ player }))
-    Style.OnChange("target", Restyle({ target }))
-    Style.OnChange("focus", Restyle({ focus }))
-    Style.OnChange("boss", Restyle(boss))
+    if player then Style.OnChange("player", Restyle({ player })) end
+    if target then Style.OnChange("target", Restyle({ target })) end
+    if focus then Style.OnChange("focus", Restyle({ focus })) end
+    if boss[1] then Style.OnChange("boss", Restyle(boss)) end
 
-    WireEvents(player)
-    WireEvents(target)
-    WireEvents(focus)
-    for i = 1, 5 do
+    for _, frame in pairs({ player, target, focus }) do WireEvents(frame) end
+    for i = 1, bossCount do
         WireEvents(boss[i])
     end
 
     FS.player, FS.target, FS.focus = player, target, focus
-    FS.boss = boss
+    FS.boss = bossCount > 0 and boss or nil
 
     -- Frames that resolve their name via UpdateWatchedUnitName (every
     -- non-player frame) feed the unfiltered UNIT_NAME_UPDATE watcher above.
-    nameWatchFrames[#nameWatchFrames + 1] = target
-    nameWatchFrames[#nameWatchFrames + 1] = focus
-    for i = 1, 5 do
+    if target then nameWatchFrames[#nameWatchFrames + 1] = target end
+    if focus then nameWatchFrames[#nameWatchFrames + 1] = focus end
+    for i = 1, bossCount do
         nameWatchFrames[#nameWatchFrames + 1] = boss[i]
     end
 
     ApplyVisibility()
 
-    UpdateAll(player)
-    if UnitExists("target") then UpdateAll(target) end
-    if UnitExists("focus") then UpdateAll(focus) end
-    for i = 1, 5 do
+    if player then UpdateAll(player) end
+    if target and UnitExists("target") then UpdateAll(target) end
+    if focus and UnitExists("focus") then UpdateAll(focus) end
+    for i = 1, bossCount do
         if UnitExists(boss[i].unit) then UpdateAll(boss[i]) end
     end
 end

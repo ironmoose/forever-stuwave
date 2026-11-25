@@ -313,6 +313,7 @@ local function ReleaseAll(display)
 end
 
 local function RefreshDisplay(display)
+    if not display then return end -- that frame was handed back to the game (unitFrames.useTarget / useFocus)
     local unit = display.unit
     if not UnitExists(unit) then
         ReleaseAll(display)
@@ -360,14 +361,11 @@ local function Init()
     -- already set by the time this runs, except a rare in-combat-reload race
     -- (this file's own combat defer below, racing UnitFrames.lua's). Bail
     -- loudly instead of throwing on a nil frame.
-    if not FS.target or not FS.focus then
-        FS.LogDegradeOnce("targetauras_nounits",
-            "|cffff4488Forever STUwave|r targetauras: FS.target/FS.focus not set at init, skipping")
-        return
-    end
+    -- A frame switched off on the Unit Frames page is not built (FS.target / FS.focus nil): its rows are skipped quietly.
+    if not FS.target and not FS.focus then return end
 
-    BuildAuraDisplay("target", FS.target)
-    BuildAuraDisplay("focus", FS.focus)
+    if FS.target then BuildAuraDisplay("target", FS.target) end
+    if FS.focus then BuildAuraDisplay("focus", FS.focus) end
 
     local targetEvents = CreateFrame("Frame")
     SafeRegisterUnitEvent(targetEvents, "UNIT_AURA", "target")
