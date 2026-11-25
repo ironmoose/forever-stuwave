@@ -354,7 +354,7 @@ local function Reveal(entry)
     if sec and sec.folded then
         sec.folded = false
         if sec.id then CW.SetFolded(sec.id, false) end
-        if sec.chevron then sec.chevron:SetText("v") end
+        if sec.PaintChevron then sec.PaintChevron() end
     end
     CW.RefreshScroll()
     local row = entry.row
