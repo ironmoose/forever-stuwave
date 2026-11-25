@@ -1254,8 +1254,8 @@ local function RefreshWatchedNames()
     end
 end
 
+-- The event itself is registered by Init, so a Unit frames switch that is off listens to nothing.
 local nameWatcher = CreateFrame("Frame")
-nameWatcher:RegisterEvent("UNIT_NAME_UPDATE")
 nameWatcher:SetScript("OnEvent", RefreshWatchedNames)
 
 -------------------------------------------------------------------------------
@@ -1388,19 +1388,17 @@ local function ApplyVisibility()
     for _, frame in ipairs(FS.boss or {}) do Seat(frame, FS.Config.Get(SHOW_KEYS.boss) == false) end
 end
 
-visibilityEvents:RegisterEvent("PLAYER_LOGIN")
+-- Init hooks these up (the login apply and the four setting hooks), so a Unit frames switch that is off listens to nothing.
 visibilityEvents:SetScript("OnEvent", ApplyVisibility)
-FS.Config.OnChange(HIDE_KEYS.player, ApplyVisibility)
-FS.Config.OnChange(HIDE_KEYS.target, ApplyVisibility)
-FS.Config.OnChange(SHOW_KEYS.focus, ApplyVisibility)
-FS.Config.OnChange(SHOW_KEYS.boss, ApplyVisibility)
 
 local function FramesStateLine()
     local parts = {}
     for _, unit in ipairs({ "player", "target" }) do
         parts[#parts + 1] = unit .. " " .. (FS.Config.Get(HIDE_KEYS[unit]) == true and "hidden" or "shown")
     end
-    return table.concat(parts, ", ")
+    local line = table.concat(parts, ", ")
+    if FS.ModuleSwitch and not FS.ModuleSwitch.On("m.uf") then line = line .. "; the Unit frames module is off, so none is drawn" end
+    return line
 end
 
 SLASH_FSFRAMES1 = "/fsframes"
@@ -1422,6 +1420,15 @@ end
 -------------------------------------------------------------------------------
 
 local function Init()
+    -- The listeners that belong to the frames built below: the unfiltered name event, the login apply of the hide and show
+    -- settings and the four setting hooks (a profile switch or a setting change applies at once).
+    nameWatcher:RegisterEvent("UNIT_NAME_UPDATE")
+    visibilityEvents:RegisterEvent("PLAYER_LOGIN")
+    FS.Config.OnChange(HIDE_KEYS.player, ApplyVisibility)
+    FS.Config.OnChange(HIDE_KEYS.target, ApplyVisibility)
+    FS.Config.OnChange(SHOW_KEYS.focus, ApplyVisibility)
+    FS.Config.OnChange(SHOW_KEYS.boss, ApplyVisibility)
+
     -- Dim, not hide: Player/Target/Focus/boss are all Edit Mode
     -- UnitFrame system members (retail's Enum.EditModeUnitFrameSystemIndices)
     -- and Hide()+OnShow-hook taints their secure Update path, the same class
@@ -1432,9 +1439,7 @@ local function Init()
     if FocusFrame then
         DimBlizzardFrame(FocusFrame) -- not confirmed present on every 16001 build
     end
-    if PetFrame then
-        DimBlizzardFrame(PetFrame) -- not confirmed present on every 16001 build
-    end
+    -- The game's pet frame is not dimmed here: it follows the Pet bar switch (DimPetFrame below).
     for i = 1, 5 do
         local bossFrame = _G["Boss" .. i .. "TargetFrame"]
         if bossFrame then
@@ -1540,13 +1545,43 @@ local function Init()
     end
 end
 
-if InCombatLockdown() then
-    local regen = CreateFrame("Frame")
-    regen:RegisterEvent("PLAYER_REGEN_ENABLED")
-    regen:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-        Init()
+-- Now, or at the first PLAYER_REGEN_ENABLED when the client loaded in a fight (the secure frames and the stock frames'
+-- mouse cannot be touched in combat).
+local function OutOfCombat(fn)
+    if InCombatLockdown() then
+        local regen = CreateFrame("Frame")
+        regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        regen:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            fn()
+        end)
+    else
+        fn()
+    end
+end
+
+-- The game's own pet frame goes with the pet panel that replaces it (Pet bar, m.pet), not with the Unit frames switch: Pet bar
+-- off leaves the game's pet frame up, and Unit frames off with the Pet bar on still hides it behind the panel.
+local function DimPetFrame()
+    if PetFrame then
+        DimBlizzardFrame(PetFrame) -- not confirmed present on every 16001 build
+    end
+end
+
+-- Module power (Core/ModuleSwitch.lua): with Unit frames off none of the frames above exist, FS.player, FS.target, FS.focus
+-- and FS.boss stay nil (every reader checks them), and the game's player, target, focus and boss frames are left as they are.
+local MS = FS.ModuleSwitch
+if MS then
+    MS.WhenOn("m.uf", function()
+        OutOfCombat(function()
+            Init()
+            MS.MarkBuilt("m.uf")
+        end)
     end)
+    MS.WhenOn("m.pet", function() OutOfCombat(DimPetFrame) end)
 else
-    Init()
+    OutOfCombat(function()
+        Init()
+        DimPetFrame()
+    end)
 end

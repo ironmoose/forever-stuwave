@@ -3090,6 +3090,9 @@ FS.Config.RegisterDefault(SHOWN.KEY, true)
 -- The wanted state, which is the saved value: right the moment SetShown, a profile switch or a reset changes it,
 -- whatever the container (nil, or owing a Show that combat blocks) looks like.
 function PartyFrames.IsShown()
+    -- Module power: with the Party frames switch off nothing is drawn, whatever the saved value says.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.party") then return false end
     return FS.Config.Get(SHOWN.KEY) == true
 end
 
@@ -3167,16 +3170,6 @@ function PartyFrames.SetSuppressed(flag)
     SHOWN.Apply()
 end
 
--- Init runs as the files load, before ADDON_LOADED gives FS.Config its saved values, so the apply it makes there
--- sees the defaults. The saved value reaches the container here at PLAYER_LOGIN (FS.Config has resolved the
--- character's profile by then), and through the OnChange hook above if a profile switch changes it later. A login in
--- combat builds the container only after that, and Init applies the wanted state once more.
-do
-    local login = CreateFrame("Frame")
-    login:RegisterEvent("PLAYER_LOGIN")
-    login:SetScript("OnEvent", SHOWN.Apply)
-end
-
 -- What the raid grid (RaidFrames.lua, loaded next) reuses from this file, through one table: this file is at Lua's
 -- limit of 200 file-scope locals, so nothing here may add one. Every function reads only its arguments and the unit
 -- APIs; UpdateRowLowHealth drives any frame with `.unit`, `.lowHealthTargets` and `.lowHealthBase`.
@@ -3212,6 +3205,14 @@ PartyFrames.shared = {
 
 local function Init()
     WatchBlizzardParty()
+
+    -- The container is built when the files load or at ADDON_LOADED, before the character's profile is known, so the
+    -- apply it makes there sees the defaults. The saved value reaches the container here at PLAYER_LOGIN (FS.Config has
+    -- resolved the character's profile by then), and through the OnChange hook above if a profile switch changes it
+    -- later. A login in combat builds the container only after that, and Init applies the wanted state once more.
+    local login = CreateFrame("Frame")
+    login:RegisterEvent("PLAYER_LOGIN")
+    login:SetScript("OnEvent", SHOWN.Apply)
 
     local container = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
     FS.Layout.Apply(container, "party")
@@ -3415,6 +3416,8 @@ local function Init()
 
         RefreshRanges()
     end
+
+    if FS.ModuleSwitch then FS.ModuleSwitch.MarkBuilt("m.party") end
 end
 
 -------------------------------------------------------------------------------
@@ -3489,11 +3492,18 @@ SlashCmdList["FSPARTY"] = function(msg)
         return
     elseif cmd == "show" or cmd == "hide" then
         if PartyFrames.SetShown(cmd == "show") then
-            print(("  party frames: %s%s"):format(cmd == "show" and "shown" or "hidden",
-                InCombatLockdown() and " (settles when combat ends)" or ""))
+            local off = FS.ModuleSwitch and not FS.ModuleSwitch.On("m.party")
+            print(("  party frames: %s%s%s"):format(cmd == "show" and "shown" or "hidden",
+                InCombatLockdown() and " (settles when combat ends)" or "",
+                off and " (saved; the Party frames module is off, so nothing is drawn)" or ""))
         else
             print("  party frames: the saved setting could not be changed")
         end
+        return
+    end
+
+    if FS.ModuleSwitch and not FS.ModuleSwitch.On("m.party") then
+        print("|cff22e0ffForever STUwave|r party: the Party frames module is off, so no row is built.")
         return
     end
 
@@ -3554,13 +3564,25 @@ SlashCmdList["FSPARTY"] = function(msg)
         .. "/fsparty show and /fsparty hide switch the frames.")
 end
 
-if InCombatLockdown() then
-    local regen = CreateFrame("Frame")
-    regen:RegisterEvent("PLAYER_REGEN_ENABLED")
-    regen:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-        Init()
-    end)
-else
-    Init()
+-- Module power (Core/ModuleSwitch.lua): with the Party frames switch off nothing above runs, so the game's own party frames
+-- (PartyFrame, CompactPartyFrame, the raid manager tab) are never dimmed, swept or parked and no row is built. The tables
+-- stay defined (the raid grid reuses `shared`, the console key asks IsShown), and the style preview still builds. Party
+-- frames need Unit frames in the Modules list (turning Unit frames off turns them off with it), but the gate itself reads
+-- only its own switch, so a store that holds one without the other still builds what it says.
+do
+    local MS = FS.ModuleSwitch
+    if MS then MS.Register({ key = "m.party", requires = { "m.uf" } }) end
+    local function Start()
+        if InCombatLockdown() then
+            local regen = CreateFrame("Frame")
+            regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+            regen:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                Init()
+            end)
+        else
+            Init()
+        end
+    end
+    if MS then MS.WhenOn("m.party", Start) else Start() end
 end

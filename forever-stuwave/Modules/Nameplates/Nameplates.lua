@@ -146,20 +146,26 @@ local ALPHA_NONTARGET_DIM = 0.75
 
 local FONT_FLAGS = "OUTLINE"
 
--- STUwave nameplates switch (Config key `nameplates.enabled`, on by default; the Config window row reads FS.Nameplates.SETTING). Off,
--- this file builds nothing on a plate, hides the roots it had built and leaves Blizzard's own UnitFrame on every plate
--- as the game draws it, so the stock plates (and what other addons add to them) show instead. Live, no reload: see
--- ApplyPlatesSetting. Blizzard keeps a plate's UnitFrame shown exactly while its unit exists
+-- STUwave nameplates switch: the Nameplates module switch of Core/ModuleSwitch.lua ("m.np", account wide, the one live module).
+-- Off, this file registers no event, builds nothing on a plate, hides the roots it had built and leaves Blizzard's own
+-- UnitFrame on every plate as the game draws it, so the stock plates (and what other addons add to them) show instead. Live,
+-- no reload: see ApplyPlatesSetting. Blizzard keeps a plate's UnitFrame shown exactly while its unit exists
 -- (CompactUnitFrame_UpdateVisible), so giving it back is a plain Show.
+-- Config key `nameplates.enabled` (the Config window row reads FS.Nameplates.SETTING) is the switch's older home: it is
+-- read once into the module switch (Plates.MigrateSwitch) and then follows it both ways (Plates.MirrorSwitch), so the row
+-- still turns the plates off and on, and the saved value stays right for one release in case the addon is rolled back. Without
+-- Core/ModuleSwitch.lua (a test world) the key is the whole switch, as it was.
 --
 -- This file sits at the parse gate's limit of file-scope locals (tools/parse-gate.py), so the switch, its cache and the
 -- Questie and build helpers below live in this one table (exported as FS.Nameplates): `on` is the cached switch (the Show
--- hook, HideBlizzardPlate and every plate event read it; FS.Config loads after this file, so it starts on and a saved
--- "off" is applied from PLAYER_ENTERING_WORLD, see Plates.RegisterConfig), `Questie` the Questie icon helpers, `Build`
--- the plate builder.
+-- hook, HideBlizzardPlate and every plate event read it; it starts off, and the gate turns it on at this addon's
+-- ADDON_LOADED, see Plates.Boot), `Questie` the Questie icon helpers, `Build` the plate builder.
 local Plates = {
     KEY = "nameplates.enabled",
-    on = true,
+    MODULE = "m.np",
+    on = false,
+    eventsUp = false,
+    addon = (...),
     Questie = {},
 }
 Plates.SETTING = {
@@ -2977,24 +2983,33 @@ end
 
 -- The switch: one do-block exporting through Plates (file-scope locals are at the parse gate's limit).
 do
-    -- The saved switch (Plates.KEY), on unless saved off (and on while the config is not there yet).
+    -- The switch as it stands now: the Nameplates module switch (live, so the store is what the plates follow). Without
+    -- Core/ModuleSwitch.lua (a test world) the saved key is the switch, on unless saved off, and on while the config is not there.
     local function ReadPlatesSetting()
+        local MS = FS.ModuleSwitch
+        if MS then return MS.Wanted(Plates.MODULE) end
         local config = FS.Config
         if config and type(config.Get) == "function" then return config.Get(Plates.KEY) ~= false end
         return true
     end
 
     -- Applies the switch to every plate that is up, live: off releases each root (its aura container goes back to the
-    -- pool, Questie's icon goes back to Questie) and gives Blizzard's UnitFrame back, a plain Show because Blizzard keeps
-    -- that frame shown exactly while its unit exists; on builds a root on every plate that is up. Nothing here is
-    -- protected, so it works in combat too. `Plates.on` is flipped first: the Show hook and HideBlizzardPlate read it, and
-    -- the restore must not be hidden again by them.
+    -- pool, Questie's icon goes back to Questie), gives Blizzard's UnitFrame back (a plain Show, because Blizzard keeps
+    -- that frame shown exactly while its unit exists) and unregisters every event; on registers the events, reads the
+    -- plates that are up from the client (nothing tracked them while the events were off) and builds a root on each.
+    -- Nothing here is protected, so it works in combat too. `Plates.on` is flipped first: the Show hook and HideBlizzardPlate
+    -- read it, and the restore must not be hidden again by them.
     local function ApplyPlatesSetting()
         local on = ReadPlatesSetting()
         if on == Plates.on then return end
         Plates.on = on
         local units = {}
         if on then
+            Plates.RegisterEvents()
+            Plates.Discover()
+            -- The first PLAYER_ENTERING_WORLD never reached a module that loaded off: its keys, its Questie and aura
+            -- hooks and the target mark are set up now (a second call finds them done).
+            Plates.EnterWorld()
             TopUpAuraPool()
             for unit in pairs(FS.platesByUnit) do units[#units + 1] = unit end
             for _, unit in ipairs(units) do
@@ -3011,23 +3026,68 @@ do
             -- pcall: a refusing frame must not stop the others.
             if unitFrame then pcall(unitFrame.Show, unitFrame) end
         end
+        -- Nothing tracks the plates while the events are off, so what was tracked is let go (Plates.Discover reads it again).
+        for unit in pairs(FS.platesByUnit) do FS.platesByUnit[unit] = nil end
+        Plates.UnregisterEvents()
+    end
+    Plates.ApplySwitch = ApplyPlatesSetting
+
+    -- The older per profile key changed (the Nameplates page row, a profile switch): it is now a view of the module
+    -- switch, so it writes that and the module switch's own change callback applies it.
+    function Plates.OnKeyChange(new)
+        local MS = FS.ModuleSwitch
+        if MS then
+            MS.Set(Plates.MODULE, new ~= false)
+        else
+            ApplyPlatesSetting()
+        end
     end
 
-    -- FS.Config is not there when this file loads (.toc), so the default and the change callback are registered once,
-    -- from PLAYER_ENTERING_WORLD, and a saved "off" is applied there before the aura pool is filled.
-    local registered = false
-    function Plates.RegisterConfig()
-        if registered then return end
+    -- The module switch changed: the older key follows, so the page row shows what the plates do and a rolled back addon
+    -- finds the same answer.
+    function Plates.MirrorSwitch(on)
         local config = FS.Config
-        if not config or type(config.RegisterDefault) ~= "function" or type(config.OnChange) ~= "function" then return end
-        registered = true
+        if config and type(config.Get) == "function" and type(config.Set) == "function" and config.Get(Plates.KEY) ~= on then
+            config.Set(Plates.KEY, on)
+        end
+    end
+
+    -- Once, at the first login after the module switch exists: a saved "off" of the older key (the active profile's) turns
+    -- the module switch off. The saved value is read when the config has resolved the character's profile, so this runs
+    -- from PLAYER_ENTERING_WORLD; the mark is account wide.
+    function Plates.MigrateSwitch()
+        local MS, config, db = FS.ModuleSwitch, FS.Config, _G.ForeverSTUwaveDB
+        if not (MS and config and type(config.Get) == "function" and type(db) == "table") then return end
+        if db.nameplatesSwitchMigrated or not MS.IsWritable() then return end
+        db.nameplatesSwitchMigrated = true
+        if config.Get(Plates.KEY) == false and MS.Wanted(Plates.MODULE) then MS.Set(Plates.MODULE, false) end
+    end
+
+    -- Defaults and change hooks of every key this module owns. FS.Config is not there when this file loads (.toc) and a
+    -- test world may add it later still, so this runs at ADDON_LOADED and again from RegisterConfig; the second call finds it
+    -- done. Not the target mark's value: that is read at PLAYER_ENTERING_WORLD, once the profile is known.
+    local keysDone = false
+    function Plates.RegisterKeys()
+        if keysDone then return true end
+        local config = FS.Config
+        if not config or type(config.RegisterDefault) ~= "function" or type(config.OnChange) ~= "function" then return false end
+        keysDone = true
         config.RegisterDefault(Plates.KEY, true)
-        config.OnChange(Plates.KEY, ApplyPlatesSetting)
+        config.OnChange(Plates.KEY, Plates.OnKeyChange)
         -- The page's settings: defaults, then every key calls the same diff, which reads them all and applies what moved.
         for _, def in pairs(Plates.SETTINGS) do
             config.RegisterDefault(def.key, def.default)
             config.OnChange(def.key, Plates.ApplySettings)
         end
+        return true
+    end
+
+    -- The saved settings are in only once the profile is known, so the first read of them waits for PLAYER_ENTERING_WORLD
+    -- (or for the plates being switched on, which is later still).
+    local registered = false
+    function Plates.RegisterConfig()
+        if registered or not Plates.RegisterKeys() then return end
+        registered = true
         Plates.ApplySettings()
         ApplyPlatesSetting()
     end
@@ -3039,10 +3099,9 @@ end
 
 local eventFrame = CreateFrame("Frame")
 
--- Guarded per-event: a missing event name on some client build must not abort
--- the whole registration block (mirrors StanceBar.lua/ActionBars.lua's own
--- RegisterEvents loop).
-for _, event in ipairs({
+-- Every event the plates listen to. Registered only while the module is on (Plates.RegisterEvents), so a module that is
+-- off costs the client nothing; the one event this file always listens to is its own ADDON_LOADED (Plates.Boot).
+Plates.EVENTS = {
     "NAME_PLATE_UNIT_ADDED",
     "NAME_PLATE_UNIT_REMOVED",
     "UNIT_HEALTH",
@@ -3066,17 +3125,43 @@ for _, event in ipairs({
     -- applied in combat and still running afterward is otherwise never drawn --
     -- mirrors TargetAuras.lua's own PLAYER_REGEN_ENABLED registration.
     "PLAYER_REGEN_ENABLED",
-}) do
-    pcall(eventFrame.RegisterEvent, eventFrame, event)
+}
+
+-- Guarded per-event: a missing event name on some client build must not abort
+-- the whole registration block (mirrors StanceBar.lua/ActionBars.lua's own
+-- RegisterEvents loop). The cast bar events (CAST_EVENTS) are their own list, declared up in Constants alongside the rest
+-- of the cast-bar setup. The aura container updates itself (engine-side), so UNIT_AURA, which fires for every unit all the
+-- time, is only worth listening to for the fallback row: from load without the template, or from the moment the container
+-- path is given up (EngageAuraFallback, called by GiveUpAuraContainers).
+function Plates.RegisterEvents()
+    if Plates.eventsUp then return end
+    Plates.eventsUp = true
+    for _, event in ipairs(Plates.EVENTS) do
+        pcall(eventFrame.RegisterEvent, eventFrame, event)
+    end
+    for _, event in ipairs(CAST_EVENTS) do
+        pcall(eventFrame.RegisterEvent, eventFrame, event)
+    end
+    if not AuraContainersActive() then
+        pcall(eventFrame.RegisterEvent, eventFrame, "UNIT_AURA")
+    end
 end
 
--- The aura container updates itself (engine-side), so UNIT_AURA, which fires for
--- every unit all the time, is only worth listening to for the fallback row: from
--- load without the template, or from the moment the container path is given up
--- (EngageAuraFallback, called by GiveUpAuraContainers).
-if not USE_AURA_CONTAINERS then
-    pcall(eventFrame.RegisterEvent, eventFrame, "UNIT_AURA")
+function Plates.UnregisterEvents()
+    if not Plates.eventsUp then return end
+    Plates.eventsUp = false
+    for _, event in ipairs(Plates.EVENTS) do
+        pcall(eventFrame.UnregisterEvent, eventFrame, event)
+    end
+    for _, event in ipairs(CAST_EVENTS) do
+        pcall(eventFrame.UnregisterEvent, eventFrame, event)
+    end
+    pcall(eventFrame.UnregisterEvent, eventFrame, "UNIT_AURA")
 end
+
+-- This file loads before Core/ModuleSwitch.lua and Core/Config.lua (.toc), so the gate cannot be asked at file scope: the
+-- file listens for its own ADDON_LOADED, which comes after every file has loaded (Plates.Boot).
+pcall(eventFrame.RegisterEvent, eventFrame, "ADDON_LOADED")
 
 -- The fallback row's regen rescan (the handler below) is refused while the client still says
 -- auras are secret; the shared retry chain (Theme.lua) runs it again once reads work. The
@@ -3098,7 +3183,7 @@ end
 -- The container path was given up at runtime: register UNIT_AURA and give every
 -- live plate that has no container its fallback row, scanned at once.
 EngageAuraFallback = function()
-    pcall(eventFrame.RegisterEvent, eventFrame, "UNIT_AURA")
+    if Plates.eventsUp then pcall(eventFrame.RegisterEvent, eventFrame, "UNIT_AURA") end
     for unit, root in pairs(FS.framesByUnit) do
         if not root.auraContainer then
             EnsureAuraIcons(root)
@@ -3107,14 +3192,72 @@ EngageAuraFallback = function()
     end
 end
 
--- Cast bar events, same guarded registration as above; kept as its own
--- loop over CAST_EVENTS rather than folded into the list above, since that
--- table is declared up in Constants alongside the rest of the cast-bar setup.
-for _, event in ipairs(CAST_EVENTS) do
-    pcall(eventFrame.RegisterEvent, eventFrame, event)
+-- Plate discovery, entering the world and the gate, defined here because they use the locals above.
+do
+    -- The plates that are up, from the client: nothing tracked them while the events were off. Only a client that has
+    -- C_NamePlate.GetNamePlates is read; any other keeps what it has tracked.
+    function Plates.Discover()
+        local get = C_NamePlate and C_NamePlate.GetNamePlates
+        if type(get) ~= "function" then return end
+        local ok, list = pcall(get)
+        if not ok or type(list) ~= "table" then return end
+        for unit in pairs(FS.platesByUnit) do FS.platesByUnit[unit] = nil end
+        for _, plate in ipairs(list) do
+            local unit = type(plate) == "table" and plate.namePlateUnitToken or nil
+            if type(unit) == "string" then FS.platesByUnit[unit] = C_NamePlate.GetNamePlateForUnit(unit) end
+        end
+    end
+
+    -- Once per session the saved settings, the aura pool, the Questie and aura hooks and the target mark are set up; the
+    -- second call finds the one time parts done. Runs at PLAYER_ENTERING_WORLD, or when the plates are switched on after
+    -- that event has gone by.
+    function Plates.EnterWorld()
+        Plates.RegisterConfig()
+        if Plates.on and Plates.S.auras then TopUpAuraPool() end
+        RegisterAurasReadable()
+        RegisterTargetMarkConfig()
+        RefreshTargetMarks()
+        -- Whether Questie draws plate icons changes across an instance door: the "!" follows.
+        for otherUnit in pairs(FS.framesByUnit) do
+            UpdateQuestIcon(otherUnit)
+        end
+    end
+
+    -- The module is on at load: the plates are live and listen.
+    function Plates.Start()
+        Plates.on = true
+        Plates.RegisterEvents()
+    end
+
+    -- ADDON_LOADED, once. The keys are registered always (the Config row of the older key must work with the plates off),
+    -- the events only while on. The module switch is the gate; without it (a test world) the plates start at once.
+    function Plates.Boot()
+        if Plates.booted then return end
+        Plates.booted = true
+        Plates.RegisterKeys()
+        local MS = FS.ModuleSwitch
+        if not MS then
+            Plates.Start()
+            return
+        end
+        MS.OnChange(Plates.MODULE, function(on)
+            Plates.MirrorSwitch(on)
+            Plates.ApplySwitch()
+        end)
+        MS.WhenOn(Plates.MODULE, Plates.Start)
+    end
 end
 
 eventFrame:SetScript("OnEvent", function(_, event, unit)
+    -- ADDON_LOADED names the addon that loaded: this one is the gate's start.
+    if event == "ADDON_LOADED" then
+        if unit == Plates.addon then
+            pcall(eventFrame.UnregisterEvent, eventFrame, "ADDON_LOADED")
+            Plates.Boot()
+        end
+        return
+    end
+
     -- PLAYER_TARGET_CHANGED carries no unit argument, so it has to be
     -- dispatched before the unit-based lookup below: targeting changes
     -- emphasis on both the old and new target plate, and dims/undims every
@@ -3163,15 +3306,8 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     -- the aura container pool (a no-op without the template, or in combat) and, once,
     -- registers the fallback row's readable callback (Theme.lua is loaded by now).
     if event == "PLAYER_ENTERING_WORLD" then
-        Plates.RegisterConfig()
-        if Plates.on and Plates.S.auras then TopUpAuraPool() end
-        RegisterAurasReadable()
-        RegisterTargetMarkConfig()
-        RefreshTargetMarks()
-        -- Whether Questie draws plate icons changes across an instance door: the "!" follows.
-        for otherUnit in pairs(FS.framesByUnit) do
-            UpdateQuestIcon(otherUnit)
-        end
+        Plates.MigrateSwitch()
+        Plates.EnterWorld()
         return
     end
 

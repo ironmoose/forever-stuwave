@@ -963,6 +963,7 @@ function CreateFrame(kind, name, parent, template)
     local f = Sponge(name or ("(" .. tostring(kind) .. ")"))
     f._name, f._kind, f._parent = name, kind, parent
     __made[#__made + 1] = { name = name, phase = __phase, files = stackFiles() }
+    f._madeBy = __made[#__made].files
     if name then _G[name] = f end
     return f
 end
@@ -1049,6 +1050,7 @@ function Boot(opts)
     local modules = {}
     for _, key in ipairs(opts.off or {}) do modules[key] = false end
     ForeverSTUwaveDB = { modules = modules }
+    for k, v in pairs(opts.db or {}) do ForeverSTUwaveDB[k] = v end
     __phase = "run"
     Fire("ADDON_LOADED", "forever-stuwave")
     IsLoggedIn = function() return true end
@@ -2019,6 +2021,474 @@ function T.the_deck_is_built_with_both_on()
     classWorld({}, "SHAMAN")
     yes(MadeNamed("ForeverSTUwaveDeck"))
     loaded("Modules/ActionBars/Deck.lua")
+end
+
+-- ---- B5c: unit frames (m.uf), party frames (m.party), raid frames (m.raid), nameplates (m.np) ----------------------------
+--
+-- The same tolerant client with the unit APIs the frames read and a stand-in roster, so a row can join and leave a group and
+-- fight. Every row plays the events these modules answer (target, focus, health, auras, the roster, a nameplate coming and
+-- going, a fight), so an "off" module has to stay silent through all of them, not only at load.
+
+local UF_FILE, AURAS_FILE = "Modules/UnitFrames/UnitFrames.lua", "Modules/Auras/TargetAuras.lua"
+local PARTY_FILE, RAID_FILE = "Modules/UnitFrames/PartyFrames.lua", "Modules/UnitFrames/RaidFrames.lua"
+local NP_FILE = "Modules/Nameplates/Nameplates.lua"
+local EXTRAS_FILE = "Modules/UnitFrames/FrameExtras.lua"
+
+local B5C = {
+    ["m.uf"] = {
+        files = { UF_FILE, AURAS_FILE },
+        named = { "ForeverSTUwavePlayerFrame", "ForeverSTUwaveTargetFrame", "ForeverSTUwaveFocusFrame", "ForeverSTUwaveBoss1Frame" },
+        blizzard = { "PlayerFrame", "TargetFrame", "FocusFrame", "Boss1TargetFrame", "Boss2TargetFrame", "Boss3TargetFrame",
+            "Boss4TargetFrame", "Boss5TargetFrame" },
+    },
+    ["m.party"] = {
+        files = { PARTY_FILE },
+        named = { "ForeverSTUwavePartyContainer", "ForeverSTUwavePartyRow1" },
+        blizzard = { "PartyFrame", "CompactPartyFrame", "CompactRaidFrameManager" },
+    },
+    ["m.raid"] = {
+        files = { RAID_FILE },
+        named = { "ForeverSTUwaveRaidContainer", "ForeverSTUwaveRaidCell1" },
+        blizzard = { "CompactRaidFrameContainer", "CompactRaidFrame1" },
+    },
+}
+local B5C_PET_FRAME = "PetFrame"
+
+local function b5cNames(list)
+    local out = {}
+    for _, key in ipairs(list) do out[#out + 1] = key end
+    return out
+end
+
+local function b5cStubs()
+    __combat = false
+    InCombatLockdown = function() return __combat end
+    __units = { player = true }
+    __inGroup, __inRaid, __groupCount = false, false, 1
+    UnitExists = function(u) return __units[u] == true end
+    IsInGroup = function() return __inGroup end
+    IsInRaid = function() return __inRaid end
+    GetNumGroupMembers = function() return __groupCount end
+    GetNumSubgroupMembers = function() return math.max(0, __groupCount - 1) end
+    for name, value in pairs({ UnitHealth = 100, UnitHealthMax = 100, UnitPower = 50, UnitPowerMax = 100, UnitLevel = 12,
+        UnitIsConnected = true, UnitIsDeadOrGhost = false, UnitIsDead = false, UnitIsGhost = false, UnitIsPlayer = true,
+        UnitCanAttack = false, UnitIsFriend = true, UnitIsPVP = false, UnitIsUnit = false, UnitInRange = true,
+        UnitAffectingCombat = false, UnitInParty = true, UnitInRaid = false, UnitIsVisible = true, UnitIsGroupLeader = false,
+        UnitGroupRolesAssigned = "NONE", UnitThreatSituation = 0, UnitClassification = "normal", UnitReaction = 5,
+        GetRaidTargetIndex = 0, UnitHasVehicleUI = false, UnitIsEnemy = false, UnitInVehicle = false, UnitGetTotalAbsorbs = 0,
+        UnitGetIncomingHeals = 0, UnitHealthPercent = 100, UnitSex = 2 }) do
+        _G[name] = function() return value end
+    end
+    UnitPowerType = function() return 0, "MANA" end
+    UnitName = function(u) return u == "player" and "Stu" or ("Mate" .. tostring(u)) end
+    GetUnitName = function(u) return UnitName(u) end
+    UnitClass = function() return "Shaman", "SHAMAN", 7 end
+    GetRaidRosterInfo = function() return nil end
+    UnitCastingInfo = function() end
+    UnitChannelInfo = function() end
+    UnitAura = function() end
+    for _, n in ipairs({ "GetSpellInfo", "IsSpellKnown", "IsPlayerSpell", "GetBindingKey", "GetBindingText", "GetNumGroupMembers",
+        "UnitXP", "UnitXPMax", "GetThreatStatusColor", "UnitDetailedThreatSituation", "UnitPlayerControlled", "UnitIsTapDenied",
+        "UnitSelectionColor", "GetQuestLogTitle", "GetNumQuestLogEntries" }) do
+        if _G[n] == nil then _G[n] = function() end end
+    end
+    -- a Blizzard nameplate and the client's list of the plates that are up
+    __platesUp = {}
+    for _, unit in ipairs({ "nameplate1", "nameplate2" }) do
+        local plate = Watch("FakePlate_" .. unit)
+        WatchTree(plate._name, { UnitFrame = true })
+        rawset(plate, "namePlateUnitToken", unit)
+    end
+    C_NamePlate = {
+        GetNamePlateForUnit = function(unit) return _G["FakePlate_" .. unit] end,
+        GetNamePlates = function()
+            local out = {}
+            for unit in pairs(__platesUp) do out[#out + 1] = _G["FakePlate_" .. unit] end
+            return out
+        end,
+    }
+    local base = CreateFrame
+    CreateFrame = function(kind, name, parent, template)
+        local f = base(kind, name, parent, template)
+        rawset(f, "TextOverlayContainer", false)
+        -- a status bar owns the texture its fill is drawn with
+        rawset(f, "GetStatusBarTexture", function(self)
+            if not self._fillTexture then self._fillTexture = self:CreateTexture() end
+            return self._fillTexture
+        end)
+        return f
+    end
+end
+
+local B5C_EVENTS = {
+    { "GROUP_ROSTER_UPDATE" }, { "PLAYER_TARGET_CHANGED" }, { "PLAYER_FOCUS_CHANGED" }, { "UNIT_HEALTH", "player" },
+    { "UNIT_POWER_UPDATE", "player" }, { "UNIT_AURA", "target" }, { "UNIT_HEALTH", "party1" }, { "UNIT_AURA", "party1" },
+    { "UNIT_PET", "player" }, { "PARTY_LEADER_CHANGED" }, { "INSTANCE_ENCOUNTER_ENGAGE_UNIT" }, { "UI_SCALE_CHANGED" },
+    { "DISPLAY_SIZE_CHANGED" }, { "RAID_TARGET_UPDATE" }, { "QUEST_LOG_UPDATE" }, { "UNIT_FLAGS", "player" },
+    { "PLAYER_ENTERING_WORLD", false, false },
+}
+
+-- Joins a party of `n` others, plays the roster and combat events, then (with `raid`) turns it into a raid, then leaves.
+local function b5cGroupLife(raid)
+    for i = 1, 4 do __units["party" .. i] = true end
+    __inGroup, __groupCount = true, 5
+    Fire("GROUP_ROSTER_UPDATE"); Fire("UNIT_HEALTH", "party1"); Fire("UNIT_AURA", "party1"); Fire("PARTY_MEMBER_ENABLE")
+    __combat = true
+    Fire("PLAYER_REGEN_DISABLED"); Fire("UNIT_HEALTH", "party2"); Fire("UNIT_AURA", "player"); Fire("GROUP_ROSTER_UPDATE")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED")
+    if raid then
+        __inRaid, __groupCount = true, 10
+        for i = 1, 9 do __units["raid" .. i] = true end
+        Fire("GROUP_ROSTER_UPDATE"); Fire("RAID_ROSTER_UPDATE"); Fire("UNIT_HEALTH", "raid3")
+    end
+    __inRaid, __inGroup, __groupCount = false, false, 1
+    for i = 1, 4 do __units["party" .. i] = false end
+    for i = 1, 9 do __units["raid" .. i] = false end
+    Fire("GROUP_ROSTER_UPDATE")
+end
+
+local function b5cFlush()
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+-- Every stock frame any of the modules may touch is watched; `off` is the saved store.
+local function b5cWorld(off, opts)
+    opts = opts or {}
+    local watch = { B5C_PET_FRAME }
+    for _, module in pairs(B5C) do
+        for _, name in ipairs(module.blizzard) do watch[#watch + 1] = name end
+    end
+    Boot({ off = off, watch = watch, db = opts.db, pre = function() b5cStubs(); if opts.extra then opts.extra() end end })
+    for _, ev in ipairs(B5C_EVENTS) do Fire(unpack(ev)) end
+    b5cGroupLife(opts.raid ~= false)
+    -- a target and a focus, a nameplate coming and going
+    __units.target, __units.focus = true, true
+    Fire("PLAYER_TARGET_CHANGED"); Fire("PLAYER_FOCUS_CHANGED"); Fire("UNIT_HEALTH", "target")
+    __platesUp.nameplate1 = true
+    Fire("NAME_PLATE_UNIT_ADDED", "nameplate1"); Fire("UNIT_HEALTH", "nameplate1"); Fire("UNIT_AURA", "nameplate1")
+    Fire("PLAYER_TARGET_CHANGED")
+    Fire("NAME_PLATE_UNIT_REMOVED", "nameplate1"); __platesUp.nameplate1 = nil
+    __units.target, __units.focus = false, false
+    b5cFlush()
+    if not opts.noRegen then Fire("PLAYER_REGEN_ENABLED") end
+    b5cFlush()
+end
+
+local function b5cClean(key)
+    for _, f in ipairs(B5C[key].files) do loaded(f) end
+end
+
+local function b5cNotBuilt(key)
+    local module = B5C[key]
+    eq(FS.ModuleSwitch.On(key), false, key .. " switch")
+    eq(FS.ModuleSwitch.Built(key), false, key .. " built nothing")
+    for _, f in ipairs(module.files) do eq(BuiltBy(f), 0, f .. " made no frame after the files loaded") end
+    for _, name in ipairs(module.named) do no(MadeNamed(name), name .. " exists") end
+    for _, f in ipairs(module.files) do
+        for _, name in ipairs(module.blizzard) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+        eq(TouchesOn("hooksecurefunc", f), "", f .. " hooked nothing")
+    end
+end
+
+local function b5cBuilt(key)
+    local module = B5C[key]
+    eq(FS.ModuleSwitch.On(key), true, key .. " switch")
+    eq(FS.ModuleSwitch.Built(key), true, key .. " built")
+    for _, name in ipairs(module.named) do yes(MadeNamed(name), name .. " exists") end
+end
+
+-- a frame this file made listens to the event
+local function b5cHears(event, file)
+    for _, f in ipairs(__evFrames) do
+        if f._events[event] and f._madeBy and f._madeBy[file] then return true end
+    end
+    return false
+end
+
+-- the file registered no plate event, or took them back
+local function b5cNobodyHears(event)
+    no(b5cHears(event, NP_FILE), "Nameplates.lua still listens to " .. event)
+end
+
+local function b5cSomebodyHears(event)
+    yes(b5cHears(event, NP_FILE), "Nameplates.lua does not listen to " .. event)
+end
+
+local B5C_PLATE_EVENTS = { "NAME_PLATE_UNIT_ADDED", "NAME_PLATE_UNIT_REMOVED", "UNIT_HEALTH", "PLAYER_TARGET_CHANGED",
+    "RAID_TARGET_UPDATE", "QUEST_LOG_UPDATE", "CVAR_UPDATE", "UNIT_THREAT_LIST_UPDATE", "UNIT_SPELLCAST_START" }
+
+-- ---- unit frames ----
+
+function T.unit_frames_off_builds_none_of_its_frames_and_leaves_the_stock_frames_alone()
+    b5cWorld({ "m.uf" })
+    b5cClean("m.uf")
+    b5cNotBuilt("m.uf")
+    eq(FS.player, nil); eq(FS.target, nil); eq(FS.focus, nil); eq(FS.boss, nil)
+end
+
+function T.unit_frames_off_keeps_what_the_other_files_read()
+    b5cWorld({ "m.uf" })
+    eq(type(FS.GetFullUnitName), "function", "file scope helper stays")
+    eq(type(FS.UnitFrames), "table"); eq(type(FS.UnitFrames.IsHidden), "function")
+    FS.UnitFrames.IsHidden("player")
+    eq(type(SlashCmdList["FSFRAMES"]), "function")
+    SlashCmdList["FSFRAMES"]("")
+    yes(#__printed > 0, "the slash command answers")
+    for _, name in ipairs(B5C["m.uf"].blizzard) do eq(TouchesOn(name, UF_FILE), "", name .. " untouched by the slash command") end
+    b5cClean("m.uf")
+end
+
+function T.unit_frames_on_builds_the_frames_and_dims_the_stock_ones_as_before()
+    b5cWorld({})
+    b5cClean("m.uf")
+    b5cBuilt("m.uf")
+    for _, name in ipairs({ "PlayerFrame", "TargetFrame", "FocusFrame", "Boss1TargetFrame" }) do
+        yes(TouchesOn(name, UF_FILE) ~= "", name .. " dimmed")
+    end
+    yes(BuiltBy(AURAS_FILE) > 0 or FS.player ~= nil, "the aura rows or the player frame exist")
+end
+
+function T.the_stock_pet_frame_stays_when_the_pet_bar_is_off()
+    b5cWorld({ "m.pet" })
+    eq(TouchesOn(B5C_PET_FRAME, UF_FILE), "", "pet bar off: the stock pet frame stays")
+    yes(TouchesOn("PlayerFrame", UF_FILE) ~= "", "and the other stock frames are dimmed as before")
+end
+
+function T.the_stock_pet_frame_is_still_dimmed_behind_the_pet_panel_when_unit_frames_are_off()
+    b5cWorld({ "m.uf" })
+    yes(TouchesOn(B5C_PET_FRAME, UF_FILE) ~= "", "the pet panel is on, so the stock pet frame goes")
+    eq(TouchesOn("PlayerFrame", UF_FILE), "", "the other stock frames stay")
+end
+
+function T.the_stock_pet_frame_is_dimmed_as_before_with_both_on()
+    b5cWorld({})
+    yes(TouchesOn(B5C_PET_FRAME, UF_FILE) ~= "", "both on: dimmed as before")
+end
+
+function T.the_stock_pet_frame_stays_with_both_off()
+    b5cWorld({ "m.uf", "m.pet" })
+    eq(TouchesOn(B5C_PET_FRAME, UF_FILE), "", "both off: nothing")
+end
+
+-- ---- party frames ----
+
+function T.party_off_builds_no_row_and_leaves_the_stock_party_alone()
+    b5cWorld({ "m.party" })
+    b5cClean("m.party")
+    b5cNotBuilt("m.party")
+    no(MadeNamed("ForeverSTUwavePartyRow1"), "no row")
+end
+
+function T.party_off_keeps_the_shown_api_the_console_key_asks()
+    b5cWorld({ "m.party" })
+    local P = FS.PartyFrames
+    eq(type(P), "table"); eq(type(P.IsShown), "function"); eq(type(P.SetShown), "function"); eq(type(P.OnShownChanged), "function")
+    eq(type(P.shared), "table", "the raid grid reuses it")
+    eq(P.IsShown(), false, "nothing is drawn, so nothing is shown")
+    P.SetShown(true)
+    eq(P.IsShown(), false, "the saved value changes, the answer waits for the switch")
+    eq(type(SlashCmdList["FSPARTY"]), "function")
+    SlashCmdList["FSPARTY"]("")
+    SlashCmdList["FSPARTY"]("show")
+    for _, name in ipairs(B5C["m.party"].blizzard) do eq(TouchesOn(name, PARTY_FILE), "", name .. " untouched by the slash command") end
+    b5cClean("m.party")
+end
+
+function T.party_on_builds_the_rows_and_takes_the_stock_party_as_before()
+    b5cWorld({})
+    b5cClean("m.party")
+    b5cBuilt("m.party")
+    yes(TouchesOn("PartyFrame", PARTY_FILE) ~= "" or TouchesOn("CompactPartyFrame", PARTY_FILE) ~= "", "the stock party frames are dimmed")
+    eq(FS.PartyFrames.IsShown(), true)
+end
+
+-- ---- raid frames ----
+
+function T.raid_off_builds_no_cell_and_leaves_the_stock_raid_frames_alone()
+    b5cWorld({ "m.raid" })
+    b5cClean("m.raid")
+    b5cNotBuilt("m.raid")
+    no(MadeNamed("ForeverSTUwaveRaidCell1"), "no cell")
+    eq(FS.RaidFrames.Preview.Show(), false, "the editor places no raid seat")
+end
+
+function T.raid_on_builds_the_container_as_before()
+    b5cWorld({})
+    b5cClean("m.raid")
+    eq(FS.ModuleSwitch.Built("m.raid"), true)
+    yes(MadeNamed("ForeverSTUwaveRaidContainer"), "the raid container")
+end
+
+function T.raid_does_not_need_party_frames_but_both_need_unit_frames()
+    Boot({})
+    local MS = FS.ModuleSwitch
+    eq(table.concat(MS.Requires("m.party"), ","), "m.uf")
+    eq(table.concat(MS.Requires("m.raid"), ","), "m.uf")
+    local deps = table.concat(MS.Dependents("m.uf"), ",")
+    yes(deps:find("m.party", 1, true) and deps:find("m.raid", 1, true), "turning Unit frames off lists both: " .. deps)
+    local changed = MS.SetWithDeps("m.uf", false)
+    eq(MS.Wanted("m.party"), false); eq(MS.Wanted("m.raid"), false)
+    changed = MS.SetWithDeps("m.raid", true)
+    eq(MS.Wanted("m.uf"), true, "turning raid on pulls Unit frames in")
+    eq(MS.Wanted("m.party"), false, "and not Party frames")
+end
+
+function T.raid_frames_build_with_party_frames_off_because_the_shared_table_is_file_scope()
+    b5cWorld({ "m.party" })
+    b5cClean("m.raid"); b5cClean("m.party")
+    eq(FS.ModuleSwitch.Built("m.raid"), true, "the raid grid is built")
+    eq(FS.ModuleSwitch.Built("m.party"), false, "the party rows are not")
+    yes(MadeNamed("ForeverSTUwaveRaidContainer"))
+    no(MadeNamed("ForeverSTUwavePartyContainer"))
+end
+
+-- ---- pairs ----
+
+local function b5cPair(a, b)
+    b5cWorld({ a, b })
+    local function isOff(key) return key == a or key == b end
+    for _, key in ipairs({ "m.uf", "m.party", "m.raid" }) do
+        b5cClean(key)
+        eq(FS.ModuleSwitch.On(key), not isOff(key), key .. " switch")
+        if isOff(key) then
+            b5cNotBuilt(key)
+        else
+            eq(FS.ModuleSwitch.Built(key), true, key .. " built as it is alone")
+        end
+    end
+    for _, f in ipairs({ NP_FILE, EXTRAS_FILE, "Modules/UnitFrames/FrameStyle.lua" }) do loaded(f) end
+end
+
+function T.pair_unit_frames_and_party_off() b5cPair("m.uf", "m.party") end
+function T.pair_party_and_raid_off() b5cPair("m.party", "m.raid") end
+function T.pair_unit_frames_and_raid_off() b5cPair("m.uf", "m.raid") end
+
+function T.all_three_off_together_loads_and_runs_clean()
+    b5cWorld({ "m.uf", "m.party", "m.raid" })
+    for _, key in ipairs({ "m.uf", "m.party", "m.raid" }) do b5cClean(key); b5cNotBuilt(key) end
+end
+
+-- the group aura engine and the borrowed stock frames belong to the rows and cells, so with both off nothing is built or taken
+function T.with_party_and_raid_off_the_group_aura_engine_builds_nothing_and_no_compact_frame_loses_its_events()
+    b5cWorld({ "m.party", "m.raid" })
+    loaded(EXTRAS_FILE)
+    local Engine = FS.FrameExtras and FS.FrameExtras.Engine
+    eq(type(Engine), "table", "the library is defined")
+    eq(#Engine.list, 0, "no group engine was made")
+    eq(BuiltBy(EXTRAS_FILE, UF_FILE), 0, "no frame made by the group aura code (the unit frames are on)")
+    for _, name in ipairs({ "CompactRaidFrameContainer", "CompactRaidFrame1", "CompactPartyFrame", "PartyFrame", "CompactRaidFrameManager" }) do
+        for _, f in ipairs({ PARTY_FILE, RAID_FILE, EXTRAS_FILE }) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+end
+
+-- the events the frames made by a file listen to ("" when none)
+local function b5cListening(file)
+    local out = {}
+    for _, f in ipairs(__evFrames) do
+        if f._madeBy and f._madeBy[file] then
+            for event in pairs(f._events) do out[#out + 1] = event end
+        end
+    end
+    table.sort(out)
+    return table.concat(out, ",")
+end
+
+function T.every_module_that_is_off_listens_for_nothing()
+    b5cWorld({ "m.uf", "m.party", "m.raid", "m.np" })
+    eq(b5cListening(UF_FILE), "", "Unit frames off: UnitFrames.lua listens to")
+    eq(b5cListening(AURAS_FILE), "", "Unit frames off: TargetAuras.lua listens to")
+    eq(b5cListening(PARTY_FILE), "", "Party frames off: PartyFrames.lua listens to")
+    eq(b5cListening(RAID_FILE), "", "Raid frames off: RaidFrames.lua listens to")
+    eq(b5cListening(NP_FILE), "", "Nameplates off: Nameplates.lua listens to")
+end
+
+-- ---- nameplates (the live module) ----
+
+function T.nameplates_on_listens_for_the_plate_events_and_builds_a_root_per_plate_as_before()
+    b5cWorld({})
+    loaded(NP_FILE)
+    for _, e in ipairs(B5C_PLATE_EVENTS) do b5cSomebodyHears(e) end
+    eq(FS.ModuleSwitch.On("m.np"), true)
+    __platesUp.nameplate1 = true
+    Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    yes(FS.framesByUnit.nameplate1 ~= nil, "a root is built on the plate")
+    yes(TouchesOn("FakePlate_nameplate1.UnitFrame") ~= "", "the stock plate frame is taken")
+end
+
+function T.nameplates_off_registers_no_plate_event_and_leaves_the_stock_plates_alone()
+    b5cWorld({ "m.np" })
+    loaded(NP_FILE)
+    for _, e in ipairs(B5C_PLATE_EVENTS) do b5cNobodyHears(e) end
+    eq(FS.ModuleSwitch.On("m.np"), false)
+    __platesUp.nameplate1 = true
+    Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    eq(next(FS.framesByUnit), nil, "no root is built")
+    eq(TouchesOn("FakePlate_nameplate1"), "", "the stock plate is untouched")
+    eq(TouchesOn("hooksecurefunc", NP_FILE), "", "nothing hooked")
+    eq(BuiltBy(NP_FILE), 0, "no frame made after load")
+    eq(type(FS.Nameplates), "table", "the API stays defined")
+end
+
+function T.nameplates_switch_off_and_on_live_without_a_reload()
+    b5cWorld({})
+    local MS = FS.ModuleSwitch
+    __platesUp.nameplate1 = true; __platesUp.nameplate2 = true
+    Fire("NAME_PLATE_UNIT_ADDED", "nameplate1"); Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    yes(FS.framesByUnit.nameplate1 and FS.framesByUnit.nameplate2, "both plates have roots")
+    yes(MS.Set("m.np", false))
+    eq(MS.On("m.np"), false, "a live module's session value follows at once")
+    eq(MS.Pending("m.np"), false, "and nothing waits for a reload")
+    eq(next(FS.framesByUnit), nil, "the roots are released")
+    for _, e in ipairs(B5C_PLATE_EVENTS) do b5cNobodyHears(e) end
+    -- a plate that comes and goes while off is not tracked, and nothing answers an event
+    Fire("NAME_PLATE_UNIT_ADDED", "nameplate1"); Fire("UNIT_HEALTH", "nameplate1"); Fire("PLAYER_TARGET_CHANGED")
+    eq(next(FS.framesByUnit), nil, "still nothing built while off")
+    yes(MS.Set("m.np", true))
+    for _, e in ipairs(B5C_PLATE_EVENTS) do b5cSomebodyHears(e) end
+    yes(FS.framesByUnit.nameplate1 and FS.framesByUnit.nameplate2, "the plates that are up get their roots back")
+    eq(ErrorsFrom(NP_FILE), "", "no error through the whole round trip")
+end
+
+function T.nameplates_loaded_off_switch_on_live_builds_from_then_on()
+    b5cWorld({ "m.np" })
+    local MS = FS.ModuleSwitch
+    __platesUp.nameplate1 = true
+    yes(MS.Set("m.np", true))
+    eq(MS.On("m.np"), true)
+    yes(FS.framesByUnit.nameplate1 ~= nil, "a plate that is up gets a root")
+    __platesUp.nameplate2 = true
+    Fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    yes(FS.framesByUnit.nameplate2 ~= nil, "a new plate gets one too")
+    eq(ErrorsFrom(NP_FILE), "", "no error")
+end
+
+function T.nameplates_a_saved_off_of_the_older_key_turns_the_module_off_once_and_the_key_keeps_following()
+    local db = { profiles = { Default = { settings = { ["nameplates.enabled"] = false }, layout = { v = 1, frames = {} } } } }
+    b5cWorld({}, { db = db })
+    local MS, C = FS.ModuleSwitch, FS.Config
+    eq(MS.Wanted("m.np"), false, "the saved off became the module switch")
+    eq(MS.On("m.np"), false)
+    eq(ForeverSTUwaveDB.nameplatesSwitchMigrated, true, "read once")
+    for _, e in ipairs(B5C_PLATE_EVENTS) do b5cNobodyHears(e) end
+    -- the older key is a view of the switch from now on: the module switch writes it, the row writes the switch
+    MS.Set("m.np", true)
+    eq(C.Get("nameplates.enabled"), true, "the module switch writes the older key")
+    C.Set("nameplates.enabled", false)
+    eq(MS.Wanted("m.np"), false, "the row writes the module switch")
+    eq(MS.On("m.np"), false, "and the plates follow it")
+    C.Set("nameplates.enabled", true)
+    eq(MS.On("m.np"), true)
+    for _, e in ipairs(B5C_PLATE_EVENTS) do b5cSomebodyHears(e) end
+end
+
+function T.nameplates_the_module_switch_wins_over_a_stale_older_key_after_the_first_read()
+    local db = { nameplatesSwitchMigrated = true, profiles = { Default = { settings = { ["nameplates.enabled"] = false },
+        layout = { v = 1, frames = {} } } } }
+    b5cWorld({}, { db = db })
+    eq(FS.ModuleSwitch.Wanted("m.np"), true, "the migration is not run twice")
 end
 
 return T

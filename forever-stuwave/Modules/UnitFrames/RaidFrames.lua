@@ -1362,6 +1362,8 @@ end
 -- False in combat (nothing of the preview runs there), else true once it is up.
 function Preview.Show()
     if InCombatLockdown() then return false end
+    -- Module power: with the Raid frames switch off there is no grid to place, so the editor gets no raid handle.
+    if FS.ModuleSwitch and not FS.ModuleSwitch.On("m.raid") then return false end
     BuildPreview()
     PreviewDraw()
     pv.container:Show()
@@ -1495,25 +1497,6 @@ local function QueueSweep()
     if blizz.queued then return end
     blizz.queued = true
     After(Sweep)
-end
-
--- The switch applies live: a reflow shows or hides the grid and gives the party rows their place back, and the
--- sweep dims Blizzard's raid frames the first time the switch is on.
-FS.Config.OnChange(RaidFrames.CONFIG_KEY, function()
-    QueueReflow()
-    QueueSweep()
-end)
-
--- PLAYER_LOGIN: FS.Config has resolved the character's profile (its loader registered first), so the saved switch is
--- known; nothing touched Blizzard's frames before this.
-do
-    local login = CreateFrame("Frame")
-    login:RegisterEvent("PLAYER_LOGIN")
-    login:SetScript("OnEvent", function()
-        flags.started = true
-        QueueReflow()
-        QueueSweep()
-    end)
 end
 
 -------------------------------------------------------------------------------
@@ -1708,13 +1691,52 @@ local function Init()
     end
 end
 
-if InCombatLockdown() then
-    local regen = CreateFrame("Frame")
-    regen:RegisterEvent("PLAYER_REGEN_ENABLED")
-    regen:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-        Init()
+local function Start()
+    -- The switch applies live: a reflow shows or hides the grid and gives the party rows their place back, and the
+    -- sweep dims Blizzard's raid frames the first time the switch is on.
+    FS.Config.OnChange(RaidFrames.CONFIG_KEY, function()
+        QueueReflow()
+        QueueSweep()
     end)
-else
-    Init()
+
+    -- PLAYER_LOGIN: FS.Config has resolved the character's profile (its loader registered first), so the saved switch is
+    -- known; nothing touched Blizzard's frames before this. Made at once, in a fight too: the login of a client that
+    -- loads in combat must not be missed while Init waits for the end of it.
+    local login = CreateFrame("Frame")
+    login:RegisterEvent("PLAYER_LOGIN")
+    login:SetScript("OnEvent", function()
+        flags.started = true
+        QueueReflow()
+        QueueSweep()
+    end)
+
+    if InCombatLockdown() then
+        local regen = CreateFrame("Frame")
+        regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        regen:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            Init()
+        end)
+    else
+        Init()
+    end
+end
+
+-- Module power (Core/ModuleSwitch.lua): with the Raid frames switch off nothing above runs. The game's raid frames are never
+-- dimmed or swept (`raid.shown` only picks what a module that is on does), no cell is built, and neither the switch hook nor
+-- the login event exists. The raid grid reuses the party frames' `shared` table, which is defined whether or not the party
+-- rows are built, so Raid frames do not need Party frames: they sit under Unit frames in the Modules list, like Party frames.
+-- The Style tab's preview is a plain frame and stays; the layout editor's raid seat (Preview.Show) is not placed while the
+-- switch is off, so the editor has no raid handle.
+do
+    local MS = FS.ModuleSwitch
+    if MS then
+        MS.Register({ key = "m.raid", requires = { "m.uf" } })
+        MS.WhenOn("m.raid", function()
+            Start()
+            MS.MarkBuilt("m.raid")
+        end)
+    else
+        Start()
+    end
 end

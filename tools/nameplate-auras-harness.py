@@ -334,7 +334,7 @@ FS = {
         ReadAuraSlot = function() __slotReads = __slotReads + 1 return nil end,
     }, { __index = function() return function() end end }),
 }
-C_NamePlate = { GetNamePlateForUnit = function(unit)
+local function mkplate(unit)
     __plates = __plates or {}
     if not __plates[unit] then
         local p = __newFrame("Frame", nil, nil)
@@ -342,7 +342,21 @@ C_NamePlate = { GetNamePlateForUnit = function(unit)
         __plates[unit] = p
     end
     return __plates[unit]
-end }
+end
+-- The units whose plate is up (addPlate / removePlate keep it): what GetNamePlates answers, with or without the events.
+__up = {}
+C_NamePlate = {
+    GetNamePlateForUnit = mkplate,
+    GetNamePlates = function()
+        local out = {}
+        for unit in pairs(__up) do
+            local p = mkplate(unit)
+            p.namePlateUnitToken = unit
+            out[#out + 1] = p
+        end
+        return out
+    end,
+}
 
 -- .toc order: Modules/Nameplates/Nameplates.lua loads BEFORE Theme.lua, FrameHelpers.lua and the rest, so
 -- none of what they put on FS exists while this file's top level runs. The file is loaded with
@@ -350,6 +364,7 @@ end }
 local LOADED_LATER = { "Theme", "FrameHelpers", "AurasReadable", "OnAurasReadable", "IsSecret", "LogDegradeOnce" }
 function boot()
     local fn = assert(loadstring(__SRC, "@Modules/Nameplates/Nameplates.lua"))
+    local framesBefore = #__frames
     local later = {}
     for _, k in ipairs(LOADED_LATER) do later[k] = FS[k]; FS[k] = nil end
     local ok, err = pcall(fn, "forever-stuwave", FS)
@@ -360,6 +375,15 @@ function boot()
     FS.LogDegradeOnce = later.LogDegradeOnce
     FS.OnAurasReadable = function(f) __readableCallbacks[#__readableCallbacks + 1] = f end
     if not ok then error("loading Modules/Nameplates/Nameplates.lua before Theme.lua threw: " .. tostring(err), 0) end
+    -- The file registers its events at its own ADDON_LOADED (after every file has loaded), as the client sends it: to the
+    -- frame this load made (a second boot in one world leaves the first load's frame behind).
+    for i = framesBefore + 1, #__frames do
+        local f = __frames[i]
+        if f._scripts.OnEvent and f._events.ADDON_LOADED then
+            local okLoaded, errLoaded = pcall(f._scripts.OnEvent, f, "ADDON_LOADED", "forever-stuwave")
+            if not okLoaded then error("ADDON_LOADED threw: " .. tostring(errLoaded), 0) end
+        end
+    end
 end
 
 -- Test helpers ------------------------------------------------------------------------
@@ -367,11 +391,14 @@ function check(c, msg) if not c then error("CHECK FAILED: " .. msg, 2) end end
 function evframe()
     for _, f in ipairs(__frames) do if f._scripts.OnEvent then return f end end
 end
+-- Delivers an event the way the client does: only to a frame that has the event registered.
 function fire(event, ...)
     local f = evframe()
     check(f, "no event frame")
+    if not f._events[event] then return false end
     local ok, err = pcall(f._scripts.OnEvent, f, event, ...)
     check(ok, "event handler threw on " .. event .. ": " .. tostring(err))
+    return true
 end
 function drain()
     local n = 0
@@ -391,8 +418,8 @@ function pendingTimers()
     for _, t in ipairs(__timers) do if not t.fired then n = n + 1 end end
     return n
 end
-function addPlate(unit) fire("NAME_PLATE_UNIT_ADDED", unit) end
-function removePlate(unit) fire("NAME_PLATE_UNIT_REMOVED", unit) end
+function addPlate(unit) __up[unit] = true; fire("NAME_PLATE_UNIT_ADDED", unit) end
+function removePlate(unit) __up[unit] = nil; fire("NAME_PLATE_UNIT_REMOVED", unit) end
 function degraded(key)
     local n = 0
     for _, k in ipairs(__degrade) do if k == key then n = n + 1 end end
@@ -1768,8 +1795,13 @@ check(hooked == 2, "expected one Show hook per UnitFrame, got " .. hooked)
 p1.UnitFrame:Show()
 check(not p1.UnitFrame._shown, "a Blizzard re-Show was not undone while ours is on")
 
+-- on: the plate events are registered on the one frame
+check(evframe()._events.NAME_PLATE_UNIT_ADDED and evframe()._events.UNIT_HEALTH and evframe()._events.UNIT_SPELLCAST_START, "the plate events are not registered while on")
+
 -- off: roots go, UnitFrame comes back, nothing is left tracked as built
 FS.Config.Set(KEY, false)
+check(not evframe()._events.NAME_PLATE_UNIT_ADDED and not evframe()._events.UNIT_HEALTH and not evframe()._events.UNIT_SPELLCAST_START
+    and not evframe()._events.PLAYER_ENTERING_WORLD and not evframe()._events.UNIT_AURA, "events are still registered after switching off")
 check(not r1._shown and not r2._shown, "roots still shown after switching off")
 check(next(FS.framesByUnit) == nil, "plates still held as built after switching off")
 check(p1.UnitFrame._shown and p2.UnitFrame._shown, "Blizzard's UnitFrame was not restored")
@@ -1797,6 +1829,7 @@ removePlate("nameplate2")
 
 -- on: every plate that is still up gets its root back, UnitFrame hidden again
 FS.Config.Set(KEY, true)
+check(evframe()._events.NAME_PLATE_UNIT_ADDED and evframe()._events.UNIT_SPELLCAST_START, "events not registered again after switching on")
 check(FS.framesByUnit.nameplate1 and FS.framesByUnit.nameplate1._shown, "plate 1 not rebuilt")
 check(FS.framesByUnit.nameplate3 and FS.framesByUnit.nameplate3._shown, "the plate added while off not built")
 check(FS.framesByUnit.nameplate2 == nil, "a plate removed while off was built")
@@ -1824,6 +1857,85 @@ C_NamePlate.GetNamePlateForUnit = function() return nil end
 addPlate("nameplate5")
 FS.Config.Set(KEY, false); FS.Config.Set(KEY, true)
 check(FS.framesByUnit.nameplate5 == nil, "a plate the addon may not touch was built")
+"""),
+
+    ("module switch: loaded off registers only its own ADDON_LOADED and builds nothing; switching on is live and picks up the plates that are up", "true", r"""
+local wanted, queued, changed = false, {}, {}
+local db = {}
+FS.ModuleSwitch = {
+    Wanted = function() return wanted end,
+    WhenOn = function(key, fn) queued[#queued + 1] = { key = key, fn = fn } end,
+    OnChange = function(key, fn) changed[#changed + 1] = { key = key, fn = fn } end,
+    IsWritable = function() return true end,
+    Set = function(key, on) wanted = on; for _, c in ipairs(changed) do c.fn(on, not on, key) end return true end,
+}
+local store, cbs, defaults = {}, {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) defaults[k] = v end,
+    Get = function(k) if store[k] ~= nil then return store[k] end return defaults[k] end,
+    Set = function(k, v) store[k] = v; for _, f in ipairs(cbs[k] or {}) do f(v) end return true end,
+    OnChange = function(k, f) cbs[k] = cbs[k] or {}; table.insert(cbs[k], f) end,
+}
+ForeverSTUwaveDB = db
+boot()
+check(#queued == 1 and queued[1].key == "m.np", "the file did not ask the gate for m.np")
+check(#changed == 1 and changed[1].key == "m.np", "the file did not subscribe to the switch")
+-- the gate did not run it (the module is off): only the file's own event frame exists and it listens to nothing
+for event in pairs(evframe()._events) do check(event == "ADDON_LOADED" or event == nil, "an event is registered while off: " .. event) end
+local p = __newFrame("Frame", nil, nil)
+p.UnitFrame = __newFrame("Frame", nil, p)
+p.UnitFrame._shown = true
+__plates = { nameplate1 = p }
+addPlate("nameplate1")
+check(FS.framesByUnit.nameplate1 == nil and p.UnitFrame._shown, "a plate was built or touched while off")
+-- a saved off of the older key is read into the switch once, at PLAYER_ENTERING_WORLD
+-- switching on at runtime: events, the plate that is up, no reload
+FS.ModuleSwitch.Set("m.np", true)
+check(FS.Config.Get("nameplates.enabled") == true, "the older key does not follow the switch")
+check(evframe()._events.NAME_PLATE_UNIT_ADDED and evframe()._events.PLAYER_ENTERING_WORLD, "events not registered after switching on")
+check(FS.framesByUnit.nameplate1 and FS.framesByUnit.nameplate1._shown and not p.UnitFrame._shown, "the plate that was up was not built")
+FS.ModuleSwitch.Set("m.np", false)
+check(next(FS.framesByUnit) == nil and p.UnitFrame._shown, "switching off did not release the roots")
+check(FS.Config.Get("nameplates.enabled") == false, "the older key does not follow the switch off")
+check(not evframe()._events.NAME_PLATE_UNIT_ADDED, "events stayed registered after switching off")
+"""),
+
+    ("module switch: a saved off of nameplates.enabled turns the switch off once at login, and the key is a view of it afterwards", "true", r"""
+local wanted = true
+local changed = {}
+local db = {}
+FS.ModuleSwitch = {
+    Wanted = function() return wanted end,
+    WhenOn = function(key, fn) fn() end,
+    OnChange = function(key, fn) changed[#changed + 1] = fn end,
+    IsWritable = function() return true end,
+    Set = function(key, on) wanted = on; for _, fn in ipairs(changed) do fn(on, not on, key) end return true end,
+}
+local store, cbs, defaults = { ["nameplates.enabled"] = false }, {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) defaults[k] = v end,
+    Get = function(k) if store[k] ~= nil then return store[k] end return defaults[k] end,
+    Set = function(k, v) store[k] = v; for _, f in ipairs(cbs[k] or {}) do f(v) end return true end,
+    OnChange = function(k, f) cbs[k] = cbs[k] or {}; table.insert(cbs[k], f) end,
+}
+ForeverSTUwaveDB = db
+boot()
+check(wanted == true and evframe()._events.NAME_PLATE_UNIT_ADDED, "the module was on until login")
+fire("PLAYER_ENTERING_WORLD"); drain()
+check(wanted == false, "a saved off of the older key did not turn the switch off")
+check(db.nameplatesSwitchMigrated == true, "the migration was not marked done")
+check(not evframe()._events.NAME_PLATE_UNIT_ADDED, "the plates still listen after the migration turned them off")
+-- not again: the key now follows the switch, and a stale false does not turn it off a second time
+FS.ModuleSwitch.Set("m.np", true)
+check(store["nameplates.enabled"] == true and evframe()._events.PLAYER_ENTERING_WORLD, "the switch did not write the key or bring the events back")
+store["nameplates.enabled"] = false
+check(fire("PLAYER_ENTERING_WORLD") == true, "the world event is not delivered while on")
+check(wanted == true, "the migration ran twice")
+-- the row writes the switch
+FS.Config.Set("nameplates.enabled", false)
+check(wanted == false, "the row did not write the switch")
+FS.Config.Set("nameplates.enabled", true)
+check(wanted == true, "the row did not switch it back on")
 """),
 
     ("nameplates.enabled: saved off at login builds nothing, leaves Blizzard's plates alone, and switching on builds from then on", "true", r"""
