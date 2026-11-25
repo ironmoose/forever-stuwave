@@ -1628,6 +1628,8 @@ local function UpdateRowOverlays(frame, max)
     if heal then
         local ok, incoming = pcall(UnitGetIncomingHeals, frame.unit)
         if not ok or not incoming then incoming = 0 end
+        -- Roles page: a healer who turned incoming heals off sees none (the switches of other roles do nothing)
+        if FS.Role and FS.Role.Disabled("heal.incoming") then incoming = 0 end
         heal:SetMinMaxValues(0, max)
         heal:SetValue(incoming)
         -- IsSecret first, so the `> 0` compare is never reached for a secret;
@@ -1984,6 +1986,8 @@ local function UpdateRowAlerts(frame)
     if not FS.AurasReadable() then return end
 
     local cleansable, harmful = ScanDebuffs(unit)
+    -- Roles page: a healer who turned "Highlight what I can dispel" off gets no halo and no cleanse icons
+    if FS.Role and FS.Role.Disabled("heal.dispel") then cleansable = {} end
     local style = FS.FrameStyle
     local function opt(suffix) return style.Get("party", suffix) end   -- only called with a style module
 
@@ -2138,7 +2142,8 @@ local function UpdateRangeFor(frame)
     -- for "player", and false for everyone while ungrouped, which dimmed the
     -- player's own row to 40% permanently once the secret-boolean fix made the
     -- call actually take effect. You are never out of range of yourself.
-    if frame.unit == "player" or not IsInGroup() then
+    -- (Roles page: a healer who turned the fade off keeps every row at full alpha, the same branch)
+    if frame.unit == "player" or not IsInGroup() or (FS.Role and FS.Role.Disabled("heal.range")) then
         frame.visual:SetAlpha(RANGE_ALPHA_IN_RANGE)
         if frame.petFrame then frame.petFrame.visual:SetAlpha(RANGE_ALPHA_IN_RANGE) end
         return
