@@ -99,12 +99,16 @@ local function ClassTab(key, field, rows, after)
     }
 end
 
+-- The Mage's two tabs: portals and teleports (two rows), then food and water 16 design px right of it
+local MAGE = ClassTab("mage", "PortalsTab", 2)
+MAGE.also = { ClassTab("mageconjure", "ConjureTab", 1, 16) }
+
 -- The classes that own a shoulder, by class token: the block (mockup lsRowW(cols) wide, `rows` tall) and the
 -- question whose answer says the class's bar is up. Append only; a class not listed here never gets one.
 local OWNERS = {
     DRUID = ClassTab("druid", "ShapeshiftTab", 1),
     HUNTER = ClassTab("hunter", "CallPetTab", 1),
-    MAGE = ClassTab("mage", "PortalsTab", 2),
+    MAGE = MAGE,
     PALADIN = {
         key = "paladin", cols = C.COLS, rows = C.ROWS,
         wants = function()
