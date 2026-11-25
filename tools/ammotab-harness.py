@@ -202,8 +202,9 @@ def check_a_hunter_with_a_bow_gets_the_count_after_the_mana_regen_module():
     assert tab(lua).OwnsShoulder(), "no shoulder"
     assert shown(host(lua)), "host hidden"
     st = standing(lua)
-    assert 36 in st and 144.8 in st, f"seats {st}"
-    assert st[144.8] == (92.8, 49.0), f"block {st[144.8]}"
+    # a Hunter's shoulders stand right of the docked pet panel (24 + 348 + 16), the regen module first
+    assert 388 in st and 496.8 in st, f"seats {st}"
+    assert st[496.8] == (92.8, 49.0), f"block {st[496.8]}"
     assert readout(lua) == "_412", readout(lua)
     assert glyph(lua) == "arrow"
     assert tab(lua).AT.state == "plenty"

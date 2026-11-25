@@ -2246,6 +2246,26 @@ def check_yielding_the_gap_is_single_owner_and_validated() -> None:
     assert rt.eval("(function() local o = {} return FS.PetDock.YieldGap(o) and not FS.PetDock.YieldGap({}) and FS.PetDock.ReclaimGap(o) end)()") is True
 
 
+def check_an_owner_that_takes_the_pet_span_in_keeps_the_pet_patch_live() -> None:
+    # a Warlock or Hunter: the class shoulder's gap takes the pet panel's span in (YieldGap(owner, true)), so the
+    # patch under the pet panel still follows the pet, in combat too
+    rt = _owner_world(True)
+    pd = rt.globals().FS.PetDock
+    assert pd.YieldGap("classshoulder", True) is True
+    assert _patch(rt) == 0, "pet shown: the patch is open"
+    rt.execute("__combat = true")
+    pd.SetPetShown(False)
+    assert _patch(rt) == 1, "pet gone in combat: the patch closes the line under the pet panel"
+    pd.SetPetShown(True)
+    assert _patch(rt) == 0, "pet back: the patch opens again"
+    rt.execute("__combat = false")
+    # asked again without the pet span, the patch is the owner's (open) and the pet no longer moves it
+    assert pd.YieldGap("classshoulder") is True and _patch(rt) == 0
+    pd.SetPetShown(False)
+    assert _patch(rt) == 0, "a plain yield: the pet does not touch the owner's patch"
+    assert pd.DockRight() == pd.C.DOCK_X + pd.C.W
+
+
 def check_reclaiming_the_gap_restores_the_pet_gap() -> None:
     for pet in (True, False):
         rt = _owner_world(pet)
@@ -2521,6 +2541,7 @@ def main() -> int:
         ("a dock that fails after its shoulder built forgets the shoulder", check_a_dock_that_fails_after_its_shoulder_built_forgets_the_shoulder),
         ("a shoulder that took the Console gap keeps it (single owner)", check_a_shoulder_that_took_the_gap_keeps_it),
         ("YieldGap and ReclaimGap are single owner and validated", check_yielding_the_gap_is_single_owner_and_validated),
+        ("an owner that takes the pet span in keeps the pet patch live", check_an_owner_that_takes_the_pet_span_in_keeps_the_pet_patch_live),
         ("reclaiming the gap restores the pet gap", check_reclaiming_the_gap_restores_the_pet_gap),
         ("a reclaim in combat keeps the patch open until regen", check_a_reclaim_in_combat_keeps_the_patch_open_until_regen),
         ("SetEdgeColor refuses a bad alpha before tinting anything", check_set_edge_color_refuses_a_bad_alpha_before_tinting_anything),

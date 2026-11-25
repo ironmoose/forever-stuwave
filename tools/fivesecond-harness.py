@@ -1693,7 +1693,8 @@ def check_a_class_without_a_tab_of_its_own_seats_the_cue_where_the_class_tab_wou
         lua = boot(klass=klass)
         p = host(lua)._points[1]
         assert (p.point, p.rel._name, p.relPoint) == ("BOTTOMLEFT", "FSConsole", "TOPLEFT"), klass
-        approx(p.x, 36.0, f"{klass}: seat"), approx(p.y, 0, "seat y")
+        # a pet class stands right of the docked pet panel (24 + 348 + 16), so the pet panel never covers it
+        approx(p.x, 388.0 if klass in ("WARLOCK", "HUNTER") else 36.0, f"{klass}: seat"), approx(p.y, 0, "seat y")
         assert csh.cs(lua).Shoulder("fivesecond") is not None, klass
         assert csh.cs(lua).shoulder is None, f"{klass}: the class shoulder slot is for a class tab"
 

@@ -187,6 +187,7 @@ DEFS[AMMO.key] = AMMO
 local stands = {}      -- key -> { shoulder, shown }: built once per def, never resized (NewShoulder has no resize)
 local primary             -- the def of the player's class's first shoulder (what the key-less calls answer)
 local holdsGap = false
+local heldWithPet = false -- the gap was taken with the pet panel's span in (PetDock keeps driving its patch)
 local gapKey              -- the span in force, so an unchanged gap is not asked for again
 local links = {}        -- plain line textures over the top line between two shoulders
 local pending = false
@@ -217,6 +218,20 @@ local function PlayerClass()
     return token
 end
 
+-- The classes whose pet panel docks on the Console (PetDock.lua): their shoulders stand right of it, PET_AFTER design
+-- px past its body (the gap one shoulder leaves to the next), whether a pet is out or not, so a summon or a pet dying
+-- (in combat too, where nothing can be re-seated) never moves them. The Console's gap then takes the pet panel's
+-- span in, and its patch closes only under the pet panel (PetDock drives it from the pet's visibility).
+local PET_CLASSES = { WARLOCK = true, HUNTER = true }
+local PET_AFTER = 16
+
+local function PetReserved()
+    local dock = FS.PetDock
+    return PET_CLASSES[PlayerClass()] == true and type(dock) == "table" and type(dock.DockRight) == "function"
+        and type(dock.GapSpan) == "function"
+end
+ClassShoulder.PET_CLASSES = PET_CLASSES
+
 -- The shoulders the player's class wants right now, in order (the Console drawn is the first condition), and the
 -- console.
 local function Wanted()
@@ -225,7 +240,10 @@ local function Wanted()
     local console = Console()
     if not (console and console.IsDrawn()) then return console, {} end
     local list = {}
-    -- a def's size follows its colsFn; a def with `after` stands that far right of the one before it
+    local base = C.DX
+    if PetReserved() then base = FS.PetDock.DockRight() + PET_AFTER end
+    -- a def's size follows its colsFn; the first stands at `base`, a later def with `after` that far right of the
+    -- one before it
     local function Seat(def)
         if def.colsFn then
             local ok, cols = pcall(def.colsFn)
@@ -234,9 +252,11 @@ local function Wanted()
                 def.w, def.h = BlockSize(cols, def.rows)
             end
         end
-        if def.after then
-            local last = list[#list]
-            def.dx = last and (last.dx + last.w + def.after) or C.DX
+        local last = list[#list]
+        if not last then
+            def.dx = base
+        elseif def.after then
+            def.dx = last.dx + last.w + def.after
         end
         list[#list + 1] = def
     end
@@ -289,34 +309,40 @@ local function Stand(key)
     if st and st.shown and st.shoulder then return st, def end
 end
 
--- The Console gap for the shoulders standing: line x0, x1 and halo x0, x1, each the widest of every shoulder's own
--- span (the spans of neighbours overlap or touch; the stretch of line a union opens between two is joined).
-local function UnionSpan(list)
-    local a, b, c, d
+-- Every span the gap takes in: each standing shoulder's own (line x0, x1, halo x0, x1), plus the docked pet panel's
+-- for a pet class.
+local function Spans(list, pet)
+    local spans = {}
     for _, item in ipairs(list) do
         local x0, x1, h0, h1 = item.st.shoulder:GapSpan(item.def.dx)
-        if x0 then
-            a, c = math.min(a or x0, x0), math.min(c or h0, h0)
-            b, d = math.max(b or x1, x1), math.max(d or h1, h1)
-        end
+        if x0 then spans[#spans + 1] = { x0, x1, h0, h1 } end
+    end
+    if pet then spans[#spans + 1] = pet end
+    table.sort(spans, function(l, r) return l[1] < r[1] end)
+    return spans
+end
+
+-- The Console gap for those spans: line x0, x1 and halo x0, x1, each the widest of all of them (the spans of
+-- neighbours overlap or touch; the stretch of line a union opens between two is joined).
+local function UnionSpan(spans)
+    local a, b, c, d
+    for _, sp in ipairs(spans) do
+        a, c = math.min(a or sp[1], sp[1]), math.min(c or sp[3], sp[3])
+        b, d = math.max(b or sp[2], sp[2]), math.max(d or sp[4], sp[4])
     end
     return a, b, c, d
 end
 
 -- Plain line pieces over the Console's top line where the union of the gaps opened it between two shoulders
 -- (their own halo pieces already cover the glow there). One texture per such stretch, the Console's line colour.
-local function SeatLinks(console, list)
+local function SeatLinks(console, spans)
     local used = 0
     local art = console.art
     local theme = FS.Theme
     local colour = theme and theme.COLOR_BORDER
     if art and colour and type(console.OUTLINE_ALPHA) == "number" then
-        local sorted = {}
-        for _, item in ipairs(list) do sorted[#sorted + 1] = item end
-        table.sort(sorted, function(l, r) return l.def.dx < r.def.dx end)
-        for i = 1, #sorted - 1 do
-            local _, endsAt = sorted[i].st.shoulder:GapSpan(sorted[i].def.dx)
-            local startsAt = sorted[i + 1].st.shoulder:GapSpan(sorted[i + 1].def.dx)
+        for i = 1, #spans - 1 do
+            local endsAt, startsAt = spans[i][2], spans[i + 1][1]
             if endsAt and startsAt and startsAt > endsAt then
                 used = used + 1
                 local tex = links[used]
@@ -340,7 +366,7 @@ end
 local function SyncGap(console, list)
     local dock = FS.PetDock
     if #list == 0 then
-        SeatLinks(console, list)
+        SeatLinks(console, {})
         if holdsGap then
             holdsGap, gapKey = false, nil
             if console.SetDockGap then console.SetDockGap(nil, nil) end
@@ -348,19 +374,42 @@ local function SyncGap(console, list)
         end
         return
     end
-    if not holdsGap and not (dock and dock.YieldGap and dock.YieldGap(C.OWNER)) then
-        WarnOnce("classshoulder_gap", "another module holds the Console's top gap, the class shoulder leaves it alone")
-        return
+    local pet
+    if PetReserved() then
+        local x0, x1, h0, h1 = dock.GapSpan()
+        if type(x0) == "number" and type(x1) == "number" then pet = { x0, x1, h0 or x0, h1 or x1 } end
     end
-    local a, b, c, d = UnionSpan(list)
+    -- yield once per change of hands (or of whether the pet panel's patch goes with it)
+    if not holdsGap or heldWithPet ~= (pet ~= nil) then
+        local yielded
+        if pet then
+            yielded = dock and dock.YieldGap and dock.YieldGap(C.OWNER, true)
+        else
+            yielded = dock and dock.YieldGap and dock.YieldGap(C.OWNER)
+        end
+        if not yielded then
+            WarnOnce("classshoulder_gap", "another module holds the Console's top gap, the class shoulder leaves it alone")
+            return
+        end
+        heldWithPet = pet ~= nil
+    end
+    local spans = Spans(list, pet)
+    local a, b, c, d = UnionSpan(spans)
     local key = tostring(a) .. ":" .. tostring(b) .. ":" .. tostring(c) .. ":" .. tostring(d)
+        .. (pet and (":" .. pet[1] .. ":" .. pet[2]) or "")
     if holdsGap and gapKey == key then
-        SeatLinks(console, list)
+        SeatLinks(console, spans)
         return
     end
-    if console.SetDockGap(a, b, c, d) then
+    local ok
+    if pet then
+        ok = console.SetDockGap(a, b, c, d, pet[1], pet[2], pet[3], pet[4])
+    else
+        ok = console.SetDockGap(a, b, c, d)
+    end
+    if ok then
         holdsGap, gapKey = true, key
-        SeatLinks(console, list)
+        SeatLinks(console, spans)
     else
         pending = true
     end

@@ -211,6 +211,15 @@ function Console.Compute(g, s, n)
         -- the halo stops where the foot texture's own halo begins (SeatHalo)
         local h0, h1 = math.max(dockGap[3], L.cut), math.min(dockGap[4], L.haloEnd)
         if h1 > h0 then L.haloGap = { x0 = h0, x1 = h1 } end
+        -- the patch covers the whole gap, or only its own span inside it (SetDockGap's patch pair)
+        if L.gap then
+            local p0, p1 = math.max(dockGap[5] or x0, x0), math.min(dockGap[6] or x1, x1)
+            if p1 > p0 then L.patch = { x0 = p0, x1 = p1 } end
+        end
+        if L.haloGap then
+            local hp0, hp1 = math.max(dockGap[7] or h0, h0), math.min(dockGap[8] or h1, h1)
+            if hp1 > hp0 then L.haloPatch = { x0 = hp0, x1 = hp1 } end
+        end
     end
     return L
 end
@@ -465,7 +474,8 @@ local function SeatHalo(L)
     PlaceRun(parts.haloTop2, gap and gap.x1 or footStart, -GP, gap and footStart - gap.x1 or 0, GP)
     Uv(parts.haloTop2, mid0, mid1, 0, GP / TEXN)
     -- (and the gap patch, the top halo's own strip over the gap, carries it whole when its alpha is 1)
-    PlaceRun(parts.gapHalo, gap and gap.x0 or 0, -GP, gap and gap.x1 - gap.x0 or 0, GP)
+    local hp = L.haloPatch
+    PlaceRun(parts.gapHalo, hp and hp.x0 or 0, -GP, hp and hp.x1 - hp.x0 or 0, GP)
     Uv(parts.gapHalo, mid0, mid1, 0, GP / TEXN)
     if L.hasTab then
         Place(parts.haloTabTop, footEnd, -th - GP, (W - cut) - footEnd, GP)
@@ -515,7 +525,8 @@ local function SeatOutline(L)
     Place(parts.cornerTL, 0, 0, cut, cut);                 Uv(parts.cornerTL, 0, c, 0, c)
     PlaceRun(parts.lineTop, cut, 0, (gap and gap.x0 or tx) - cut, LINE)
     PlaceRun(parts.lineTop2, gap and gap.x1 or tx, 0, gap and tx - gap.x1 or 0, LINE)
-    PlaceRun(parts.gapLine, gap and gap.x0 or 0, 0, gap and gap.x1 - gap.x0 or 0, LINE)
+    local lp = L.patch
+    PlaceRun(parts.gapLine, lp and lp.x0 or 0, 0, lp and lp.x1 - lp.x0 or 0, LINE)
     Place(parts.lineLeft, 0, cut, LINE, H - cut - LINE)
     Place(parts.lineBottom, 0, H - LINE, W - cut, LINE)
     Place(parts.cornerBR, W - cut, H - cut, cut, cut);     Uv(parts.cornerBR, 1 - c, 1, 1 - c, 1)
@@ -731,21 +742,34 @@ end
 -- is open. Each span is clamped to the cut-to-foot run; one that is empty once clamped, or lies
 -- outside it, draws no gap (and no patch). nil, nil (or anything that is not two numbers) clears
 -- it. The gap is kept and re-seated with the chassis (a key count change, a rescale, the next
--- draw), and applied at once when the chassis is drawn.
+-- draw), and applied at once when the chassis is drawn. An optional third pair `px0, px1` (and a fourth,
+-- `phx0, phx1`, for the halo) narrows the PATCH to its own span inside the gap: a gap opened for the pet panel
+-- and the class shoulders beside it closes only under the pet panel when the pet goes.
 -- Same rule as SetKeyCount: the chassis is anchored to the protected action stack, so this is
 -- refused in combat (returns false, nothing changes and nothing is recorded); the caller asks
 -- again at PLAYER_REGEN_ENABLED. Returns true when the gap is in force.
-function Console.SetDockGap(x0, x1, hx0, hx1)
+function Console.SetDockGap(x0, x1, hx0, hx1, px0, px1, phx0, phx1)
     if InCombatLockdown() then return false end
     local gap
-    if type(x0) == "number" and type(x1) == "number" and x0 == x0 and x1 == x1 then
-        if not (type(hx0) == "number" and type(hx1) == "number" and hx0 == hx0 and hx1 == hx1) then
+    local function Pair(a, b) return type(a) == "number" and type(b) == "number" and a == a and b == b end
+    if Pair(x0, x1) then
+        if not Pair(hx0, hx1) then
             hx0, hx1 = x0, x1
         end
         gap = { x0, x1, hx0, hx1 }
+        if Pair(px0, px1) then
+            if not Pair(phx0, phx1) then phx0, phx1 = px0, px1 end
+            gap[5], gap[6], gap[7], gap[8] = px0, px1, phx0, phx1
+        end
     end
-    if (gap == nil and dockGap == nil) or (gap and dockGap and gap[1] == dockGap[1] and gap[2] == dockGap[2]
-        and gap[3] == dockGap[3] and gap[4] == dockGap[4]) then
+    local same = gap == nil and dockGap == nil
+    if gap and dockGap then
+        same = true
+        for i = 1, 8 do
+            if gap[i] ~= dockGap[i] then same = false end
+        end
+    end
+    if same then
         return true
     end
     dockGap = gap

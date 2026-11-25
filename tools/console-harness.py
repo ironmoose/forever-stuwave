@@ -630,6 +630,21 @@ function T.gap_patch_fills_the_gap_with_the_top_lines_own_recipe()
     sameParts(before, snapParts(), "unchanged by the patch")
 end
 
+function T.gap_patch_can_cover_only_its_own_span_inside_a_wider_gap()
+    -- a pet class: the gap runs under the pet panel and the shoulders beside it, the patch only under the pet panel
+    truthy(C().SetDockGap(25, 500, 25, 506, 25, 381, 25, 387))
+    local a, b = piece("lineTop"), piece("lineTop2")
+    near(a.r, 25, "the line opens at the gap's x0"); near(b.x, 500, "...and closes at its x1")
+    local l, h = piece("gapLine"), piece("gapHalo")
+    near(l.x, 25, "patch line from the patch x0"); near(l.r, 381, "patch line to the patch x1, not the gap's")
+    near(h.x, 25, "patch halo from the patch x0"); near(h.r, 387, "patch halo to the patch x1")
+    -- a patch pair outside the gap is clamped to it; omitted, the patch is the whole gap again
+    truthy(C().SetDockGap(100, 300, 100, 300, 50, 400))
+    near(piece("gapLine").x, 100, "patch clamped to the gap x0"); near(piece("gapLine").r, 300, "...and x1")
+    truthy(C().SetDockGap(100, 300))
+    near(piece("gapLine").x, 100, "no patch pair: the whole gap"); near(piece("gapLine").r, 300, "...to x1")
+end
+
 function T.gap_patch_follows_the_effective_gap_the_key_count_and_a_rescale()
     local P = C().parts
     truthy(C().SetDockGap(-50, 100))

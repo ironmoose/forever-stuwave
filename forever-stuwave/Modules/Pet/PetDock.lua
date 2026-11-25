@@ -148,6 +148,7 @@ local petShown = false             -- the pet panel's visibility gate says shown
 local gapOpen = false              -- the Console's top line is open under the docked panel (SetDockGap)
 local gapOwner = nil               -- another owner (a class shoulder) holds the Console's gap: this file leaves it alone
 local gapReclaimed = false         -- the gap came back in combat: the owner's span still stands until the regen Refresh
+local patchKept = false            -- the owner's gap takes the pet panel's span in and its patch covers only that: keep driving it
 
 local dockShoulder              -- the NewShoulder object the pet's dock chrome is (nil when the dock failed to build)
 local frames = {}               -- frames.float, frames.dock: the chrome roots (the only things Shown / Hidden)
@@ -812,7 +813,8 @@ PetDock.GapSpan = GapSpan
 -- combat too. Cosmetic: a throw is logged once and never undocks the panel.
 local warnedPatch = false
 local function ApplyPatch()
-    if gapOwner ~= nil or gapReclaimed then return end   -- a class shoulder holds (or, until regen, still has) the gap: its line stays open
+    if gapReclaimed then return end   -- until regen the old owner's span still stands: its line stays open
+    if gapOwner ~= nil and not patchKept then return end   -- a class shoulder holds the gap: its line stays open
     local api = FS.Console
     if type(api) ~= "table" or type(api.SetGapPatchAlpha) ~= "function" then return end
     local ok, err = pcall(api.SetGapPatchAlpha, petShown and 0 or 1)
@@ -963,19 +965,36 @@ end
 -- not want it left standing. CALL YieldGap OUT OF COMBAT: the owner's SetDockGap is refused in combat, so a
 -- yield made in combat leaves this file's old pet gap [25, 381] standing with the patch open (alpha 0, which
 -- is legal in combat) until the owner sets its own at regen.
-function PetDock.YieldGap(owner)
+--
+-- keepPatch: the owner's gap takes the pet panel's span (GapSpan) in, with the Console's patch narrowed to that
+-- span (SetDockGap's patch pair). This file then keeps driving the patch alpha from the pet's visibility, so the
+-- line under the pet panel closes when the pet goes, in combat too, while the owner's own part stays open. Asked
+-- again with the other value, it switches (the same owner only).
+function PetDock.YieldGap(owner, keepPatch)
     local kind = type(owner)
     if not ((kind == "string" and owner ~= "") or kind == "table") then return false end
     if gapOwner ~= nil and gapOwner ~= owner then return false end
     gapOwner = owner
+    patchKept = keepPatch and true or false
     local api = FS.Console
-    if type(api) == "table" and type(api.SetGapPatchAlpha) == "function" then pcall(api.SetGapPatchAlpha, 0) end
+    if patchKept then
+        ApplyPatch()
+    elseif type(api) == "table" and type(api.SetGapPatchAlpha) == "function" then
+        pcall(api.SetGapPatchAlpha, 0)
+    end
     return true
+end
+
+-- The docked panel's right edge (its body, the flare not counted), console-local design px: what a class shoulder
+-- seated beside the pet panel measures from.
+function PetDock.DockRight()
+    return C.DOCK_X + C.W
 end
 
 function PetDock.ReclaimGap(owner)
     if gapOwner == nil or owner ~= gapOwner then return false end
     gapOwner = nil
+    patchKept = false
     gapReclaimed = true   -- the next Refresh that runs (now, or at regen in combat) re-asks the Console or closes the old span
     PetDock.Refresh(true)
     return true
