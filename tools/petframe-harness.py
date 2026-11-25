@@ -1627,6 +1627,137 @@ def check_the_container_changes_never_touch_a_protected_frame_in_combat() -> Non
     approx(_pieces(rt)["box"]["w"], 180 + 214, "everything lands at regen")
 
 
+# ---------------------------------------------------------------------------------------------
+# The config window's preview (FS.PetFrame.NewStylePreview): the same block code on a still panel
+# ---------------------------------------------------------------------------------------------
+
+CAST_PREVIEW_STUB = """
+__cast_states = {}
+FS.PetCastBar = { NewPreview = function(parent)
+    local f = CreateFrame('Frame', nil, parent)
+    f:SetSize(198, 26)
+    local P = { frame = f }
+    function P.Restyle(state) __cast_states[#__cast_states + 1] = state; P.state = state end
+    __cast_preview = P
+    return P
+end }
+"""
+
+
+def preview(rt: LuaRuntime):
+    """The preview over the booted world, drawn once."""
+    rt.execute(CAST_PREVIEW_STUB)
+    made = rt.eval("FS.PetFrame.NewStylePreview(UIParent)")
+    made.Restyle()
+    return made
+
+
+def check_the_preview_draws_a_hunter_pet_as_the_panel_does() -> None:
+    rt = runtime(1.0)
+    p = preview(rt)
+    parts = p.parts
+    approx(p.frame.w, 348, "the panel is 348 wide")
+    approx(p.frame.h, 68, "and 68 high")
+    block = parts.block
+    assert block.nameText.text == "Wolf" and block.levelText.text == "LV 22", (block.nameText.text, block.levelText.text)
+    assert block.healthBar.text.text == "208 / 253" and block.powerBar.text.text == "70 / 100"
+    assert block.healthBar.value == 208 and block.healthBar.max == 253
+    for i, want in enumerate((0.71, 0.43, 0.27), start=1):
+        approx(block.powerBar.fsRail.r if i == 1 else (block.powerBar.fsRail.g if i == 2 else block.powerBar.fsRail.b),
+               want, "a hunter pet's power rail is focus brown")
+    assert rt.eval("__cast_preview.state.casting") is False, "the plate shows the idle ghost row for a hunter pet"
+    assert rt.eval("__cast_preview.frame.shown") is True
+    assert block.dot.shown is False, "the happiness dot is off by default"
+    assert len(parts.buttons) == 10, "ten pet buttons"
+    approx(bounds(rt, parts.status)["w"], 134, "status block width")
+    approx(bounds(rt, block.healthBar.shell)["h"], 7, "health rail height")
+    assert not list(rt.globals().__messages.values())
+
+
+def check_the_preview_draws_a_demon_with_a_firebolt_cast_and_a_blue_rail() -> None:
+    rt = runtime(1.0)
+    put(rt, pet_previewKind="demon", pet_castIcon=False, pet_castName=True, pet_castTimer=False)
+    p = preview(rt)
+    block = p.parts.block
+    assert block.nameText.text == "Grimzik" and block.powerBar.text.text == "162 / 253"
+    approx(block.powerBar.fsRail.r, 0.13, "a demon's power rail is mana blue")
+    state = rt.eval("__cast_preview.state")
+    assert state.casting is True and state.icon is False and state.name is True and state.timer is False
+    put(rt, pet_happy=True)
+    p.Restyle()
+    assert block.dot.shown is False, "a demon has no happiness"
+
+
+def check_the_preview_follows_sizes_wider_and_the_dock() -> None:
+    rt = runtime(1.0)
+    p = preview(rt)
+    put(rt, w=160, hpH=12, mpH=9)
+    p.Restyle()
+    approx(p.frame.w, 374, "width 160 widens the panel")
+    approx(p.frame.h, 75, "rails 12 and 9 heighten it")
+    approx(bounds(rt, p.parts.status)["w"], 160, "status width")
+    approx(bounds(rt, p.parts.block.healthBar.shell)["h"], 12, "health rail")
+    approx(bounds(rt, p.parts.block.powerBar.shell)["h"], 9, "power rail")
+    put(rt, w=None, hpH=None, mpH=None, pet_castShow="auto")
+    p.Restyle()
+    assert rt.eval("__cast_preview.frame.shown") is False, "Auto hides the plate for a hunter pet"
+    approx(bounds(rt, p.parts.status)["w"], 336, "Wider fills the room")
+    put(rt, pet_castFree="gap")
+    p.Restyle()
+    approx(bounds(rt, p.parts.status)["w"], 134, "Leave the gap keeps the block's width")
+    put(rt, pet_previewKind="demon")
+    p.Restyle()
+    assert rt.eval("__cast_preview.frame.shown") is True, "Auto keeps the plate for a demon"
+    # Docked, the Console sets the size: the preview shows what the panel will draw.
+    put(rt, pet_castShow=None, w=200, hpH=20)
+    rt.execute("__anchor = CreateFrame('Frame'); __anchor:SetSize(500, 40); FS.PetFrame.SeatDocked(__anchor, 0)")
+    p.Restyle()
+    approx(p.frame.w, 348, "docked width")
+    approx(p.frame.h, 68, "docked height")
+    rt.execute("FS.PetFrame.SeatFloat()")
+    p.Restyle()
+    approx(p.frame.w, 414, "floating again")
+
+
+def check_the_preview_follows_text_opacity_and_the_hover_override() -> None:
+    rt = runtime(1.0)
+    p = preview(rt)
+    block = p.parts.block
+    rt.execute("CurveConstants = { ScaleTo100 = 1 }")
+    put(rt, hpFmt="percent", mpFmt="none", hpTs=10, nameX=4, alpha=50, bgAlpha=60, pet_castShow="always")
+    p.Restyle()
+    assert block.healthBar.text.text == "82%", block.healthBar.text.text
+    assert block.powerBar.text.shown is False, "None hides the number"
+    approx(block.healthBar.text.fontSize, 10, "text size")
+    approx(block.nameText.points.LEFT.x, 5, "name offset")
+    assert p.frame.alpha == 0.5, "opacity is the whole preview's alpha"
+    approx(p.parts.fill.color[4], 0.6, "background opacity is the fill's alpha")
+    approx(p.parts.fill.color[1], rt.eval("FS.Theme.COLOR_HUD_SCRIM[1]"), "and the fill keeps the scrim's colour")
+    put(rt, bgAlpha=None, level=False)
+    p.Restyle()
+    approx(p.parts.fill.color[4], rt.eval("FS.Theme.COLOR_HUD_SCRIM[4]"), "the default fill is the scrim's own")
+    assert block.levelText.shown is False
+    rt.execute("FS.FrameStyle.override = { frame = 'pet', suffix = 'level', value = true }")
+    p.Restyle()
+    rt.execute("FS.FrameStyle.override = nil")
+    assert block.levelText.shown is True, "pointing at the Level switch turns it on in the preview for the moment"
+    put(rt, pet_happy=True)
+    p.Restyle()
+    assert block.dot.shown is True, "the Hunter tab's switch draws the dot on a hunter pet"
+    for i, want in enumerate((0, 0.659, 0.110)):
+        approx(block.dot.color[i + 1], want, "the dot is the happy green")
+
+
+def check_building_the_preview_leaves_the_live_panel_alone() -> None:
+    rt = runtime(1.0)
+    before = rt.eval("__snapshot()")
+    p = preview(rt)
+    put(rt, pet_happy=True, hpH=12)
+    p.Restyle()
+    put(rt, hpH=None, pet_happy=False)
+    assert rt.eval("__snapshot()") == before, "the live panel moved"
+
+
 def main() -> int:
     cases = [
         ("status slot starts at the interior left", check_status_slot_is_the_left_block_at_the_interior_left),
@@ -1680,6 +1811,11 @@ def main() -> int:
         ("style: bar looks come from the shared helper", check_bar_looks_are_drawn_by_the_shared_helper),
         ("style: the happiness dot sits between name and level", check_the_happiness_dot_sits_between_the_name_and_the_level),
         ("style: no protected frame is touched in combat", check_the_container_changes_never_touch_a_protected_frame_in_combat),
+        ("preview: a hunter pet as the panel draws it", check_the_preview_draws_a_hunter_pet_as_the_panel_does),
+        ("preview: a demon with a Firebolt cast and a blue rail", check_the_preview_draws_a_demon_with_a_firebolt_cast_and_a_blue_rail),
+        ("preview: sizes, Wider and the dock", check_the_preview_follows_sizes_wider_and_the_dock),
+        ("preview: text, opacity and the hover override", check_the_preview_follows_text_opacity_and_the_hover_override),
+        ("preview: the live panel is left alone", check_building_the_preview_leaves_the_live_panel_alone),
     ]
     failures = 0
     for name, check in cases:

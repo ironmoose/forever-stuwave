@@ -1289,6 +1289,104 @@ local function RegisterEvents()
 end
 
 -------------------------------------------------------------------------------
+-- Preview (the config window's Pet bar page)
+-------------------------------------------------------------------------------
+
+-- What the preview pets read: a hunter's pet (focus, brown rail, a happiness dot) and a demon (mana, blue rail,
+-- casting Firebolt). Nothing is read from a unit.
+local PREVIEW_PETS = {
+    hunter = { name = "Wolf", level = 22, hp = { 208, 253 }, mp = { 70, 100 }, power = 2 },
+    demon = { name = "Grimzik", level = 22, hp = { 208, 253 }, mp = { 162, 253 }, power = 0 },
+}
+
+-- The panel on a still frame, drawn from the same plan and the same block code as the live one: the float chrome
+-- (PetDock.lua's two cut textures), the status block (NewBlock, SeatBlockGeometry, SeatBlockText), the cast plate
+-- (PetCastBar.lua's NewPreview) and ten button plates. Returns { frame, Restyle, parts }; Restyle reads the settings
+-- again (Style.override included, for the row the pointer is on) and takes no unit.
+function FS.PetFrame.NewStylePreview(parent)
+    local Theme = FS.Theme
+    local frame = CreateFrame("Frame", nil, parent)
+    local panel = CreateFrame("Frame", nil, frame)
+    panel:SetAllPoints(frame)
+    local parts = { panel = panel, buttons = {} }
+    parts.outline = Theme.AddCut2Texture(panel, Theme.SLICE_CUT2_OUTLINE_TEXTURE, COLOR_POWER, "BORDER")
+    parts.fill = Theme.AddCut2Texture(panel, Theme.SLICE_CUT2_FILL_TEXTURE, Theme.COLOR_HUD_SCRIM, "BACKGROUND", nil, 0)
+    parts.status = CreateFrame("Frame", nil, panel)
+    parts.block = NewBlock(parts.status, 1)
+    local castMaker = FS.PetCastBar and FS.PetCastBar.NewPreview
+    parts.cast = castMaker and castMaker(panel) or nil
+    for i = 1, 10 do
+        local button = CreateFrame("Frame", nil, panel)
+        button:SetSize(BAR_HEIGHT, BAR_HEIGHT)
+        Theme.AddCut2Texture(button, Theme.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND")
+        parts.buttons[i] = button
+    end
+
+    local function Restyle()
+        local Config = FS.Config
+        local kind = (Config and Config.Get("pet.previewKind") == "demon") and "demon" or "hunter"
+        local sample = PREVIEW_PETS[kind]
+        local hunter = kind == "hunter"
+        local plan = FS.PetFrame.Plan(docked, hunter)
+        local b = parts.block
+
+        frame:SetSize(plan.panelW, plan.panelH)
+        frame:SetAlpha(Bounded("alpha", 100, 0, 100) / 100)
+        local fillAlpha = Theme.COLOR_HUD_SCRIM[4]
+        if Style and Style.IsStored("pet", "bgAlpha") then fillAlpha = Bounded("bgAlpha", 47, 0, 100) / 100 end
+        parts.fill:SetVertexColor(Theme.COLOR_HUD_SCRIM[1], Theme.COLOR_HUD_SCRIM[2], Theme.COLOR_HUD_SCRIM[3], fillAlpha)
+
+        parts.status:ClearAllPoints()
+        parts.status:SetPoint("TOPLEFT", panel, "TOPLEFT", INSET_SIDE, -INSET_TOP)
+        parts.status:SetSize(plan.w, plan.block)
+        b.dotOn = hunter and Config ~= nil and Config.Get("pet.happy") == true
+        SeatBlockGeometry(b, plan, 1)
+        SeatBlockText(b, 1)
+        if b.dotOn then
+            local c = HAPPY_COLORS[3]
+            b.dot:SetVertexColor(c[1], c[2], c[3], 1)
+        end
+
+        b.nameText:SetText(sample.name)
+        b.levelText:SetText("LV " .. sample.level)
+        local function Fill(bar, values, suffix, kind)
+            bar:SetMinMaxValues(0, values[2])
+            bar:SetValue(values[1])
+            local fmt = Setting(suffix, "number")
+            -- The live frame keeps the number where the client has no percent read; so does the preview.
+            if Style and (fmt == "percent" or fmt == "both") and not Style.PercentAvailable(kind) then fmt = "number" end
+            local text = Style and Style.TextFor(fmt, values[1], values[2]) or ("%d / %d"):format(values[1], values[2])
+            bar.text:SetText(text)
+            bar.text:SetShown(fmt ~= "none")
+        end
+        Fill(b.healthBar, sample.hp, "hpFmt", "health")
+        Fill(b.powerBar, sample.mp, "mpFmt", "power")
+        local tint = POWER_COLORS[sample.power] or COLOR_POWER
+        FS.FrameHelpers.SetLaserRailColor(b.powerBar, tint[1], tint[2], tint[3])
+
+        if parts.cast then
+            local cast = parts.cast
+            cast.frame:ClearAllPoints()
+            cast.frame:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -INSET_SIDE, -INSET_TOP)
+            cast.frame:SetShown(not CastGone(hunter))
+            cast.Restyle({
+                casting = not hunter,
+                icon = Config == nil or Config.Get("pet.castIcon") ~= false,
+                name = Config == nil or Config.Get("pet.castName") ~= false,
+                timer = Config == nil or Config.Get("pet.castTimer") ~= false,
+            })
+        end
+
+        local rowTop = INSET_TOP + plan.top + ROW_GAP_TOP
+        for i, button in ipairs(parts.buttons) do
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", panel, "TOPLEFT", INSET_SIDE + (i - 1) * (BAR_HEIGHT + GAP), -rowTop)
+        end
+    end
+    return { frame = frame, Restyle = Restyle, parts = parts }
+end
+
+-------------------------------------------------------------------------------
 -- Assembly
 -------------------------------------------------------------------------------
 
