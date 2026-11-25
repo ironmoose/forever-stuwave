@@ -521,6 +521,43 @@ function T.the_card_power_button_turns_the_module_back_on()
     errorsClean()
 end
 
+-- The Pet bar off card carries a ? (question 180): the game's pet unit frame is Unit frames' to hide, not this switch's.
+function T.the_pet_bar_off_card_has_a_help_icon_saying_the_pet_unit_frame_belongs_to_unit_frames()
+    local W = msboot({ db = { modules = { ["m.pet"] = false } } })
+    W.Open("pet")
+    local card = _G.ForeverSTUwaveConfigOffCard
+    yes(card and card:IsShown(), "the card is shown")
+    local help = card.fsHelp
+    yes(help and help:IsShown(), "a ? on the card")
+    local tip = help.fsTip
+    yes(tip:find("pet unit frame", 1, true) and tip:find("Unit frames", 1, true), "the tip names both: " .. tostring(tip))
+    help.scripts.OnEnter(help)
+    eq(TOOLTIP.text, tip, "hovering the ? shows it")
+    -- seated on the second line, right of where its centred text ends
+    local pt = help.points[1]
+    eq(pt.rel, card.fsLine2, "anchored to the second line")
+    yes(pt.x >= card.fsLine2:GetStringWidth() / 2, "right of the text, not on it")
+    yes(visibleText("Pet bar is off."), "the card still says the module is off")
+    yes(visibleText("Blizzard's own shows instead. Turning it on takes a Reload UI."), "and keeps its two lines")
+    errorsClean()
+end
+
+function T.the_pet_bar_help_icon_follows_the_page_and_no_other_off_card_has_one()
+    local W = msboot({ db = { modules = { ["m.pet"] = false, ["m.cast"] = false } } })
+    W.Open("pet")
+    local card = _G.ForeverSTUwaveConfigOffCard
+    yes(card.fsHelp and card.fsHelp:IsShown(), "the Pet bar card has its ?")
+    W.Open("cast")
+    yes(card:IsShown(), "the Cast bars card is up")
+    no(card.fsHelp and card.fsHelp:IsShown(), "no ? on a card with nothing to add")
+    W.Open("pet")
+    yes(card.fsHelp:IsShown(), "and it is back on the Pet bar card")
+    -- a module turned back on closes the card, the ? with it
+    MS().Set("m.pet", true)
+    no(card:IsShown())
+    errorsClean()
+end
+
 function T.a_pending_reload_marks_the_row_the_nav_count_and_the_registry_and_clears_when_turned_back()
     local W = msboot()
     W.Open("modules")

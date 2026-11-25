@@ -293,6 +293,13 @@ end
 local card
 local held       -- the tab page the card hides
 
+-- A module whose off card adds one thing: a ? after the second line carries it. The game's pet unit frame is hidden by Unit
+-- frames, not by the pet bar, so turning the pet bar off leaves it hidden while Unit frames is on.
+local OFF_NOTES = {
+    ["m.pet"] = "The game's own pet unit frame is handled by Unit frames, not by this switch.",
+}
+local HELP_GAP_CARD = 6
+
 -- The module of the page on screen when it is off, with the page key; false when no card is wanted.
 local function CardWanted()
     local frame = ui.frame
@@ -339,6 +346,8 @@ local function EnsureCard()
     card.fsLine2:SetPoint("LEFT", area, "LEFT", 0, 0)
     card.fsLine2:SetPoint("RIGHT", area, "RIGHT", 0, 0)
     card.fsLine2:SetJustifyH("CENTER")
+    card.fsHelp = UI.HelpIcon(card, "")
+    card.fsHelp:Hide()
     card:Hide()
     return card
 end
@@ -354,6 +363,17 @@ local function PaintCard(page, key)
     card.fsBig.fsOn = false
     card.fsBig.fsHover, card.fsBig.fsDown = false, false
     PaintPower(card.fsBig)
+    -- the ? sits right of where the centred second line ends
+    local note = OFF_NOTES[key]
+    local help = card.fsHelp
+    if note then
+        help.fsTip = note
+        help:ClearAllPoints()
+        help:SetPoint("LEFT", card.fsLine2, "CENTER", S.Snap(card.fsLine2:GetStringWidth() / 2 + HELP_GAP_CARD), 0)
+        help:Show()
+    else
+        help:Hide()
+    end
 end
 
 -- A tab page hidden under the card stays hidden when the window selects it again.
