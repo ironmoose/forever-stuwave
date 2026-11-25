@@ -750,7 +750,6 @@ local P = GF.Preview
 check(P and P.Show and P.Hide and P.Restyle and P.IsShown, "the module has a Preview table")
 local classes = table.concat(P.Classes(), ",")
 check(classes == "PALADIN,WARLOCK", "the classes with proc rungs: " .. classes)
-check(P.Show("PRIEST") == false, "a class with no procs has nothing to show")
 check(P.Show("WARLOCK") == true, "the warlock rungs come up")
 local L, R = GF.rungs.left, GF.rungs.right
 check(L.key == "shadow_trance" and R.key == "decimation", "Shadow Trance left, Decimation right")
@@ -767,6 +766,45 @@ check(P.Show("PALADIN") == true and GF.rungs.left.key == "hs" and GF.rungs.right
 P.Hide()
 InCombatLockdown = function() return true end
 check(P.Show("WARLOCK") == false, "never in combat")
+InCombatLockdown = nil
+""")
+
+case("a_class_with_no_procs_shows_the_stay_rad_placeholder_and_the_loop_ignites_holds_fades_and_repeats")(r"""
+local GF = boot({ profile = "ROGUE", state = function(p) return StateFor(p) end })
+local P = GF.Preview
+local ph = GF.PLACEHOLDER
+check(ph.spec.label == "STAY RAD" and ph.spec.side == "left", "the placeholder is STAY RAD on the left post")
+local longest = 0
+for _, prof in pairs(FS.HudProfiles) do if type(prof) == "table" then
+    for _, spec in pairs(prof.procs or {}) do if spec.label and #spec.label > longest then longest = #spec.label end end end
+end
+check(#ph.spec.label <= longest, "it is no wider than the widest real label (" .. #ph.spec.label .. " of " .. longest .. ")")
+check(P.Show("SHAMAN") == true, "a shaman gets the placeholder")
+local L, R = GF.rungs.left, GF.rungs.right
+check(L.key == "placeholder" and L.label:GetText() == "STAY RAD", "the left rung carries it")
+check(not R.key, "the right post stays idle")
+check(L.icon.tex.tex == 134400, "a generic icon")
+check(P.Phase() == "ignite", "it ignites first")
+local d
+for _, f in ipairs(FRAMES) do if f.scripts.OnUpdate and f ~= L.frame and f ~= R.frame and not f.name then d = f end end
+check(d, "the loop has a driver")
+local function run(t) local n = 0 while n < t do d.scripts.OnUpdate(d, 0.05); if L.frame.scripts.OnUpdate then L.frame.scripts.OnUpdate(L.frame, 0.05) end n = n + 0.05 end end
+run(1.0)
+check(P.Phase() == "hold" and L.q == 1, "lit and holding: " .. tostring(P.Phase()))
+local function untilPhase(want, limit)
+    local n = 0
+    while P.Phase() ~= want and n < limit do run(0.05); n = n + 0.05 end
+    return P.Phase() == want
+end
+check(untilPhase("fade", 2.0), "after about 1.5 s of hold it falls off")
+check(L.target == 0, "the rung is aimed down")
+check(untilPhase("gap", 2.0) and L.q == 0, "dark in the gap")
+check(untilPhase("ignite", 2.0), "and it ignites again")
+P.Hide()
+check(P.Phase() == nil and not d.scripts.OnUpdate, "the loop stops with the preview")
+check(not L.frame:IsShown() and L.key == nil, "and the rung is down")
+InCombatLockdown = function() return true end
+check(P.Show("SHAMAN") == false and P.Phase() == nil, "nothing loops in combat")
 InCombatLockdown = nil
 """)
 

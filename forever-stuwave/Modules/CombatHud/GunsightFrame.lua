@@ -630,7 +630,7 @@ local function ProcSpell(spec)
     local def = type(spec.ready) == "string" and type(spells) == "table" and spells[spec.ready] or nil
     local name = type(def) == "table" and type(def.names) == "table" and def.names[1] or nil
     local FH = FS.FrameHelpers
-    return FH and FH.SpellIDForName and FH.SpellIDForName(name) or nil, name
+    return name and FH and FH.SpellIDForName and FH.SpellIDForName(name) or nil, name
 end
 
 local function BindRung(rung, key, spec, stateIcon)
@@ -700,7 +700,60 @@ end
 -- Hud state is ignored while it is up, and the real state is drawn again when it ends. Out of combat only. Show answers true
 -- when this call put it up; false when it is already up, the HUD is not built or a fight is on.
 GunsightFrame.Preview = {}
+
+-- A class with no proc of its own gets this sample on the left post: a generic icon and a neutral label, the same rung and the
+-- same loop, so the Procs row shows something moving on any class.
+GunsightFrame.PLACEHOLDER = {
+    key = "placeholder", icon = 134400,       -- the question mark icon
+    spec = { label = "STAY RAD", side = "left", glow = "gold", ready = "placeholder" },
+}
+
+-- The loop, like a proc landing in a fight: the rung ignites (it grows to lit), holds, falls off, a short gap, again.
+local PV_HOLD, PV_GAP, PV_LIMIT = 1.5, 0.6, 1.5
+local pv = { phase = nil, t = 0, bound = {} }
+local pvFrame
+
+local function PvAllAt(q)
+    for _, rung in ipairs(pv.bound) do
+        if q == 1 and rung.q < 1 then return false end
+        if q == 0 and rung.q > 0 then return false end
+    end
+    return true
+end
+
+local function PvIgnite()
+    pv.phase, pv.t = "ignite", 0
+    for _, rung in ipairs(pv.bound) do
+        rung.q, rung.target = 0, 0
+        PaintRung(rung)
+        SetTarget(rung, true)
+    end
+end
+
+local function PvTick(_, dt)
+    if not (previewClass and pv.phase) then
+        pvFrame:SetScript("OnUpdate", nil)
+        pv.phase = nil
+        return
+    end
+    if dt > 0.1 then dt = 0.1 end
+    pv.t = pv.t + dt
+    if pv.phase == "ignite" then
+        if PvAllAt(1) or pv.t >= PV_LIMIT then pv.phase, pv.t = "hold", 0 end
+    elseif pv.phase == "hold" then
+        if pv.t >= PV_HOLD then
+            pv.phase, pv.t = "fade", 0
+            for _, rung in ipairs(pv.bound) do SetTarget(rung, false) end
+        end
+    elseif pv.phase == "fade" then
+        if PvAllAt(0) or pv.t >= PV_LIMIT then pv.phase, pv.t = "gap", 0 end
+    elseif pv.phase == "gap" then
+        if pv.t >= PV_GAP then PvIgnite() end
+    end
+end
+
 function GunsightFrame.Preview.IsShown() return previewClass ~= nil end
+function GunsightFrame.Preview.Phase() return pv.phase end
 function GunsightFrame.Preview.Classes()
     local out = {}
     for class, profile in pairs(FS.HudProfiles or {}) do
@@ -713,35 +766,48 @@ function GunsightFrame.Preview.Classes()
     table.sort(out)
     return out
 end
+-- `class`: a profile with procs (Warlock, Paladin) shows its own rungs; any other class shows the placeholder.
 function GunsightFrame.Preview.Show(class)
     if previewClass or not built then return false end
     if type(InCombatLockdown) == "function" and InCombatLockdown() then return false end
     local profile = FS.HudProfiles and FS.HudProfiles[class]
     local specs = type(profile) == "table" and profile.procs or nil
-    if type(specs) ~= "table" then return false end
-    local keys = {}
-    for key, spec in pairs(specs) do
-        if type(spec) == "table" then keys[#keys + 1] = key end
+    local list = {}
+    if type(specs) == "table" then
+        local keys = {}
+        for key, spec in pairs(specs) do
+            if type(spec) == "table" and (spec.side == "left" or spec.side == "right") then keys[#keys + 1] = key end
+        end
+        table.sort(keys)
+        for _, key in ipairs(keys) do list[#list + 1] = { key = key, spec = specs[key] } end
     end
-    table.sort(keys)
-    local bound = {}
-    for _, key in ipairs(keys) do
-        local spec = specs[key]
-        local rung = rungs[spec.side]
-        if rung and not bound[rung] then
-            bound[rung] = true
+    if #list == 0 then
+        local ph = GunsightFrame.PLACEHOLDER
+        list[1] = { key = ph.key, spec = ph.spec, icon = ph.icon }
+    end
+    pv.bound = {}
+    local taken = {}
+    for _, item in ipairs(list) do
+        local rung = rungs[item.spec.side]
+        if rung and not taken[rung] then
+            taken[rung] = true
             if rung.key then UnbindRung(rung) end
-            BindRung(rung, key, spec, nil)
-            SetTarget(rung, true)
+            BindRung(rung, item.key, item.spec, item.icon)
+            pv.bound[#pv.bound + 1] = rung
         end
     end
-    if next(bound) == nil then return false end
+    if #pv.bound == 0 then return false end
     previewClass = class
+    pvFrame = pvFrame or CreateFrame("Frame")
+    PvIgnite()
+    pvFrame:SetScript("OnUpdate", PvTick)
     return true
 end
 function GunsightFrame.Preview.Hide()
     if not previewClass then return end
     previewClass = nil
+    pv.phase, pv.bound = nil, {}
+    if pvFrame then pvFrame:SetScript("OnUpdate", nil) end
     for _, rung in pairs(rungs) do UnbindRung(rung) end
     ApplyState(lastState)
 end

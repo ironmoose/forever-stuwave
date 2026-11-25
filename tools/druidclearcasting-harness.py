@@ -216,6 +216,33 @@ def case(name: str, body: str) -> None:
     CASES.append((name, body))
 
 
+case("the_config_preview_loops_enter_hold_exit_gap_and_stops_on_hide_and_in_combat", """
+    assert(Boot() == true)
+    local P = CC.Preview
+    assert(P.Show() == true, "the preview comes up")
+    assert(P.Phase() == "enter", "it starts with the real enter animation")
+    local d = P.Driver()
+    assert(d and d.scripts.OnUpdate, "the loop has a driver")
+    local seen, shownAtHold = {}, nil
+    local function step(sec)
+        for _ = 1, math.floor(sec * 30 + 0.5) do
+            local ph = P.Phase()
+            if d.scripts.OnUpdate then d.scripts.OnUpdate(d, 1 / 30) end
+            if P.Phase() then seen[P.Phase()] = true end
+        end
+    end
+    step(4)
+    assert(seen.enter and seen.hold and seen.exit and seen.gap, "ignite, hold, exit and gap all ran")
+    step(6)
+    assert(P.Phase() ~= nil, "and it keeps repeating")
+    P.Hide()
+    assert(P.Phase() == nil and not d.scripts.OnUpdate, "the loop stops on hide")
+    assert(not RootShown(), "and the alert is down")
+    InCombatLockdown = function() return true end
+    assert(P.Show() == false and P.Phase() == nil, "nothing loops in combat")
+    InCombatLockdown = nil
+""")
+
 case("builds_for_druids_only", """
     __class = "WARRIOR"
     assert(Boot() == false)

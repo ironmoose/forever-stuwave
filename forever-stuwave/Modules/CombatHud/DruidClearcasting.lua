@@ -602,6 +602,60 @@ local function EndPreview()
     sync(GetTime())
 end
 
+
+-- The preview plays like a fight: the baked enter animation, a hold of PREVIEW_HOLD seconds on the held loop, the baked exit,
+-- a PREVIEW_GAP of nothing, again. Plain frames and the module's own sequences; it runs only while the preview is up.
+local PREVIEW_HOLD, PREVIEW_GAP = 1.5, 0.6
+local loop = { phase = nil, t = 0 }
+local loopFrame
+
+local function LoopBegin()
+    loop.phase, loop.t = "enter", 0
+    StartSeq("bear", "enter", 1, Art.WIN * PREVIEW_REM)
+end
+
+local function LoopTick(_, dt)
+    if not (previewing and built and loop.phase) then
+        loopFrame:SetScript("OnUpdate", nil)
+        loop.phase = nil
+        return
+    end
+    if dt > 0.1 then dt = 0.1 end
+    if loop.phase == "gap" then
+        loop.t = loop.t + dt
+        if loop.t >= PREVIEW_GAP then LoopBegin() end
+        return
+    end
+    curAcc = curAcc + dt
+    while curAcc >= FRAME_S and curKind do
+        curAcc = curAcc - FRAME_S
+        Step()
+    end
+    if curKind then Commit() end
+    if loop.phase == "enter" and curSeq ~= "enter" then
+        loop.phase, loop.t = "hold", 0
+    elseif loop.phase == "hold" then
+        loop.t = loop.t + dt
+        if loop.t >= PREVIEW_HOLD then
+            loop.phase = "exit"
+            StartSeq("bear", "exp", 1, curRem)
+        end
+    elseif loop.phase == "exit" and not curKind then
+        loop.phase, loop.t = "gap", 0
+    end
+end
+
+local function LoopStart()
+    loopFrame = loopFrame or CreateFrame("Frame")
+    LoopBegin()
+    loopFrame:SetScript("OnUpdate", LoopTick)
+end
+
+local function LoopStop()
+    loop.phase = nil
+    if loopFrame then loopFrame:SetScript("OnUpdate", nil) end
+end
+
 -- The config window's preview (ConfigFlash.lua): the same still alert the layout editor shows, at its seat while a row of the
 -- alert is pointed at or its Test button is on, whatever the class (the art is baked, nothing is read from the player). Out of
 -- combat only. Show answers true when this call put it up (false: already up, or it cannot be built).
@@ -617,11 +671,15 @@ function CC.Preview.Show()
     end
     if not Build() then return false end
     ShowPreview()
+    if previewing then LoopStart() end
     return previewing
 end
 function CC.Preview.Hide()
+    LoopStop()
     if previewing then EndPreview() end
 end
+function CC.Preview.Phase() return loop.phase end
+function CC.Preview.Driver() return loopFrame end
 function CC.Preview.Restyle()
     if previewing and built then pcall(Reseat) end
 end

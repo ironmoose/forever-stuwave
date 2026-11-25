@@ -488,6 +488,60 @@ local function OnEditChanged(editing)
     if editing then ShowPreview() else EndPreview() end
 end
 
+
+-- The preview plays like a fight: the baked enter animation, a hold of PREVIEW_HOLD seconds on the held loop, the baked exit,
+-- a PREVIEW_GAP of nothing, again. Plain frames and the module's own sequences; it runs only while the preview is up.
+local PREVIEW_HOLD, PREVIEW_GAP = 1.5, 0.6
+local loop = { phase = nil, t = 0 }
+local loopFrame
+
+local function LoopBegin()
+    loop.phase, loop.t = "enter", 0
+    StartSeq("overpower", "enter", 1, ART_SPELLS.overpower.win * PREVIEW_REM)
+end
+
+local function LoopTick(_, dt)
+    if not (previewing and built and loop.phase) then
+        loopFrame:SetScript("OnUpdate", nil)
+        loop.phase = nil
+        return
+    end
+    if dt > MAX_DT then dt = MAX_DT end
+    if loop.phase == "gap" then
+        loop.t = loop.t + dt
+        if loop.t >= PREVIEW_GAP then LoopBegin() end
+        return
+    end
+    curAcc = curAcc + dt
+    while curAcc >= FRAME_S and curKey do
+        curAcc = curAcc - FRAME_S
+        Step()
+    end
+    if curKey then Commit() end
+    if loop.phase == "enter" and curSeq ~= "enter" then
+        loop.phase, loop.t = "hold", 0
+    elseif loop.phase == "hold" then
+        loop.t = loop.t + dt
+        if loop.t >= PREVIEW_HOLD then
+            loop.phase = "exit"
+            StartSeq("overpower", "exp", 1, curRem)
+        end
+    elseif loop.phase == "exit" and not curKey then
+        loop.phase, loop.t = "gap", 0
+    end
+end
+
+local function LoopStart()
+    loopFrame = loopFrame or CreateFrame("Frame")
+    LoopBegin()
+    loopFrame:SetScript("OnUpdate", LoopTick)
+end
+
+local function LoopStop()
+    loop.phase = nil
+    if loopFrame then loopFrame:SetScript("OnUpdate", nil) end
+end
+
 -- The config window's preview (ConfigFlash.lua): the same still alert the layout editor shows, on screen at its seat while a row of
 -- the alert is pointed at or its Test button is on, whatever the class (the art is baked, nothing is read from the player).
 -- Out of combat only; plain frames, so legal anywhere, but the config window never starts it in a fight. Show answers true when
@@ -504,11 +558,15 @@ function PU.Preview.Show()
     end
     if not Build() then return false end
     ShowPreview()
+    if previewing then LoopStart() end
     return previewing
 end
 function PU.Preview.Hide()
+    LoopStop()
     if previewing then EndPreview() end
 end
+function PU.Preview.Phase() return loop.phase end
+function PU.Preview.Driver() return loopFrame end
 function PU.Preview.Restyle()
     if previewing and built then pcall(Reseat) end
 end

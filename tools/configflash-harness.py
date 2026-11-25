@@ -1191,7 +1191,7 @@ function T.the_proc_rungs_piece_row_previews_a_class_rung_pair_and_its_test_butt
     } }
     UnitClass = function() return "Shaman", "SHAMAN" end
     W.SetHover({ key = "gunsight.pieces.prc", row = {} })
-    eq(shown, "WARLOCK", "off a rung class the piece row shows the Warlock's rungs")
+    eq(shown, "PLACEHOLDER", "off a rung class the piece row shows the sample rung")
     W.SetHover(nil)
     eq(shown, nil, "and takes them down after")
     UnitClass = function() return "Paladin", "PALADIN" end

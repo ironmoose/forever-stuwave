@@ -56,10 +56,11 @@ end
 -- Priest: the left half has nothing to set; the right half is one pick, the one line that explains the pick, and the Inner Fire
 -- pulse, which only the two looks that carry Inner Fire have (PriestRight.lua holds the labels and the lines).
 local function PriestTab(content)
-    UI.Section(content, {
+    local shieldSec = UI.Section(content, {
         title = "Left: Power Word: Shield",
         tip = "The round shield on the left fills with light while your shield holds. The rim turns violet during Weakened Soul.",
     })
+    if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(shieldSec, "procs.placeholder") end
     UI.Note(content, "Always shown once you know the spell. Nothing to set.")
     local Right = FS.PriestRight
     if not (Right and Right.SETTING and Right.REMIND) then return end
@@ -93,7 +94,8 @@ local tabs = {
         end
     end },
     { key = "hunter", label = "Hunter", build = function(content)
-        ModuleSection(content, "HUNTER", "Hunter class module")
+        local sec = ModuleSection(content, "HUNTER", "Hunter class module")
+        if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(sec, "procs.placeholder") end
         local HS = FS.HunterState
         local warn = HS and HS.SETTINGS and HS.SETTINGS.ammoWarn
         if not warn then return ClassMessage(content, "Hunter") end
@@ -105,7 +107,8 @@ local tabs = {
         })
     end },
     { key = "mage", label = "Mage", build = function(content)
-        ModuleSection(content, "MAGE", "Mage")
+        local sec = ModuleSection(content, "MAGE", "Mage")
+        if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(sec, "procs.placeholder") end
         ClassMessage(content, "Mage")
     end },
     { key = "paladin", label = "Paladin", build = function(content)
@@ -115,11 +118,13 @@ local tabs = {
     end },
     { key = "priest", label = "Priest", build = PriestTab },
     { key = "rogue", label = "Rogue", build = function(content)
-        ModuleSection(content, "ROGUE", "Rogue")
+        local sec = ModuleSection(content, "ROGUE", "Rogue")
+        if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(sec, "procs.placeholder") end
         ClassMessage(content, "Rogue")
     end },
     { key = "shaman", label = "Shaman", build = function(content)
-        ModuleSection(content, "SHAMAN", "Shaman class module")
+        local sec = ModuleSection(content, "SHAMAN", "Shaman class module")
+        if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(sec, "procs.placeholder") end
         UI.Note(content, "Nothing to set. Hover the ? for what it shows.")
     end },
     { key = "warlock", label = "Warlock", build = function(content)
