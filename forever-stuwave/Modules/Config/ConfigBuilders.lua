@@ -58,6 +58,7 @@ local function NewRow(content, o, kind)
     row.fsWhen = o.when
     UI.Stack(content, row, o.half)
     local entry = I.Register(row, o, kind or "row")
+    entry.opts = o
     if o.needs or o.enabled then
         if o.enabled and not (o.needs or o.reason) then
             Forward("row '" .. tostring(o.label) .. "' has enabled() but neither needs nor reason")
@@ -92,26 +93,83 @@ local function RowReason(o)
     return false
 end
 
+-- The ? tip of a row: the plain tip, or (when the row is off) its label, the reason and the tip, and a last line when the
+-- value differs from its default.
+function I.RefreshTip(row)
+    local icon, entry = row.fsHelp, row.fsEntry
+    if not (icon and entry) then return end
+    local o = entry.opts
+    local parts = {}
+    local off = entry.disabled
+    if off then
+        parts[#parts + 1] = o.label or ""
+        if entry.why then parts[#parts + 1] = entry.why end
+    end
+    if o.tip then parts[#parts + 1] = o.tip end
+    local changed = I.EntryChanged(entry)
+    if changed then parts[#parts + 1] = "Changed from the default." end
+    icon.fsTip = table.concat(parts, "\n")
+    icon:SetShown(off or o.tip ~= nil or changed)
+    icon:SetAlpha(1)
+end
+
 -- Run before the controls' own refreshes: dims the label, marks the row off, and puts the reason first in the ? tip.
 function I.ApplyRowState(row, o, entry)
     local off, reason = RowReason(o)
     row.fsRowOff = off or nil
     entry.disabled, entry.why = off, reason
     row.fsLabel:SetAlpha(off and 0.4 or 1)
-    local icon = row.fsHelp
-    if icon then
-        if off then
-            local parts = { o.label or "" }
-            if reason then parts[#parts + 1] = reason end
-            if o.tip then parts[#parts + 1] = o.tip end
-            icon.fsTip = table.concat(parts, "\n")
-        else
-            icon.fsTip = o.tip or ""
-        end
-        icon:SetShown(off or o.tip ~= nil)
-        icon:SetAlpha(1)
-    end
+    I.RefreshTip(row)
 end
+
+-- The changed dot, the reset button and the tip's last line for one keyed (or isChanged / reset) row. `edge` is the
+-- control part furthest left: the reset button sits CTL_GAP to its left.
+function I.AttachChanged(row, edge)
+    local entry = row.fsEntry
+    if not entry or entry.nodot then return end
+    if not (entry.cfgKey or entry.isChanged) then return end
+    local dot = row:CreateTexture(nil, "OVERLAY")
+    dot:SetColorTexture(C.pink[1], C.pink[2], C.pink[3], 1)
+    dot:SetSize(S.DOT, S.DOT)
+    -- the page clips PAD_X (8) left of the content: keep the dot inside it
+    dot:SetPoint("LEFT", row, "LEFT", math.max(S.DOT_X, -8), 0)
+    dot:Hide()
+    local glow = row:CreateTexture(nil, "BACKGROUND")
+    glow:SetColorTexture(C.pink[1], C.pink[2], C.pink[3], 0.25)
+    glow:SetSize(S.DOT + 4, S.DOT + 4)
+    glow:SetPoint("CENTER", dot, "CENTER", 0, 0)
+    glow:Hide()
+    local reset = I.MakeButton(row, { width = S.RESET, height = S.RESET, ring = C.line, textColor = C.cyan, chamfer = 3,
+        text = "\226\134\186", glow = 0 })
+    reset:SetPoint("RIGHT", edge or row.control or row, "LEFT", -S.CTL_GAP, 0)
+    I.HoverStyle(reset, C.cyan)
+    reset:Hide()
+    reset:SetAlpha(0.45)
+    reset:SetScript("OnClick", function()
+        if not Writable() then return end
+        I.EntryReset(entry)
+        CW.RefreshAll()
+    end)
+    reset:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Reset to the default", 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    reset:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    row.fsDot, row.fsReset = dot, reset
+    entry.resetButton = reset
+    Track(function()
+        local changed = I.EntryChanged(entry)
+        dot:SetShown(changed)
+        glow:SetShown(changed)
+        reset:SetShown(changed)
+        reset:SetAlpha(ui.hover == entry and 1 or 0.45)
+        I.RefreshTip(row)
+    end)
+end
+
+CW.On("rowEnter", function(entry) if entry.resetButton then entry.resetButton:SetAlpha(1) end end)
+CW.On("rowLeave", function(entry) if entry.resetButton then entry.resetButton:SetAlpha(0.45) end end)
 
 -------------------------------------------------------------------------------
 -- Help icon
@@ -176,16 +234,31 @@ function UI.Section(content, o)
     end
     local meta = Label(header, "", S.SMALL, C.muted)
     meta:SetPoint("RIGHT", header, "RIGHT", 0, 0)
+    -- the changed count: a pink "• N" after the title (and its ?) while any row of the section differs from its default
+    local chip = Label(header, "", S.SMALL, C.pink)
+    chip:SetPoint("LEFT", last, "RIGHT", 8, 0)
+    chip:Hide()
     local rule = header:CreateTexture(nil, "ARTWORK")
     rule:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.35)
     rule:SetHeight(1)
     rule:SetPoint("LEFT", last, "RIGHT", 8, 0)
+    local metaOn = false
     local function SeatRule(hasMeta)
+        metaOn = hasMeta
+        local from = (sec.changed or 0) > 0 and chip or last
         rule:ClearAllPoints()
-        rule:SetPoint("LEFT", last, "RIGHT", 8, 0)
+        rule:SetPoint("LEFT", from, "RIGHT", 8, 0)
         if hasMeta then rule:SetPoint("RIGHT", meta, "LEFT", -8, 0) else rule:SetPoint("RIGHT", header, "RIGHT", 0, 0) end
     end
     SeatRule(false)
+    function sec.SetChanged(count)
+        count = count or 0
+        if sec.changed == count then return end
+        sec.changed = count
+        chip:SetText("\226\128\162 " .. count)
+        chip:SetShown(count > 0)
+        SeatRule(metaOn)
+    end
     function sec.SetMeta(value)
         value = value and tostring(value) or ""
         meta:SetText(value)
@@ -409,6 +482,7 @@ function UI.Toggle(content, o)
         size = master and 12 or S.TEXT, inset = master and 10 or o.inset, sub = o.sub,
         key = o.key, needs = o.needs, nl = o.nl, reason = o.reason, enabled = o.enabled, reload = o.reload,
         target = o.target, when = o.when, inverted = o.inverted, nodot = o.nodot,
+        isChanged = o.isChanged, reset = o.reset,
     }, "switch")
     if master then
         Theme.AddCutSliceFill(row, { C.violet[1], C.violet[2], C.violet[3], 0.07 }, 6)
@@ -466,6 +540,7 @@ function UI.Toggle(content, o)
         end
         SetLook(b, Writable())
     end)
+    I.AttachChanged(row, note or state or b)
     row.control = b
     return row
 end
@@ -528,6 +603,7 @@ function UI.Segmented(content, o)
             SetLook(item.button, Writable() and (o.enabled == nil or o.enabled() == true))
         end
     end)
+    I.AttachChanged(row, holder)
     row.control = holder
     return row
 end
@@ -652,6 +728,7 @@ function UI.Slider(content, o)
         if on then track:Enable() else track:Disable() end
         row:SetAlpha(on and 1 or 0.4)                    -- the label and the readout dim with the track
     end)
+    I.AttachChanged(row, track)
     row.control = track
     return row
 end
@@ -768,6 +845,7 @@ function UI.Dropdown(content, o)
         b.fsLabel:SetText(o.text and o.text(value) or tostring(value))
         SetLook(b, o.free or Writable())
     end)
+    I.AttachChanged(row, b)
     row.control = b
     return row
 end

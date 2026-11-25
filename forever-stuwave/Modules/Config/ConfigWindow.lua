@@ -572,6 +572,7 @@ function I.Register(row, o, kind)
         row = row, sub = o.sub == true, needs = o.needs, reason = o.reason or (o.nl and ("Needs " .. o.nl) or nil),
         enabled = o.enabled, reload = o.reload, min = o.min, max = o.max, target = o.target, when = o.when,
         inverted = o.inverted == true, nodot = o.nodot == true,
+        secObj = sec, cfgKey = o.key, isChanged = o.isChanged, resetFn = o.reset,
     }
     row.fsEntry = entry
     registry[#registry + 1] = entry
@@ -580,6 +581,75 @@ end
 
 function CW.Rows()
     return registry
+end
+
+-- Changed state: a keyed row differs from its default when the active profile stores a value for it; a row built with
+-- get/set opts in with isChanged / reset functions; `nodot` rows (pickers) never count.
+function I.EntryChanged(entry)
+    if entry.nodot or entry.kind == "note" then return false end
+    if entry.cfgKey then return Config.IsStored(entry.cfgKey) end
+    if entry.isChanged then
+        local ok, value = pcall(entry.isChanged)
+        return ok and value == true
+    end
+    return false
+end
+
+function I.EntryReset(entry)
+    if entry.resetFn then
+        local ok, err = pcall(entry.resetFn)
+        if not ok then Forward(err) end
+    elseif entry.cfgKey then
+        Config.Set(entry.cfgKey, nil)
+    end
+end
+
+-- The keys of the changed rows of a page (and tab), for the page reset and the search. Only built tabs have rows.
+function CW.ChangedKeys(page, tab)
+    page = ALIASES[page] or page
+    local list = {}
+    for _, entry in ipairs(registry) do
+        if (page == nil or entry.page == page) and (tab == nil or entry.tab == tab) and I.EntryChanged(entry) then
+            list[#list + 1] = entry.cfgKey or entry.key or entry.label
+        end
+    end
+    return list
+end
+
+-- One write per key (a registry row resets by its own function), then one refresh.
+function CW.ResetKeys(list)
+    for _, key in ipairs(list or {}) do
+        local entry
+        for _, e in ipairs(registry) do
+            if e.cfgKey == key or e.key == key then entry = e break end
+        end
+        if entry then I.EntryReset(entry) else Config.Set(key, nil) end
+    end
+    CW.RefreshAll()
+end
+
+-- Repaints every changed marker: the row dots and resets (their own refresh), the section chips, the tab dots, the nav dots.
+function I.UpdateChanged()
+    local sections, tabs, pages = {}, {}, {}
+    for _, entry in ipairs(registry) do
+        if I.EntryChanged(entry) then
+            if entry.secObj then sections[entry.secObj] = (sections[entry.secObj] or 0) + 1 end
+            tabs[entry.page .. "/" .. entry.tab] = (tabs[entry.page .. "/" .. entry.tab] or 0) + 1
+            pages[entry.page] = (pages[entry.page] or 0) + 1
+        end
+    end
+    for _, entry in ipairs(registry) do
+        local sec = entry.secObj
+        if sec and sec.SetChanged then sec.SetChanged(sections[sec] or 0) end
+    end
+    for key, strip in pairs(ui.strips) do
+        for _, b in ipairs(strip.fsButtons or {}) do
+            if b.fsDot then b.fsDot:SetShown((tabs[key .. "/" .. b.fsTabKey] or 0) > 0) end
+        end
+    end
+    for key, b in pairs(ui.nav) do
+        if b.fsNdot then b.fsNdot:SetShown((pages[key] or 0) > 0) end
+    end
 end
 
 function CW.RowByKey(key, page)
@@ -831,6 +901,11 @@ local function BuildStrip(cat)
         b:SetSize(width, S.TAB_H)
         b:SetPoint("BOTTOMLEFT", strip, "BOTTOMLEFT", x, 0)
         x = x + width + S.TAB_GAP
+        b.fsDot = b:CreateTexture(nil, "OVERLAY")
+        b.fsDot:SetColorTexture(C.pink[1], C.pink[2], C.pink[3], 1)
+        b.fsDot:SetSize(S.DOT, S.DOT)
+        b.fsDot:SetPoint("TOPRIGHT", b, "TOPRIGHT", -4, -6)
+        b.fsDot:Hide()
         b.fsUnderline = b:CreateTexture(nil, "ARTWORK")
         b.fsUnderline:SetColorTexture(C.pink[1], C.pink[2], C.pink[3], 1)
         b.fsUnderline:SetHeight(S.TAB_LINE_H)
@@ -919,6 +994,7 @@ function CW.RefreshAll()
         if not ok then Forward(err) end
     end
     if ui.readOnlyIcon then ui.readOnlyIcon:SetShown(Config.IsReadOnly()) end
+    I.UpdateChanged()
     local rec = ui.tabRec
     if rec and rec.page then
         if I.EvalWhens(rec.page.fsHolder) then
@@ -949,6 +1025,11 @@ local function MakeNavButton(cat)
     b.fsLabel:SetPoint("LEFT", b, "LEFT", S.NAV_SEL_W + 6, 0)
     b.fsLabel:SetPoint("RIGHT", b, "RIGHT", -(S.PWR + S.PWR_R), 0)
     b.fsLabel:SetJustifyH("LEFT")
+    b.fsNdot = b:CreateTexture(nil, "OVERLAY")
+    b.fsNdot:SetColorTexture(C.pink[1], C.pink[2], C.pink[3], 1)
+    b.fsNdot:SetSize(S.DOT, S.DOT)
+    b.fsNdot:SetPoint("RIGHT", b, "RIGHT", -(S.PWR + S.PWR_R + 6), 0)
+    b.fsNdot:Hide()
     -- the right slot: B5's power button lives here
     b.fsSlot = CreateFrame("Frame", nil, b)
     b.fsSlot:SetSize(S.PWR, S.PWR)

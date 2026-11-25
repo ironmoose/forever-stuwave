@@ -400,6 +400,11 @@ local function hasText(root, needle)
     for _, t in ipairs(texts(root)) do if t:find(needle, 1, true) then return true end end
     return false
 end
+local function plainCount(r)       -- a row's texts without the reset glyph of a changed row
+    local n = 0
+    for _, t in ipairs(texts(r)) do if t ~= "\226\134\186" then n = n + 1 end end
+    return n
+end
 local function count(t) local n = 0; for _ in pairs(t) do n = n + 1 end; return n end
 local function keys(list) local out = {}; for _, c in ipairs(list) do out[#out + 1] = c.key end; return table.concat(out, ",") end
 local function reload(opts)       -- a relog over the same saved variable
@@ -1182,8 +1187,8 @@ function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_clas
         ["Animate the tab"] = "Tip five.", ["Cast flash"] = "Tip six.", ["Regen sweep"] = "Tip seven." }) do
         local r, found = row(label), nil
         for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
-        eq(found, tip, label .. ": explained by a ? tip")
-        eq(#texts(r), 3, label .. ": label, state and the ? icon only, no helper line")
+        eq((found:gsub("\nChanged from the default%.$", "")), tip, label .. ": explained by a ? tip")
+        eq(plainCount(r), 3, label .. ": label, state and the ? icon only, no helper line")
     end
 end
 
@@ -1235,6 +1240,80 @@ function T.a_disabled_row_ignores_a_press_and_an_enabled_fn_without_a_reason_is_
     yes(press("Gated"), "enabled once the function says so")
 end
 
+-- ---- A3: changed dot, per row reset, counts on sections, tabs and the nav ----
+
+local BULLET = "\226\128\162 "
+local function tabButton(page, key)
+    for _, o in ipairs(ALL) do if o.fsTabKey == key and o.fsDot and o.parent and o.parent.fsButtons then return o end end
+end
+
+function T.a_changed_row_shows_a_dot_a_reset_and_counts_and_reset_puts_it_back()
+    local W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unit", "frames")
+    local r = row("Show player frame")
+    no(r.fsDot:IsShown(), "no dot at the default")
+    no(r.fsReset:IsShown(), "no reset at the default")
+    no(findText(BULLET .. "1", win()), "no count at the default")
+    press("Show player frame")
+    yes(r.fsDot:IsShown(), "the dot")
+    yes(r.fsReset:IsShown(), "the reset button")
+    eq(r.fsReset.alpha, 0.45, "faint until the row is hovered")
+    yes(findText(BULLET .. "1", win()), "the section chip counts one")
+    yes(tabButton("unit", "frames").fsDot:IsShown(), "the tab dot")
+    yes(owner(findText("Unit Frames", win()), "fsCategory").fsNdot:IsShown(), "the nav dot")
+    eq(table.concat(W.ChangedKeys("unit"), ","), "unitFrames.hidePlayer")
+    eq(table.concat(W.ChangedKeys("unit", "bars"), ","), "", "other tab: none")
+    FS.Config.Set("unitFrames.hideTarget", true)
+    yes(findText(BULLET .. "2", win()), "two changed rows")
+    -- the row's own reset
+    r.fsReset.scripts.OnClick(r.fsReset)
+    eq(FS.Config.Get("unitFrames.hidePlayer"), false, "back to the default")
+    no(FS.Config.IsStored("unitFrames.hidePlayer"))
+    no(r.fsDot:IsShown(), "dot gone"); no(r.fsReset:IsShown(), "reset gone")
+    yes(findText(BULLET .. "1", win()), "the count dropped to one")
+    -- the list reset for the search and the page reset
+    W.ResetKeys(W.ChangedKeys("unit"))
+    eq(FS.Config.Get("unitFrames.hideTarget"), false)
+    no(findText(BULLET .. "1", win()), "no chip left")
+    no(tabButton("unit", "frames").fsDot:IsShown(), "tab dot gone")
+    no(owner(findText("Unit Frames", win()), "fsCategory").fsNdot:IsShown(), "nav dot gone")
+end
+
+function T.the_reset_brightens_on_row_hover()
+    local W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unit", "frames")
+    local r = row("Show target frame")
+    press("Show target frame")
+    local entry = r.fsEntry
+    W.SetHover(entry)
+    eq(r.fsReset.alpha, 1, "bright while the row is hovered")
+    W.SetHover(nil)
+    eq(r.fsReset.alpha, 0.45)
+end
+
+function T.rows_with_get_and_set_opt_in_and_nodot_rows_never_show_a_dot()
+    local W = boot()
+    local store = { v = 5 }
+    W.RegisterCategory({ key = "dots", label = "Dots", group = "GENERAL", order = 63, build = function(c)
+        W.UI.Slider(c, { label = "Opt in", min = 0, max = 10, step = 1, get = function() return store.v end,
+            set = function(v) store.v = v end, isChanged = function() return store.v ~= 5 end, reset = function() store.v = 5 end })
+        W.UI.Slider(c, { label = "Plain", min = 0, max = 10, step = 1, get = function() return store.v end,
+            set = function(v) store.v = v end })
+        W.UI.Dropdown(c, { label = "Picker", nodot = true, key = "dots.pick", get = function() return "a" end,
+            items = function() return { { value = "a", text = "A" } } end, set = function() end })
+    end })
+    FS.Config.RegisterDefault("dots.pick", "a")
+    W.Open("dots")
+    store.v = 8
+    W.RefreshAll()
+    yes(row("Opt in").fsDot:IsShown(), "a get/set row with isChanged shows the dot")
+    eq(row("Plain").fsDot, nil, "a get/set row without isChanged has none")
+    eq(row("Picker").fsDot, nil, "nodot never shows one")
+    row("Opt in").fsReset.scripts.OnClick(row("Opt in").fsReset)
+    eq(store.v, 5, "its own reset function ran")
+    no(row("Opt in").fsDot:IsShown())
+end
+
 function T.the_five_second_rule_group_is_left_out_for_other_classes_and_clients()
     local W = boot({ preWindow = withFiveSecond(false) })
     openOld(W, "unitframes")
@@ -1266,8 +1345,8 @@ function T.the_unit_frames_page_has_the_buff_tab_combat_state_switch_for_a_shama
     eq(FS.Config.Get("buffs.combatstate"), false)
     local r, found = row("Buff tab combat state"), nil
     for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
-    eq(found, "Tip four.", "explained by a ? tip")
-    eq(#texts(r), 3, "label, state and the ? icon only, no helper line")
+    eq((found:gsub("\nChanged from the default%.$", "")), "Tip four.", "explained by a ? tip")
+    eq(plainCount(r), 3, "label, state and the ? icon only, no helper line")
     W = boot({ preWindow = withBuffTab(true) })
     W.UIState("tabsCls", "MAGE")
     openOld(W, "unitframes")
@@ -1306,7 +1385,7 @@ function T.the_icon_style_rows_have_a_tip_each_and_write_their_own_key()
     for label, tip in pairs({ ["Micro menu icons"] = "Micro tip.", ["Spell icons"] = "Spell tip." }) do
         local r, found = row(label), nil
         for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
-        eq(found, tip, label .. ": explained by a ? tip")
+        eq((found:gsub("\nChanged from the default%.$", "")), tip, label .. ": explained by a ? tip")
         yes(row(label).control, label .. ": a control")
         click("Stock", r)
     end
@@ -1400,7 +1479,7 @@ function T.the_unit_frames_page_has_the_stuwave_nameplates_switch_with_a_tip()
     local found
     for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
     eq(found, "Plates tip.", "explained by a ? tip")
-    eq(#texts(r), 3, "label, state and the ? icon only, no helper line")
+    eq(plainCount(r), 3, "label, state and the ? icon only, no helper line")
     press("STUwave nameplates")
     eq(FS.Config.Get(PLATES_KEY), false)
     no(r.control.fsChecked)
