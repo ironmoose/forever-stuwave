@@ -109,6 +109,36 @@ C_UnitAuras.GetAuraDataByIndex=function(unit,index,filter)
 end
 """
 
+
+COMPACT_MOCK = r"""
+function hooksecurefunc(obj,name,fn)
+    local o=obj[name]
+    obj[name]=function(...) local r=o(...) fn(...) return r end
+end
+__moves=0
+local function icon(parent,i,kind)
+    local b=CreateFrame('Button',nil,parent)
+    b.kind,b.idx=kind,i
+    function b:SetParent(p) __moves=__moves+1 if __combat then error('SetParent in combat') end self.parent=p end
+    return b
+end
+CompactPartyFrame=CreateFrame('Frame','CompactPartyFrame',UIParent)
+CompactPartyFrame.memberUnitFrames={}
+for i=1,5 do
+    local f=CreateFrame('Button','CompactPartyFrameMember'..i,CompactPartyFrame)
+    f.unit=(i==1) and 'player' or ('party'..(i-1))
+    f.registered={UNIT_AURA=true}
+    function f:IsEventRegistered(e) return self.registered[e]==true end
+    function f:RegisterUnitEvent(e) self.registered[e]=true end
+    f.dispelDebuffFrames={} f.buffFrames={}
+    for k=1,3 do f.dispelDebuffFrames[k]=icon(f,k,'dispel') f.buffFrames[k]=icon(f,k,'buff') end
+    CompactPartyFrame.memberUnitFrames[i]=f
+end
+function __compact(unit)
+    for _,f in ipairs(CompactPartyFrame.memberUnitFrames) do if f.unit==unit then return f end end
+end
+"""
+
 PARTY_EXTRA = ENGINE_MOCK + """
 FS.Theme.AddRoundedFill=function(panel,color) local t=panel:CreateTexture() t:SetColorTexture(color[1],color[2],color[3],color[4]) end
 """
@@ -120,6 +150,9 @@ def close(a, b, tol=1e-4):
 
 def _party(extra="", **kwargs):
     kwargs.setdefault("known", (FORT,))
+    if "compact" in kwargs:
+        kwargs.pop("compact")
+        extra = COMPACT_MOCK + extra
     rt = P._buff_rt(extra=PARTY_EXTRA + extra, **kwargs)
     P._event(rt, "ADDON_LOADED", "'forever-stuwave'")
     P._event(rt, "PLAYER_LOGIN")
@@ -458,6 +491,104 @@ def _check_raid_down_and_unbuilt():
     R._assert_quiet(rt)
 
 
+
+# ---------------------------------------------------------------------------------------------
+# Borrowed Blizzard icons
+# ---------------------------------------------------------------------------------------------
+
+BORROW = "ForeverSTUwaveDB={groupAuras={mode='borrow'}}"
+
+
+def _check_borrow_keeps_events_and_seats_icons():
+    rt = _party(extra=BORROW, compact=True, blizzard_party="none")
+    compact = rt.eval("__compact('party1')")
+    assert compact.registered.UNIT_AURA is True, "borrow mode unregistered the compact frame's events"
+    assert compact.alpha == 0 and compact.mouse is False, "the compact frame was not dimmed"
+    row = _row(rt)
+    P._fire(row, "UNIT_AURA")
+    assert not _acs(rt), "borrow mode built an engine container"
+    eng = row.engine
+    assert eng.borrow, "no icons were borrowed"
+    host = rt.eval("function(e) return e.borrow.dispelHost end")(eng)
+    assert rt.eval("function(c, h) return c.dispelDebuffFrames[1].parent == h end")(compact, host), "the icon was not moved"
+    pt = compact.dispelDebuffFrames[1].points
+    assert "TOPRIGHT" in pt, list(pt.keys())
+    assert host.alpha == 0, "borrowed icons drew out of combat"
+    P._assert_quiet(rt)
+
+
+def _check_borrow_fight_flip_and_no_moves_in_combat():
+    rt = _party(extra=BORROW, compact=True, blizzard_party="none")
+    compact = rt.eval("__compact('party1')")
+    row = _row(rt)
+    rt.execute("__debuffs={'Magic'} __buffs.party1={{name='Renew',caster='player',duration=15,expiration=10}}")
+    P._fire(row, "UNIT_AURA")
+    moves = rt.globals().__moves
+    _fight(rt)
+    b = row.engine.borrow
+    assert b.dispelHost.alpha == 1 and b.buffHost.alpha == 1, "the borrowed icons stay hidden in a fight"
+    assert row.health.fsRail.halo.host.shown, "the held halo went although the edge is not borrowed"
+    assert not row.alertIcons[1].shown and row.alertIcons[2].shown, "held cleansable tile out, missing buff tile kept"
+    seated = rt.eval("function(r) local p=r.alertIcons[2].points.TOPRIGHT return p and p.rel==r.engine.borrow.dispelHost end")
+    assert seated(row), "the missing buff tile is not seated after the borrowed icons"
+    # Blizzard re-anchors an icon in the fight: nothing of ours moves it until the fight ends
+    rt.execute("__compact('party1').dispelDebuffFrames[1]:SetPoint('CENTER', __compact('party1'), 'CENTER', 0, 0)")
+    P._fire(row, "UNIT_AURA")
+    assert rt.globals().__moves == moves, "SetParent was called in combat"
+    assert b.owed is True
+    _calm(rt)
+    assert rt.globals().__moves >= moves and b.dispelHost.alpha == 0 and b.buffHost.alpha == 0
+    assert "TOPRIGHT" in compact.dispelDebuffFrames[1].points and b.owed is False, "the icon was not seated again after the fight"
+    P._assert_quiet(rt)
+
+
+def _check_borrow_fallback_when_engine_cannot_build():
+    rt = _party(extra="__acThrows=true", compact=True, blizzard_party="none", quiet=False)
+    compact = rt.eval("__compact('party1')")
+    rt.execute("__compact('party1').registered={}")   # the sweep had silenced it in engine mode
+    row = _row(rt)
+    for _ in range(4):
+        P._fire(row, "UNIT_AURA")
+    assert row.engine.borrow, "a unit whose containers cannot be built did not fall to borrow"
+    assert compact.registered.UNIT_AURA is True, "the compact frame was not woken"
+    _fight(rt)
+    assert row.engine.borrow.dispelHost.alpha == 1
+
+
+def _check_off_mode_and_refused_moves():
+    rt = _party(extra="ForeverSTUwaveDB={groupAuras={mode='off'}}", compact=True, blizzard_party="none")
+    compact = rt.eval("__compact('party1')")
+    P._fire(_row(rt), "UNIT_AURA")
+    assert not _acs(rt) and not _row(rt).engine.borrow, "off mode built something"
+    # a compact frame whose icons refuse to move: no error, owed
+    rt = _party(extra=BORROW + "\nfor _,i in ipairs(__compact('party1').dispelDebuffFrames) do i.SetParent=function() error('refused') end end",
+                compact=True, blizzard_party="none")
+    P._fire(_row(rt), "UNIT_AURA")
+    assert _row(rt).engine.borrow.owed is True
+    P._assert_quiet(rt)
+
+
+def _check_borrow_no_compact_is_quiet_unless_chosen():
+    rt = _party()   # no compact frames at all, no template: the automatic fall finds nothing and says nothing
+    P._fire(_row(rt), "UNIT_AURA")
+    assert not _row(rt).engine.borrow
+    P._assert_quiet(rt)
+
+
+def _check_raid_borrow():
+    rt = R._client(player_class="PRIEST", before_load=ENGINE_MOCK + COMPACT_MOCK.replace("'party1'", "'raid3'") + BORROW
+                   + "\nCompactPartyFrame.memberUnitFrames[2].unit='raid3'\n")
+    R._roster(rt, 10)
+    R._unit_event(rt, "UNIT_AURA", "raid3")
+    cell = R._cell(rt, 3)
+    assert cell.engine.borrow, "the raid cell borrowed nothing"
+    _rfight(rt)
+    assert cell.engine.borrow.dispelHost.alpha == 1
+    _rcalm(rt)
+    assert cell.engine.borrow.dispelHost.alpha == 0
+    assert len(list(rt.globals().__messages.values())) == 1, "the missing compact frames are logged once, not per cell"
+
+
 def main() -> int:
     cases = [
         ("party: built out of combat only, alpha 0 until a fight", _check_builds_out_of_combat_only),
@@ -472,6 +603,12 @@ def main() -> int:
         ("raid: switches", _check_raid_switches),
         ("raid: the missing buff square sits after the lanes", _check_raid_missing_buff_after_lanes),
         ("raid: a down member and unbuilt cells", _check_raid_down_and_unbuilt),
+        ("borrow: events kept, icons seated, hosts hidden out of combat", _check_borrow_keeps_events_and_seats_icons),
+        ("borrow: a fight flips, nothing moves in combat, seated again after", _check_borrow_fight_flip_and_no_moves_in_combat),
+        ("borrow: a unit the engine cannot build falls to borrow", _check_borrow_fallback_when_engine_cannot_build),
+        ("borrow: off mode and refused moves", _check_off_mode_and_refused_moves),
+        ("borrow: no compact frame is quiet unless chosen", _check_borrow_no_compact_is_quiet_unless_chosen),
+        ("borrow: raid cell", _check_raid_borrow),
     ]
     failures = 0
     for label, fn in cases:

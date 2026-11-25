@@ -683,12 +683,27 @@ function Engine.Supported()
     return supported
 end
 
--- The kill switch: ForeverSTUwaveDB.groupAuras = { engine = false } keeps today's held-state behaviour.
-function Engine.Enabled()
+-- ForeverSTUwaveDB.groupAuras.mode: "engine" (default), "borrow" or "off". "engine" falls to "borrow" when the client has no
+-- container template; a unit whose containers cannot be built falls to borrow for that unit (Engine.Ensure). The old
+-- `engine = false` still means "off". Read at call time, but the Blizzard frames' events are only kept alive at the sweep,
+-- so a change of mode takes a reload.
+function Engine.Mode()
     local db = _G.ForeverSTUwaveDB
     local g = type(db) == "table" and db.groupAuras or nil
-    if type(g) == "table" and g.engine == false then return false end
-    return Engine.Supported()
+    local mode = type(g) == "table" and g.mode or nil
+    if type(g) == "table" and g.engine == false then return "off" end
+    if mode ~= "borrow" and mode ~= "off" then mode = "engine" end
+    if mode == "engine" and not Engine.Supported() then return "borrow" end
+    return mode
+end
+
+function Engine.Enabled() return Engine.Mode() == "engine" end
+
+-- The player chose borrow in the saved mode (a failure to borrow is then worth a message; the automatic fall is quiet).
+function Engine.Explicit()
+    local db = _G.ForeverSTUwaveDB
+    local g = type(db) == "table" and db.groupAuras or nil
+    return type(g) == "table" and g.mode == "borrow"
 end
 
 local function MineSet()
@@ -959,8 +974,11 @@ local BUILDERS = { markers = BuildMarkers, edge = BuildEdge, tray = BuildTray }
 -- Builds the containers the switches ask for and the client allows. Out of combat only (fail closed). Each part gets
 -- Engine.BUILD_TRIES attempts; a failed one is logged once and leaves that part to the Lua layer.
 function Engine.Ensure(eng)
-    if not eng or not Engine.Enabled() or Locked() then return false end
+    if not eng or Locked() then return false end
+    local mode = Engine.Mode()
+    if mode == "off" then return false end
     if eng.settled then return true end
+    if mode == "borrow" or eng.fallback then return Extras.Borrow.Ensure(eng, Engine.Explicit()) end
     local w = Engine.Wanted(eng.key)
     local want = {
         markers = next(w.hots) ~= nil or next(w.debs) ~= nil,
@@ -979,6 +997,18 @@ function Engine.Ensure(eng)
                     .. "they keep the out of combat display (" .. tostring(result) .. ")")
             end
         end
+    end
+    -- Nothing could be built for a unit that wants something: its containers are given up and the Blizzard icons are borrowed.
+    local anyWanted, exhausted = false, true
+    for part, wanted in pairs(want) do
+        if wanted then
+            anyWanted = true
+            if eng.parts[part] or (eng.tries[part] or 0) < Engine.BUILD_TRIES then exhausted = false end
+        end
+    end
+    if anyWanted and exhausted and next(eng.parts) == nil then
+        eng.fallback = true
+        return Extras.Borrow.Ensure(eng, false)
     end
     -- Settled once every wanted part is built or out of tries: the per update step then costs one flag read.
     eng.settled = true
@@ -1087,6 +1117,7 @@ end
 -- change is owed to REGEN_ENABLED (eng.owed).
 function Engine.Apply(eng)
     if not eng then return end
+    if eng.borrow then return Extras.Borrow.Apply(eng) end
     local w = Engine.Wanted(eng.key)
     eng.owed = false
     local fight = Engine.fight
@@ -1141,6 +1172,231 @@ local function SetFight(on)
         pcall(Engine.Apply, eng)
         if eng.onMode then pcall(eng.onMode, eng, on) end
     end
+end
+
+-------------------------------------------------------------------------------
+-- Borrowed Blizzard icons (the second in combat path)
+-------------------------------------------------------------------------------
+-- Blizzard's compact party and raid frames still show debuffs in a fight because their code runs untainted. In "borrow"
+-- mode (or for a unit whose containers could not be built) their events are left alive (the sweeps in PartyFrames and
+-- RaidFrames skip UnregisterAllEvents on a frame that carries aura icons, `Borrow.Dim`; the frame itself stays alpha 0 and
+-- mouse off) and ONLY the icon children (`dispelDebuffFrames`, `buffFrames`) are moved onto plain hosts of ours:
+-- SetParent, ClearAllPoints and SetPoint on the icon, never on the compact frame (an Edit Mode system), and ONLY OUT OF
+-- COMBAT (a move that Blizzard undoes in a fight is re-done at the end of it). The icons keep Blizzard's own drawing and
+-- updating; our hosts are alpha 0 out of combat (the Lua display draws then) and alpha 1 in a fight, exactly the engine
+-- layer's mode. UNVERIFIED in game: whether the compact frames exist for a party, whether they update at alpha 0, and
+-- whether Blizzard re-anchors an icon in a fight (the icons would then sit where Blizzard puts them until it ends).
+local Borrow = {}
+Extras.Borrow = Borrow
+Borrow.MAX_DISPEL, Borrow.MAX_BUFF = 4, 3
+
+local function IsFrameList(t)
+    return type(t) == "table" and t[1] ~= nil
+end
+
+-- A compact unit frame: one that carries the aura icon lists. Plain table reads only.
+function Borrow.IsAuraFrame(frame)
+    if type(frame) ~= "table" then return false end
+    local ok, dispel, buffs = pcall(function() return frame.dispelDebuffFrames, frame.buffFrames end)
+    return ok and (IsFrameList(dispel) or IsFrameList(buffs))
+end
+
+function Borrow.Active() return Engine.Mode() == "borrow" end
+
+-- The sweep for such a frame in borrow mode: dim and switch the mouse off, but keep the events (UnregisterAllEvents is
+-- what stops its icons updating). Returns false when the caller should sweep it the usual way.
+function Borrow.Dim(frame)
+    if not (Borrow.Active() and Borrow.IsAuraFrame(frame)) then return false end
+    frame:SetAlpha(0)
+    if frame.EnableMouse then frame:EnableMouse(false) end
+    for _, child in ipairs({ frame:GetChildren() }) do
+        if child.EnableMouse then child:EnableMouse(false) end
+    end
+    return true
+end
+
+local function UnitOf(frame)
+    local ok, a, b = pcall(function() return frame.unit, frame.displayedUnit end)
+    if not ok then return nil end
+    if not IsSecret(a) and type(a) == "string" then return a end
+    if not IsSecret(b) and type(b) == "string" then return b end
+    return nil
+end
+
+-- The compact unit frame showing `unit`, or nil. Reads only: the party's CompactPartyFrame members and the raid's
+-- CompactRaidFrameN / group members.
+function Borrow.Find(unit)
+    local candidates = {}
+    local party = _G.CompactPartyFrame
+    if type(party) == "table" and type(party.memberUnitFrames) == "table" then
+        for _, f in ipairs(party.memberUnitFrames) do candidates[#candidates + 1] = f end
+    end
+    local raid = _G.CompactRaidFrameContainer
+    if type(raid) == "table" and raid.GetChildren then
+        local ok, kids = pcall(function() return { raid:GetChildren() } end)
+        if ok then
+            for _, child in ipairs(kids) do
+                candidates[#candidates + 1] = child
+                local okG, grand = pcall(function() return { child:GetChildren() } end)
+                if okG then for _, g in ipairs(grand) do candidates[#candidates + 1] = g end end
+            end
+        end
+    end
+    for _, f in ipairs(candidates) do
+        if Borrow.IsAuraFrame(f) and UnitOf(f) == unit then return f end
+    end
+    return nil
+end
+
+local function Reseat(eng)
+    local b = eng.borrow
+    if not b then return false end
+    if Locked() then b.owed = true return false end
+    local key = eng.key
+    local isParty = key == "party"
+    local side = isParty and Style.Get("party", "alertSide") or nil
+    local dsize = isParty and Style.Number("party", "alertSize") or math.max(8, Style.Number(key, "mkSize") * 2)
+    local dcap = isParty and math.max(1, math.min(TRAY_CAP_MAX, Style.Number("party", "alertMax")) - 1) or Borrow.MAX_DISPEL
+    local rightSide = side == "right"
+    local gap = isParty and TRAY_GAP or 1
+    local ok = true
+    local function step(fn) if not pcall(fn) then ok = false end end
+    b.seating = true
+    -- the dispel host: where the engine tray would flow (party) or along the cell's bottom edge (raid)
+    step(function()
+        b.dispelHost:SetSize(dcap * (dsize + gap), dsize)
+        b.dispelHost:ClearAllPoints()
+        if isParty and eng.trayOrigin then
+            local anchor = rightSide and "TOPLEFT" or "TOPRIGHT"
+            b.dispelHost:SetPoint(anchor, eng.trayOrigin, anchor, 0, 0)
+        else
+            b.dispelHost:SetPoint("BOTTOMLEFT", eng.host, "BOTTOMLEFT", 2, 2)
+        end
+    end)
+    for i, icon in ipairs(b.dispel) do
+        step(function()
+            if i <= dcap then
+                icon:SetParent(b.dispelHost)
+                icon:ClearAllPoints()
+                icon:SetSize(dsize, dsize)
+                if isParty and not rightSide then
+                    icon:SetPoint("TOPRIGHT", b.dispelHost, "TOPRIGHT", -(i - 1) * (dsize + gap), 0)
+                else
+                    icon:SetPoint("TOPLEFT", b.dispelHost, "TOPLEFT", (i - 1) * (dsize + gap), 0)
+                end
+                if icon.EnableMouse then icon:EnableMouse(false) end
+            else
+                icon:SetParent(b.spare)   -- beyond the cap: out of sight
+            end
+        end)
+    end
+    -- the buff host: the marker corner
+    local size, corner = Style.Number(key, "mkSize") * 2, Style.Get(key, "mkPos")
+    if not CORNER_SIDE[corner] then corner = Style.Default(key, "mkPos") end
+    local v, sd = CORNER_VERTICAL[corner], CORNER_SIDE[corner]
+    local sign = sd == "RIGHT" and -1 or 1
+    step(function()
+        b.buffHost:SetSize(Borrow.MAX_BUFF * (size + 1), size)
+        b.buffHost:ClearAllPoints()
+        b.buffHost:SetPoint(v .. sd, eng.host, v .. sd, sign * 3, v == "TOP" and -2 or 2)
+    end)
+    for i, icon in ipairs(b.buff) do
+        step(function()
+            if i <= Borrow.MAX_BUFF then
+                icon:SetParent(b.buffHost)
+                icon:ClearAllPoints()
+                icon:SetSize(size, size)
+                icon:SetPoint(v .. sd, b.buffHost, v .. sd, sign * (i - 1) * (size + 1), 0)
+                if icon.EnableMouse then icon:EnableMouse(false) end
+            else
+                icon:SetParent(b.spare)
+            end
+        end)
+    end
+    b.seating = false
+    b.lanes = math.min(#b.buff, Borrow.MAX_BUFF)
+    b.owed = not ok
+    return ok
+end
+
+-- Takes the compact frame's icon lists and the hosts; out of combat only. Returns true when attached.
+local function Attach(eng, explicit)
+    local compact = Borrow.Find(eng.unit)
+    if not compact then
+        if explicit then Degrade("group_aura_borrow", "no compact frame carries the aura icons for " .. tostring(eng.unit) .. " (and maybe others), group frames keep the out of combat display") end
+        return false
+    end
+    -- the frame's events were left alive by the sweep in borrow mode; a unit that fell back from the engine woke them here
+    if type(compact.IsEventRegistered) == "function" and type(compact.RegisterUnitEvent) == "function" then
+        local okR, reg = pcall(compact.IsEventRegistered, compact, "UNIT_AURA")
+        if okR and not reg then pcall(compact.RegisterUnitEvent, compact, "UNIT_AURA", eng.unit) end
+    end
+    local b = { compact = compact, dispel = {}, buff = {} }
+    b.dispelHost = CreateFrame("Frame", nil, eng.host)
+    b.buffHost = CreateFrame("Frame", nil, eng.host)
+    b.spare = CreateFrame("Frame", nil, eng.host)
+    for _, host in ipairs({ b.dispelHost, b.buffHost }) do
+        host:SetFrameLevel(eng.level + 8)
+        host:EnableMouse(false)
+        host:SetAlpha(0)
+    end
+    b.spare:Hide()
+    for _, icon in ipairs(compact.dispelDebuffFrames or {}) do b.dispel[#b.dispel + 1] = icon end
+    for _, icon in ipairs(compact.buffFrames or {}) do b.buff[#b.buff + 1] = icon end
+    eng.borrow = b
+    -- stand-ins with the engine parts' shape, so the owners' fight mode (held halo, tiles and squares out, the missing buff
+    -- tile seated after the tray) needs no second code path; the edge is not borrowed, the held Lua one stays
+    eng.parts.tray = eng.key == "party" and { container = b.dispelHost, armed = true, alpha = 0 } or nil
+    eng.parts.markers = { container = b.buffHost, armed = true, alpha = 0, lanes = 0 }
+    if type(hooksecurefunc) == "function" then
+        for _, icon in ipairs(b.dispel) do
+            pcall(hooksecurefunc, icon, "SetPoint", function() if not b.seating then b.owed = true end end)
+        end
+        for _, icon in ipairs(b.buff) do
+            pcall(hooksecurefunc, icon, "SetPoint", function() if not b.seating then b.owed = true end end)
+        end
+    end
+    Reseat(eng)
+    return true
+end
+
+-- Attach once (BUILD_TRIES tries), then keep it seated. `explicit` = the player chose borrow (a failure is logged).
+function Borrow.Ensure(eng, explicit)
+    eng.fallback = eng.fallback or not explicit
+    if not eng.borrow then
+        eng.tries.borrow = (eng.tries.borrow or 0) + 1
+        local ok, attached = pcall(Attach, eng, explicit)
+        if not ok then Degrade("group_aura_borrow_error", "borrowing the Blizzard aura icons failed (" .. tostring(attached) .. ")") end
+        if not (ok and attached) and eng.tries.borrow < Engine.BUILD_TRIES then
+            eng.settled = false
+            return false
+        end
+    end
+    eng.settled = true
+    if eng.borrow then eng.borrow.seated = false end   -- a style change seats the icons again
+    Engine.Apply(eng)
+    return eng.borrow ~= nil
+end
+
+-- Seat again if Blizzard moved an icon (out of combat) and set the hosts' alpha for the mode.
+function Borrow.Apply(eng)
+    local b = eng.borrow
+    if not b then return end
+    local w = Engine.Wanted(eng.key)
+    if b.owed or not b.seated then
+        if Reseat(eng) then b.seated = true end
+    end
+    eng.owed = b.owed == true
+    local live = Engine.fight and not eng.down
+    local dispelOn = next(eng.key == "party" and w.tray or w.debs) ~= nil
+    local buffOn = next(w.hots) ~= nil
+    local function alpha(host, part, a)
+        if host.alphaNow ~= a then host.alphaNow = a; pcall(host.SetAlpha, host, a) end
+        if part then part.alpha = a end
+    end
+    alpha(b.dispelHost, eng.parts.tray, live and dispelOn and 1 or 0)
+    alpha(b.buffHost, eng.parts.markers, live and buffOn and 1 or 0)
+    if eng.parts.markers then eng.parts.markers.lanes = buffOn and b.lanes or 0 end
 end
 
 do   -- a reload in a fight starts in the engine mode
