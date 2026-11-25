@@ -1680,7 +1680,7 @@ def check_the_preview_draws_a_hunter_pet_as_the_panel_does() -> None:
     approx(p.frame.w, 348, "the panel is 348 wide")
     approx(p.frame.h, 68, "and 68 high")
     block = parts.block
-    assert block.nameText.text == "Wolf" and block.levelText.text == "LV 22", (block.nameText.text, block.levelText.text)
+    assert block.nameText.text == "Falkor" and block.levelText.text == "LV 22", (block.nameText.text, block.levelText.text)
     assert block.healthBar.text.text == "208 / 253" and block.powerBar.text.text == "70 / 100"
     assert block.healthBar.value == 208 and block.healthBar.max == 253
     for i, want in enumerate((0.71, 0.43, 0.27), start=1):
@@ -1700,7 +1700,7 @@ def check_the_preview_draws_a_demon_with_a_firebolt_cast_and_a_blue_rail() -> No
     put(rt, pet_previewKind="demon", pet_castIcon=False, pet_castName=True, pet_castTimer=False)
     p = preview(rt)
     block = p.parts.block
-    assert block.nameText.text == "Grimzik" and block.powerBar.text.text == "162 / 253"
+    assert block.nameText.text == "Slimer" and block.powerBar.text.text == "162 / 253"
     approx(block.powerBar.fsRail.r, 0.13, "a demon's power rail is mana blue")
     state = rt.eval("__cast_preview.state")
     assert state.casting is True and state.icon is False and state.name is True and state.timer is False
@@ -1717,7 +1717,7 @@ def check_the_preview_draws_without_the_dock_file() -> None:
     made = rt.eval("FS.PetFrame.NewStylePreview(UIParent)")
     made.Restyle()
     assert made.parts.fill is None and made.parts.outline is None
-    assert made.parts.block.nameText.text == "Wolf"
+    assert made.parts.block.nameText.text == "Falkor"
     approx(made.frame.w, 348, "the panel keeps its size")
 
 

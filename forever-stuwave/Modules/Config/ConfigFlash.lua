@@ -1,8 +1,12 @@
 -- Forever STUwave: the hover flash on the thing a setting changes
 -- Pointing at a row in /fsconfig for 150 ms outlines the frame on screen that the setting changes (the frames come from
 -- ConfigTargets.lua, looked up when the row is hovered): the outline pulses twice for 1.1 s each, then holds, with a corner
--- bracket on each corner; leaving the row removes it. A setting whose frame is not on screen right now draws nothing, and
--- its ? tip says so. The overlays are plain insecure frames on UIParent, placed from the target's rect and never parented
+-- bracket on each corner; leaving the row removes it. A setting whose frame has a seat but is not showing right now (a
+-- target frame with no target, the party in no group, the Gunsight's target side) gets a PREVIEW where there is a safe one
+-- to reuse: a plain insecure copy built from the Style tab's sample frames (or the Edit Mode raid preview) shown at the seat
+-- while the row is hovered, then hidden again, never in combat. Where there is none the outline is drawn dimmed with a short
+-- caption saying why it is empty ("Shows with a target"). A setting with no seat at all draws nothing, and its ? tip says
+-- so. The overlays are plain insecure frames on UIParent, placed from the target's rect and never parented
 -- to or anchored on it, so the flash works in combat. The look is the prototype's .flash (mockups/config-window-2026-11-25.html).
 -- The "Flash frames on hover" switch (config.flash) is in Profiles > Window; off, nothing here runs.
 -- Harness: tools/configflash-harness.py.
@@ -29,6 +33,9 @@ local REFRESH = 0.05      -- while a flash is up its rects are read again this o
 local ARM = 2             -- thickness of a corner bracket arm
 local GLOW_SIZE, GLOW_ALPHA = 12, 0.5   -- the prototype's box-shadow: 0 0 12px at half strength
 local NOT_SHOWN = "Not on screen right now."
+local DIM = 0.45              -- a dimmed outline's share of the pulse
+local CAP_PAD, CAP_H = 6, 16  -- the caption plate: side padding and height, whole pixels
+local PARTY_ROWS = 4          -- sample rows stacked in the party preview
 
 if Config and Config.RegisterDefault then Config.RegisterDefault(F.KEY, true) end
 
@@ -92,7 +99,60 @@ local function NewOverlay()
             o.fsBrackets[#o.fsBrackets + 1] = t
         end
     end
+    -- The caption of a dimmed outline: a plate and one line of small text, centred
+    o.fsCapBg = o:CreateTexture(nil, "ARTWORK")
+    o.fsCapBg:SetColorTexture(C.ink[1], C.ink[2], C.ink[3], 0.8)
+    o.fsCapBg:Hide()
+    o.fsCaption = o:CreateFontString(nil, "OVERLAY")
+    Theme.ApplyMono(o.fsCaption, S.SMALL, C.text)
+    o.fsCaption:SetWordWrap(false)
+    o.fsCaption:Hide()
     return o
+end
+
+local function Whole(v) return math.floor(v + 0.5) end
+
+-- Tints the outline and brackets: the flash cyan, or the muted tone when dimmed.
+local function Tone(o, color, bracketAlpha)
+    for _, e in ipairs(o.fsEdges or {}) do e:SetColorTexture(color[1], color[2], color[3], 0.8) end
+    for _, t in ipairs(o.fsBrackets) do
+        t:SetColorTexture(color[1], color[2], color[3], 1)
+        t:SetAlpha(bracketAlpha)
+    end
+end
+
+-- Puts an overlay in its look: live (today's outline, no caption) or dim with `reason` as the caption.
+local function SetLook(o, dim, reason)
+    local key = dim and ("dim:" .. tostring(reason)) or "live"
+    o.fsDim = dim and true or false
+    if o.fsLook == key then return end
+    o.fsLook = key
+    if not dim then
+        Tone(o, C.cyan, 1)
+        o.fsCapBg:Hide()
+        o.fsCaption:Hide()
+        return
+    end
+    Tone(o, C.muted, 0.6)
+    local text = type(reason) == "string" and reason ~= "" and reason or "Hidden right now"
+    local cap = o.fsCaption
+    cap:SetText(text)
+    local width = cap.GetStringWidth and cap:GetStringWidth() or 0
+    if type(width) ~= "number" or width <= 0 then width = #text * 6 end
+    local plate = Whole(width) + 2 * CAP_PAD
+    local ow, oh = o:GetWidth() or plate, o:GetHeight() or CAP_H
+    if type(ow) ~= "number" or ow <= 0 then ow = plate end
+    if type(oh) ~= "number" or oh <= 0 then oh = CAP_H end
+    plate = math.min(plate, Whole(ow))
+    local x, y = math.floor((ow - plate) / 2), math.floor((oh - CAP_H) / 2)
+    o.fsCapBg:ClearAllPoints()
+    o.fsCapBg:SetPoint("TOPLEFT", o, "TOPLEFT", x, -y)
+    o.fsCapBg:SetSize(plate, CAP_H)
+    cap:ClearAllPoints()
+    cap:SetPoint("CENTER", o.fsCapBg, "CENTER", 0, 0)
+    cap:SetWidth(plate)
+    o.fsCapBg:Show()
+    cap:Show()
 end
 
 -- The overlay covers the target's rect pushed out by FLASH_OUT on every side, anchored on UIParent alone.
@@ -101,6 +161,158 @@ local function Place(o, rect)
     o:ClearAllPoints()
     o:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", rect.left - out, rect.bottom - out)
     o:SetSize(rect.width + 2 * out, rect.height + 2 * out)
+end
+
+-------------------------------------------------------------------------------
+-- Previews: a sample of a frame that is not showing, at its seat, while its row is hovered
+-------------------------------------------------------------------------------
+-- Built from what the Style tabs already draw (FS.UnitFrames.NewPreview, PartyFrames.NewStylePreview,
+-- PetFrame.NewStylePreview: plain insecure frames, no unit, no event) inside a host frame on UIParent, scaled so the sample
+-- is the size of the real frame's seat and anchored at its top left. The raid uses the Edit Mode preview (RaidFrames
+-- Preview.Show / Hide, which only fades the real grid by alpha). Nothing here touches a secure frame, and nothing is
+-- built or shown in combat. A key with no maker (cast bars, the Gunsight, class tabs, nameplates, alerts) has no sample
+-- and gets the dimmed outline with its caption instead.
+
+local ghosts = {}
+F.ghosts = ghosts
+local raidByUs = false
+
+local function InCombat()
+    return type(InCombatLockdown) == "function" and InCombatLockdown() == true
+end
+
+local MAKERS = {}
+F.MAKERS = MAKERS
+
+for _, key in ipairs({ "player", "target", "focus", "boss" }) do
+    MAKERS[key] = function(host)
+        local uf = FS.UnitFrames
+        if not (uf and uf.NewPreview) then return nil end
+        local f = uf.NewPreview(host, key)
+        return { frame = f, restyle = f.Restyle }
+    end
+end
+
+MAKERS.petcontainer = function(host)
+    local pet = FS.PetFrame
+    if not (pet and pet.NewStylePreview) then return nil end
+    local pv = pet.NewStylePreview(host)
+    if type(pv) ~= "table" or not pv.frame then return nil end
+    return { frame = pv.frame, restyle = pv.Restyle }
+end
+
+MAKERS.party = function(host)
+    local party = FS.PartyFrames
+    if not (party and party.NewStylePreview) then return nil end
+    local stack = CreateFrame("Frame", nil, host)
+    local rows = {}
+    for i = 1, PARTY_ROWS do
+        local pv = party.NewStylePreview(stack)
+        if type(pv) ~= "table" or not pv.frame then return nil end
+        rows[i] = pv
+    end
+    local function Restyle()
+        local y, w = 0, 0
+        for _, pv in ipairs(rows) do
+            if pv.Restyle then pv.Restyle() end
+            local h = pv.frame:GetHeight() or 0
+            pv.frame:ClearAllPoints()
+            pv.frame:SetPoint("TOPLEFT", stack, "TOPLEFT", 0, -y)
+            y = y + h + 2
+            w = math.max(w, pv.frame:GetWidth() or 0)
+        end
+        stack:SetSize(math.max(w, 1), math.max(y - 2, 1))
+    end
+    return { frame = stack, restyle = Restyle }
+end
+
+local function Plain(v)
+    if FS.IsSecret and FS.IsSecret(v) then return nil end
+    if type(v) ~= "number" or v ~= v then return nil end
+    return v
+end
+
+-- The Edit Mode raid preview, shown for this hover only (left alone when the editor already has it up).
+local function ShowRaid()
+    local raid = FS.RaidFrames
+    local pv = raid and raid.Preview
+    if not (type(pv) == "table" and type(pv.Show) == "function" and type(pv.Rect) == "function"
+        and type(pv.IsShown) == "function") then return nil end
+    if pv.IsShown() ~= true then
+        if pv.Show() ~= true then return nil end
+        raidByUs = true
+    end
+    local l, t, w, h = pv.Rect()
+    l, t, w, h = Plain(l), Plain(t), Plain(w), Plain(h)
+    if not (l and t and w and h and w > 0 and h > 0) then return nil end
+    return { left = l, bottom = t - h, width = w, height = h }, "raid"
+end
+
+local function HideRaid()
+    if not raidByUs then return end
+    raidByUs = false
+    local raid = FS.RaidFrames
+    local pv = raid and raid.Preview
+    if type(pv) == "table" and type(pv.Hide) == "function" then pcall(pv.Hide) end
+end
+
+-- Shows the sample for a hidden rect and answers the rect it fills (and its key), or nil when there is none to show.
+local function ShowGhost(rect)
+    local key = rect.preview
+    if not key or InCombat() then return nil end
+    if key == "raid" then return ShowRaid() end
+    local maker = MAKERS[key]
+    if not maker then return nil end
+    local g = ghosts[key]
+    if g and g.failed then return nil end
+    if not g then
+        local host = CreateFrame("Frame", nil, UIParent)
+        host:SetFrameStrata("HIGH")
+        host:EnableMouse(false)
+        host:Hide()
+        local ok, made = pcall(maker, host)
+        if not (ok and type(made) == "table" and made.frame) then
+            host:Hide()
+            ghosts[key] = { failed = true }
+            return nil
+        end
+        g = { host = host, made = made, up = false }
+        ghosts[key] = g
+    end
+    if not g.up then
+        if g.made.restyle then pcall(g.made.restyle) end
+        g.made.frame:Show()
+    end
+    local w, h = Plain(g.made.frame:GetWidth()), Plain(g.made.frame:GetHeight())
+    if not (w and h and w > 0 and h > 0) then return nil end
+    local scale = rect.width / w
+    if scale < 0.25 then scale = 0.25 elseif scale > 4 then scale = 4 end
+    local top = rect.bottom + rect.height
+    g.host:SetScale(scale)
+    g.host:SetSize(w, h)
+    g.host:ClearAllPoints()
+    g.host:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", rect.left / scale, top / scale)
+    g.host:Show()
+    g.up = true
+    return { left = rect.left, bottom = top - h * scale, width = w * scale, height = h * scale }, key
+end
+
+-- Hides every sample that was not used this pass (`used` is the set of keys that were), or all of them when `used` is nil.
+local function SweepGhosts(used)
+    for key, g in pairs(ghosts) do
+        if g.up and not (used and used[key]) then
+            g.up = false
+            g.host:Hide()
+        end
+    end
+    if raidByUs and not (used and used.raid) then HideRaid() end
+end
+
+-- Draws the samples again with the settings as they are now (a setting changed while its row is hovered).
+function F.Restyle()
+    for _, g in pairs(ghosts) do
+        if g.up and g.made.restyle then pcall(g.made.restyle) end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -116,8 +328,8 @@ F.driver = driver
 -- The rects of a row's frames that are on screen now; nil when the row has no target (or the map is not there).
 local function Rects(entry)
     local targets = CW.Targets
-    if type(targets) ~= "table" or type(targets.Resolve) ~= "function" then return nil end
-    local ok, rects = pcall(targets.Resolve, entry)
+    if type(targets) ~= "table" or type(targets.Seats) ~= "function" then return nil end
+    local ok, rects = pcall(targets.Seats, entry)
     if ok and type(rects) == "table" then return rects end
     return nil
 end
@@ -154,24 +366,36 @@ end
 local function Paint()
     local alpha = F.Envelope(state.t)
     for _, o in ipairs(pool) do
-        if o:IsShown() then o.fsPulse:SetAlpha(alpha) end
+        if o:IsShown() then o.fsPulse:SetAlpha(o.fsDim and alpha * DIM or alpha) end
     end
 end
 
 local function Draw(rects)
     local n = math.min(#rects, F.MAX)
+    local used = {}
     for i = 1, n do
         local o = pool[i]
         if not o then
             o = NewOverlay()
             pool[i] = o
         end
-        Place(o, rects[i])
+        local rect, dim = rects[i], false
+        if rect.hidden then
+            local seat, key = ShowGhost(rect)
+            if seat then
+                rect, used[key] = seat, true
+            else
+                dim = true
+            end
+        end
+        Place(o, rect)
+        SetLook(o, dim, rects[i].reason)
         if not o:IsShown() then
-            o.fsPulse:SetAlpha(F.Envelope(state.t))
+            o.fsPulse:SetAlpha(dim and F.Envelope(state.t) * DIM or F.Envelope(state.t))
             o:Show()
         end
     end
+    SweepGhosts(used)
     for i = n + 1, #pool do
         if pool[i]:IsShown() then pool[i]:Hide() end
     end
@@ -217,6 +441,7 @@ function F.Clear()
     for _, o in ipairs(pool) do
         if o:IsShown() then o:Hide() end
     end
+    SweepGhosts(nil)
     if wasHidden and entry and entry.row then I.RefreshTip(entry.row) end
 end
 
@@ -241,10 +466,17 @@ function F.Show(entry)
     if Begin(entry) then GoLive(0) end
 end
 
+CW.On("change", function() if state.entry then F.Restyle() end end)
 CW.On("rowEnter", F.Start)
 CW.On("rowLeave", F.Clear)
 CW.On("hide", F.Clear)
 CW.On("select", F.Clear)
+-- Combat starts: every sample goes down now (they are plain frames, but nothing of this runs in a fight).
+local combatWatch = CreateFrame("Frame", nil, UIParent)
+pcall(combatWatch.RegisterEvent, combatWatch, "PLAYER_REGEN_DISABLED")
+combatWatch:SetScript("OnEvent", function() SweepGhosts(nil) end)
+F.combatWatch = combatWatch
+
 if Config and Config.OnChange then
     Config.OnChange(F.KEY, function()
         if not F.Enabled() then F.Clear() end

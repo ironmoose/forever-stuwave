@@ -954,7 +954,7 @@ function T.the_preview_is_drawn_from_the_plate_module_constants()
     end
     eq(one("size", "power", 2).h, 5, "the target plate's power bar")
     eq(one("size", "cast", 2).h, 6, "the target plate's cast bar")
-    eq(one("size", "name", 2):GetText():find("Kolkar Packhound", 1, true) ~= nil, true)
+    eq(one("size", "name", 2):GetText():find("Biff Tannen", 1, true) ~= nil, true)
     eq(one("size", "quest", 1):GetText(), "!", "the quest marker is the module's own glyph")
     yes(one("size", "quest", 1):IsShown(), "the neutral plate carries the quest marker")
     yes(one("size", "mark", 3):IsShown(), "the third plate carries the raid marker")

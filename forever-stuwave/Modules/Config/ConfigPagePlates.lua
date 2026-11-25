@@ -32,11 +32,11 @@ local RAID_ICONS = "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
 -- The four plates, left to right. `fill` and `name` pick a palette colour; hp is the fill share; `power`, `cast`, `combo`,
 -- `tmark` ride only the target.
 local PLATES = {
-    { name = "Plainstrider", level = "20", fill = "neutral", hp = 100, quest = true, dim = true },
-    { name = "Kolkar Packhound", level = "22", fill = "hostile", hp = 64, target = true, auras = { "own", "own", "other" },
-        power = 72, cast = "Howl" },
-    { name = "Kolkar Bloodcharger", level = "21+", fill = "hostile", hp = 88, mark = true, auras = { "other" }, dim = true },
-    { name = "Moolah", fill = "friend", hp = 93, friendly = true, dim = true },
+    { name = "Gizmo", level = "20", fill = "neutral", hp = 100, quest = true, dim = true },
+    { name = "Biff Tannen", level = "22", fill = "hostile", hp = 64, target = true, auras = { "own", "own", "other" },
+        power = 72, cast = "Hadouken" },
+    { name = "Gruber", level = "21+", fill = "hostile", hp = 88, mark = true, auras = { "other" }, dim = true },
+    { name = "Marty", fill = "friend", hp = 93, friendly = true, dim = true },
 }
 
 -- Hover: values forced on for the moment (what shows) and the parts that pulse (what the row changes).

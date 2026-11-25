@@ -10,7 +10,9 @@ tools/configwindow-harness.py and pins:
     run when the row is hovered, a missing module answers nothing, and a row can name its own target
   * hovering a row for 150 ms draws one pooled overlay per target that is on screen, at the target's rect plus FLASH_OUT,
     with FLASH_CORNER brackets, the outline pulsing twice for 1.1 s and then holding; leaving the row removes it
-  * a target that is not on screen draws nothing and the row's ? tip says "Not on screen right now."
+  * a target with no seat at all draws nothing and the row's ? tip says "Not on screen right now."
+  * a target with a seat that is not showing gets a preview (Style tab sample frames, Edit Mode raid preview) while hovered,
+    hidden again on leave, close or combat; with no preview it gets a dimmed outline and a caption with its reason
   * the overlays are plain insecure frames on UIParent (never parented to or anchored on a secure frame), so the flash
     works in combat; unreadable, secret and degenerate rects are skipped
   * Profiles > Window has the "Flash frames on hover" switch (config.flash, on); off draws nothing
@@ -821,6 +823,240 @@ function T.the_flash_never_writes_a_setting_or_calls_anything_protected()
     W.SetHover(nil)
     eq(sets, 0, "hovering writes nothing")
     FS.Config.Set = set
+end
+
+
+-- ---- hidden targets: a preview where there is one, a dimmed outline with its reason where there is not ----------------
+
+local function gunsightWith(hasTarget)
+    local anchors = {}
+    for i, n in ipairs({ "tapeL", "tapeR", "boxL", "boxR", "areaU", "areaL", "shards" }) do
+        anchors[n] = target("GA_" .. n, i * 100, 50, 40, 40)
+    end
+    FS.Gunsight.anchors = anchors
+    FS.Gunsight.IsActive = function() return true end
+    FS.Gunsight.IsPieceOn = function() return true end
+    FS.HasTarget = function() return hasTarget end
+    return anchors
+end
+
+local function captionOf(o)
+    if o.fsCaption and o.fsCaption:IsShown() then return o.fsCaption.text end
+    return nil
+end
+
+function T.the_target_side_with_no_target_is_a_seat_marked_hidden_with_its_reason()
+    local W = boot()
+    gunsightWith(false)
+    local seats = W.Targets.Seats({ key = "gunsight.pieces.tgt" })
+    eq(#seats, 1); yes(seats[1].hidden, "the target tape has a seat but is not showing")
+    eq(seats[1].reason, "Shows with a target")
+    eq(#W.Targets.Resolve({ key = "gunsight.pieces.tgt" }), 0, "Resolve answers only what is showing")
+    local you = W.Targets.Seats({ key = "gunsight.pieces.you" })
+    no(you[1].hidden, "your side shows without a target")
+    eq(you[1].reason, nil)
+end
+
+function T.each_hidden_reason_comes_from_the_registry()
+    local W = boot()
+    local Tg = W.Targets
+    local function reason(name, key, id, hide)
+        local f = seat(id, target(name, 10, 10, 50, 50))
+        f.shown = false
+        local r = Tg.Seats(type(key) == "table" and key or { key = key })
+        yes(r, tostring(key) .. " has a target"); eq(#r, 1, id); yes(r[1].hidden, id .. " hidden")
+        eq(r[1].reason, hide, id)
+        FS.Layout._applied = {}
+    end
+    reason("TF", "unitFrames.hideTarget", "target", "Shows with a target")
+    reason("PartyF", { key = "x", page = "party" }, "party", "Shows in a group")
+    reason("PetF", { key = "x", page = "pet" }, "petcontainer", "Shows with a pet")
+    reason("TC", { key = "x", target = "tcast" }, "tcast", "Shows with a target")
+    local raid = target("ForeverSTUwaveRaidContainer", 50, 500, 300, 224); raid.shown = false
+    eq(Tg.Seats({ key = "x", page = "raid" })[1].reason, "Shows in a raid")
+    local gs = gunsightWith(true)
+    FS.Gunsight.IsPieceOn = function(k) return k ~= "shard" end
+    eq(Tg.Seats({ key = "gunsight.pieces.shard" })[1].reason, "Turned off", "a piece whose own switch is off")
+    FS.Config.RegisterDefault("fivesecond.enabled", false)
+    target("FSFiveSecondTab", 5, 5, 40, 40)
+    eq(Tg.Seats({ key = "fivesecond.enabled" })[1].reason, "Turned off", "a row's own switch")
+    local plain = target("ForeverSTUwaveDataBar", 0, 0, 100, 20); plain.shown = false
+    eq(Tg.Seats({ key = "x", page = "data" })[1].reason, "Hidden right now", "the fallback")
+    plain.shown = true
+    plain.alpha = 0
+    function plain:GetEffectiveAlpha() return 0 end
+    eq(Tg.Seats({ key = "x", page = "data" })[1].hidden, true, "a frame faded to alpha 0 is hidden")
+    function plain:GetEffectiveAlpha() return FS.IsSecret and 1 or 1 end
+    no(Tg.Seats({ key = "x", page = "data" })[1].hidden, "and is not hidden at alpha 1")
+end
+
+function T.a_hidden_target_with_no_preview_gets_the_dimmed_outline_and_its_reason_caption()
+    local W = boot()
+    local C = W.C
+    gunsightWith(false)
+    W.Flash.Show({ key = "gunsight.pieces.tgt" }); tick(W, 0.01)
+    local o = overlays(W)[1]
+    yes(o, "an outline is drawn at the seat")
+    eq(captionOf(o), "Shows with a target")
+    yes(o.fsCapBg:IsShown(), "on its plate")
+    for _, e in ipairs(o.fsEdges) do near(e.color[1], C.muted[1], "dimmed outline colour") end
+    for _, t in ipairs(o.fsBrackets) do near(t.color[2], C.muted[2], "dimmed bracket colour") end
+    tick(W, 0.3)
+    yes(o.fsPulse:GetAlpha() < 0.5, "dimmed: the pulse never reaches full")
+    eq(o.fsCaption.points[1].point, "CENTER", "centred on its plate")
+    -- the target appears while the row is hovered: today's outline, no caption
+    FS.HasTarget = function() return true end
+    tick(W, 0.1)
+    o = overlays(W)[1]
+    eq(captionOf(o), nil, "no caption once it shows")
+    for _, e in ipairs(o.fsEdges) do near(e.color[1], C.cyan[1]); near(e.color[4], 0.8) end
+    for _, t in ipairs(o.fsBrackets) do near(t.color[1], C.cyan[1]); near(t.color[4], 1) end
+end
+
+function T.a_visible_target_keeps_exactly_todays_outline_with_no_caption()
+    local W = boot()
+    local C = W.C
+    seat("player", target("PF", 20, 1300, 260, 73))
+    flashOn(W, unitRow(W))
+    local o = overlays(W)[1]
+    eq(captionOf(o), nil)
+    no(o.fsCapBg:IsShown(), "no plate")
+    for _, e in ipairs(o.fsEdges) do near(e.color[1], C.cyan[1]); near(e.color[4], 0.8) end
+    local x, y, w, h = rectOf(o)
+    near(x, 20 - W.Spec.FLASH_OUT); near(w, 260 + 2 * W.Spec.FLASH_OUT)
+    near(o.fsPulse:GetAlpha(), W.Flash.Envelope(0.01), "full strength pulse")
+end
+
+-- A stand-in for the Style tab sample frame: a plain frame, never a secure one, with a size.
+local function sampleFrames()
+    local made = { built = 0, restyled = 0 }
+    FS.UnitFrames = FS.UnitFrames or {}
+    FS.UnitFrames.NewPreview = function(parent, key)
+        made.built = made.built + 1
+        made.key = key
+        local f = CreateFrame("Frame", nil, parent)
+        f:SetSize(260, 73)
+        f.Restyle = function() made.restyled = made.restyled + 1 end
+        made.frame = f
+        return f
+    end
+    return made
+end
+
+function T.hovering_a_hidden_target_row_shows_its_preview_at_the_seat_and_leaving_hides_it()
+    local W = boot()
+    local made = sampleFrames()
+    local tf = seat("target", target("TF", 300, 1300, 260, 73)); tf.shown = false
+    local entry = { key = "unitFrames.hideTarget" }
+    W.Flash.Show(entry); tick(W, 0.01)
+    eq(made.built, 1, "the sample is built from the Style tab's frame")
+    eq(made.key, "target")
+    local g = W.Flash.ghosts.target
+    yes(g and g.host:IsShown(), "the preview is up")
+    eq(g.host.parent, UIParent, "on UIParent, not on the secure frame")
+    yes(g.made.frame.protected ~= true, "an insecure frame")
+    local o = overlays(W)[1]
+    eq(captionOf(o), nil, "the outline frames something real, so no caption")
+    local x, y, w, h = rectOf(o)
+    near(x, 300 - W.Spec.FLASH_OUT); near(w, 260 + 2 * W.Spec.FLASH_OUT)
+    for _, e in ipairs(o.fsEdges) do near(e.color[1], W.C.cyan[1]) end
+    W.Flash.Clear()
+    no(g.host:IsShown(), "leaving the row hides the preview")
+    eq(#overlays(W), 0)
+    -- again: built once, restyled on each show
+    W.Flash.Show(entry); tick(W, 0.01)
+    eq(made.built, 1, "the sample is reused"); eq(made.restyled, 2)
+    yes(g.host:IsShown())
+    W.Flash.Clear()
+    no(g.host:IsShown())
+end
+
+function T.the_preview_goes_away_when_the_row_target_shows_closing_the_window_or_a_page_change()
+    local W = boot()
+    sampleFrames()
+    local tf = seat("target", target("TF", 300, 1300, 260, 73)); tf.shown = false
+    W.Open("unit", "frames")
+    local entry = { key = "unitFrames.hideTarget" }
+    W.Flash.Show(entry); tick(W, 0.01)
+    local g = W.Flash.ghosts.target
+    yes(g.host:IsShown())
+    tf.shown = true
+    tick(W, 0.06)
+    no(g.host:IsShown(), "the real frame is up: no sample over it")
+    tf.shown = false
+    tick(W, 0.06)
+    yes(g.host:IsShown())
+    W.Close()
+    no(g.host:IsShown(), "closing the window hides it")
+end
+
+function T.nothing_is_previewed_in_combat_and_a_fight_starting_takes_the_preview_down()
+    local W = boot()
+    local made = sampleFrames()
+    local tf = seat("target", target("TF", 300, 1300, 260, 73)); tf.shown = false
+    local entry = { key = "unitFrames.hideTarget" }
+    __combat = true
+    W.Flash.Show(entry); tick(W, 0.01)
+    eq(made.built, 0, "nothing is built in combat")
+    local o = overlays(W)[1]
+    eq(captionOf(o), "Shows with a target", "the dimmed outline stands in")
+    W.Flash.Clear()
+    __combat = false
+    W.Flash.Show(entry); tick(W, 0.01)
+    local g = W.Flash.ghosts.target
+    yes(g.host:IsShown())
+    __combat = true
+    W.Flash.combatWatch.scripts.OnEvent(W.Flash.combatWatch, "PLAYER_REGEN_DISABLED")
+    no(g.host:IsShown(), "combat starting hides it")
+    tick(W, 0.06)
+    no(g.host:IsShown(), "and it stays down through the fight")
+    eq(captionOf(overlays(W)[1]), "Shows with a target")
+    __combat = false
+end
+
+function T.the_party_pet_and_raid_previews_are_built_from_the_style_tab_samples_and_the_edit_mode_raid()
+    local W = boot()
+    local rows = 0
+    FS.PartyFrames = FS.PartyFrames or {}
+    FS.PartyFrames.NewStylePreview = function(parent)
+        rows = rows + 1
+        local f = CreateFrame("Frame", nil, parent); f:SetSize(231, 68)
+        return { frame = f, Restyle = function() end }
+    end
+    local pet = 0
+    FS.PetFrame = FS.PetFrame or {}
+    FS.PetFrame.NewStylePreview = function(parent)
+        pet = pet + 1
+        local f = CreateFrame("Frame", nil, parent); f:SetSize(348, 68)
+        return { frame = f, Restyle = function() end }
+    end
+    local pv = { shown = false, hides = 0 }
+    FS.RaidFrames = { Preview = {
+        IsShown = function() return pv.shown end,
+        Show = function() if __combat then return false end pv.shown = true return true end,
+        Hide = function() pv.shown = false; pv.hides = pv.hides + 1 end,
+        Rect = function() return 50, 724, 300, 224 end,
+    } }
+    local p = seat("party", target("PartyF", 40, 700, 231, 294)); p.shown = false
+    W.Flash.Show({ key = "x", page = "party" }); tick(W, 0.01)
+    eq(rows, 4, "a short stack of sample rows"); yes(W.Flash.ghosts.party.host:IsShown())
+    W.Flash.Clear(); no(W.Flash.ghosts.party.host:IsShown())
+    local pp = seat("petcontainer", target("PetF", 90, 300, 348, 68)); pp.shown = false
+    W.Flash.Show({ key = "x", page = "pet" }); tick(W, 0.01)
+    eq(pet, 1); yes(W.Flash.ghosts.petcontainer.host:IsShown())
+    W.Flash.Clear()
+    local grid = target("ForeverSTUwaveRaidContainer", 50, 500, 300, 224); grid.shown = false
+    W.Flash.Show({ key = "x", page = "raid" }); tick(W, 0.01)
+    yes(pv.shown, "the Edit Mode raid preview is up for the hover")
+    local o = overlays(W)[1]
+    near(select(2, rectOf(o)), 500 - W.Spec.FLASH_OUT, "the outline follows the preview's own rect")
+    W.Flash.Clear()
+    no(pv.shown, "and down again after")
+    -- the editor already had it up: the hover leaves it alone
+    pv.shown = true
+    W.Flash.Show({ key = "x", page = "raid" }); tick(W, 0.01)
+    W.Flash.Clear()
+    yes(pv.shown, "a preview Edit Mode owns is not hidden by the hover")
 end
 
 -- Plain data for the python level checks (the real files, booted once).

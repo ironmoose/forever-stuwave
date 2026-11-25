@@ -1311,8 +1311,8 @@ end
 -- What the preview pets read: a hunter's pet (focus, brown rail, a happiness dot) and a demon (mana, blue rail,
 -- casting Firebolt). Nothing is read from a unit.
 local PREVIEW_PETS = {
-    hunter = { name = "Wolf", level = 22, hp = { 208, 253 }, mp = { 70, 100 }, power = 2 },
-    demon = { name = "Grimzik", level = 22, hp = { 208, 253 }, mp = { 162, 253 }, power = 0 },
+    hunter = { name = "Falkor", level = 22, hp = { 208, 253 }, mp = { 70, 100 }, power = 2 },
+    demon = { name = "Slimer", level = 22, hp = { 208, 253 }, mp = { 162, 253 }, power = 0 },
 }
 
 -- The panel on a still frame, drawn from the same plan and the same block code as the live one: the float chrome

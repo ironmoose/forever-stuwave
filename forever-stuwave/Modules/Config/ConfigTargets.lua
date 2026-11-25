@@ -4,8 +4,11 @@
 -- longest key prefix in KEYS, then its page in PAGE_TARGETS. A provider is a function run when the row is hovered; it
 -- answers a list of frames (or nothing when its module or frame is missing). CW.Targets.Resolve(entry) turns that into
 -- rects in UIParent units for the frames that are on screen now, and nil when the row has no target at all.
--- Nothing here writes, shows, hides or anchors anything: a frame is only asked IsVisible and GetRect, inside a pcall,
--- so a protected frame in combat, a secret number or a frame with no rect yet is skipped, never an error.
+-- Nothing here writes, shows, hides or anchors anything: a frame is only asked IsVisible, GetEffectiveAlpha and GetRect,
+-- inside a pcall, so a protected frame in combat, a secret number or a frame with no rect yet is skipped, never an error.
+-- CW.Targets.Seats(entry) also answers the frames that have a seat but are not showing (a hidden frame, alpha 0, a piece
+-- that is off, a target side with no target): those rects carry `hidden = true`, a short `reason` ("Shows with a target")
+-- and the `preview` key the flash can build a sample for. Resolve answers only what is showing.
 -- Harness: tools/configflash-harness.py.
 
 local _, FS = ...
@@ -27,27 +30,59 @@ local function Num(v)
     return v
 end
 
--- One thing a provider answered, as a rect { left, bottom, width, height } in UIParent units. A frame must be visible and
--- have a rect; a plain table with those four fields is taken as it is (the quest tracker answers its own rect).
-local function Read(thing)
+T.GENERIC_REASON = "Hidden right now"
+
+-- A frame's rect in UIParent units, whether or not it is showing; nil with no readable rect.
+local function Measure(frame)
+    local l, b, w, h = frame:GetRect()
+    l, b, w, h = Num(l), Num(b), Num(w), Num(h)
+    if not (l and b and w and h and w > 0 and h > 0) then return nil end
+    -- GetRect is in the frame's own scale; the overlay sits on UIParent
+    local scale, parentScale = 1, 1
+    if type(frame.GetEffectiveScale) == "function" then scale = Num(frame:GetEffectiveScale()) or 1 end
+    if UIParent and type(UIParent.GetEffectiveScale) == "function" then parentScale = Num(UIParent:GetEffectiveScale()) or 1 end
+    if scale <= 0 or parentScale <= 0 then return nil end
+    local k = scale / parentScale
+    return { left = l * k, bottom = b * k, width = w * k, height = h * k }
+end
+
+-- True when our own frame is faded out (alpha 0). A secret or missing answer reads as not faded.
+local function Faded(frame)
+    local get = frame.GetEffectiveAlpha or frame.GetAlpha
+    if type(get) ~= "function" then return false end
+    local a = Num(get(frame))
+    return a ~= nil and a <= 0
+end
+
+-- One thing a provider answered, as a rect { left, bottom, width, height } in UIParent units. A frame that is showing gives
+-- the plain rect. A frame that has a rect but is not showing (hidden, faded out, or held down by `hidden`) gives the same
+-- rect with `hidden = true`, `reason` and `preview` (what the provider says about why and what could stand in for it).
+-- A provider may answer a wrapper { seat = frame, reason, preview, hidden } to say those itself. A plain table with the
+-- four fields is taken as it is (the quest tracker answers its own rect).
+local function Read(thing, ctx)
     if type(thing) ~= "table" then return nil end
     local ok, rect = pcall(function()
-        if type(thing.GetRect) ~= "function" then
-            local l, b, w, h = Num(thing.left), Num(thing.bottom), Num(thing.width), Num(thing.height)
+        local frame, reason, preview, forced = thing, nil, nil, false
+        if thing.seat ~= nil then
+            frame, reason, preview, forced = thing.seat, thing.reason, thing.preview, thing.hidden == true
+        end
+        if type(frame) ~= "table" then return nil end
+        if type(frame.GetRect) ~= "function" then
+            local l, b, w, h = Num(frame.left), Num(frame.bottom), Num(frame.width), Num(frame.height)
             if l and b and w and h and w > 0 and h > 0 then return { left = l, bottom = b, width = w, height = h } end
             return nil
         end
-        if type(thing.IsVisible) == "function" and thing:IsVisible() ~= true then return nil end
-        local l, b, w, h = thing:GetRect()
-        l, b, w, h = Num(l), Num(b), Num(w), Num(h)
-        if not (l and b and w and h and w > 0 and h > 0) then return nil end
-        -- GetRect is in the frame's own scale; the overlay sits on UIParent
-        local scale, parentScale = 1, 1
-        if type(thing.GetEffectiveScale) == "function" then scale = Num(thing:GetEffectiveScale()) or 1 end
-        if UIParent and type(UIParent.GetEffectiveScale) == "function" then parentScale = Num(UIParent:GetEffectiveScale()) or 1 end
-        if scale <= 0 or parentScale <= 0 then return nil end
-        local k = scale / parentScale
-        return { left = l * k, bottom = b * k, width = w * k, height = h * k }
+        local r = Measure(frame)
+        if not r then return nil end
+        local hidden = forced
+        if not hidden and type(frame.IsVisible) == "function" and frame:IsVisible() ~= true then hidden = true end
+        if not hidden and Faded(frame) then hidden = true end
+        if hidden then
+            r.hidden = true
+            r.reason = reason or (ctx and ctx.reason) or T.GENERIC_REASON
+            r.preview = preview or (ctx and ctx.preview) or nil
+        end
+        return r
     end)
     if ok then return rect end
     return nil
@@ -58,6 +93,15 @@ end
 -------------------------------------------------------------------------------
 
 -- The frame a layout id is seated on (FS.Layout._applied), a shown one when there are several. Nothing when none.
+-- Why a seated frame is not showing, by layout id; the id is also the key of its preview (ConfigFlash.lua).
+local SEAT_REASONS = {
+    target = "Shows with a target", tcast = "Shows with a target",
+    party = "Shows in a group", petcontainer = "Shows with a pet",
+    pcast = "Shows while casting",
+    warriorpowerup = "Shows on a proc", druidclearcasting = "Shows on a proc",
+}
+local SEAT_PREVIEWS = { player = true, target = true, focus = true, boss = true, party = true, petcontainer = true }
+
 local function Seat(id)
     return function()
         local applied = FS.Layout and FS.Layout._applied
@@ -66,19 +110,23 @@ local function Seat(id)
         for frame, info in pairs(applied) do
             if type(info) == "table" and info.id == id and info.parent == nil then
                 local ok, shown = pcall(frame.IsShown, frame)
-                if ok and shown == true then return { frame } end
+                if ok and shown == true then found = frame; break end
                 found = found or frame
             end
         end
-        return found and { found } or nil
+        if not found then return nil end
+        return { { seat = found, reason = SEAT_REASONS[id], preview = SEAT_PREVIEWS[id] and id or nil } }
     end
 end
 
 -- A global frame by name, looked up when asked (a module that is absent or builds later answers nothing, then the frame).
-local function Named(name)
+local function Named(name, reason, preview)
     return function()
         local frame = _G[name]
-        if type(frame) == "table" then return { frame } end
+        if type(frame) == "table" then
+            if reason or preview then return { { seat = frame, reason = reason, preview = preview } } end
+            return { frame }
+        end
         return nil
     end
 end
@@ -111,23 +159,44 @@ local function First(...)
 end
 
 -- Gunsight anchor frames by name. `piece` (optional) is the piece switch that must be on for them to be drawn; the HUD must
--- be up at all. The anchors are plain frames that stay "shown" with their piece faded out, so the switches are asked here.
+-- be up at all. The anchors are plain frames that stay "shown" with their piece faded out, so the switches are asked here,
+-- and the target side only shows while there is a target. An anchor that is not drawn is still answered, marked hidden with
+-- the reason, so the flash can say why it is empty.
+local TARGET_SIDE = { tapeR = true, boxR = true, areaU = true, areaL = true }
+
+local function HasTarget()
+    if type(FS.HasTarget) ~= "function" then return true end
+    local ok, has = pcall(FS.HasTarget)
+    return not ok or has ~= false
+end
+
 local function Anchors(piece, ...)
     local names = { ... }
     return function()
         local G = FS.Gunsight
         if type(G) ~= "table" or type(G.anchors) ~= "table" then return nil end
+        local reason
         if type(G.IsActive) == "function" then
             local ok, active = pcall(G.IsActive)
-            if ok and active ~= true then return nil end
+            if ok and active ~= true then reason = "Turned off" end
         end
-        if piece and type(G.IsPieceOn) == "function" then
+        if not reason and piece and type(G.IsPieceOn) == "function" then
             local ok, on = pcall(G.IsPieceOn, piece)
-            if ok and on == false then return nil end
+            if ok and on == false then reason = "Turned off" end
         end
+        local noTarget = not reason and not HasTarget()
         local out = {}
         for _, name in ipairs(names) do
-            if G.anchors[name] then out[#out + 1] = G.anchors[name] end
+            local frame = G.anchors[name]
+            if frame then
+                if reason then
+                    out[#out + 1] = { seat = frame, hidden = true, reason = reason }
+                elseif noTarget and TARGET_SIDE[name] then
+                    out[#out + 1] = { seat = frame, hidden = true, reason = "Shows with a target" }
+                else
+                    out[#out + 1] = frame
+                end
+            end
         end
         return out
     end
@@ -145,9 +214,9 @@ P.player = Seat("player")
 P.target = Seat("target")
 P.focus = Seat("focus")
 P.boss = Seat("boss")
-P.party = First(Seat("party"), Named("ForeverSTUwavePartyContainer"))
-P.raid = Named("ForeverSTUwaveRaidContainer")
-P.pet = First(Seat("petcontainer"), Named("FSPetContainer"))
+P.party = First(Seat("party"), Named("ForeverSTUwavePartyContainer", "Shows in a group", "party"))
+P.raid = Named("ForeverSTUwaveRaidContainer", "Shows in a raid", "raid")
+P.pet = First(Seat("petcontainer"), Named("FSPetContainer", "Shows with a pet", "petcontainer"))
 
 -- The Style tabs of the Unit Frames page share their rows between the four unit frames: the picker says which one.
 local STYLE_FRAMES = { player = true, target = true, focus = true, boss = true }
@@ -338,21 +407,48 @@ function T.Providers(entry)
     return names
 end
 
--- The frames of a row that are on screen now, as rects { left, bottom, width, height } in UIParent units. nil: the row
--- has no target. An empty list: it has one and nothing of it is on screen right now.
-function T.Resolve(entry)
-    local _, fns = Pick(entry)
+-- Switches that are the row's own: a row whose key is one of these (or ends in .enabled) and is off gives "Turned off".
+local OWN_SWITCH = { ["unitFrames.showFocus"] = true, ["unitFrames.showBoss"] = true }
+local function OwnSwitchOff(entry)
+    local key = entry.key
+    if type(key) ~= "string" or not (OWN_SWITCH[key] or key:sub(-8) == ".enabled") then return false end
+    if not (Config and Config.Get) then return false end
+    local ok, v = pcall(Config.Get, key)
+    return ok and v == false
+end
+
+-- Every frame of a row that has a seat, as rects { left, bottom, width, height } in UIParent units: the ones on screen now
+-- plain, the ones that are not carry hidden = true, reason (short, shown to the player) and preview (a key, or nil). nil:
+-- the row has no target. An empty list: it has one and none of it has a seat to draw at.
+function T.Seats(entry)
+    local names, fns = Pick(entry)
     if not fns then return nil end
+    local off = OwnSwitchOff(entry)
     local out = {}
-    for _, fn in ipairs(fns) do
+    for i, fn in ipairs(fns) do
         local ok, list = pcall(fn, entry)
         if ok and type(list) == "table" then
-            if list[1] == nil and (type(list.GetRect) == "function" or list.left ~= nil) then list = { list } end
+            if list[1] == nil and (type(list.GetRect) == "function" or list.left ~= nil or list.seat ~= nil) then list = { list } end
             for _, thing in ipairs(list) do
-                local rect = Read(thing)
-                if rect then out[#out + 1] = rect end
+                local rect = Read(thing, { reason = nil, preview = nil, name = names[i] })
+                if rect then
+                    if off then rect.hidden, rect.reason, rect.preview = true, "Turned off", nil end
+                    out[#out + 1] = rect
+                end
             end
         end
+    end
+    return out
+end
+
+-- The frames of a row that are on screen now. nil: the row has no target. An empty list: it has one and nothing of it is
+-- on screen right now.
+function T.Resolve(entry)
+    local seats = T.Seats(entry)
+    if not seats then return nil end
+    local out = {}
+    for _, rect in ipairs(seats) do
+        if not rect.hidden then out[#out + 1] = rect end
     end
     return out
 end
