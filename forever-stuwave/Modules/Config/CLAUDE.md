@@ -1,6 +1,6 @@
 # Config
 
-The `/fsconfig` window: a grouped nav, a well with sub tabs and folding sections, built from `FS.ConfigWindow.UI` builders. Constants come from the prototype (`mockups/config-window-2026-11-25.html`, SPEC const); everything drawn here is pending Parker review.
+The `/fsconfig` window: a grouped nav, a well with sub tabs and folding sections, built from `FS.ConfigWindow.UI` builders. Constants come from the prototype (`mockups/config-window-2026-11-25.html`, SPEC const); everything drawn here is pending owner review.
 
 ## Key Files
 - `ConfigSpec.lua` -- every size by its prototype name (`CW.Spec`), `Derive(w, h)` for what follows the window size, `Snap`, the colour map. Nothing else types a size.

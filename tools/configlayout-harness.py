@@ -12,7 +12,7 @@ The mock frame tree of tools/configwindow-harness.py does no anchor layout, so t
   * the extension points other lanes use exist and work (RegisterCategory, ExtendTab, Open, On, slots, registry, folds)
   * the saved settings of the old window are all still reachable (no key lost)
 
-Everything the window draws is pending Parker review: this proves geometry, not looks.
+Everything the window draws is pending owner review: this proves geometry, not looks.
 """
 
 from __future__ import annotations
