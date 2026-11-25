@@ -518,7 +518,7 @@ local R = FS.Role
 check(R.Get("tank.aggro") == true and R.Get("heal.hp") == "missing", "defaults without a config")
 """),
 
-    ("the party rows repaint at once on a role change and on a healer switch, and only then", r"""
+    ("the party rows repaint at once on a role change, a healer switch and the health text pick, and only then", r"""
 __class, __points = "SHAMAN", { 0, 31, 0 }
 local R = enter({ login = false })
 local runs = {}
@@ -538,8 +538,9 @@ FS.Config.Set("heal.incoming", false)
 FS.Config.Set("heal.range", false)
 check(#runs == base + 4, "each healer switch repaints")
 FS.Config.Set("heal.hp", "percent")
+check(#runs == base + 5, "the health text pick repaints")
 FS.Config.Set("tank.aggro", false)
-check(#runs == base + 4, "other keys do not")
+check(#runs == base + 5, "other keys do not")
 FS.PartyFrames = nil
 FS.Config.Set("heal.dispel", true)
 """),
@@ -888,13 +889,24 @@ function T.the_colour_and_warn_rows_say_what_happens_when_the_game_hides_threat(
     end
 end
 
-function T.the_health_text_row_says_it_is_not_applied_yet()
+function T.the_health_text_row_is_live_until_the_party_style_tab_sets_its_own_text()
+    local stored = false
     local W = boot({ preWindow = roles() })
+    -- the party Style tab's own Text: PartyFrames.HealthFormat lets it win over the healer's pick
+    local real = FS.FrameStyle
+    FS.FrameStyle = setmetatable({ IsStored = function(frame, suffix) return stored and frame == "party" and suffix == "hpFmt" end },
+        { __index = real })
     W.Open("role", "healer")
     local e = W.RowByKey("heal.hp", "role")
-    yes(e.disabled, "the row does nothing yet and is greyed")
-    yes(e.why and e.why:find("Not applied yet", 1, true), "the reason says so")
+    no(e.disabled, "the party frames draw the pick, so the row is live")
     eq(FS.Config.Get("heal.hp"), "missing")
+    yes(not (e.why and e.why:find("Not applied yet", 1, true)), "no row says it is not applied yet")
+    stored = true
+    FS.Config.Set("heal.hp", "percent")
+    e = W.RowByKey("heal.hp", "role")
+    yes(e.disabled, "a party Style Text that was set wins, so the row says it does nothing")
+    yes(e.why and e.why:find("Party style tab", 1, true), "the reason names the setting that wins")
+    eq(FS.Config.Get("heal.hp"), "percent", "the pick is kept")
 end
 
 function T.the_threat_text_and_warn_rows_write_their_keys()
