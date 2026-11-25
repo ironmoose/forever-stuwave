@@ -667,7 +667,7 @@ end
 -- the module's public tables are that object's parts.
 -- Docked, the panel wears the Console's own chassis look (its fill tint, stroke alpha and baked halo), the same as
 -- every class shoulder standing beside it (ClassShoulder.lua), so the pet panel and the mana regen or ammo tab read
--- as one piece of the Console (Parker, 2026-11-24). A Console that exports no look leaves the panel its own.
+-- as one piece of the Console (decided 2026-11-24). A Console that exports no look leaves the panel its own.
 local function ChassisLook()
     local console = FS.Console
     if type(console) ~= "table" then return nil end

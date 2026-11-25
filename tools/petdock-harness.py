@@ -2267,7 +2267,7 @@ def check_an_owner_that_takes_the_pet_span_in_keeps_the_pet_patch_live() -> None
 
 
 def check_docked_the_panel_wears_the_consoles_chassis_look() -> None:
-    # Parker 2026-11-24: the docked pet panel and the class shoulders beside it read as one piece of the Console
+    # 2026-11-24: the docked pet panel and the class shoulders beside it read as one piece of the Console
     look = ("FS.Console = FS.Console or {}; FS.Console.FILL_TOP = { 45/255, 27/255, 78/255, 0.80 }; "
             "FS.Console.OUTLINE_ALPHA = 0.72; FS.Console.GLOW = { texture = 'glow', size = 64, pad = 11, margin = 25, "
             "mid0 = 28, mid1 = 36 }")
