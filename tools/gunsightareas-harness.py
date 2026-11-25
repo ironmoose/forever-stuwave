@@ -1104,6 +1104,26 @@ local plate = Areas.Plate("lower")
 check(plate:IsShown() and not fillOf(plate):IsShown() and skinOf(plate).ring:IsShown(), "built with the background already off")
 """)
 
+case("with_the_real_theme_background_off_hides_every_fill_texture_and_leaves_the_ring_and_glow")(SWITCH_HELPERS + r"""
+local Gs, Areas, cl = bootClass({ realTheme = true })
+local plate = Areas.Plate("lower")
+local skin = plate.fsSkin
+check(skin and skin.glow and skin.border and skin.border.ring, "the real Theme.SkinButton skinned the plate")
+local fills = {}
+for _, r in ipairs({ plate:GetRegions() }) do
+    if r ~= skin.glow and r ~= skin.border.ring then fills[#fills + 1] = r end
+end
+check(#fills >= 3, "the real fill is several textures, got " .. #fills)
+FS.Config.Set(sw("bg").key, false)
+for i, t in ipairs(fills) do check(not t:IsShown(), "fill texture " .. i .. " is hidden") end
+check(skin.glow:IsShown() and skin.border.ring:IsShown(), "the ring and the glow stay")
+FS.Config.Set(sw("bg").key, true)
+for i, t in ipairs(fills) do check(t:IsShown(), "fill texture " .. i .. " is back") end
+FS.Config.Set(sw("border").key, false)
+check(not skin.glow:IsShown() and not skin.border.ring:IsShown(), "border off hides the real ring and glow")
+for i, t in ipairs(fills) do check(t:IsShown(), "and the fill " .. i .. " stays") end
+""")
+
 case("the_alert_scale_setting_has_its_range_default_and_a_clamped_reader")(SWITCH_HELPERS + r"""
 local Gs, Areas = bootClass()
 local def = sw("alertScale")

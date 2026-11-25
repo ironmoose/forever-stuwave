@@ -1,13 +1,17 @@
 -- Forever STUwave: Config page, Class modules
--- The Gunsight class modules, one tab each for all nine classes in the Addon tabs strip order, after a General tab. Sections
--- here never fold. An empty class says so. The rows that exist today live here; the class modules ticket (C4) adds the
--- module plate switches, the alert scale and the new class rows.
+-- The Gunsight class modules, a General tab and then one tab per class (all nine, in the Addon tabs strip order). Sections
+-- here never fold (UI.Section forbids it on this page). General holds what every class module shares: the plate it sits on
+-- (Background, Border, Opacity, GunsightAreas.lua) and the alert scale (the pop up alerts that own a frame read it through
+-- Areas.AlertScale()). A class with nothing to set says so. Every row maps to a setting a module reads; the page reads each
+-- module's SETTING(S) table at build time and leaves a row out when the module is absent.
 
 local _, FS = ...
 
 local CW = FS.ConfigWindow
 local UI = CW.UI
 local Config = FS.Config
+
+local AMMO_WARN = { min = 0, max = 400, step = 10 }   -- the count the Hunter module warns under (HunterState.AmmoWarn)
 
 local function ClassMessage(content, name)
     UI.Note(content, "The " .. name .. " module has nothing to set yet.")
@@ -18,19 +22,67 @@ local function ModuleSection(content, token, title, tip)
     UI.Section(content, { title = title, tip = tip or FS.ClassModuleHelp[token] })
 end
 
-local tabs = {
-    { key = "general", label = "General", build = function(content)
-        UI.Section(content, { title = "Module plate", tip = "The panel the class module sits on, in the Gunsight under your target." })
-        local Areas = FS.GunsightAreas
-        local plate = Areas and Areas.SETTINGS and Areas.SETTINGS.background
-        if plate then
-            UI.Slider(content, {
-                label = "Opacity", key = plate.key, min = plate.min, max = plate.max, step = plate.step, fmt = "%d%%",
-                tip = "A dark plate behind your class module, so it stays readable on bright ground. "
-                    .. "Higher is more solid; 0 removes the plate.",
-            })
+-- A part of the plate that is switched on (a stored value that is not a boolean reads as the default, on).
+local function PlateOn(def)
+    return Config.Get(def.key) ~= false
+end
+
+local function PlateTab(content)
+    local Areas = FS.GunsightAreas
+    local set = Areas and Areas.SETTINGS
+    UI.Section(content, { title = "Module plate", tip = "The panel the class module sits on, in the Gunsight under your target." })
+    if not set then return end
+    UI.Toggle(content, { label = "Background", key = set.bg.key, tip = "The dark fill behind the module." })
+    UI.Toggle(content, { label = "Border", key = set.border.key, tip = "The cyan outline and its glow." })
+    UI.Slider(content, {
+        label = "Opacity", key = set.background.key, min = set.background.min, max = set.background.max,
+        step = set.background.step, fmt = "%d%%",
+        tip = "How solid the plate is: the background and border together. 0 hides both.",
+        enabled = function() return PlateOn(set.bg) or PlateOn(set.border) end,
+        reason = "Requires |cffffffffBackground|r or |cffffffffBorder|r to be on.",
+    })
+    UI.Section(content, {
+        title = "Alerts",
+        tip = "The pop up alerts class modules show above your character: Overpower, Revenge and Victory Rush, and Clearcasting.",
+    })
+    UI.Slider(content, {
+        label = "Alert scale", key = set.alertScale.key, min = set.alertScale.min, max = set.alertScale.max,
+        step = set.alertScale.step, fmt = "%d%%",
+        tip = "Grows or shrinks every pop up class alert together. Cues drawn inside the module keep the module's size.",
+    })
+end
+
+-- Priest: the left half has nothing to set; the right half is one pick, the one line that explains the pick, and the Inner Fire
+-- pulse, which only the two looks that carry Inner Fire have (PriestRight.lua holds the labels and the lines).
+local function PriestTab(content)
+    UI.Section(content, {
+        title = "Left: Power Word: Shield",
+        tip = "The round shield on the left fills with light while your shield holds. The rim turns violet during Weakened Soul.",
+    })
+    UI.Note(content, "Always shown once you know the spell. Nothing to set.")
+    local Right = FS.PriestRight
+    if not (Right and Right.SETTING and Right.REMIND) then return end
+    local S = Right.SETTING
+    UI.Section(content, {
+        title = "Right: what sits beside the shield",
+        tip = "Pick one. A change made in a fight applies when the fight ends.",
+    })
+    local options = {}
+    for i, value in ipairs(S.values) do options[i] = { value = value, text = S.text[value] } end
+    UI.Segmented(content, { label = S.label, key = S.key, options = options })
+    for _, value in ipairs(S.values) do
+        if S.notes and S.notes[value] then
+            UI.Note(content, { text = S.notes[value], when = function() return Right.Setting() == value end })
         end
-    end },
+    end
+    UI.Toggle(content, {
+        label = Right.REMIND.label, key = Right.REMIND.key, tip = Right.REMIND.tip,
+        when = function() local v = Right.Setting() return v == "auto" or v == "spirit" end,
+    })
+end
+
+local tabs = {
+    { key = "general", label = "General", build = PlateTab },
     { key = "druid", label = "Druid", build = function(content)
         local CC = FS.DruidClearcasting
         if CC and CC.SETTING then
@@ -40,7 +92,15 @@ local tabs = {
     end },
     { key = "hunter", label = "Hunter", build = function(content)
         ModuleSection(content, "HUNTER", "Hunter class module")
-        ClassMessage(content, "Hunter")
+        local HS = FS.HunterState
+        local warn = HS and HS.SETTINGS and HS.SETTINGS.ammoWarn
+        if not warn then return ClassMessage(content, "Hunter") end
+        UI.Slider(content, {
+            label = "Low ammo warning below", key = warn.key, min = AMMO_WARN.min, max = AMMO_WARN.max, step = AMMO_WARN.step,
+            fmt = "%d",
+            tip = "The module warns when your arrows or bullets drop under this many. 0 warns only when you are out. "
+                .. "The ammo tab turns amber at the same count.",
+        })
     end },
     { key = "mage", label = "Mage", build = function(content)
         ModuleSection(content, "MAGE", "Mage")
@@ -50,25 +110,7 @@ local tabs = {
         ModuleSection(content, "PALADIN", "Paladin")
         ClassMessage(content, "Paladin")
     end },
-    { key = "priest", label = "Priest", build = function(content)
-        -- What the right side of the Priest module shows, and the Inner Fire reminder (PriestRight.lua)
-        local Right = FS.PriestRight
-        if not (Right and Right.SETTING and Right.REMIND) then return end
-        local S = Right.SETTING
-        UI.Section(content, { title = "Priest class module", tip = "What the right side of the Priest module shows beside the shield." })
-        UI.Dropdown(content, {
-            label = S.label, tip = S.tip, key = S.key,
-            get = function() return Right.Setting() end,
-            text = function(value) return S.text[value] or tostring(value) end,
-            items = function()
-                local items = {}
-                for i, value in ipairs(S.values) do items[i] = { value = value, text = S.text[value] } end
-                return items
-            end,
-            set = function(value) Config.Set(S.key, value) end,
-        })
-        UI.Toggle(content, { label = Right.REMIND.label, key = Right.REMIND.key, tip = Right.REMIND.tip, sub = true })
-    end },
+    { key = "priest", label = "Priest", build = PriestTab },
     { key = "rogue", label = "Rogue", build = function(content)
         ModuleSection(content, "ROGUE", "Rogue")
         ClassMessage(content, "Rogue")

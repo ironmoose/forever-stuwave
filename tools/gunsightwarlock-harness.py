@@ -347,6 +347,28 @@ case("every_cue_has_an_off_switch_that_removes_only_that_cue", """
     NoLog()
 """)
 
+case("the_four_cue_switches_are_published_in_page_order_with_the_keys_defaults_and_tips_the_config_page_reads", """
+    local S = FS.WarlockState
+    assert(table.concat(S.ORDER, ",") == "summon,procs,tap,drain", "page order: " .. table.concat(S.ORDER, ","))
+    local want = { summon = "Demon cue", procs = "Proc cues", tap = "Life Tap cue", drain = "Drain Soul cue" }
+    for _, name in ipairs(S.ORDER) do
+        local def = S.SETTINGS[name]
+        assert(def.key == "gunsight.warlock.cue." .. name, name .. " key: " .. tostring(def.key))
+        assert(def.default == true, name .. " is on by default")
+        assert(def.label == want[name], name .. " label: " .. tostring(def.label))
+        assert(type(def.tip) == "string" and #def.tip > 20, name .. " has a tip")
+    end
+    assert(S.SETTINGS.tap.tip:find("TAP", 1, true) and S.SETTINGS.drain.tip:find("DRAIN", 1, true), "the tips name the cue")
+    assert(S.Cue("tap") == true and S.Cue("drain") == true, "both read on with nothing stored")
+    CFG["gunsight.warlock.cue.tap"] = false
+    assert(S.Cue("tap") == false and S.Cue("drain") == true, "the tap switch is its own")
+    CFG["gunsight.warlock.cue.tap"] = nil
+    CFG["gunsight.warlock.cue.drain"] = false
+    assert(S.Cue("drain") == false and S.Cue("tap") == true, "the drain switch is its own")
+    CFG["gunsight.warlock.cue.drain"] = nil
+    NoLog()
+""")
+
 case("the_book_is_lit_by_the_secret_health_through_the_bar_and_never_compared", """
     Build()
     push(HS(3)); World()
