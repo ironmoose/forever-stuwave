@@ -560,6 +560,19 @@ def check_a_druid_form_button_uses_its_own_form_index():
         assert f"/cancelform [form:{i}]" in text and f"/cast [noform:{i}] {name}" in text, text
 
 
+def check_a_druid_draws_no_stance_buttons_while_the_shapeshift_tab_owns_the_forms():
+    lua = other("DRUID", forms=["Bear Form", "Cat Form"])
+    assert sb.shown(stance(lua, 1)) and sb.shown(stance(lua, 2)), "no owner: the stance bar draws the forms"
+    lua.execute("FS.ShapeshiftTab = { OwnsForms = function() return true end }")
+    fire(lua, "UPDATE_SHAPESHIFT_FORMS")
+    assert not sb.shown(stance(lua, 1)) and not sb.shown(stance(lua, 2)), "the tab owns them: none drawn twice"
+    assert not g(lua).FSStanceBar._shown
+    lua.execute("FS.ShapeshiftTab = { OwnsForms = function() return false end }")
+    fire(lua, "UPDATE_SHAPESHIFT_FORMS")
+    assert sb.shown(stance(lua, 1)) and sb.shown(stance(lua, 2)), "the tab off: the stance bar is back"
+    assert stock_alphas(lua)[0] == 0, "the stock bar stays dimmed throughout"
+
+
 def check_a_warriors_stances_stay_on_the_spell_type():
     # /cancelform does nothing to a stance (the stock bar's active stance does nothing when clicked either)
     lua = warrior()
@@ -638,6 +651,7 @@ CHECKS = [
     check_a_rogue_stealth_button_cancels_the_form_when_it_is_the_active_one,
     check_the_active_stance_is_lit_and_the_others_are_not,
     check_a_druid_form_button_uses_its_own_form_index,
+    check_a_druid_draws_no_stance_buttons_while_the_shapeshift_tab_owns_the_forms,
     check_a_warriors_stances_stay_on_the_spell_type,
     check_a_death_knight_presence_stays_on_the_spell_type,
     check_a_form_change_in_combat_rebuilds_the_macro_at_regen,

@@ -774,6 +774,8 @@ local function Build()
     -- A Paladin's auras are its forms; SealBar.lua draws them (with the seals), so no stance
     -- bar is built. Re-asked on every build: SealBar decides after this file's first build.
     if FS.SealBar and FS.SealBar.OwnsForms and FS.SealBar.OwnsForms() then numForms = 0 end
+    -- A Druid's forms are drawn by the Shapeshift tab while it is on (read on every rebuild, and when it is switched).
+    if FS.ShapeshiftTab and FS.ShapeshiftTab.OwnsForms and FS.ShapeshiftTab.OwnsForms() then numForms = 0 end
     for i = numForms + 1, #buttons do buttons[i]:Hide() end
     SetOwnsShoulder(isWarrior and numForms > 0)
     if numForms == 0 then

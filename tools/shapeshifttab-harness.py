@@ -320,6 +320,18 @@ def check_the_master_switch_off_hides_everything_and_frees_the_seat():
     assert 36 in standing(lua)
 
 
+def check_the_tab_owns_the_forms_for_the_stance_bar_only_while_it_is_on():
+    lua = boot(learn=DRUID_ALL)
+    assert tab(lua).OwnsForms() is True
+    rebuilds = []
+    run(lua, "FS.StanceBar = { Rebuild = function() __stanceRebuilds = (__stanceRebuilds or 0) + 1 end }")
+    run(lua, 'FS.Config.Set("tabs.druid.forms", false)')
+    assert tab(lua).OwnsForms() is False, "off: the stance bar draws the forms again"
+    assert g(lua).__stanceRebuilds == 1, "the stance bar was asked to rebuild"
+    other = boot(klass="WARRIOR")
+    assert not tab(other).OwnsForms(), "another class never owns forms"
+
+
 def check_the_seat_is_a_one_row_shoulder_36_in_with_the_paladin_cell_pitch():
     lua = boot(learn=(768, 783, 1066))
     st = standing(lua)

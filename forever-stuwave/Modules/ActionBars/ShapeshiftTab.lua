@@ -786,3 +786,14 @@ local Tab = Kit.New({
     },
 })
 Tab.FORMS = FORMS
+
+-- While this tab is on for a Druid it draws the forms, so StanceBar.lua builds none (the same hand over as a Paladin's
+-- SealBar.OwnsForms); the stock bar stays dimmed either way. Turning the tab off hands the forms back to StanceBar.
+function Tab.OwnsForms()
+    return Tab.Applies() and Tab.Enabled() == true
+end
+if FS.Config and FS.Config.OnChange then
+    FS.Config.OnChange(SETTINGS.forms.key, function()
+        if FS.StanceBar and FS.StanceBar.Rebuild then FS.StanceBar.Rebuild() end
+    end)
+end
