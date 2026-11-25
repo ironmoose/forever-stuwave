@@ -111,6 +111,7 @@ local OWNERS = {
     HUNTER = ClassTab("hunter", "CallPetTab", 1),
     MAGE = MAGE,
     ROGUE = ClassTab("rogue", "PoisonsTab", 1),
+    WARLOCK = ClassTab("warlock", "DemonTab", 1),
     PALADIN = {
         key = "paladin", cols = C.COLS, rows = C.ROWS,
         wants = function()

@@ -277,7 +277,7 @@ def check_the_file_is_in_the_toc_and_says_no_dashes():
     i = toc.index("Modules/ActionBars/CallPetTab.lua")
     assert toc.index("Modules/ActionBars/ShapeshiftTab.lua") < i < toc.index("Modules/Config/ConfigWindow.lua")
     text = TAB.read_text(encoding="utf-8")
-    assert "—" not in text and "–" not in text, "an em or en dash"
+    assert chr(0x2014) not in text and chr(0x2013) not in text, "an em or en dash"
     assert "local _, FS = ..." in text
 
 

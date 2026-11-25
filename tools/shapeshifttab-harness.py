@@ -570,7 +570,7 @@ def check_the_kit_is_one_shared_table_and_the_toc_orders_the_files():
 
 def check_the_files_say_no_dashes_and_no_automation_words():
     text = KIT.read_text(encoding="utf-8")
-    assert "—" not in text and "–" not in text, "an em or en dash"
+    assert chr(0x2014) not in text and chr(0x2013) not in text, "an em or en dash"
     for word in ("macro bot", "autoclick", "automation"):
         assert word not in text.lower(), word
 
