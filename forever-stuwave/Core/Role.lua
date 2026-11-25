@@ -1,0 +1,3 @@
+-- Forever STUwave: the player role (tank, healer, melee, ranged) and its per character store (stub for ticket C3; empty until that ticket lands)
+
+local _, FS = ...

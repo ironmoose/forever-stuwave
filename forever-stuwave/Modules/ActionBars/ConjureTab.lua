@@ -1,0 +1,3 @@
+-- Forever STUwave: Mage food and water tab (stub for ticket T4; empty until that ticket lands)
+
+local _, FS = ...

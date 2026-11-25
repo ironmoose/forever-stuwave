@@ -1,67 +1,54 @@
 -- Forever STUwave: Config window
--- /fsconfig opens one fixed size themed window: a category nav on the left, a content well on the right.
--- Pages register through FS.ConfigWindow.RegisterCategory and are built lazily; the FS.ConfigWindow.UI
--- builders stack rows in the shared style. The window is a plain non-secure frame, so it opens in combat.
+-- /fsconfig opens one resizable themed window: a grouped page list on the left, a sub tab strip and a content well on
+-- the right, a head band with the brand and the breadcrumb, and a footer band with empty slots. This file is the chrome:
+-- the window, the nav, the tabs, the sections that fold, the row registry, the scroll and the extension points other
+-- files use. Sizes live in ConfigSpec.lua, the UI.* builders in ConfigBuilders.lua, each page in its ConfigPage*.lua.
+-- The window is a plain non-secure frame, so it opens in combat.
 
 local addonName, FS = ...
 
 FS.ConfigWindow = FS.ConfigWindow or {}
 local CW = FS.ConfigWindow
 CW.UI = CW.UI or {}
+CW.I = CW.I or {}
 local UI = CW.UI
+local I = CW.I
 
 local Theme = FS.Theme
 local Config = FS.Config
+local S = CW.Spec
+local D = CW.D
+local C = CW.C
 
 -------------------------------------------------------------------------------
 -- Constants
 -------------------------------------------------------------------------------
 
 local FRAME_NAME = "ForeverSTUwaveConfig"
-local WIN_W, WIN_H = 780, 560
-local NAV_W, NAV_ITEM_H, NAV_GAP = 150, 28, 3
--- Window geometry shared by the sizes below and by BuildChrome's anchors, so the scroll range cannot drift from the frames.
-local WIN_PAD, WELL_GAP = 17, 10                    -- window edge to nav, nav to well
-local WELL_TOP, WELL_BOTTOM = 74, 36                -- well inset from the window's top and bottom
-local CONTENT_L, CONTENT_R, CONTENT_T, CONTENT_B = 14, 22, 10, 8   -- content area inset inside the well
-local BAR_INSET = 11                                -- scrollbar inset from the well's right edge
-local WELL_W = WIN_W - WIN_PAD - (WIN_PAD + NAV_W + WELL_GAP)
-local CONTENT_W = WELL_W - CONTENT_L - CONTENT_R
-local HALF_GAP = 28
-local HALF_W = (CONTENT_W - HALF_GAP) / 2
-local ROW_H, GROUP_GAP, SUB_INSET = 28, 12, 16
-local SLIDER_W, SLIDER_H, THUMB_W, READOUT_W = 150, 12, 8, 34
--- The content area is WELL_H less its top and bottom insets. Each page scrolls inside a ScrollFrame
--- that reaches PAD_X to the sides and PAD_TOP / PAD_BOT beyond it, so a button glow is not clipped.
-local WELL_H = WIN_H - WELL_TOP - WELL_BOTTOM
-local VIEW_H = WELL_H - CONTENT_T - CONTENT_B
+-- Each tab page scrolls inside a ScrollFrame that reaches PAD_X to the sides and PAD_TOP / PAD_BOT beyond the content
+-- area, so a button glow is not clipped.
 local PAD_X, PAD_TOP, PAD_BOT = 8, 6, 4
 local WHEEL_STEP = 42
-local BAR_W, THUMB_MIN_H, BAR_HIT = 4, 24, 4     -- BAR_HIT: invisible hit area added to each side of the bar and thumb
+local THUMB_MIN_H, BAR_HIT = 24, 4     -- BAR_HIT: invisible hit area added to each side of the bar and thumb
+local GRIP = 16
+local NAV_GROUPS = { "FRAMES", "SCREEN", "PANELS", "GENERAL" }
+local DEFAULT_GROUP = "GENERAL"
+local ALIASES = { unitframes = "unit" }     -- page keys the first release used
 
-local C = {
-    text = { 0.886, 0.910, 0.941, 1 },
-    muted = Theme.COLOR_MUTED,
-    cyan = Theme.COLOR_POWER,
-    violet = Theme.COLOR_BORDER,
-    pink = Theme.COLOR_HEALTH,
-    line = Theme.COLOR_BAR_BORDER,
-    track = Theme.COLOR_BAR_TRACK,
-    green = Theme.COLOR_CARET_HEALTH,
-    ink = { 0.090, 0.047, 0.165, 1 },
-    knob = { 0.357, 0.290, 0.541, 1 },
-}
-
-local categories = {}        -- key -> { key, label, order, build }
-local sorted = {}            -- the same, by order then key
-local ui = { pages = {}, nav = {} }
+local categories = {}        -- key -> { key, label, group, order, tabs = { { key, label, build, tip } } }
+local sorted = {}            -- the same, by group then order then key
+local ui = { tabs = {}, strips = {}, nav = {}, groups = {} }
 local controls = {}          -- refresh functions of every control built
 local cursors = setmetatable({}, { __mode = "k" })
+local registry = {}          -- every row builder run, in build order
+local extensions = {}        -- "page/tab" -> list of { fn, order, title }
+local handlers = {}          -- event -> list of functions
 local menuState, dialogState = {}, {}
-local CloseMenu                  -- defined with the popup menu; scrolling closes an open menu
+I.menuState, I.dialogState = menuState, dialogState
+I.ui, I.controls, I.registry = ui, controls, registry
 
 -------------------------------------------------------------------------------
--- Small helpers
+-- Small helpers (shared with the builders through CW.I)
 -------------------------------------------------------------------------------
 
 local function Forward(err)
@@ -139,30 +126,126 @@ local function TintAll(list, color)
     for _, t in ipairs(list) do Tint(t, color) end
 end
 
+-- A row switched off by its `needs` / `enabled` (ConfigBuilders.lua) marks itself fsRowOff; every control under it reads
+-- as disabled, whatever its own refresh says.
+local function RowOff(frame)
+    local p = frame
+    while p do
+        if p.fsRowOff then return true end
+        p = p.GetParent and p:GetParent() or nil
+    end
+    return false
+end
+I.RowOff = RowOff
+
 local function SetLook(control, on)
+    if on and RowOff(control) then on = false end
     if on then control:Enable() else control:Disable() end
     control:SetAlpha(on and 1 or 0.4)
 end
 
+-- One function per row that can be switched off: RefreshAll runs these first, so the controls' own refreshes see the state.
+local rowStates = {}
+I.rowStates = rowStates
+
 -- Every control registers one refresh function; RefreshAll runs them all.
+-- A control built while a tab builds belongs to that tab: RefreshAll runs only the shown tab's functions, and the other built
+-- tabs are marked stale (run when next shown). Anything built outside a tab (chrome, dialogs) refreshes every time.
+local tabLists = {}            -- tab id -> { controls = {...}, states = {...} }
+I.tabLists = tabLists
+local function ListFor(id)
+    local list = tabLists[id]
+    if not list then
+        list = { controls = {}, states = {} }
+        tabLists[id] = list
+    end
+    return list
+end
 local function Track(fn)
-    controls[#controls + 1] = fn
+    local id = ui.building
+    local into = id and ListFor(id).controls or controls
+    into[#into + 1] = fn
     fn()
 end
+function I.TrackState(fn)
+    local id = ui.building
+    local into = id and ListFor(id).states or rowStates
+    into[#into + 1] = fn
+end
 
--- Does nothing while the window is hidden: Open and Select refresh before anything is seen.
-function CW.RefreshAll()
-    if not (ui.frame and ui.frame:IsShown()) then return end
-    for _, fn in ipairs(controls) do
-        local ok, err = pcall(fn)
+I.Forward, I.Writable, I.Capitalize, I.Say = Forward, Writable, Capitalize, Say
+I.Mix, I.Tint, I.Label, I.Outline, I.Disc, I.TintAll = Mix, Tint, Label, Outline, Disc, TintAll
+I.SetLook, I.Track = SetLook, Track
+
+-------------------------------------------------------------------------------
+-- Events: CW.On(event, fn)
+-------------------------------------------------------------------------------
+
+-- "show", "hide", "select" (page, tab), "rowEnter" / "rowLeave" (the registry row), "change" (key, new, old).
+function CW.On(event, fn)
+    if type(event) ~= "string" or type(fn) ~= "function" then return false end
+    handlers[event] = handlers[event] or {}
+    table.insert(handlers[event], fn)
+    return true
+end
+
+local function Fire(event, ...)
+    for _, fn in ipairs(handlers[event] or {}) do
+        local ok, err = pcall(fn, ...)
         if not ok then Forward(err) end
     end
-    if ui.readOnlyIcon then ui.readOnlyIcon:SetShown(Config.IsReadOnly()) end
+end
+I.Fire = Fire
+
+-------------------------------------------------------------------------------
+-- Account wide window state (size, folded sections, the class strip), kept outside every profile
+-------------------------------------------------------------------------------
+
+local memoryState = {}
+
+local function StateTable()
+    local db = _G.ForeverSTUwaveDB
+    if type(db) == "table" and not Config.IsReadOnly() then
+        if type(db.ui) ~= "table" then db.ui = {} end
+        return db.ui
+    end
+    return memoryState
+end
+
+-- CW.UIState(key) reads; CW.UIState(key, value) writes. A nil value clears. Never a profile setting.
+function CW.UIState(key, ...)
+    if type(key) ~= "string" then return nil end
+    local t = StateTable()
+    if select("#", ...) > 0 then
+        t[key] = (...)
+        return (...)
+    end
+    return t[key]
+end
+
+local function FoldTable()
+    local t = StateTable()
+    if type(t.folds) ~= "table" then t.folds = {} end
+    return t.folds
 end
 
 -------------------------------------------------------------------------------
--- Stacking
+-- Flow: rows are recorded in build order and laid out again whenever one hides, folds or the window resizes
 -------------------------------------------------------------------------------
+
+local function FlowOwner(frame)
+    while frame do
+        if frame.fsFlow then return frame end
+        frame = frame:GetParent()
+    end
+end
+
+local function TabRecOf(frame)
+    local owner = FlowOwner(frame)
+    return owner and owner.fsTabRec
+end
+
+I.FlowOwner, I.TabRecOf = FlowOwner, TabRecOf
 
 local function Cursor(content)
     local c = cursors[content]
@@ -173,30 +256,118 @@ local function Cursor(content)
     return c
 end
 
--- Seats `frame` below the previous row of `content`. A frame with `fsStretch` set, or at most 1 wide,
--- stretches across the page; half = "left" or "right" places two rows side by side and drops the cursor after the right one.
+-- Seats `frame` as the next row of `content`. A frame with `fsStretch` set, or at most 1 wide, stretches across the
+-- page; half = "left" or "right" places two rows side by side. A two column section pairs its rows on its own.
 function UI.Stack(content, frame, half)
-    local c = Cursor(content)
-    local h = frame:GetHeight()
-    if half then
-        frame:SetWidth(HALF_W)
-        frame:SetPoint("TOPLEFT", content, "TOPLEFT", half == "left" and 0 or HALF_W + HALF_GAP, -c.y)
-        if half == "left" then
-            c.pending = h
-        else
-            c.y = c.y + math.max(h, c.pending or 0)
-            c.pending = nil
-        end
-        return frame
+    local owner = FlowOwner(content)
+    if not owner then
+        owner = content
+        owner.fsFlow = owner.fsFlow or {}
     end
-    if c.pending then
-        c.y = c.y + c.pending
-        c.pending = nil
-    end
-    frame:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -c.y)
-    if frame.fsStretch or frame:GetWidth() <= 1 then frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -c.y) end
-    c.y = c.y + h
+    local item = { frame = frame, half = half, section = owner.fsSectionCur, when = frame.fsWhen, kind = "row" }
+    frame.fsItem = item
+    owner.fsFlow[#owner.fsFlow + 1] = item
+    local c = Cursor(owner)
+    c.dirty = true
+    if owner.fsTabRec and owner.fsTabRec.built then I.Reflow(owner) end      -- a row added to a built tab
     return frame
+end
+
+function UI.StackHeader(content, frame, section)
+    local owner = FlowOwner(content)
+    if not owner then
+        owner = content
+        owner.fsFlow = owner.fsFlow or {}
+    end
+    local item = { frame = frame, kind = "header", section = section, when = section.when }
+    frame.fsItem = item
+    section.item = item
+    owner.fsSectionCur = section
+    owner.fsFlow[#owner.fsFlow + 1] = item
+    return frame
+end
+
+local function ItemVisible(item)
+    local sec = item.section
+    if item.hidden then return false end
+    if sec then
+        if sec.hidden then return false end
+        if sec.folded and item.kind ~= "header" then return false end
+    end
+    return true
+end
+
+-- Positions every visible item below the previous one and sizes the holder to what they take.
+function I.Reflow(owner)
+    local flow = owner.fsFlow
+    if not flow then return end
+    local y, pending, sawVisible = 0, nil, false
+    local secCount = {}
+    for _, item in ipairs(flow) do
+        local frame, sec = item.frame, item.section
+        local visible = ItemVisible(item)
+        frame:SetShown(visible)
+        if visible then
+            frame:ClearAllPoints()
+            local h = frame:GetHeight()
+            if item.kind == "header" then
+                if pending then y = y + pending; pending = nil end
+                if sawVisible then y = y + S.SEC_GAP end
+                frame:SetPoint("TOPLEFT", owner, "TOPLEFT", 0, -y)
+                frame:SetPoint("TOPRIGHT", owner, "TOPRIGHT", 0, -y)
+                item.y = y
+                y = y + h
+            else
+                local half = item.half
+                if sec and sec.two then
+                    secCount[sec] = (secCount[sec] or 0) + 1
+                    half = secCount[sec] % 2 == 1 and "left" or "right"
+                end
+                if half then
+                    frame:SetWidth(D.HALF_W)
+                    frame:SetPoint("TOPLEFT", owner, "TOPLEFT", half == "left" and 0 or D.HALF_W + S.HALF_GAP, -y)
+                    item.y = y
+                    if half == "left" then
+                        pending = h
+                    else
+                        y = y + math.max(h, pending or 0)
+                        pending = nil
+                    end
+                else
+                    if pending then y = y + pending; pending = nil end
+                    frame:SetPoint("TOPLEFT", owner, "TOPLEFT", 0, -y)
+                    if frame.fsStretch or frame:GetWidth() <= 1 then frame:SetPoint("TOPRIGHT", owner, "TOPRIGHT", 0, -y) end
+                    item.y = y
+                    y = y + h
+                end
+            end
+            sawVisible = true
+        end
+    end
+    if pending then y = y + pending end
+    local c = Cursor(owner)
+    c.y, c.pending, c.dirty = y, nil, false
+    owner:SetHeight(math.max(y, 1))
+    local rec = owner.fsTabRec
+    if rec then rec.total = y end
+end
+
+-- Re-reads every `when` of the tab; true when something showed or hid.
+function I.EvalWhens(owner)
+    local changed = false
+    for _, item in ipairs(owner.fsFlow or {}) do
+        if item.when then
+            local ok, value = pcall(item.when)
+            local hide = ok and not value
+            if item.kind == "header" then
+                if (item.section.hidden == true) ~= hide then item.section.hidden = hide; changed = true end
+            elseif (item.hidden == true) ~= hide then
+                item.hidden = hide
+                changed = true
+            end
+        end
+    end
+    return changed
 end
 
 -------------------------------------------------------------------------------
@@ -207,6 +378,12 @@ local function ShiftHeld()
     return type(IsShiftKeyDown) == "function" and IsShiftKeyDown() == true
 end
 
+local function ViewH()
+    local rec = ui.tabRec
+    local band = rec and rec.bandH or 0
+    return math.max(1, D.SCROLL_H + (ui.stripH and 0 or S.TAB_STRIP_H) - S.CONTENT_T - S.CONTENT_B - band)
+end
+
 -- The nearest scroll page at or above `frame` (a builder's content may be a sub-frame of the page holder).
 local function FindScrollPage(frame)
     while frame do
@@ -215,28 +392,28 @@ local function FindScrollPage(frame)
     end
 end
 
--- Sizes the page to what its builders stacked: a taller holder gives a scroll range, a page that fits has none.
 local function MeasurePage(page)
-    local c = Cursor(page.fsHolder)
-    local y = c.y + (c.pending or 0)
-    page.fsHolder:SetHeight(math.max(y, 1))
+    local owner = page.fsHolder
+    local y = Cursor(owner).y
+    owner:SetHeight(math.max(y, 1))
     page.fsChild:SetHeight(y + PAD_TOP + PAD_BOT)
-    page.fsRange = math.max(0, y - VIEW_H)
+    page.fsRange = math.max(0, y - ViewH())
 end
 
--- The slim bar in the well's right margin: shown only while the current page overflows.
+-- The slim bar in the well's right margin: shown only while the current tab overflows.
 local function UpdateBar()
     local bar = ui.bar
     if not bar then return end
-    local page = ui.current and ui.pages[ui.current]
+    local page = ui.tabRec and ui.tabRec.page
     local range = page and page.fsRange or 0
     if range <= 0 then
         bar:Hide()
         return
     end
+    local view = ViewH()
     local thumb = bar.fsThumb
-    local height = math.max(THUMB_MIN_H, math.floor(VIEW_H * VIEW_H / (VIEW_H + range)))
-    local travel = VIEW_H - height
+    local height = math.max(THUMB_MIN_H, math.floor(view * view / (view + range)))
+    local travel = view - height
     thumb:SetHeight(height)
     thumb:ClearAllPoints()
     thumb:SetPoint("TOP", bar, "TOP", 0, -math.floor(travel * page:GetVerticalScroll() / range + 0.5))
@@ -248,46 +425,52 @@ local function SetScroll(page, value)
     if value == page:GetVerticalScroll() then return end
     page:SetVerticalScroll(value)
     -- An open dropdown menu follows its button, which just moved; close it rather than let it hang off the panel.
-    CloseMenu()
-    -- A tooltip owned by a row that just moved would hang over the wrong place.
+    I.CloseMenu()
     local owner = GameTooltip:GetOwner()
     while owner and owner ~= page do owner = owner:GetParent() end
     if owner then GameTooltip:Hide() end
-    if ui.pages[ui.current] == page then UpdateBar() end
+    if ui.tabRec and ui.tabRec.page == page then UpdateBar() end
 end
 
 local function ScrollBy(page, delta)
     SetScroll(page, page:GetVerticalScroll() - delta * WHEEL_STEP)
 end
 
+I.FindScrollPage, I.ScrollBy, I.ShiftHeld = FindScrollPage, ScrollBy, ShiftHeld
+
 -- Re-measures the page after its rows changed height or the window came back: a new range, the offset kept inside it.
 local function Remeasure(page)
     MeasurePage(page)
     SetScroll(page, page:GetVerticalScroll())
-    if ui.pages[ui.current] == page then UpdateBar() end
+    if ui.tabRec and ui.tabRec.page == page then UpdateBar() end
 end
 
--- Call after a builder adds or removes rows on a page that is already built.
+-- Call after a builder adds or removes rows on a tab that is already built.
 function CW.RefreshScroll()
-    local page = ui.current and ui.pages[ui.current]
-    if page then Remeasure(page) end
+    local rec = ui.tabRec
+    if rec and rec.page then
+        I.Reflow(rec.page.fsHolder)
+        Remeasure(rec.page)
+    end
 end
 
--- One ScrollFrame per page; builders stack into `fsHolder`, a frame inset by PAD_X inside the scroll child.
-local function NewPage(key)
+-- One ScrollFrame per tab; builders stack into `fsHolder`, a frame inset by PAD_X inside the scroll child.
+local function NewTabPage(rec)
     local page = CreateFrame("ScrollFrame", nil, ui.content)
     page:SetPoint("TOPLEFT", ui.content, "TOPLEFT", -PAD_X, PAD_TOP)
     page:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", PAD_X, -PAD_BOT)
     page:SetClipsChildren(true)
     page:EnableMouseWheel(true)
-    page.fsPageKey = key
+    page.fsPageKey = rec.cat.key
     local child = CreateFrame("Frame", nil, page)
-    child:SetSize(CONTENT_W + 2 * PAD_X, 1)
+    child:SetSize(D.CONTENT_W + 2 * PAD_X, 1)
     page:SetScrollChild(child)
     local holder = CreateFrame("Frame", nil, child)
-    holder:SetWidth(CONTENT_W)
+    holder:SetWidth(D.CONTENT_W)
     holder:SetPoint("TOPLEFT", child, "TOPLEFT", PAD_X, -PAD_TOP)
     holder.fsScrollPage = page
+    holder.fsFlow = {}
+    holder.fsTabRec = rec
     page.fsChild, page.fsHolder, page.fsRange = child, holder, 0
     page:SetScript("OnMouseWheel", function(self, delta) ScrollBy(self, delta) end)
     return page
@@ -296,26 +479,26 @@ end
 local function BuildScrollbar(well)
     local bar = CreateFrame("Frame", nil, well)
     bar.fsScrollbar = true
-    bar:SetWidth(BAR_W)
-    bar:SetPoint("TOPRIGHT", well, "TOPRIGHT", -BAR_INSET, -CONTENT_T)
-    bar:SetPoint("BOTTOMRIGHT", well, "BOTTOMRIGHT", -BAR_INSET, CONTENT_B)
+    bar:SetWidth(S.BAR_W)
+    bar:SetPoint("TOPRIGHT", well, "TOPRIGHT", -S.BAR_INSET, -S.CONTENT_T)
+    bar:SetPoint("BOTTOMRIGHT", well, "BOTTOMRIGHT", -S.BAR_INSET, S.CONTENT_B)
     -- A click on the rail jumps the thumb under the cursor (a click on the thumb itself starts a drag instead).
     bar:EnableMouse(true)
     bar:SetHitRectInsets(-BAR_HIT, -BAR_HIT, 0, 0)
     bar:SetScript("OnMouseDown", function(self, button)
         if button ~= "LeftButton" then return end
-        local page = ui.current and ui.pages[ui.current]
+        local page = ui.tabRec and ui.tabRec.page
         local top = self:GetTop()
         if not (page and (page.fsRange or 0) > 0 and top) then return end
         local _, y = GetCursorPosition()
-        local travel = VIEW_H - self.fsThumb:GetHeight()
+        local travel = ViewH() - self.fsThumb:GetHeight()
         if travel <= 0 then return end
         local thumbTop = (top - y / self:GetEffectiveScale()) - self.fsThumb:GetHeight() / 2
         SetScroll(page, thumbTop / travel * page.fsRange)
     end)
     bar:EnableMouseWheel(true)
     bar:SetScript("OnMouseWheel", function(_, delta)
-        local page = ui.current and ui.pages[ui.current]
+        local page = ui.tabRec and ui.tabRec.page
         if page then ScrollBy(page, delta) end
     end)
     local rail = bar:CreateTexture(nil, "BACKGROUND")
@@ -324,7 +507,7 @@ local function BuildScrollbar(well)
     rail:SetPoint("TOP", bar, "TOP", 0, 0)
     rail:SetPoint("BOTTOM", bar, "BOTTOM", 0, 0)
     local thumb = CreateFrame("Frame", nil, bar)
-    thumb:SetSize(BAR_W, THUMB_MIN_H)
+    thumb:SetSize(S.BAR_W, THUMB_MIN_H)
     thumb:SetPoint("TOP", bar, "TOP", 0, 0)
     thumb:EnableMouse(true)
     thumb:SetHitRectInsets(-BAR_HIT, -BAR_HIT, 0, 0)
@@ -340,13 +523,13 @@ local function BuildScrollbar(well)
     end
     thumb:SetScript("OnMouseDown", function(self, button)
         if button ~= "LeftButton" then return end
-        local page = ui.current and ui.pages[ui.current]
+        local page = ui.tabRec and ui.tabRec.page
         if not (page and page.fsRange > 0) then return end
         local _, y = GetCursorPosition()
         startY, startScroll = y / self:GetEffectiveScale(), page:GetVerticalScroll()
         self:SetScript("OnUpdate", function()
             local _, now = GetCursorPosition()
-            local travel = VIEW_H - self:GetHeight()
+            local travel = ViewH() - self:GetHeight()
             if not startY or travel <= 0 then return end
             SetScroll(page, startScroll + (startY - now / self:GetEffectiveScale()) * page.fsRange / travel)
         end)
@@ -357,722 +540,331 @@ local function BuildScrollbar(well)
     ui.bar = bar
 end
 
-local function NewRow(content, o)
-    local row = CreateFrame("Frame", nil, content)
-    row:SetHeight(o.height or ROW_H)
-    local inset = o.inset or 0
-    row.fsLabel = Label(row, o.label, o.size or 11, C.text)
-    row.fsLabel:SetPoint("LEFT", row, "LEFT", inset, 0)
-    if o.tip then
-        row.fsHelp = UI.HelpIcon(row, o.tip)
-        row.fsHelp:SetPoint("LEFT", row.fsLabel, "RIGHT", 6, 0)
+-------------------------------------------------------------------------------
+-- Pinned band: a frame that sticks to the top of the scroll area while the tab scrolls beneath it
+-------------------------------------------------------------------------------
+
+-- UI.Band(content, height) returns a frame the tab's builder fills (a preview, a role bar). One per tab.
+function UI.Band(content, height)
+    local rec = TabRecOf(content)
+    if not rec then return nil end
+    height = height or 64
+    if not rec.band then
+        rec.band = CreateFrame("Frame", nil, ui.content)
+        rec.band:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
+        rec.band:SetPoint("TOPRIGHT", ui.content, "TOPRIGHT", 0, 0)
+        rec.band.fsBand = true
+        local rule = rec.band:CreateTexture(nil, "ARTWORK")
+        rule:SetColorTexture(C.line[1], C.line[2], C.line[3], 1)
+        rule:SetHeight(1)
+        rule:SetPoint("BOTTOMLEFT", rec.band, "BOTTOMLEFT", -S.CONTENT_L, 0)
+        rule:SetPoint("BOTTOMRIGHT", rec.band, "BOTTOMRIGHT", S.CONTENT_R, 0)
+        rec.band.fsRule = rule
     end
-    UI.Stack(content, row, o.half)
-    return row
+    rec.band:SetHeight(height)
+    rec.bandH = height + 8
+    rec.band:SetShown(ui.tabRec == rec)
+    I.PlaceTabPage(rec)
+    return rec.band
+end
+
+function I.PlaceTabPage(rec)
+    if not rec.page then return end
+    rec.page:ClearAllPoints()
+    rec.page:SetPoint("TOPLEFT", ui.content, "TOPLEFT", -PAD_X, PAD_TOP - (rec.bandH or 0))
+    rec.page:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", PAD_X, -PAD_BOT)
 end
 
 -------------------------------------------------------------------------------
--- Help icon
+-- Row registry
 -------------------------------------------------------------------------------
 
--- A small circled ? whose tooltip carries the explanation, in the addon's skinned GameTooltip.
-function UI.HelpIcon(parent, tip)
-    local icon = CreateFrame("Frame", nil, parent)
-    icon:SetSize(12, 12)
-    icon:EnableMouse(true)
-    icon.fsTip = tip
-    local ringColor = Mix(C.violet, C.line, 0.3)
-    local ring = Disc(icon, 12, ringColor, 0)
-    Disc(icon, 10, C.track, 1)
-    local glyph = Label(icon, "?", 9, C.muted)
-    glyph:SetPoint("CENTER", icon, "CENTER", 0, 0)
-    icon:SetScript("OnEnter", function(self)
-        TintAll(ring, C.cyan)
-        Theme.ApplyMono(glyph, 9, C.cyan)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(self.fsTip, 1, 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    icon:SetScript("OnLeave", function()
-        TintAll(ring, ringColor)
-        Theme.ApplyMono(glyph, 9, C.muted)
-        GameTooltip:Hide()
-    end)
-    return icon
+-- Every builder records its row here: { key, label, tip, page, tab, section, row, sub, needs, reason, enabled, reload,
+-- min, max, target, when, inverted, nodot, kind }.
+function I.Register(row, o, kind)
+    local rec = TabRecOf(row:GetParent() or row)
+    local owner = row:GetParent() and FlowOwner(row:GetParent())
+    local sec = owner and owner.fsSectionCur
+    local entry = {
+        key = o.regKey or o.key, label = o.label, tip = o.tip, kind = kind,
+        page = rec and rec.cat.key, tab = rec and rec.def.key, section = sec and sec.title,
+        row = row, sub = o.sub == true, needs = o.needs, reason = o.reason or (o.nl and ("Needs " .. o.nl) or nil),
+        enabled = o.enabled, reload = o.reload, min = o.min, max = o.max, target = o.target, when = o.when,
+        inverted = o.inverted == true, nodot = o.nodot == true,
+        secObj = sec, cfgKey = o.key, isChanged = o.isChanged, resetFn = o.reset,
+    }
+    row.fsEntry = entry
+    registry[#registry + 1] = entry
+    return entry
 end
 
--------------------------------------------------------------------------------
--- Header
--------------------------------------------------------------------------------
+function CW.Rows()
+    return registry
+end
 
--- The "// TEXT" section header with a rule; `tip` adds the ? icon.
-function UI.Header(content, text, tip)
-    local c = Cursor(content)
-    if c.pending then
-        c.y = c.y + c.pending
-        c.pending = nil
+-- Changed state: a keyed row differs from its default when the active profile stores a value for it; a row built with
+-- get/set opts in with isChanged / reset functions; `nodot` rows (pickers) never count.
+function I.EntryChanged(entry)
+    if entry.nodot or entry.kind == "note" then return false end
+    if entry.cfgKey then return Config.IsStored(entry.cfgKey) end
+    if entry.isChanged then
+        local ok, value = pcall(entry.isChanged)
+        return ok and value == true
     end
-    if c.y > 0 then c.y = c.y + GROUP_GAP end
-    local header = CreateFrame("Frame", nil, content)
-    header:SetHeight(16)
-    local slash = Label(header, "//", 10, C.line)
-    slash:SetPoint("LEFT", header, "LEFT", 0, 0)
-    local title = Label(header, text:upper(), 10, C.violet)
-    title:SetPoint("LEFT", slash, "RIGHT", 6, 0)
-    local last = title
-    if tip then
-        local icon = UI.HelpIcon(header, tip)
-        icon:SetPoint("LEFT", title, "RIGHT", 6, 0)
-        last = icon
+    return false
+end
+
+function I.EntryReset(entry)
+    if entry.resetFn then
+        local ok, err = pcall(entry.resetFn)
+        if not ok then Forward(err) end
+    elseif entry.cfgKey then
+        Config.Set(entry.cfgKey, nil)
     end
-    local rule = header:CreateTexture(nil, "ARTWORK")
-    rule:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.35)
-    rule:SetHeight(1)
-    rule:SetPoint("LEFT", last, "RIGHT", 8, 0)
-    rule:SetPoint("RIGHT", header, "RIGHT", 0, 0)
-    return UI.Stack(content, header)
 end
 
--------------------------------------------------------------------------------
--- Buttons
--------------------------------------------------------------------------------
-
-local function MakeButton(parent, o)
-    local b = CreateFrame("Button", nil, parent)
-    if o.width then b:SetSize(o.width, o.height) else b:SetHeight(o.height) end
-    b:RegisterForClicks("LeftButtonUp")
-    b.fsRing = o.ring
-    b.fsFill = Theme.AddCutSliceFill(b, o.fill or C.ink, o.chamfer)
-    b.fsSkin = Theme.SkinButton(b, { borderColor = o.ring, chamfer = o.chamfer, glowAlpha = o.glow or 0.35 })
-    b.fsLabel = Label(b, o.text or "", o.size or 11, o.textColor)
-    b.fsLabel:SetPoint("CENTER", b, "CENTER", 0, 0)
-    return b
-end
-
--- Retints a button's ring, glow, fill and label together (selected, hovered or plain).
-local function Restyle(b, ring, textColor, fill, glow)
-    Tint(b.fsSkin and b.fsSkin.border and b.fsSkin.border.ring, ring, 1)
-    Tint(b.fsSkin and b.fsSkin.glow, ring, glow)
-    Tint(b.fsFill, fill, 1)
-    Theme.ApplyMono(b.fsLabel, select(2, b.fsLabel:GetFont()) or 11, textColor)
-    b.fsRing = ring
-end
-
-local function HoverStyle(b, ring)
-    b:SetScript("OnEnter", function(self)
-        if self.fsSelected or not self:IsEnabled() then return end
-        Tint(self.fsFill, Mix(C.ink, ring, 0.16), 1)
-    end)
-    b:SetScript("OnLeave", function(self)
-        if self.fsSelected then return end
-        Tint(self.fsFill, C.ink, 1)
-    end)
-end
-
-local function BuildButton(parent, o)
-    local ring = o.warn and C.pink or (o.big and C.cyan or C.violet)
-    local textColor = o.warn and C.pink or C.cyan
-    local width = not o.big and math.max(70, math.floor(#o.text * 6.6 + 28)) or nil
-    local b = MakeButton(parent, {
-        width = width, height = o.big and 36 or 24, ring = ring, textColor = textColor,
-        chamfer = 6, size = o.big and 14 or 11, text = o.text,
-    })
-    b.fsWarn = o.warn == true
-    b.fsStretch = o.big == true
-    HoverStyle(b, ring)
-    b:SetScript("OnClick", function(self)
-        if not self:IsEnabled() then return end
-        local function run()
-            if o.onClick then o.onClick(self) end
-            CW.RefreshAll()
+-- The keys of the changed rows of a page (and tab), for the page reset and the search. Only built tabs have rows.
+function CW.ChangedKeys(page, tab)
+    page = ALIASES[page] or page
+    local list = {}
+    for _, entry in ipairs(registry) do
+        if (page == nil or entry.page == page) and (tab == nil or entry.tab == tab) and I.EntryChanged(entry) then
+            list[#list + 1] = entry.cfgKey or entry.key or entry.label
         end
-        local confirm = o.confirm
-        if type(confirm) == "function" then confirm = confirm() end
-        if confirm then UI.Confirm(confirm, run) else run() end
-    end)
-    Track(function()
-        SetLook(b, Writable() and (o.enabled == nil or o.enabled() == true))
-    end)
-    return b
-end
-
--- {text, big, warn, onClick, confirm}. With `label` (and optional `tip`) the button sits at the right
--- of a label row. `enabled` is an optional function re-read on refresh. `confirm` may be a function.
-function UI.Button(content, o)
-    if o.label then
-        local row = NewRow(content, { label = o.label, tip = o.tip })
-        local b = BuildButton(row, o)
-        b:SetPoint("RIGHT", row, "RIGHT", 0, 0)
-        row.control = b
-        return row
     end
-    local b = BuildButton(content, o)
-    return UI.Stack(content, b)
+    return list
 end
 
--- A row of buttons side by side: a list of the same tables UI.Button takes.
-function UI.ButtonRow(content, list)
-    local row = CreateFrame("Frame", nil, content)
-    row:SetHeight(32)
-    local prev
-    for _, o in ipairs(list) do
-        local b = BuildButton(row, o)
-        if prev then b:SetPoint("LEFT", prev, "RIGHT", 8, 0) else b:SetPoint("LEFT", row, "LEFT", 0, 0) end
-        prev = b
-    end
-    return UI.Stack(content, row)
-end
-
--------------------------------------------------------------------------------
--- Toggle and segmented control
--------------------------------------------------------------------------------
-
-local function ReadValue(o)
-    if o.key then return Config.Get(o.key) end
-    return o.get()
-end
-
-local function WriteValue(o, value)
-    local ok, result
-    if o.key then ok, result = pcall(Config.Set, o.key, value) else ok, result = pcall(o.set, value) end
-    if not ok then
-        Forward(result)
-        Say("that setting could not be changed.")
-    elseif result == false then
-        Say("settings are read-only this session.")
-    end
-    return ok and result ~= false
-end
-
-local function MakeToggle(parent)
-    local b = CreateFrame("Button", nil, parent)
-    b:SetSize(34, 16)
-    b:RegisterForClicks("LeftButtonUp")
-    b.fsFill = Theme.AddCutSliceFill(b, C.track, 4)
-    b.fsSkin = Theme.SkinButton(b, { borderColor = C.line, chamfer = 4, glowAlpha = 0 })
-    local knob = CreateFrame("Frame", nil, b)
-    knob:SetSize(12, 8)
-    b.fsKnob = knob
-    knob.fsFill = Theme.AddCutSliceFill(knob, C.knob, 3)
-    return b
-end
-
-local function PaintToggle(b, on)
-    b.fsChecked = on
-    local ring = on and C.cyan or C.line
-    Tint(b.fsSkin.border.ring, ring, 1)
-    Tint(b.fsSkin.glow, C.cyan, on and 0.35 or 0)
-    Tint(b.fsFill, on and Mix(C.track, C.cyan, 0.14) or C.track, 1)
-    Tint(b.fsKnob.fsFill, on and C.cyan or C.knob, 1)
-    b.fsKnob:ClearAllPoints()
-    b.fsKnob:SetPoint(on and "RIGHT" or "LEFT", b, on and "RIGHT" or "LEFT", on and -4 or 4, 0)
-end
-
--- {label, key, get, set, tip, half, master, reload}: bound to FS.Config.Get/Set(key), or to get()/set(v).
--- `reload` (master rows) is a function returning the line to show beside a Reload button, or nil for none: the
--- part of a change that only a /reload can apply, so the row never silently does nothing.
-function UI.Toggle(content, o)
-    local master = o.master == true
-    local row = NewRow(content, {
-        label = o.label, tip = o.tip, half = o.half, height = master and 34 or ROW_H,
-        size = master and 12 or 11, inset = master and 10 or o.inset or 0,
-    })
-    if master then
-        Theme.AddCutSliceFill(row, { C.violet[1], C.violet[2], C.violet[3], 0.07 }, 6)
-        Theme.SkinButton(row, { borderColor = C.violet, chamfer = 6, glowAlpha = 0 })
-    end
-    local b = MakeToggle(row)
-    b:SetPoint("RIGHT", row, "RIGHT", master and -10 or 0, 0)
-    local state
-    if not o.half then
-        state = Label(row, "OFF", 9, C.line)
-        state:SetPoint("RIGHT", b, "LEFT", -8, 0)
-    end
-    b:SetScript("OnClick", function(self)
-        if not self:IsEnabled() then return end
-        WriteValue(o, not (ReadValue(o) == true))
-        CW.RefreshAll()
-    end)
-    local note, reloadButton
-    if o.reload and state then
-        reloadButton = BuildButton(row, {
-            text = "Reload", warn = true,
-            -- Addon code cannot reload on this client: the secure reload button is laid over this one
-            -- while the pointer is on it, so a click lands there. This click only runs without it.
-            onClick = function()
-                local SR = FS.SecureReload
-                if SR and SR.Explain then SR.Explain() end
-            end,
-        })
-        reloadButton:HookScript("OnEnter", function(self)
-            local SR = FS.SecureReload
-            if SR and SR.Cover then SR.Cover(self) end
-        end)
-        reloadButton:HookScript("OnHide", function(self)
-            local SR = FS.SecureReload
-            if SR and SR.Covering and SR.Covering() == self then SR.Uncover() end
-        end)
-        reloadButton:SetPoint("RIGHT", state, "LEFT", -12, 0)
-        note = Label(row, "", 10, C.pink)
-        note:SetPoint("RIGHT", reloadButton, "LEFT", -8, 0)
-    end
-    Track(function()
-        local on = ReadValue(o) == true
-        PaintToggle(b, on)
-        if note then
-            local line = o.reload()
-            note:SetText(line or "")
-            note:SetShown(line ~= nil)
-            reloadButton:SetShown(line ~= nil)
+-- One write per key (a registry row resets by its own function), then one refresh.
+function CW.ResetKeys(list)
+    for _, key in ipairs(list or {}) do
+        local entry
+        for _, e in ipairs(registry) do
+            if e.cfgKey == key or e.key == key then entry = e break end
         end
-        if state then
-            state:SetText(on and "ON" or "OFF")
-            Theme.ApplyMono(state, 9, on and C.cyan or C.line)
-        end
-        SetLook(b, Writable())
-    end)
-    row.control = b
-    return row
-end
-
--- {label, options = {{value, text}, ...}, key, get, set, tip, sub, enabled}: one button per option, one selected.
--- `sub` indents the row under the toggle above it with the mockup's elbow; `enabled` is re-read on refresh.
-function UI.Segmented(content, o)
-    local row = NewRow(content, { label = o.label, tip = o.tip, inset = o.sub and SUB_INSET or 0 })
-    if o.sub then
-        local down = row:CreateTexture(nil, "ARTWORK")
-        down:SetColorTexture(C.line[1], C.line[2], C.line[3], 1)
-        down:SetSize(1, 14)
-        down:SetPoint("TOPLEFT", row, "TOPLEFT", 4, 0)
-        local across = row:CreateTexture(nil, "ARTWORK")
-        across:SetColorTexture(C.line[1], C.line[2], C.line[3], 1)
-        across:SetSize(8, 1)
-        across:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -13)
+        if entry then I.EntryReset(entry) else Config.Set(key, nil) end
     end
-    local holder = CreateFrame("Frame", nil, row)
-    holder:SetPoint("RIGHT", row, "RIGHT", 0, 0)
-    local buttons, total = {}, 0
-    for _, option in ipairs(o.options) do
-        local width = math.floor(#option.text * 6.3 + 22)
-        local b = MakeButton(holder, {
-            width = width, height = 22, ring = C.line, textColor = C.muted, chamfer = 4, size = 10.5, glow = 0,
-            text = option.text,
-        })
-        b:SetPoint("LEFT", holder, "LEFT", total, 0)
-        total = total + width + 2
-        b:SetScript("OnClick", function(self)
-            if not self:IsEnabled() then return end
-            WriteValue(o, option.value)
-            CW.RefreshAll()
-        end)
-        buttons[#buttons + 1] = { button = b, value = option.value }
-    end
-    holder:SetSize(math.max(total - 2, 1), 22)
-    Track(function()
-        local current = ReadValue(o)
-        holder.fsValue = current
-        for _, item in ipairs(buttons) do
-            local selected = item.value == current
-            item.button.fsSelected = selected
-            if selected then
-                Restyle(item.button, C.cyan, C.cyan, Mix(C.ink, C.cyan, 0.2), 0.5)
-            else
-                Restyle(item.button, C.line, C.muted, C.ink, 0)
-            end
-            SetLook(item.button, Writable() and (o.enabled == nil or o.enabled() == true))
-        end
-    end)
-    row.control = holder
-    return row
-end
-
--------------------------------------------------------------------------------
--- Slider
--------------------------------------------------------------------------------
-
--- The value for a position along the track (0 to 1), held inside the range and snapped to the step.
-local function SliderValue(lo, hi, step, fraction)
-    if not (hi > lo) then return lo end
-    local steps = math.floor(math.min(1, math.max(0, fraction)) * (hi - lo) / step + 0.5)
-    local value = math.floor((lo + steps * step) * 1e6 + 0.5) / 1e6
-    return math.min(hi, value)
-end
-
--- The mouse position along the track as a fraction of its width, or nil when the client cannot say.
-local function CursorFraction(track)
-    local left, scale = track:GetLeft(), track:GetEffectiveScale()
-    if type(GetCursorPosition) ~= "function" or not left or not scale or scale <= 0 then return nil end
-    return ((GetCursorPosition()) / scale - left) / SLIDER_W
-end
-
-local function PaintSlider(track, lo, hi, value)
-    local x = hi > lo and (value - lo) / (hi - lo) * SLIDER_W or 0
-    track.fsValue = value
-    track.fsThumb:ClearAllPoints()
-    track.fsThumb:SetPoint("CENTER", track, "LEFT", x, 0)
-    track.fsFill:SetShown(x > 0)
-    if x > 0 then track.fsFill:SetWidth(x) end
-end
-
--- {label, key, get, set, min, max, step, fmt, tip}: a thin track with a cyan fill, a slab thumb and a mono readout.
--- `fmt` is a format string or a function of the value. Click or drag the track, or use the mouse wheel.
-function UI.Slider(content, o)
-    local lo, hi = o.min or 0, o.max or 100
-    local step = (o.step and o.step > 0) and o.step or 1
-    local row = NewRow(content, { label = o.label, tip = o.tip })
-    local readout = Label(row, "", 10.5, C.cyan)
-    readout:SetWidth(READOUT_W)
-    readout:SetJustifyH("RIGHT")
-    readout:SetPoint("RIGHT", row, "RIGHT", 0, 0)
-    row.fsReadout = readout
-
-    local track = CreateFrame("Button", nil, row)
-    track:SetSize(SLIDER_W, SLIDER_H)
-    track:SetPoint("RIGHT", readout, "LEFT", -10, 0)
-    track:EnableMouse(true)
-    track:EnableMouseWheel(true)
-    track:SetHitRectInsets(0, 0, -8, -8)
-    local rail = track:CreateTexture(nil, "ARTWORK")
-    local railColor = Mix(C.line, C.violet, 0.45)
-    rail:SetColorTexture(railColor[1], railColor[2], railColor[3], 1)
-    rail:SetHeight(2)
-    rail:SetPoint("LEFT", track, "LEFT", 0, 0)
-    rail:SetPoint("RIGHT", track, "RIGHT", 0, 0)
-    track.fsFill = track:CreateTexture(nil, "ARTWORK", nil, 1)
-    track.fsFill:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 1)
-    track.fsFill:SetHeight(2)
-    track.fsFill:SetPoint("LEFT", track, "LEFT", 0, 0)
-    local thumb = CreateFrame("Frame", nil, track)
-    thumb:SetSize(THUMB_W, SLIDER_H)
-    thumb.fsFill = Theme.AddCutSliceFill(thumb, C.ink, 3)
-    thumb.fsSkin = Theme.SkinButton(thumb, { borderColor = C.cyan, chamfer = 3, glowAlpha = 0.55 })
-    track.fsThumb = thumb
-
-    local function Refresh()
-        local value = ReadValue(o)
-        if type(value) ~= "number" or value ~= value then value = lo end
-        value = math.min(hi, math.max(lo, value))
-        local text = o.fmt
-        if type(text) == "function" then text = text(value) else text = (text or "%s"):format(value) end
-        readout:SetText(tostring(text))
-        PaintSlider(track, lo, hi, value)
-        return value
-    end
-
-    local function StopDrag()
-        track.fsDragging = false
-        track:SetScript("OnUpdate", nil)
-    end
-    -- Writes only a changed value; a refused write ends a drag so it cannot repeat every frame. A keyed slider is
-    -- repainted by the Config.OnAnyChange refresh; only a get / set one has to repaint itself.
-    local function Commit(value)
-        if value == ReadValue(o) then return end
-        if not WriteValue(o, value) then StopDrag() end
-        if not o.key then Refresh() end
-    end
-    local function Drag()
-        if not track:IsEnabled() then StopDrag() return end
-        local fraction = CursorFraction(track)
-        if fraction then Commit(SliderValue(lo, hi, step, fraction)) end
-    end
-    track:SetScript("OnMouseDown", function(self, button)
-        if button ~= "LeftButton" or not self:IsEnabled() then return end
-        self.fsDragging = true
-        Drag()
-        self:SetScript("OnUpdate", Drag)
-    end)
-    track:SetScript("OnMouseUp", StopDrag)
-    track:SetScript("OnHide", StopDrag)
-    track:SetScript("OnMouseWheel", function(self, delta)
-        -- On a page that scrolls the wheel scrolls it, so passing over a slider never changes a setting by accident;
-        -- hold Shift to adjust the slider.
-        local page = FindScrollPage(content)
-        if page and (page.fsRange or 0) > 0 and not ShiftHeld() then
-            ScrollBy(page, delta)
-            return
-        end
-        if not self:IsEnabled() or not (hi > lo) then return end
-        local value = Refresh() + (delta > 0 and step or -step)
-        Commit(SliderValue(lo, hi, step, (value - lo) / (hi - lo)))
-    end)
-    Track(function()
-        Refresh()
-        local on = Writable()
-        if on then track:Enable() else track:Disable() end
-        row:SetAlpha(on and 1 or 0.4)                    -- the label and the readout dim with the track
-    end)
-    row.control = track
-    return row
-end
-
--------------------------------------------------------------------------------
--- Popup menu and dropdown
--------------------------------------------------------------------------------
-
--- While `frame` is shown it consumes Escape to run `close`, so Escape does not close the whole window;
--- every other key still reaches the game.
-local function CloseOnEscape(frame, close)
-    frame:SetScript("OnShow", function(self) self:EnableKeyboard(true) end)
-    frame:SetScript("OnHide", function(self) self:EnableKeyboard(false) end)
-    frame:SetScript("OnKeyDown", function(self, key)
-        if key == "ESCAPE" then
-            self:SetPropagateKeyboardInput(false)
-            close()
-        else
-            self:SetPropagateKeyboardInput(true)
-        end
-    end)
-end
-
-local MENU_ITEM_H = 24
-
-function CloseMenu()
-    if menuState.catcher then menuState.catcher:Hide() end
-end
-
-local function EnsureMenu()
-    if menuState.frame then return menuState end
-    local catcher = CreateFrame("Button", nil, UIParent)
-    catcher:SetAllPoints(UIParent)
-    catcher:SetFrameStrata("FULLSCREEN_DIALOG")
-    catcher:EnableMouse(true)
-    catcher:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    catcher:SetScript("OnClick", CloseMenu)
-    -- The wheel stops here: it must not reach a page or a slider behind the open menu.
-    catcher:EnableMouseWheel(true)
-    catcher:SetScript("OnMouseWheel", function() end)
-    CloseOnEscape(catcher, CloseMenu)
-    catcher:Hide()
-    local frame = CreateFrame("Frame", "ForeverSTUwaveConfigMenu", catcher)
-    frame:SetFrameLevel(catcher:GetFrameLevel() + 2)
-    frame:EnableMouse(true)
-    Theme.SkinPanel(frame, { strip = false, scanline = false })
-    menuState.catcher, menuState.frame, menuState.items = catcher, frame, {}
-    return menuState
-end
-
-local function MenuItem(index)
-    local state = menuState
-    local item = state.items[index]
-    if item then return item end
-    item = CreateFrame("Button", nil, state.frame)
-    item:SetHeight(MENU_ITEM_H)
-    item:RegisterForClicks("LeftButtonUp")
-    item.fsHover = item:CreateTexture(nil, "BACKGROUND")
-    item.fsHover:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 0.12)
-    item.fsHover:SetAllPoints(item)
-    item.fsHover:Hide()
-    item.fsLabel = Label(item, "", 11, C.text)
-    item.fsLabel:SetPoint("LEFT", item, "LEFT", 10, 0)
-    item:SetScript("OnEnter", function(self) self.fsHover:Show() end)
-    item:SetScript("OnLeave", function(self) self.fsHover:Hide() end)
-    state.items[index] = item
-    return item
-end
-
--- Lists `items` ({value, text}) under `anchor`; a pick runs onPick(value) and closes the menu.
-local function OpenMenu(anchor, items, onPick, current)
-    local state = EnsureMenu()
-    if #items == 0 then return end
-    local width = math.max(anchor:GetWidth(), 160)
-    state.frame:ClearAllPoints()
-    state.frame:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
-    state.frame:SetSize(width, #items * MENU_ITEM_H + 8)
-    for i, entry in ipairs(items) do
-        local item = MenuItem(i)
-        item:ClearAllPoints()
-        item:SetPoint("TOPLEFT", state.frame, "TOPLEFT", 4, -4 - (i - 1) * MENU_ITEM_H)
-        item:SetWidth(width - 8)
-        item.fsLabel:SetText(entry.text)
-        Theme.ApplyMono(item.fsLabel, 11, entry.value == current and C.cyan or C.text)
-        item:SetScript("OnClick", function()
-            CloseMenu()
-            onPick(entry.value)
-            CW.RefreshAll()
-        end)
-        item:Show()
-    end
-    for i = #items + 1, #state.items do state.items[i]:Hide() end
-    state.catcher:Show()
-end
-
--- {label, tip, get, items, set, text, free}: `free` keeps it usable when settings are read-only (it picks a view, not a setting). `items` is a function returning {value, text} entries; `text(value)`
--- names the current value on the button (it shows tostring(value) without it).
-function UI.Dropdown(content, o)
-    local row = NewRow(content, { label = o.label, tip = o.tip })
-    local b = MakeButton(row, { width = 200, height = 24, ring = C.violet, textColor = C.cyan, chamfer = 6, text = "" })
-    b:SetPoint("RIGHT", row, "RIGHT", 0, 0)
-    b.fsLabel:ClearAllPoints()
-    b.fsLabel:SetPoint("LEFT", b, "LEFT", 10, 0)
-    local chevron = Label(b, "v", 10, C.cyan)
-    chevron:SetPoint("RIGHT", b, "RIGHT", -8, 0)
-    HoverStyle(b, C.violet)
-    b:SetScript("OnClick", function(self)
-        if not self:IsEnabled() then return end
-        OpenMenu(self, o.items(), o.set, o.get())
-    end)
-    Track(function()
-        local value = o.get()
-        b.fsValue = value
-        b.fsLabel:SetText(o.text and o.text(value) or tostring(value))
-        SetLook(b, o.free or Writable())
-    end)
-    row.control = b
-    return row
-end
-
--- A muted line whose text comes from `fn`; `|cff22e0ff...|r` in it renders cyan.
-function UI.Value(content, fn)
-    local line = CreateFrame("Frame", nil, content)
-    line:SetHeight(18)
-    local fs = Label(line, "", 10, C.muted)
-    fs:SetPoint("LEFT", line, "LEFT", 0, 0)
-    Track(function() fs:SetText(fn()) end)
-    return UI.Stack(content, line)
-end
-
--- A wrapped block of text from `fn`, for the Help page. It must be the last row on its page: when the text
--- changes it grows or shrinks, and the page cursor and scroll range follow it.
-function UI.Text(content, fn)
-    local block = CreateFrame("Frame", nil, content)
-    block:SetHeight(18)
-    local fs = Label(block, "", 11, C.text)
-    fs:SetPoint("TOPLEFT", block, "TOPLEFT", 0, 0)
-    fs:SetWidth(CONTENT_W)
-    fs:SetJustifyH("LEFT")
-    fs:SetJustifyV("TOP")
-    fs:SetSpacing(4)
-    UI.Stack(content, block)
-    local c = Cursor(content)
-    local base = c.y - block:GetHeight()
-    Track(function()
-        fs:SetText(fn())
-        local h = math.max(18, math.ceil(fs:GetStringHeight() or 0) + 6)
-        block:SetHeight(h)
-        c.y = base + h
-        CW.RefreshScroll()
-    end)
-    return block
-end
-
--------------------------------------------------------------------------------
--- Confirm and prompt
--------------------------------------------------------------------------------
-
-local function CloseDialog()
-    local d = dialogState
-    if not d.overlay then return end
-    d.edit:ClearFocus()
-    d.overlay:Hide()
-end
-
-local function AcceptDialog()
-    local d = dialogState
-    local result = d.editHolder:IsShown() and d.edit:GetText() or nil
-    local ok, err = d.onAccept(result)
-    if ok == false then
-        d.error:SetText(Capitalize(err))
-        return
-    end
-    CloseDialog()
     CW.RefreshAll()
 end
 
-local function EnsureDialog()
-    local d = dialogState
-    if d.overlay then return d end
-    local overlay = CreateFrame("Frame", nil, ui.frame)
-    overlay:SetAllPoints(ui.frame)
-    overlay:SetFrameLevel(ui.frame:GetFrameLevel() + 30)
-    overlay:EnableMouse(true)
-    CloseOnEscape(overlay, CloseDialog)
-    local dim = overlay:CreateTexture(nil, "BACKGROUND")
-    dim:SetColorTexture(0, 0, 0, 0.55)
-    dim:SetAllPoints(overlay)
-    local panel = CreateFrame("Frame", "ForeverSTUwaveConfigDialog", overlay)
-    panel:SetSize(380, 150)
-    panel:SetPoint("CENTER", overlay, "CENTER", 0, 0)
-    panel:EnableMouse(true)
-    Theme.SkinPanel(panel, { strip = false })
-    d.message = Label(panel, "", 11, C.text)
-    d.message:SetWidth(340)
-    d.message:SetJustifyH("CENTER")
-    d.message:SetWordWrap(true)
-    d.message:SetPoint("TOP", panel, "TOP", 0, -22)
-
-    local holder = CreateFrame("Frame", nil, panel)
-    holder:SetSize(280, 24)
-    holder:SetPoint("TOP", d.message, "BOTTOM", 0, -12)
-    local well = holder:CreateTexture(nil, "BACKGROUND")
-    well:SetColorTexture(C.track[1], C.track[2], C.track[3], 1)
-    well:SetAllPoints(holder)
-    Outline(holder, C.line, 1)
-    local edit = CreateFrame("EditBox", nil, holder)
-    edit:SetPoint("TOPLEFT", holder, "TOPLEFT", 8, -2)
-    edit:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -8, 2)
-    edit:SetFont(Theme.FONT_MONO, 11, "")
-    edit:SetTextColor(C.cyan[1], C.cyan[2], C.cyan[3], 1)
-    edit:SetAutoFocus(false)
-    edit:SetMaxLetters(Config.NAME_MAX or 32)
-    edit:SetScript("OnEnterPressed", AcceptDialog)
-    edit:SetScript("OnEscapePressed", CloseDialog)
-    d.error = Label(panel, "", 10, C.pink)
-    d.error:SetPoint("TOP", holder, "BOTTOM", 0, -6)
-
-    d.accept = MakeButton(panel, { width = 96, height = 24, ring = C.cyan, textColor = C.cyan, chamfer = 6, text = "OK" })
-    d.accept:SetPoint("BOTTOM", panel, "BOTTOM", -52, 16)
-    d.accept:SetScript("OnClick", AcceptDialog)
-    d.cancel = MakeButton(panel, { width = 96, height = 24, ring = C.violet, textColor = C.cyan, chamfer = 6, text = "Cancel" })
-    d.cancel:SetPoint("BOTTOM", panel, "BOTTOM", 52, 16)
-    d.cancel:SetScript("OnClick", CloseDialog)
-    d.overlay, d.panel, d.editHolder, d.edit = overlay, panel, holder, edit
-    overlay:Hide()
-    return d
-end
-
-local function ShowDialog(text, initial, acceptText, onAccept)
-    local d = EnsureDialog()
-    CloseMenu()
-    d.message:SetText(text)
-    d.error:SetText("")
-    d.onAccept = onAccept
-    d.accept.fsLabel:SetText(acceptText)
-    d.editHolder:SetShown(initial ~= nil)
-    d.panel:SetHeight(initial ~= nil and 176 or 128)
-    d.overlay:Show()
-    if initial ~= nil then
-        d.edit:SetText(initial)
-        d.edit:SetFocus()
-        d.edit:HighlightText()
+-- Repaints every changed marker: the row dots and resets (their own refresh), the section chips, the tab dots, the nav dots.
+function I.UpdateChanged()
+    local sections, tabs, pages = {}, {}, {}
+    for _, entry in ipairs(registry) do
+        if I.EntryChanged(entry) then
+            if entry.secObj then sections[entry.secObj] = (sections[entry.secObj] or 0) + 1 end
+            tabs[entry.page .. "/" .. entry.tab] = (tabs[entry.page .. "/" .. entry.tab] or 0) + 1
+            pages[entry.page] = (pages[entry.page] or 0) + 1
+        end
+    end
+    for _, entry in ipairs(registry) do
+        local sec = entry.secObj
+        if sec and sec.SetChanged then sec.SetChanged(sections[sec] or 0) end
+    end
+    for key, strip in pairs(ui.strips) do
+        for _, b in ipairs(strip.fsButtons or {}) do
+            if b.fsDot then b.fsDot:SetShown((tabs[key .. "/" .. b.fsTabKey] or 0) > 0) end
+        end
+    end
+    for key, b in pairs(ui.nav) do
+        if b.fsNdot then b.fsNdot:SetShown((pages[key] or 0) > 0) end
     end
 end
 
--- Asks first; onAccept runs only on Confirm. An in-window overlay, so no Blizzard popup taints.
-function UI.Confirm(text, onAccept)
-    if not ui.frame then CW.EnsureBuilt() end
-    ShowDialog(text, nil, "Confirm", function()
-        onAccept()
-    end)
+function CW.RowByKey(key, page)
+    for _, entry in ipairs(registry) do
+        if entry.key == key and (page == nil or entry.page == page) then return entry end
+    end
 end
 
--- Asks for a line of text; onAccept(text) returns false and a reason to keep the prompt open.
-function UI.Prompt(text, initial, onAccept)
-    if not ui.frame then CW.EnsureBuilt() end
-    ShowDialog(text, initial or "", "OK", onAccept)
+-- Hover: one poll while the window is up, so a row and the controls on it count as one place.
+local function SetHover(entry)
+    if ui.hover == entry then return end
+    local old = ui.hover
+    ui.hover = entry
+    if old then Fire("rowLeave", old) end
+    if entry then Fire("rowEnter", entry) end
+end
+I.SetHover = SetHover
+CW.SetHover = SetHover
+
+local function PollHover()
+    local rec = ui.tabRec
+    if not (rec and rec.page and ui.frame and ui.frame:IsShown()) then return SetHover(nil) end
+    local found
+    for _, entry in ipairs(registry) do
+        local row = entry.row
+        if entry.page == rec.cat.key and entry.tab == rec.def.key and row:IsShown() and type(row.IsMouseOver) == "function"
+            and row:IsMouseOver() then
+            found = entry
+            break
+        end
+    end
+    SetHover(found)
 end
 
 -------------------------------------------------------------------------------
--- The window
+-- Categories
 -------------------------------------------------------------------------------
+
+local function GroupRank(group)
+    for i, name in ipairs(NAV_GROUPS) do
+        if name == group then return i end
+    end
+    return #NAV_GROUPS + 1
+end
 
 local function SortCategories()
     sorted = {}
     for _, cat in pairs(categories) do sorted[#sorted + 1] = cat end
     table.sort(sorted, function(a, b)
+        local ga, gb = GroupRank(a.group), GroupRank(b.group)
+        if ga ~= gb then return ga < gb end
+        if a.group ~= b.group then return a.group < b.group end
         if a.order ~= b.order then return a.order < b.order end
         return a.key < b.key
     end)
 end
+
+local function Squash(text)
+    return (tostring(text or ""):lower():gsub("%s+", ""))
+end
+
+local function ResolveCategory(name)
+    if name == nil then return nil end
+    name = ALIASES[name] or name
+    if categories[name] then return categories[name] end
+    local want = Squash(name)
+    for _, cat in ipairs(sorted) do
+        if Squash(cat.key) == want or Squash(cat.label) == want then return cat end
+    end
+end
+
+local function ResolveTab(cat, name)
+    if not cat or name == nil then return nil end
+    local want = Squash(name)
+    for _, tab in ipairs(cat.tabs) do
+        if tab.key == name or Squash(tab.key) == want or Squash(tab.label) == want then return tab end
+    end
+end
+
+local function TabRec(cat, def)
+    local id = cat.key .. "/" .. def.key
+    local rec = ui.tabs[id]
+    if not rec then
+        rec = { cat = cat, def = def, id = id }
+        ui.tabs[id] = rec
+    end
+    rec.def, rec.cat = def, cat
+    return rec
+end
+
+-- {key, label, group, order, tabs = { {key, label, build, tip}, ... }}; a plain `build` fn is one tab named for the page.
+-- Registering a key again updates its label, group and order, and the tabs not yet built; a built tab is never rebuilt.
+function CW.RegisterCategory(spec)
+    if type(spec) ~= "table" or type(spec.key) ~= "string" or spec.key == "" then return false end
+    local tabs = {}
+    if type(spec.tabs) == "table" and #spec.tabs > 0 then
+        for _, t in ipairs(spec.tabs) do
+            if type(t) ~= "table" or type(t.key) ~= "string" or type(t.build) ~= "function" then return false end
+            tabs[#tabs + 1] = { key = t.key, label = tostring(t.label or t.key), build = t.build, tip = t.tip }
+        end
+    elseif type(spec.build) == "function" then
+        tabs[1] = { key = "main", label = tostring(spec.label or spec.key), build = spec.build }
+    else
+        return false
+    end
+    local group = type(spec.group) == "string" and spec.group:upper() or DEFAULT_GROUP
+    local old = categories[spec.key]
+    if old then
+        -- keep a built tab's definition: it is never rebuilt
+        for i, t in ipairs(tabs) do
+            local rec = ui.tabs[spec.key .. "/" .. t.key]
+            if rec and rec.built then tabs[i] = rec.def end
+        end
+    end
+    categories[spec.key] = {
+        key = spec.key, label = tostring(spec.label or spec.key), group = group, order = tonumber(spec.order) or 100,
+        tabs = tabs,
+    }
+    SortCategories()
+    if ui.frame then I.LayoutNav() end
+    return true
+end
+
+function CW.Categories()
+    local list = {}
+    for i, cat in ipairs(sorted) do
+        local tabs = {}
+        for j, t in ipairs(cat.tabs) do tabs[j] = { key = t.key, label = t.label } end
+        list[i] = { key = cat.key, label = cat.label, order = cat.order, group = cat.group, tabs = tabs }
+    end
+    return list
+end
+
+-- CW.ExtendTab(page, tab, sectionTitle, buildFn, order): another file adds a section to a tab. `sectionTitle` is the
+-- section's title (or a table {title, tip, fold, two, meta, when}); buildFn(content, section) builds its rows. Order 0 is
+-- the tab's own content: below 0 builds before it, above after it. A tab already built gets the section at the end.
+function CW.ExtendTab(page, tab, sectionTitle, buildFn, order)
+    if type(page) ~= "string" or type(tab) ~= "string" or type(buildFn) ~= "function" then return false end
+    page = ALIASES[page] or page
+    local id = page .. "/" .. tab
+    extensions[id] = extensions[id] or {}
+    local ext = { fn = buildFn, order = tonumber(order) or 100, title = sectionTitle, seq = #extensions[id] + 1 }
+    table.insert(extensions[id], ext)
+    local rec = ui.tabs[id]
+    if rec and rec.built and rec.page then I.RunExtension(rec, ext) end
+    return true
+end
+
+-------------------------------------------------------------------------------
+-- Building a tab
+-------------------------------------------------------------------------------
+
+function I.RunExtension(rec, ext)
+    local holder = rec.page.fsHolder
+    local ok, err = pcall(function()
+        local section
+        if ext.title ~= nil then
+            local opts = type(ext.title) == "table" and ext.title or { title = tostring(ext.title) }
+            section = UI.Section(holder, opts)
+        end
+        ext.fn(holder, section)
+    end)
+    if not ok then Forward(err) end
+    if rec.built then I.Reflow(holder) end
+end
+
+local function BuildTab(rec)
+    local page = NewTabPage(rec)
+    rec.page = page
+    local steps = { { order = 0, seq = 0, fn = function() rec.def.build(page.fsHolder) end } }
+    for _, ext in ipairs(extensions[rec.id] or {}) do steps[#steps + 1] = { order = ext.order, seq = ext.seq, ext = ext } end
+    table.sort(steps, function(a, b)
+        if a.order ~= b.order then return a.order < b.order end
+        return a.seq < b.seq
+    end)
+    local outer = ui.building
+    ui.building = rec.id
+    for _, step in ipairs(steps) do
+        if step.ext then
+            I.RunExtension(rec, step.ext)
+        else
+            local ok, err = pcall(step.fn)
+            if not ok then Forward(err) end
+        end
+    end
+    ui.building = outer
+    rec.built = true
+    I.EvalWhens(page.fsHolder)
+    I.Reflow(page.fsHolder)
+    I.PlaceTabPage(rec)
+    return page
+end
+
+-------------------------------------------------------------------------------
+-- Window chrome
+-------------------------------------------------------------------------------
 
 local function Version()
     local get = _G.C_AddOns and _G.C_AddOns.GetAddOnMetadata or _G.GetAddOnMetadata
@@ -1082,84 +874,385 @@ local function Version()
 end
 
 local function SetSelected(key)
-    for _, b in pairs(ui.nav) do
-        local selected = b.fsCategory == key
+    for k, b in pairs(ui.nav) do
+        local selected = k == key
         b.fsSelected = selected
         b.fsHighlight:SetShown(selected)
         b.fsBar:SetShown(selected)
-        Theme.ApplyMono(b.fsLabel, 11, selected and C.cyan or C.muted)
-        Theme.ApplyMono(b.fsNumber, 9, selected and C.pink or C.line)
+        Theme.ApplyMono(b.fsLabel, S.TEXT, selected and C.cyan or C.muted)
     end
 end
 
+-- Tab buttons: width is the text rounded up to TEXT_SNAP; the active one cyan with a pink underline.
+local function PaintTabs(strip)
+    for _, b in ipairs(strip.fsButtons) do
+        local on = b.fsTabKey == ui.tab
+        b.fsSelected = on
+        b.fsUnderline:SetShown(on)
+        local color = on and C.cyan or (b.fsHover and C.text or C.muted)
+        if b.fsDisabled then color = C.line end
+        Theme.ApplyMono(b.fsLabel, S.TEXT, color)
+    end
+end
+
+local function BuildStrip(cat)
+    local strip = CreateFrame("Frame", nil, ui.well)
+    strip:SetHeight(S.TAB_STRIP_H)
+    strip:SetPoint("TOPLEFT", ui.well, "TOPLEFT", 0, 0)
+    strip:SetPoint("TOPRIGHT", ui.well, "TOPRIGHT", 0, 0)
+    local rule = strip:CreateTexture(nil, "ARTWORK")
+    rule:SetColorTexture(C.line[1], C.line[2], C.line[3], 1)
+    rule:SetHeight(1)
+    rule:SetPoint("BOTTOMLEFT", strip, "BOTTOMLEFT", 0, 0)
+    rule:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", 0, 0)
+    strip.fsButtons = {}
+    local x = S.CONTENT_L
+    for _, def in ipairs(cat.tabs) do
+        local b = CreateFrame("Button", nil, strip)
+        b:RegisterForClicks("LeftButtonUp")
+        b.fsTabKey = def.key
+        b.fsLabel = Label(b, def.label, S.TEXT, C.muted)
+        b.fsLabel:SetPoint("LEFT", b, "LEFT", S.TAB_PAD_X, 0)
+        local width = (b.fsLabel:GetStringWidth() or 0) + 2 * S.TAB_PAD_X
+        if def.tip then
+            b.fsHelp = UI.HelpIcon(b, def.tip)
+            b.fsHelp:SetPoint("LEFT", b.fsLabel, "RIGHT", S.Q_GAP, 0)
+            width = width + S.Q + S.Q_GAP + S.TAB_PAD_X
+        end
+        width = S.Snap(width)
+        b:SetSize(width, S.TAB_H)
+        b:SetPoint("BOTTOMLEFT", strip, "BOTTOMLEFT", x, 0)
+        x = x + width + S.TAB_GAP
+        b.fsDot = b:CreateTexture(nil, "OVERLAY")
+        b.fsDot:SetColorTexture(C.pink[1], C.pink[2], C.pink[3], 1)
+        b.fsDot:SetSize(S.DOT, S.DOT)
+        b.fsDot:SetPoint("TOPRIGHT", b, "TOPRIGHT", -4, -6)
+        b.fsDot:Hide()
+        b.fsUnderline = b:CreateTexture(nil, "ARTWORK")
+        b.fsUnderline:SetColorTexture(C.pink[1], C.pink[2], C.pink[3], 1)
+        b.fsUnderline:SetHeight(S.TAB_LINE_H)
+        b.fsUnderline:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", S.TAB_PAD_X / 2, 0)
+        b.fsUnderline:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -S.TAB_PAD_X / 2, 0)
+        b:SetScript("OnEnter", function(self) self.fsHover = true; PaintTabs(strip) end)
+        b:SetScript("OnLeave", function(self) self.fsHover = false; PaintTabs(strip) end)
+        b:SetScript("OnMouseDown", function(self) if self:IsEnabled() then Theme.ApplyMono(self.fsLabel, S.TEXT, C.cyan) end end)
+        b:SetScript("OnClick", function(self)
+            if not self:IsEnabled() then return end
+            CW.Open(cat.key, def.key)
+        end)
+        strip.fsButtons[#strip.fsButtons + 1] = b
+    end
+    strip:Hide()
+    return strip
+end
+
+-- Seats the content area under the tab strip (or the top of the well when the page has one tab).
+local function PlaceContent()
+    ui.content:ClearAllPoints()
+    local top = (ui.stripH and S.TAB_STRIP_H or 0) + S.CONTENT_T
+    ui.content:SetPoint("TOPLEFT", ui.well, "TOPLEFT", S.CONTENT_L, -top)
+    ui.content:SetPoint("BOTTOMRIGHT", ui.well, "BOTTOMRIGHT", -S.CONTENT_R, S.CONTENT_B)
+end
+
+local function UpdateCrumb(cat, tab)
+    local text = "|cff22e0ff" .. cat.label:upper() .. "|r"
+    if tab and #cat.tabs > 1 then text = text .. " / " .. tab.label:upper() end
+    ui.crumb:SetText(text)
+end
+
+local function Select(cat, tab)
+    if not cat then return end
+    local changedPage = ui.current ~= cat.key
+    tab = tab or ResolveTab(cat, ui.tabFor and ui.tabFor[cat.key]) or cat.tabs[1]
+    local changedTab = changedPage or ui.tab ~= tab.key
+    ui.current, ui.tab = cat.key, tab.key
+    ui.tabFor = ui.tabFor or {}
+    ui.tabFor[cat.key] = tab.key
+    -- the strip
+    for key, strip in pairs(ui.strips) do strip:SetShown(key == cat.key and #cat.tabs > 1) end
+    ui.stripH = #cat.tabs > 1 or nil
+    if ui.stripH then
+        local strip = ui.strips[cat.key]
+        if not strip then
+            strip = BuildStrip(cat)
+            ui.strips[cat.key] = strip
+        end
+        strip:Show()
+        PaintTabs(strip)
+    end
+    PlaceContent()
+    -- the page
+    local rec = TabRec(cat, tab)
+    for _, other in pairs(ui.tabs) do
+        if other ~= rec then
+            if other.page then other.page:Hide() end
+            if other.band then other.band:Hide() end
+        end
+    end
+    ui.tabRec = rec
+    if not rec.page then BuildTab(rec) end
+    I.PlaceTabPage(rec)
+    rec.page:Show()
+    if rec.band then rec.band:Show() end
+    if changedTab then SetScroll(rec.page, 0) end         -- reselecting the tab you are on keeps your place
+    I.Reflow(rec.page.fsHolder)
+    Remeasure(rec.page)
+    UpdateCrumb(cat, tab)
+    SetSelected(cat.key)
+    I.ScrollNavTo(cat.key)
+    CW.RefreshAll()
+    if changedTab then Fire("select", cat.key, tab.key) end
+end
+
+-- Does nothing while the window is hidden: Open and Select refresh before anything is seen.
+local function RunAll(list)
+    for _, fn in ipairs(list) do
+        local ok, err = pcall(fn)
+        if not ok then Forward(err) end
+    end
+end
+
+-- Every built tab but the one on screen is stale: its controls repaint when it is next shown.
+local function MarkStale(except)
+    for _, rec in pairs(ui.tabs) do
+        if rec.built and rec ~= except then rec.stale = true end
+    end
+end
+
+function CW.RefreshAll()
+    if not (ui.frame and ui.frame:IsShown()) then
+        MarkStale(nil)
+        return
+    end
+    local rec = ui.tabRec
+    MarkStale(rec)
+    local list = rec and tabLists[rec.id]
+    RunAll(rowStates)
+    if list then RunAll(list.states) end
+    RunAll(controls)
+    if list then RunAll(list.controls) end
+    if rec then rec.stale = nil end
+    if ui.readOnlyIcon then ui.readOnlyIcon:SetShown(Config.IsReadOnly()) end
+    I.UpdateChanged()
+    local rec = ui.tabRec
+    if rec and rec.page then
+        if I.EvalWhens(rec.page.fsHolder) then
+            I.Reflow(rec.page.fsHolder)
+            Remeasure(rec.page)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Nav
+-------------------------------------------------------------------------------
+
 local function MakeNavButton(cat)
-    local b = CreateFrame("Button", nil, ui.frame)
-    b:SetSize(NAV_W, NAV_ITEM_H)
+    local b = CreateFrame("Button", nil, ui.navChild)
+    b:SetSize(S.NAV_W, S.NAV_ITEM_H)
     b:RegisterForClicks("LeftButtonUp")
     b.fsCategory = cat.key
-    b.fsHighlight = Theme.AddCutSliceFill(b, { C.cyan[1], C.cyan[2], C.cyan[3], 0.10 }, 4)
+    b.fsHighlight = Theme.AddCutSliceFill(b, { C.cyan[1], C.cyan[2], C.cyan[3], 0.12 }, 0)
+    b.fsHover = Theme.AddCutSliceFill(b, { C.cyan[1], C.cyan[2], C.cyan[3], 0.06 }, 0)
+    b.fsHover:Hide()
     b.fsBar = b:CreateTexture(nil, "ARTWORK")
     b.fsBar:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 1)
-    b.fsBar:SetWidth(2)
-    b.fsBar:SetPoint("TOPLEFT", b, "TOPLEFT", 0, -5)
-    b.fsBar:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 0, 5)
-    b.fsNumber = Label(b, "", 9, C.line)
-    b.fsNumber:SetPoint("LEFT", b, "LEFT", 10, 0)
-    b.fsLabel = Label(b, "", 11, C.muted)
-    b.fsLabel:SetPoint("LEFT", b, "LEFT", 32, 0)
+    b.fsBar:SetWidth(S.NAV_SEL_W)
+    b.fsBar:SetPoint("TOPLEFT", b, "TOPLEFT", 0, -6)
+    b.fsBar:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 0, 6)
+    b.fsLabel = Label(b, "", S.TEXT, C.muted)
+    b.fsLabel:SetPoint("LEFT", b, "LEFT", S.NAV_SEL_W + 6, 0)
+    b.fsLabel:SetPoint("RIGHT", b, "RIGHT", -(S.PWR + S.PWR_R), 0)
+    b.fsLabel:SetJustifyH("LEFT")
+    b.fsNdot = b:CreateTexture(nil, "OVERLAY")
+    b.fsNdot:SetColorTexture(C.pink[1], C.pink[2], C.pink[3], 1)
+    b.fsNdot:SetSize(S.DOT, S.DOT)
+    b.fsNdot:SetPoint("RIGHT", b, "RIGHT", -(S.PWR + S.PWR_R + 6), 0)
+    b.fsNdot:Hide()
+    -- the right slot: B5's power button lives here
+    b.fsSlot = CreateFrame("Frame", nil, b)
+    b.fsSlot:SetSize(S.PWR, S.PWR)
+    b.fsSlot:SetPoint("RIGHT", b, "RIGHT", -S.PWR_R, 0)
     b:SetScript("OnClick", function() CW.Open(cat.key) end)
+    b:SetScript("OnEnter", function(self) if not self.fsSelected then self.fsHover:Show() end end)
+    b:SetScript("OnLeave", function(self) self.fsHover:Hide() end)
     return b
 end
 
-local function LayoutNav()
-    for i, cat in ipairs(sorted) do
+local function NavTotal()
+    return ui.navTotal or 0
+end
+
+local function NavRange()
+    return math.max(0, NavTotal() - D.NAVSCROLL_H)
+end
+
+local function UpdateNavRail()
+    local rail = ui.navRail
+    if not rail then return end
+    local range = NavRange()
+    if range <= 0 then rail:Hide() return end
+    local view = D.NAVSCROLL_H
+    local height = math.max(THUMB_MIN_H, math.floor(view * view / (view + range)))
+    rail.fsThumb:SetHeight(height)
+    rail.fsThumb:ClearAllPoints()
+    rail.fsThumb:SetPoint("TOP", rail, "TOP", 0, -math.floor((view - height) * ui.navScroll:GetVerticalScroll() / range + 0.5))
+    rail:Show()
+end
+
+local function SetNavScroll(value)
+    value = math.min(NavRange(), math.max(0, value))
+    ui.navScroll:SetVerticalScroll(value)
+    UpdateNavRail()
+end
+
+function I.LayoutNav()
+    local y = 0
+    local lastGroup
+    local rows = {}
+    for key, label in pairs(ui.groups) do label:Hide() end
+    for _, cat in ipairs(sorted) do
         local b = ui.nav[cat.key]
         if not b then
             b = MakeNavButton(cat)
             ui.nav[cat.key] = b
         end
-        b.fsNumber:SetText(("%02d"):format(i))
+        if cat.group ~= lastGroup then
+            if lastGroup then y = y + S.NAVGRP_GAP end
+            local label = ui.groups[cat.group]
+            if not label then
+                label = Label(ui.navChild, "// " .. cat.group, S.SMALL, C.muted)
+                ui.groups[cat.group] = label
+            end
+            label:ClearAllPoints()
+            label:SetPoint("TOPLEFT", ui.navChild, "TOPLEFT", 0, -y)
+            label:SetHeight(S.NAVLAB_H)
+            label:Show()
+            y = y + S.NAVLAB_H + S.NAV_ITEM_GAP
+            lastGroup = cat.group
+        end
         b.fsLabel:SetText(cat.label)
+        b.fsY = y
         b:ClearAllPoints()
-        b:SetPoint("TOPLEFT", ui.frame, "TOPLEFT", 17, -96 - (i - 1) * (NAV_ITEM_H + NAV_GAP))
+        b:SetPoint("TOPLEFT", ui.navChild, "TOPLEFT", 0, -y)
         b:Show()
+        y = y + S.NAV_ITEM_H
+        rows[#rows + 1] = cat.key
     end
+    for key, b in pairs(ui.nav) do
+        if not categories[key] then b:Hide() end
+    end
+    ui.navTotal = y
+    ui.navChild:SetHeight(math.max(y, 1))
     SetSelected(ui.current)
+    SetNavScroll(ui.navScroll:GetVerticalScroll())
 end
 
-local function Select(key)
-    local cat = categories[key]
-    if not cat then return end
-    local changed = ui.selected ~= key
-    ui.current, ui.selected = key, key
-    for k, page in pairs(ui.pages) do page:SetShown(k == key) end
-    local page = ui.pages[key]
-    if not page then
-        page = NewPage(key)
-        ui.pages[key] = page
-        local ok, err = pcall(cat.build, page.fsHolder)
-        if not ok then Forward(err) end
+-- The selected row centred in the visible list.
+function I.ScrollNavTo(key)
+    local b = ui.nav[key]
+    if not (b and b.fsY) then return end
+    SetNavScroll(b.fsY + S.NAV_ITEM_H / 2 - D.NAVSCROLL_H / 2)
+end
+
+-- CW.NavRows(): { { key, label, group, button, slot } } in list order, for the power buttons, counts and search.
+function CW.NavRows()
+    pcall(CW.EnsureBuilt)
+    local list = {}
+    for _, cat in ipairs(sorted) do
+        local b = ui.nav[cat.key]
+        if b then list[#list + 1] = { key = cat.key, label = cat.label, group = cat.group, button = b, slot = b.fsSlot } end
     end
-    page:Show()
-    if changed then SetScroll(page, 0) end         -- reselecting the page you are on keeps your place
-    Remeasure(page)
-    ui.category:SetText("CATEGORY |cff22e0ff/ " .. cat.label:upper() .. "|r")
-    SetSelected(key)
-    CW.RefreshAll()
+    return list
+end
+
+function CW.NavSlot(navKey)
+    pcall(CW.EnsureBuilt)
+    local b = ui.nav[ResolveCategory(navKey) and ResolveCategory(navKey).key or navKey]
+    return b and b.fsSlot or nil
+end
+
+function CW.FooterSlot(side)
+    pcall(CW.EnsureBuilt)
+    return ui.footer and ui.footer[side == "right" and "right" or "left"] or nil
+end
+
+function CW.SearchSlot()
+    pcall(CW.EnsureBuilt)
+    return ui.searchSlot
+end
+
+-- No-op until the search ticket replaces it: it takes the registry row a jump landed on.
+function CW.JumpHighlight(entry) end
+
+-- The scroll body of a page (its tab, or the first built one): where a page's own builder adds rows.
+function CW.PageBody(page, tab)
+    local cat = ResolveCategory(page)
+    if not cat then return nil end
+    local def = ResolveTab(cat, tab) or ResolveTab(cat, ui.tabFor and ui.tabFor[cat.key]) or cat.tabs[1]
+    local rec = ui.tabs[cat.key .. "/" .. def.key]
+    return rec and rec.page and rec.page.fsHolder or nil
+end
+
+-------------------------------------------------------------------------------
+-- Building the window
+-------------------------------------------------------------------------------
+
+local function ClampSize(w, h)
+    w = math.min(S.WIN_MAX_W, math.max(S.WIN_MIN_W, math.floor((tonumber(w) or S.WIN_W) + 0.5)))
+    h = math.min(S.WIN_MAX_H, math.max(S.WIN_MIN_H, math.floor((tonumber(h) or S.WIN_H) + 0.5)))
+    return w, h
+end
+
+-- Everything that follows the size: the derived values, the nav list, the width of each built tab, the scroll range.
+local function ApplyDerived(w, h)
+    for k, v in pairs(S.Derive(w, h)) do D[k] = v end
+    if not ui.frame then return end
+    ui.navScroll:SetHeight(D.NAVSCROLL_H)
+    ui.navRail:SetHeight(D.NAVSCROLL_H)
+    for _, rec in pairs(ui.tabs) do
+        if rec.page then
+            rec.page.fsChild:SetSize(D.CONTENT_W + 2 * PAD_X, rec.page.fsChild:GetHeight())
+            rec.page.fsHolder:SetWidth(D.CONTENT_W)
+            for _, item in ipairs(rec.page.fsHolder.fsFlow) do
+                if item.frame.fsOnResize then pcall(item.frame.fsOnResize, D) end
+            end
+            I.Reflow(rec.page.fsHolder)
+            Remeasure(rec.page)
+        end
+    end
+    SetNavScroll(ui.navScroll:GetVerticalScroll())
+    if ui.current then I.ScrollNavTo(ui.current) end
+end
+
+-- Resizes the window (clamped to the min and max), repeating every derived value. `save` remembers the size account wide.
+function CW.SetSize(w, h, save)
+    w, h = ClampSize(w, h)
+    if ui.frame then ui.frame:SetSize(w, h) end
+    ApplyDerived(w, h)
+    if save then
+        CW.UIState("winW", w)
+        CW.UIState("winH", h)
+    end
+    return w, h
 end
 
 local function BuildChrome(frame)
-    Theme.SkinPanel(frame, { strip = false, title = "config" })
+    -- the title strip ("stuwave://config" and its rule) is the panel's own header band, STRIP_H tall
+    Theme.SkinPanel(frame, { strip = false, title = "config", bandHeight = S.STRIP_H })
 
+    -- the head: brand, version and the breadcrumb
     local title = frame:CreateFontString(nil, "OVERLAY")
-    Theme.ApplyFontGeneric(title, Theme.FONT_ORBITRON, 17, C.text, "")
-    title:SetPoint("TOPLEFT", frame, "TOPLEFT", 17, -33)
+    Theme.ApplyFontGeneric(title, Theme.FONT_ORBITRON, S.BRAND_SIZE, C.text, "")
+    title:SetPoint("TOPLEFT", frame, "TOPLEFT", S.PAD, -D.BRAND_Y)
     title:SetText("FOREVER |cffff2e97STU|rWAVE")
+    ui.brand = title
 
-    local sub = Label(frame, "", 10, C.muted)
-    sub:SetPoint("TOPLEFT", frame, "TOPLEFT", 17, -55)
+    local sub = Label(frame, "", S.TEXT, C.muted)
+    sub:SetPoint("TOPLEFT", frame, "TOPLEFT", S.PAD, -D.VER_Y)
     local version = Version()
     sub:SetText((version and ("v" .. version .. "  \194\183  ") or "") .. "|cff22e0ff/fsconfig|r")
+    ui.version = sub
 
     local icon = UI.HelpIcon(frame,
         "Saved settings could not be loaded, so every setting and profile is read-only this session.")
@@ -1168,79 +1261,179 @@ local function BuildChrome(frame)
     icon:Hide()
     ui.readOnlyIcon = icon
 
-    ui.category = Label(frame, "", 10, C.muted)
-    ui.category:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -17, -36)
+    ui.crumb = Label(frame, "", S.TEXT, C.muted)
+    ui.crumb:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -S.PAD, -D.VER_Y)
+    ui.crumb:SetJustifyH("RIGHT")
 
     FS.ButtonSkins.NewCloseButton(frame, function() CW.Close() end) -- the shared STUwave X, seats itself top right
 
-    local navHeader = Label(frame, "// settings", 9, C.muted)
-    navHeader:SetPoint("TOPLEFT", frame, "TOPLEFT", 19, -78)
-    local navCommands = Label(frame, "/fsgun  /fsedit  /fsbug", 9, C.line)
-    navCommands:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 19, 42)
+    local headRule = frame:CreateTexture(nil, "ARTWORK")
+    headRule:SetColorTexture(C.line[1], C.line[2], C.line[3], 1)
+    headRule:SetHeight(1)
+    headRule:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -D.BODY_T)
+    headRule:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -D.BODY_T)
 
+    -- the search slot above the nav (B1 fills it)
+    ui.searchSlot = CreateFrame("Frame", nil, frame)
+    ui.searchSlot:SetSize(S.NAV_W, S.SEARCH_H)
+    ui.searchSlot:SetPoint("TOPLEFT", frame, "TOPLEFT", S.PAD, -D.BODY_T)
+
+    -- the nav list: clipped, wheel scrolled, a thin rail
+    ui.navScroll = CreateFrame("ScrollFrame", nil, frame)
+    ui.navScroll:SetSize(S.NAV_W, D.NAVSCROLL_H)
+    ui.navScroll:SetPoint("TOPLEFT", frame, "TOPLEFT", S.PAD, -D.NAVLAB_Y)
+    ui.navScroll:SetClipsChildren(true)
+    ui.navScroll:EnableMouseWheel(true)
+    ui.navChild = CreateFrame("Frame", nil, ui.navScroll)
+    ui.navChild:SetSize(S.NAV_W, 1)
+    ui.navScroll:SetScrollChild(ui.navChild)
+    ui.navScroll:SetScript("OnMouseWheel", function(_, delta) SetNavScroll(ui.navScroll:GetVerticalScroll() - delta * WHEEL_STEP) end)
+    ui.navRail = CreateFrame("Frame", nil, frame)
+    ui.navRail:SetSize(2, D.NAVSCROLL_H)
+    ui.navRail:SetPoint("TOPLEFT", frame, "TOPLEFT", S.PAD + S.NAV_W + 6, -D.NAVLAB_Y)
+    local railFill = ui.navRail:CreateTexture(nil, "BACKGROUND")
+    railFill:SetColorTexture(C.line[1], C.line[2], C.line[3], 0.6)
+    railFill:SetAllPoints(ui.navRail)
+    local railThumb = CreateFrame("Frame", nil, ui.navRail)
+    railThumb:SetSize(2, THUMB_MIN_H)
+    railThumb:SetPoint("TOP", ui.navRail, "TOP", 0, 0)
+    local thumbFill = railThumb:CreateTexture(nil, "ARTWORK")
+    thumbFill:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 1)
+    thumbFill:SetAllPoints(railThumb)
+    ui.navRail.fsThumb = railThumb
+    ui.navRail:Hide()
+
+    local navCommands = Label(frame, "/fsgun  /fsedit  /fsbug", S.SMALL, C.line)
+    navCommands:SetPoint("TOPLEFT", frame, "TOPLEFT", S.PAD, -D.NAVFOOT_Y)
+
+    -- the well
     local well = CreateFrame("Frame", nil, frame)
-    well:SetPoint("TOPLEFT", frame, "TOPLEFT", WIN_PAD + NAV_W + WELL_GAP, -WELL_TOP)
-    well:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -WIN_PAD, WELL_BOTTOM)
+    well:SetPoint("TOPLEFT", frame, "TOPLEFT", D.WELL_X, -D.BODY_T)
+    well:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -S.PAD, S.FOOT_H)
     local fill = well:CreateTexture(nil, "BACKGROUND")
     fill:SetColorTexture(C.track[1], C.track[2], C.track[3], 0.95)
     fill:SetAllPoints(well)
     Outline(well, C.line, 1)
+    ui.well = well
     ui.content = CreateFrame("Frame", nil, well)
-    ui.content:SetPoint("TOPLEFT", well, "TOPLEFT", CONTENT_L, -CONTENT_T)
-    ui.content:SetPoint("BOTTOMRIGHT", well, "BOTTOMRIGHT", -CONTENT_R, CONTENT_B)
+    PlaceContent()
     BuildScrollbar(well)
 
-    local rule = frame:CreateTexture(nil, "ARTWORK")
-    rule:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.30)
-    rule:SetHeight(1)
-    rule:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 3, 34)
-    rule:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -3, 34)
-    local dot = frame:CreateTexture(nil, "ARTWORK")
-    dot:SetColorTexture(C.green[1], C.green[2], C.green[3], 1)
-    dot:SetSize(6, 6)
-    dot:SetPoint("LEFT", frame, "BOTTOMLEFT", 17, 18)
-    local applies = Label(frame, "Changes apply instantly", 10, C.muted)
-    applies:SetPoint("LEFT", dot, "RIGHT", 8, 0)
-    local chip = CreateFrame("Frame", nil, frame)
-    chip:SetSize(62, 18)
-    chip:SetPoint("RIGHT", frame, "BOTTOMRIGHT", -17, 18)
-    local chipFill = chip:CreateTexture(nil, "BACKGROUND")
-    chipFill:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 0.08)
-    chipFill:SetAllPoints(chip)
-    Outline(chip, C.cyan, 0.4)
-    local key = Label(chip, "/fsconfig", 10, C.cyan)
-    key:SetPoint("CENTER", chip, "CENTER", 0, 0)
-    local openWith = Label(frame, "open with", 10, C.muted)
-    openWith:SetPoint("RIGHT", chip, "LEFT", -8, 0)
+    -- the footer band: empty slots (B2 fills them)
+    local foot = CreateFrame("Frame", nil, frame)
+    foot:SetHeight(S.FOOT_H)
+    foot:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    foot:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    local footFill = foot:CreateTexture(nil, "BACKGROUND")
+    footFill:SetColorTexture(C.ink[1], C.ink[2], C.ink[3], 0.6)
+    footFill:SetAllPoints(foot)
+    local footRule = foot:CreateTexture(nil, "ARTWORK")
+    footRule:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.30)
+    footRule:SetHeight(1)
+    footRule:SetPoint("TOPLEFT", foot, "TOPLEFT", 0, 0)
+    footRule:SetPoint("TOPRIGHT", foot, "TOPRIGHT", 0, 0)
+    ui.foot = foot
+    local left = CreateFrame("Frame", nil, foot)
+    left:SetHeight(S.BTN_H)
+    left:SetPoint("LEFT", foot, "LEFT", S.PAD, 0)
+    left:SetPoint("RIGHT", foot, "CENTER", -S.PAD / 2, 0)
+    local right = CreateFrame("Frame", nil, foot)
+    right:SetHeight(S.BTN_H)
+    right:SetPoint("LEFT", foot, "CENTER", S.PAD / 2, 0)
+    right:SetPoint("RIGHT", foot, "RIGHT", -S.PAD, 0)
+    ui.footer = { left = left, right = right }
+
+    -- the resize grip, bottom right
+    local grip = CreateFrame("Button", nil, frame)
+    grip:SetSize(GRIP, GRIP)
+    grip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
+    grip:SetFrameLevel(frame:GetFrameLevel() + 10)
+    grip.fsGrip = true
+    for i = 1, 3 do
+        local line = grip:CreateTexture(nil, "OVERLAY")
+        line:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.8)
+        line:SetSize(2 + i * 3, 1)
+        line:SetPoint("BOTTOMRIGHT", grip, "BOTTOMRIGHT", -1, 1 + (i - 1) * 3)
+    end
+    grip:SetScript("OnEnter", function(self) self.fsHover = true end)
+    grip:SetScript("OnLeave", function(self) self.fsHover = false end)
+    grip:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        local f = ui.frame
+        -- a frame anchored by its centre grows both ways: seat it by its top left corner first
+        local left, top = f:GetLeft(), f:GetTop()
+        if left and top then
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+        end
+        if type(f.StartSizing) == "function" then f:StartSizing("BOTTOMRIGHT") end
+    end)
+    grip:SetScript("OnMouseUp", function()
+        local f = ui.frame
+        f:StopMovingOrSizing()
+        CW.SetSize(f:GetWidth(), f:GetHeight(), true)
+    end)
+    ui.grip = grip
 end
 
 local function BuildWindow()
+    local w, h = ClampSize(CW.UIState("winW") or S.WIN_W, CW.UIState("winH") or S.WIN_H)
+    for k, v in pairs(S.Derive(w, h)) do D[k] = v end
     local frame = CreateFrame("Frame", FRAME_NAME, UIParent)
     frame:Hide()
-    frame:SetSize(WIN_W, WIN_H)
+    frame:SetSize(w, h)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
     frame:SetFrameStrata("DIALOG")
     frame:SetToplevel(true)
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
+    if type(frame.SetResizable) == "function" then frame:SetResizable(true) end
+    if type(frame.SetResizeBounds) == "function" then
+        frame:SetResizeBounds(S.WIN_MIN_W, S.WIN_MIN_H, S.WIN_MAX_W, S.WIN_MAX_H)
+    elseif type(frame.SetMinResize) == "function" then
+        frame:SetMinResize(S.WIN_MIN_W, S.WIN_MIN_H)
+        if type(frame.SetMaxResize) == "function" then frame:SetMaxResize(S.WIN_MAX_W, S.WIN_MAX_H) end
+    end
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart", frame.StartMoving)
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetScript("OnShow", function() CW.RefreshScroll() end)
+    frame:SetScript("OnShow", function()
+        CW.RefreshScroll()
+        Fire("show")
+    end)
     frame:SetScript("OnHide", function(self)
-        CloseMenu()
-        CloseDialog()
+        I.CloseMenu()
+        I.CloseDialog()
+        SetHover(nil)
         local owner = GameTooltip:GetOwner()
         while owner and owner ~= self do owner = owner:GetParent() end
         if owner then GameTooltip:Hide() end
+        Fire("hide")
     end)
+    -- Real size changes while the grip drags: re-derive and relay out (the final size is saved on release).
+    frame:SetScript("OnSizeChanged", function(self, nw, nh)
+        if not ui.frame or ui.sizing then return end
+        nw, nh = ClampSize(nw, nh)
+        if nw == D.WIN_W and nh == D.WIN_H then return end
+        ui.sizing = true
+        ApplyDerived(nw, nh)
+        ui.sizing = false
+    end)
+    local elapsed = 0
+    frame:SetScript("OnUpdate", function(_, dt)
+        elapsed = elapsed + (dt or 0)
+        if elapsed < 0.05 then return end
+        elapsed = 0
+        PollHover()
+    end)
+    ui.frame = frame
     local ok, err = pcall(BuildChrome, frame)
     if not ok then
         frame:Hide()
+        ui.frame = nil
         error(err, 0)
     end
-    ui.frame = frame
     local specials = _G.UISpecialFrames
     if type(specials) == "table" then
         local present = false
@@ -1254,7 +1447,7 @@ end
 
 function CW.EnsureBuilt()
     if not ui.frame then BuildWindow() end
-    LayoutNav()
+    I.LayoutNav()
     return ui.frame
 end
 
@@ -1262,37 +1455,31 @@ end
 -- Public surface
 -------------------------------------------------------------------------------
 
--- {key, label, order, build}: build(content) runs once, the first time the page is shown.
--- Registering a key again updates its label and order but the first build wins; a built page is never rebuilt.
-function CW.RegisterCategory(spec)
-    if type(spec) ~= "table" or type(spec.key) ~= "string" or spec.key == "" then return false end
-    if type(spec.build) ~= "function" then return false end
-    categories[spec.key] = {
-        key = spec.key, label = tostring(spec.label or spec.key), order = tonumber(spec.order) or 100,
-        build = spec.build,
-    }
-    SortCategories()
-    if ui.frame then LayoutNav() end
-    return true
-end
-
-function CW.Categories()
-    local list = {}
-    for i, cat in ipairs(sorted) do list[i] = { key = cat.key, label = cat.label, order = cat.order } end
-    return list
-end
-
-function CW.Open(key)
+-- CW.Open(page, tab, rowKey): the window on a page, optionally a tab and a row (scrolled into view and highlighted).
+function CW.Open(page, tab, rowKey)
     local ok, err = pcall(CW.EnsureBuilt)
     if not ok then
         Forward(err)
         Say("the config window could not open.")
         return
     end
-    if key ~= nil and categories[key] then ui.current = key end
-    if not (ui.current and categories[ui.current]) then ui.current = sorted[1] and sorted[1].key end
+    local cat = ResolveCategory(page)
+    if not cat then
+        cat = ResolveCategory(ui.current) or sorted[1]
+    end
     ui.frame:Show()
-    if ui.current then Select(ui.current) end
+    if cat then
+        local def = ResolveTab(cat, tab)
+        Select(cat, def)
+        if rowKey then
+            local entry = CW.RowByKey(rowKey, cat.key)
+            if entry and entry.row.fsItem and ui.tabRec and ui.tabRec.page then
+                SetScroll(ui.tabRec.page, (entry.row.fsItem.y or 0) - S.SEC_H)
+                Fire("jump", entry)
+                pcall(CW.JumpHighlight, entry)
+            end
+        end
+    end
 end
 
 function CW.Close()
@@ -1307,808 +1494,44 @@ function CW.Toggle()
     if CW.IsShown() then CW.Close() else CW.Open() end
 end
 
--- Repaints the controls whenever any setting changes, which includes a profile switch.
-Config.OnAnyChange(function()
-    if ui.frame then CW.RefreshAll() end
-end)
-
-local function Squash(text)
-    return (tostring(text or ""):lower():gsub("%s+", ""))
+-- The page and tab now showing, as keys.
+function CW.Current()
+    return ui.current, ui.tab
 end
 
+-- Section fold state (an account wide table, never a profile): `id` is "page/tab/Title".
+function CW.IsFolded(id, default)
+    local value = FoldTable()[id]
+    if value == nil then return default == true end
+    return value == true
+end
+
+function CW.SetFolded(id, folded)
+    FoldTable()[id] = folded == true
+end
+
+-- Repaints the controls whenever any setting changes, which includes a profile switch.
+Config.OnAnyChange(function(key, new, old)
+    if ui.frame then CW.RefreshAll() end
+    Fire("change", key, new, old)
+end)
+
+-- /fsconfig, /fsconfig <page>, /fsconfig <page> <tab>: a page or tab matches its key or its label, spaces ignored.
 SLASH_FSCONFIG1 = "/fsconfig"
 SlashCmdList["FSCONFIG"] = function(msg)
-    local want = Squash(msg)
-    if want ~= "" then
-        for _, cat in ipairs(sorted) do
-            if Squash(cat.key) == want or Squash(cat.label) == want then
-                CW.Open(cat.key)
+    msg = tostring(msg or "")
+    local words = {}
+    for word in msg:gmatch("%S+") do words[#words + 1] = word end
+    if #words > 0 then
+        -- the longest run of leading words that names a page, the rest names its tab
+        for n = #words, 1, -1 do
+            local cat = ResolveCategory(table.concat(words, " ", 1, n))
+            if cat then
+                local tab = n < #words and table.concat(words, " ", n + 1) or nil
+                CW.Open(cat.key, tab and ResolveTab(cat, tab) and ResolveTab(cat, tab).key or nil)
                 return
             end
         end
     end
     CW.Toggle()
 end
-
--------------------------------------------------------------------------------
--- Pages
--------------------------------------------------------------------------------
-
--- The five second rule tab's switches (FiveSecondTab.lua), for the classes whose power is mana: the tab, its pulse and sound,
--- then the master of its motion with one switch under it for each effect; each row explains itself in its ? tip. A client or
--- class without the tab leaves the group out.
-local function FiveSecondGroup(page)
-    local tab = FS.FiveSecondTab
-    if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
-    UI.Header(page, "Mana regen")
-    for _, name in ipairs({ "enabled", "pulse", "sound", "motion" }) do
-        local def = tab.SETTINGS[name]
-        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
-    end
-    for _, name in ipairs(tab.FT.FX_NAMES) do
-        local def = tab.SETTINGS[name]
-        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip, inset = 14 })
-    end
-end
-
--- The Shaman buff tab's combat state switch (BuffTab.lua), for a Shaman that has the tab; its ? tip explains it.
-local function BuffTabGroup(page)
-    local tab = FS.BuffTab
-    if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
-    UI.Header(page, "Shaman buff tab")
-    local def = tab.SETTINGS.combatstate
-    UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
-end
-
--- The Warrior's Thunder Clap tab (ThunderClapTab.lua): the tab and its motion, each with its ? tip; Warriors only.
-local function ThunderClapGroup(page)
-    local tab = FS.ThunderClapTab
-    if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
-    UI.Header(page, "Thunder Clap tab")
-    for _, name in ipairs({ "enabled", "motion" }) do
-        local def = tab.SETTINGS[name]
-        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
-    end
-end
-
--- The ammo tab (AmmoTab.lua): the tab, its low ammo colours and its blink, each with its ? tip; Warriors, Hunters and Rogues.
-local function AmmoTabGroup(page)
-    local tab = FS.AmmoTab
-    if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
-    UI.Header(page, "Ammo tab")
-    for _, name in ipairs({ "enabled", "lowwarn", "motion" }) do
-        local def = tab.SETTINGS[name]
-        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
-    end
-end
-
--- The Shaman totem presets (TotemPresets.lua): a switch for each of the two preset cells, the name plates, and the set 2
--- write that Preset 2 owns, each with its own ? tip. Out of the list for a client or class without the totem tab.
-local function TotemPresetsGroup(page)
-    local presets = FS.TotemPresets
-    if not (presets and presets.SETTINGS and presets.Applies and presets.Applies()) then return end
-    UI.Header(page, "Totem presets")
-    local S = presets.SETTINGS
-    UI.Toggle(page, { label = S.preset1.label, key = S.preset1.key, tip = S.preset1.tip })
-    UI.Toggle(page, { label = S.preset2.label, key = S.preset2.key, tip = S.preset2.tip })
-    UI.Toggle(page, { label = S.plate.label, key = S.plate.key, tip = S.plate.tip, inset = 14 })
-    UI.Toggle(page, { label = S.set2.label, key = S.set2.key, tip = S.set2.tip, inset = 14 })
-end
-
--- The icon style group: how the micro menu and the class tab spell icons are drawn, the STUwave gradient or the game's own
--- icons (MicroBars.lua, SpellArt.lua), each repainted live and explained by its ? tip. A row is left out when its module is
--- absent; the spell row also until a tab has drawn a spell icon (a class with none has nothing to style).
-local function IconStyleDropdown(page, mod)
-    local def = mod.SETTING
-    local TEXT = { gradient = "Gradient", stock = "Stock" }
-    UI.Dropdown(page, {
-        label = def.label, tip = def.tip,
-        get = function() return mod.Style() end,
-        text = function(value) return TEXT[value] or tostring(value) end,
-        items = function()
-            local items = {}
-            for i, value in ipairs(mod.STYLES) do items[i] = { value = value, text = TEXT[value] } end
-            return items
-        end,
-        set = function(value) Config.Set(def.key, value) end,
-    })
-end
-
-local function IconStyleGroup(page)
-    local mods = {}
-    local micro, art = FS.MicroBars, FS.SpellArt
-    if micro and micro.SETTING and micro.Style then mods[#mods + 1] = micro end
-    if art and art.SETTING and art.Applies and art.Applies() then mods[#mods + 1] = art end
-    if #mods == 0 then return end
-    UI.Header(page, "Icon style")
-    for _, mod in ipairs(mods) do IconStyleDropdown(page, mod) end
-end
-
--- The party frames' own switch and seat (PartyFrames.lua, LayoutEdit.lua), apart from the Gunsight HUD, so nothing here
--- is dimmed by its master switch. A Show switch, the raid grid's switch under it, Move (the layout editor, which brings
--- this page back from DONE or Esc) and Reset position, each explained by its ? tip; then, where the raid frames loaded,
--- the raid layout size (each raid size has its own seat) with its own Move and Reset. LayoutEdit.lua loads after this
--- file, so it is looked up at the click.
--- Out of the list for a client without the party frames.
-local PARTY_TIPS = {
-    show = "The party frames have their own switch. They follow it with the Gunsight HUD on or off, and the Party Frame key "
-        .. "on the Console moves it too.",
-    move = "Opens the layout editor. Drag the Party handle to move the party frames, right-click it to reset. "
-        .. "Done or Esc brings you back here. Out of combat only.",
-    reset = "Puts the party frames back at their design seat. Cannot be undone.",
-    raid = "In a raid, shows the raid as group columns, in place of the game's raid frames. Each raid size has its own "
-        .. "seat, set in the layout editor. Turned off, the grid hides at once and the game's raid frames come back after /reload.",
-    raidSize = "Each raid size has its own seat. Pick the size Move and Reset act on; the layout editor previews it, and its "
-        .. "panel switches size too. In a raid the grid uses the seat of the smallest size that fits the group.",
-    moveRaid = "Opens the layout editor with a preview raid of the size picked above. Drag its Raid handle to place that "
-        .. "layout, or pick another size on the editor's panel. Done or Esc brings you back here. Out of combat only.",
-    resetRaid = "Puts the raid layout for the size picked above back at its default seat. Cannot be undone.",
-}
-
-local function PartyFramesGroup(page)
-    local party = FS.PartyFrames
-    if not (party and party.CONFIG_KEY) then return end
-    UI.Header(page, "Party frames")
-    UI.Toggle(page, { label = "Show party frames", key = party.CONFIG_KEY, tip = PARTY_TIPS.show })
-    -- The raid grid's own switch (RaidFrames.lua). It applies live; its reload line says when the game's raid frames
-    -- were dimmed this session and only a reload gives them back.
-    local raid = FS.RaidFrames
-    if raid and raid.CONFIG_KEY then
-        UI.Toggle(page, { label = "Show raid frames", key = raid.CONFIG_KEY, tip = PARTY_TIPS.raid, reload = raid.NeedsReload })
-    end
-    UI.Button(page, {
-        label = "Move party frames", tip = PARTY_TIPS.move, text = "Move",
-        onClick = function()
-            local edit = FS.LayoutEdit
-            if not (edit and edit.EnterFromConfig) then
-                Say("the layout editor is not available.")
-                return
-            end
-            edit.EnterFromConfig("unitframes")   -- refuses in combat itself and leaves this window open
-        end,
-    })
-    UI.Button(page, {
-        label = "Reset position", tip = PARTY_TIPS.reset, text = "Reset", warn = true,
-        confirm = "Put the party frames back at their default position?",
-        onClick = function()
-            local edit = FS.LayoutEdit
-            if not (edit and edit.ResetOne) then
-                Say("the layout editor is not available.")
-            elseif not FS.partyContainer then
-                Say("the party frames are not up yet.")   -- a login in combat builds them when the fight ends
-            else
-                edit.ResetOne("party")
-            end
-        end,
-    })
-    -- The raid layouts' seats and the preview (RaidFrames.lua, LayoutEdit.lua): only where the preview exists. One size is
-    -- picked at a time (the same setting the editor's panel and the Layout page change), and Move and Reset act on it.
-    if raid and type(raid.Preview) == "table" then
-        local preview = raid.Preview
-        local options = {}
-        for index, size in ipairs(preview.SIZES) do options[index] = { value = size, text = tostring(size) } end
-        UI.Segmented(page, { label = "Raid layout", tip = PARTY_TIPS.raidSize, key = preview.KEY, options = options })
-        UI.Button(page, {
-            label = "Move raid frames", tip = PARTY_TIPS.moveRaid, text = "Move",
-            onClick = function()
-                local edit = FS.LayoutEdit
-                if not (edit and edit.EnterFromConfig) then
-                    Say("the layout editor is not available.")
-                    return
-                end
-                edit.EnterFromConfig("unitframes")   -- the editor previews the saved size
-            end,
-        })
-        UI.Button(page, {
-            label = "Reset raid position", tip = PARTY_TIPS.resetRaid, text = "Reset", warn = true,
-            confirm = function()
-                return ("Put the layout for a raid of up to %s back at its default seat?"):format(tostring(preview.Size()))
-            end,
-            onClick = function()
-                local edit = FS.LayoutEdit
-                if edit and edit.ResetOne then edit.ResetOne(preview.SeatId()) else Say("the layout editor is not available.") end
-            end,
-        })
-    end
-end
-
--- The STUwave nameplates switch (Nameplates.lua): off gives the game's own nameplates back, live. Its ? tip says so. Out of
--- the list for a client without the nameplate API, where the module exports nothing.
-local function NameplatesGroup(page)
-    local setting = FS.Nameplates and FS.Nameplates.SETTING
-    if not (setting and setting.key) then return end
-    UI.Header(page, "Nameplates")
-    UI.Toggle(page, { label = setting.label, key = setting.key, tip = setting.tip })
-    local combo = FS.NameplateCombo and FS.NameplateCombo.SETTING
-    if combo and combo.key then
-        UI.Toggle(page, { label = combo.label, key = combo.key, tip = combo.tip })
-    end
-end
-
--- The damage meter's row style (Skins/DamageMeter.lua), neon plates or the ladder, relaid live and explained by its ? tip.
--- Out of the list for a client without Blizzard's damage meter.
-local function DamageMeterGroup(page)
-    local skin = FS.DamageMeterSkin
-    if not (skin and skin.SETTING and skin.Style) then return end
-    local def = skin.SETTING
-    UI.Header(page, "Damage meter")
-    UI.Dropdown(page, {
-        label = def.label, tip = def.tip,
-        get = function() return skin.Style() end,
-        text = function(value) return skin.STYLE_TEXT[value] or tostring(value) end,
-        items = function()
-            local items = {}
-            for i, value in ipairs(skin.STYLES) do items[i] = { value = value, text = skin.STYLE_TEXT[value] } end
-            return items
-        end,
-        set = function(value) Config.Set(def.key, value) end,
-    })
-end
-
--- The talent spec backgrounds (Skins/TalentBackdrops.lua): animated, still or off, explained by its ? tip. Out of the list
--- without the module.
-local function TalentBackdropGroup(page)
-    local bd = FS.TalentBackdrops
-    if not (bd and bd.SETTING and bd.STYLES) then return end
-    local def = bd.SETTING
-    UI.Header(page, "Talents")
-    local options = {}
-    for i, value in ipairs(bd.STYLES) do options[i] = { value = value, text = bd.STYLE_TEXT[value] } end
-    UI.Segmented(page, { label = def.label, tip = def.tip, key = def.key, options = options })
-end
-
--- The character window background (Skins/CharBackdrop.lua), the same three choices. Out of the list without the module.
-local function CharBackdropGroup(page)
-    local bd = FS.CharBackdrop
-    if not (bd and bd.SETTING and bd.STYLES) then return end
-    local def = bd.SETTING
-    UI.Header(page, "Character")
-    local options = {}
-    for i, value in ipairs(bd.STYLES) do options[i] = { value = value, text = bd.STYLE_TEXT[value] } end
-    UI.Segmented(page, { label = def.label, tip = def.tip, key = def.key, options = options })
-end
-
-CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
-    UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
-    UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
-    UI.Toggle(page, { label = "Hide target frame", key = "unitFrames.hideTarget" })
-    PartyFramesGroup(page)
-    NameplatesGroup(page)
-    DamageMeterGroup(page)
-    TalentBackdropGroup(page)
-    CharBackdropGroup(page)
-    local bands = FS.ChatFormat and FS.ChatFormat.BAND_SETTING
-    if bands then
-        UI.Header(page, "Chat")
-        UI.Toggle(page, { label = bands.label, key = bands.key, tip = bands.tip })
-    end
-    UI.Header(page, "Panels")
-    UI.Toggle(page, { label = "Professions panel", key = "professions.shown" })
-    UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
-    local coords = FS.MinimapCoords and FS.MinimapCoords.SETTING
-    if coords then UI.Toggle(page, { label = coords.label, key = coords.key, tip = coords.tip }) end
-    local speed = FS.QuestSkin and FS.QuestSkin.SPEED_SETTING
-    if speed then UI.Segmented(page, { label = speed.label, key = speed.key, tip = speed.tip, options = speed.options }) end
-    local timer = FS.QuestTimer and FS.QuestTimer.SETTING
-    if timer then UI.Toggle(page, { label = timer.label, key = timer.key, tip = timer.tip }) end
-    local snap = FS.LossOfControl and FS.LossOfControl.SNAP_SETTING
-    if snap then UI.Toggle(page, { label = snap.label, key = snap.key, tip = snap.tip }) end
-    local alerts = FS.HudAlerts and FS.HudAlerts.SETTINGS
-    if alerts then
-        for _, name in ipairs({ "low", "fuse", "flash" }) do
-            local setting = alerts[name]
-            if setting then UI.Toggle(page, { label = setting.label, key = setting.key, tip = setting.tip }) end
-        end
-    end
-    FiveSecondGroup(page)
-    BuffTabGroup(page)
-    ThunderClapGroup(page)
-    AmmoTabGroup(page)
-    TotemPresetsGroup(page)
-    IconStyleGroup(page)
-end })
-
-local PIECE_ORDER = { "you", "tgt", "dot", "shard", "prc", "buff" }
-local PIECE_LABELS = {
-    you = "Your cast bar", tgt = "Target cast bar", dot = "Target side areas",
-    shard = "Soul shards", prc = "Proc posts", buff = "Buff reminders",
-}
-local AREA_LABELS = {
-    debuffsH = "Target Debuffs Horizontal", debuffsV = "Target Debuffs Vertical", class = "Class Module", empty = "Empty",
-}
-
-local function AreaItems()
-    local items = {}
-    for i, id in ipairs(FS.Gunsight.AREA_IDS) do items[i] = { value = id, text = AREA_LABELS[id] } end
-    return items
-end
-
-local function AreaDropdown(page, label, which)
-    local Gunsight = FS.Gunsight
-    UI.Dropdown(page, {
-        label = label,
-        get = function() return Gunsight.GetArea(which) end,
-        text = function(id) return AREA_LABELS[id] end,
-        items = AreaItems,
-        set = function(id) Gunsight.SetArea(which, id) end,
-    })
-end
-
-local function TargetSideGroups(page)
-    local Gunsight = FS.Gunsight
-    UI.Header(page, "Target side",
-        "Target debuffs shows only the debuffs you applied. Class Module shows your class's own resource: soul shards, seals, combo points.")
-    AreaDropdown(page, "Upper area", "upper")
-    AreaDropdown(page, "Lower area", "lower")
-    local Dots = FS.GunsightDots
-    if Dots and Dots.SETTINGS and Dots.SETTINGS.keepFallen then
-        UI.Toggle(page, {
-            label = "Keep fallen-off debuffs as a reapply reminder", key = Dots.SETTINGS.keepFallen.key,
-            tip = "When a debuff you applied runs out on your target during a fight, its row or chip stays with a red outline "
-                .. "as a reminder to apply it again. It clears when you reapply it, change target, or the fight ends.",
-        })
-    end
-    local Areas = FS.GunsightAreas
-    local plate = Areas and Areas.SETTINGS and Areas.SETTINGS.background
-    if plate then
-        UI.Slider(page, {
-            label = "Class module background", key = plate.key, min = plate.min, max = plate.max, step = plate.step,
-            fmt = "%d%%",
-            tip = "A dark plate behind your class module, so it stays readable on bright ground. "
-                .. "Higher is more solid; 0 removes the plate.",
-        })
-    end
-    local Tags = FS.GunsightTags
-    if Tags and Tags.SETTINGS then
-        local S = Tags.SETTINGS
-        UI.Header(page, "Target box tags", "Small tags on the target info box.")
-        local CLASS_ICON_TIP = "Shows the target's class icon in a corner tile on the target box when the target is a player. "
-            .. "Nothing is drawn for creatures, or when the game hides the class during combat."
-        for _, tag in ipairs({
-            { "Level and rank", "level" }, { "Player class icon", "classIcon", CLASS_ICON_TIP },
-            { "Health percent", "health" }, { "Target of target", "tot" },
-        }) do
-            local setting = S[tag[2]]
-            if setting and setting.key then UI.Toggle(page, { label = tag[1], key = setting.key, tip = tag[3] }) end
-        end
-    end
-    -- My buffs is deferred to the next release behind FS.Features.myBuffs (set in GunsightMyBuffs.lua); off, it has no row.
-    local myBuffs = FS.Features and FS.Features.myBuffs == true
-    UI.Header(page, "Player side",
-        myBuffs and "My buffs is the plate left of the next cast tile. Next cast is the tile for your next spell."
-            or "Next cast is the tile for your next spell.")
-    if myBuffs then UI.Toggle(page, { label = "My buffs", key = Gunsight.PieceConfigKey("mybuffs") }) end
-    UI.Toggle(page, { label = "Next cast", key = Gunsight.PieceConfigKey("next") })
-end
-
--- The Priest class module's right side (PriestRight.lua): what it shows, and the Inner Fire reminder. A Priest's page only.
-local function PriestGroup(page)
-    local Right = FS.PriestRight
-    if not (Right and Right.SETTING and Right.REMIND and Right.Applies and Right.Applies()) then return end
-    local S = Right.SETTING
-    UI.Header(page, "Priest class module", "What the right side of the Priest module shows beside the shield.")
-    UI.Dropdown(page, {
-        label = S.label, tip = S.tip,
-        get = function() return Right.Setting() end,
-        text = function(value) return S.text[value] or tostring(value) end,
-        items = function()
-            local items = {}
-            for i, value in ipairs(S.values) do items[i] = { value = value, text = S.text[value] } end
-            return items
-        end,
-        set = function(value) Config.Set(S.key, value) end,
-    })
-    UI.Toggle(page, { label = Right.REMIND.label, key = Right.REMIND.key, tip = Right.REMIND.tip, inset = 14 })
-end
-
--- The Warrior power-up alerts (WarriorPowerUps.lua): the master switch, and one switch per spell. A Warrior's page only.
-local function WarriorGroup(page)
-    local PU = FS.WarriorPowerUps
-    if not (PU and PU.SETTING and PU.SPELLS and PU.ORDER and PU.Applies and PU.Applies()) then return end
-    UI.Header(page, "Warrior power-up alerts", "The big alert above your character when Overpower, Revenge or Victory Rush lights up.")
-    UI.Toggle(page, { label = PU.SETTING.label, key = PU.SETTING.key, tip = PU.SETTING.tip })
-    for _, key in ipairs(PU.ORDER) do
-        local def = PU.SPELLS[key]
-        UI.Toggle(page, { label = def.label, key = def.key, inset = 14, tip = "Play the alert for " .. def.label .. ". Off leaves the other alerts as they are." })
-    end
-end
-
--- The Druid Clearcasting alert (DruidClearcasting.lua): one switch. A Druid's page only.
-local function DruidGroup(page)
-    local CC = FS.DruidClearcasting
-    if not (CC and CC.SETTING and CC.Applies and CC.Applies()) then return end
-    UI.Header(page, "Druid alerts", "The big alert above your character when Clearcasting makes your next spell or ability free.")
-    UI.Toggle(page, { label = CC.SETTING.label, key = CC.SETTING.key, tip = CC.SETTING.tip })
-end
-
--- What each class module shows, "Name: what it means" per piece, as the Gunsight HUD page's class ? tip. The words live in
--- HelpModules.lua, the one source the Help page and the listing pictures also read.
-local HelpModules = FS.HelpModules
-local CLASS_MODULE_HELP = setmetatable({}, { __index = function(_, token)
-    return HelpModules and HelpModules.Tip(token) or nil
-end })
-FS.ClassModuleHelp = CLASS_MODULE_HELP
-
-local function ClassModuleHelpGroup(page)
-    if type(UnitClass) ~= "function" then return end
-    local _, token = UnitClass("player")
-    local tip = type(token) == "string" and CLASS_MODULE_HELP[token]
-    if not tip then return end
-    local name = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]) or token
-    UI.Header(page, name .. " class module", tip)
-end
-
--- The Warlock class module's cues (WarlockState.lua): one switch per cue. A Warlock's page only.
-local function WarlockGroup(page)
-    local WS = FS.WarlockState
-    if not (WS and WS.SETTINGS and WS.ORDER and WS.Applies and WS.Applies()) then return end
-    UI.Header(page, "Warlock class module", "The cues on the right of the Warlock module. The shard count and the demon stay either way.")
-    for _, name in ipairs(WS.ORDER) do
-        local def = WS.SETTINGS[name]
-        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
-    end
-end
-
-if FS.Gunsight and FS.Gunsight.PIECES then
-    CW.RegisterCategory({ key = "gunsight", label = "Gunsight HUD", order = 2, build = function(page)
-        local Gunsight = FS.Gunsight
-        UI.Toggle(page, {
-            label = "Gunsight HUD", key = Gunsight.CONFIG_ENABLED, master = true,
-            reload = Gunsight.NeedsReload,
-            tip = "Master switch for the whole HUD. Off hands the cast bars back to the standard ones at once. "
-                .. "A Gunsight that was off at login, or the classic combat HUD, needs /reload.",
-        })
-        TargetSideGroups(page)
-        ClassModuleHelpGroup(page)
-        PriestGroup(page)
-        WarriorGroup(page)
-        DruidGroup(page)
-        WarlockGroup(page)
-        UI.Header(page, "Pieces")
-        local known, n = {}, 0
-        for _, key in ipairs(Gunsight.PIECES) do known[key] = true end
-        for _, key in ipairs(PIECE_ORDER) do
-            if known[key] then
-                n = n + 1
-                UI.Toggle(page, {
-                    label = PIECE_LABELS[key], key = Gunsight.PieceConfigKey(key),
-                    half = n % 2 == 1 and "left" or "right",
-                })
-            end
-        end
-        local Boxes = FS.GunsightBoxes
-        if Boxes and Boxes.SETTINGS then
-            local S = Boxes.SETTINGS
-            UI.Header(page, "Target health and resource")
-            UI.Slider(page, {
-                label = "Health bar height", key = S.hpHeight.key, min = S.hpHeight.min, max = S.hpHeight.max,
-                step = S.hpHeight.step, fmt = "%d px",
-            })
-            UI.Slider(page, {
-                label = "Resource bar height", key = S.powerHeight.key, min = S.powerHeight.min, max = S.powerHeight.max,
-                step = S.powerHeight.step, fmt = "%d px",
-            })
-            UI.Slider(page, {
-                label = "Bar width", key = S.width.key, min = S.width.min, max = S.width.max, step = S.width.step,
-                fmt = "%d%%", tip = "Percent of the target name width.",
-            })
-            UI.Toggle(page, { label = "Show numbers", key = S.numbers.key })
-            UI.Segmented(page, {
-                label = "Number format", key = S.numberFormat.key, options = Boxes.NUMBER_FORMATS, sub = true,
-                enabled = function() return Config.Get(S.numbers.key) == true end,
-            })
-        end
-    end })
-end
-
-local function CharacterLabel()
-    local db = _G.ForeverSTUwaveDB
-    local guid
-    if type(UnitGUID) == "function" then
-        local ok, value = pcall(UnitGUID, "player")
-        if ok and not (FS.IsSecret and FS.IsSecret(value)) then guid = value end
-    end
-    local label = type(db) == "table" and type(db.profileLabels) == "table" and guid and db.profileLabels[guid]
-    if type(label) == "string" and label ~= "" then return label end
-    local name = type(UnitName) == "function" and UnitName("player") or nil
-    if type(name) == "string" and not (FS.IsSecret and FS.IsSecret(name)) then return name end
-    return "unknown"
-end
-
-local function ProfileItems(...)
-    local skip, items = {}, {}
-    for _, name in ipairs({ ... }) do skip[name] = true end
-    for _, name in ipairs(Config.ListProfiles()) do
-        if not skip[name] then items[#items + 1] = { value = name, text = name } end
-    end
-    return items
-end
-
-local function Check(ok, err)
-    if ok == false then Say(err) end
-end
-
-local function ProfilesPage(page)
-    local default = Config.DEFAULT_PROFILE
-    UI.Header(page, "Active profile",
-        "A profile holds layout positions and every setting in this window. Bug reports and logs stay account-wide.")
-    UI.Dropdown(page, {
-        label = "Profile in use",
-        get = Config.ActiveProfile,
-        items = function() return ProfileItems() end,
-        set = function(name) Check(Config.SetActiveProfile(name)) end,
-    })
-    UI.Value(page, function() return "This character: |cff22e0ff" .. CharacterLabel() .. "|r" end)
-    UI.Header(page, "Manage")
-    UI.ButtonRow(page, {
-        { text = "New profile", onClick = function()
-            UI.Prompt("Name the new profile.", "", function(name)
-                local ok, made = Config.NewProfile(name)
-                if not ok then return false, made end
-                Check(Config.SetActiveProfile(made))
-            end)
-        end },
-        { text = "Copy from...", enabled = function() return #ProfileItems(Config.ActiveProfile()) > 0 end,
-          onClick = function(b)
-              OpenMenu(b, ProfileItems(Config.ActiveProfile()), function(from)
-                  local active = Config.ActiveProfile()
-                  UI.Confirm(("Replace the settings and layout of %s with a copy of %s?"):format(active, from),
-                      function() Check(Config.CopyProfile(from)) end)
-              end)
-          end },
-        { text = "Rename", enabled = function() return Config.ActiveProfile() ~= default end, onClick = function()
-            local active = Config.ActiveProfile()
-            UI.Prompt(("Rename the profile %s."):format(active), active, function(name)
-                local ok, err = Config.RenameProfile(active, name)
-                if not ok then return false, err end
-            end)
-        end },
-    })
-    UI.Button(page, {
-        label = "Delete a profile", tip = "Default and the active profile cannot be deleted. Cannot be undone.",
-        text = "Delete", warn = true,
-        enabled = function() return #ProfileItems(default, Config.ActiveProfile()) > 0 end,
-        onClick = function(b)
-            OpenMenu(b, ProfileItems(default, Config.ActiveProfile()), function(name)
-                UI.Confirm(("Delete the profile %s?"):format(name), function() Check(Config.DeleteProfile(name)) end)
-            end)
-        end,
-    })
-    UI.Button(page, {
-        label = "Put this profile back to the defaults", tip = "Cannot be undone.",
-        text = "Reset profile", warn = true,
-        confirm = function()
-            return ("Put %s back to the defaults? Its layout positions are cleared too."):format(Config.ActiveProfile())
-        end,
-        onClick = function() Check(Config.ResetProfile()) end,
-    })
-    local export = FS.CharacterExport
-    if export and export.SETTING then
-        UI.Header(page, "Saved data")
-        UI.Toggle(page, { label = export.SETTING.label, key = export.SETTING.key, tip = export.SETTING.tip })
-        local reload = export.RELOAD_SETTING
-        if reload then UI.Toggle(page, { label = reload.label, key = reload.key, tip = reload.tip }) end
-    end
-end
-
-CW.RegisterCategory({ key = "profiles", label = "Profiles", order = 9, build = ProfilesPage })
-
--- The Help page: the commands, then the class modules. A row of class tabs (opens on the player's own class), a second row
--- for the Druid forms and Mage specs, then the module's picture with numbered pins and the numbered lines. Pictures, pins,
--- words and the layout come from HelpModules.lua; the art is help_pictures.tga (HelpPicturesArt.lua says where).
-local HELP_TEX = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
-local HELP_TAB_H, HELP_SUB_H, HELP_GAP = 24, 20, 10
-
-local function HelpClassName(token)
-    return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]) or Capitalize(token:lower())
-end
-
-local function PictureSize(name)
-    local r = FS.HelpPicturesArt and FS.HelpPicturesArt.rects[name]
-    if r then return r[3], r[4] end
-    return 0, 0
-end
-
-local function HelpPicture(parent, name, x, y, scale)
-    local art = FS.HelpPicturesArt
-    local r = art and art.rects[name]
-    local t = parent:CreateTexture(nil, "ARTWORK")
-    if not r then return t end
-    t:SetTexture(HELP_TEX .. art.file, "CLAMP", "CLAMP", "NEAREST")
-    t:SetTexCoord(r[1] / art.width, (r[1] + r[3]) / art.width, r[2] / art.height, (r[2] + r[4]) / art.height)
-    t:SetSize(r[3] * scale, r[4] * scale)
-    t:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
-    return t
-end
-
-local function HelpRect(parent, x, y, w, h, color, layer)
-    local t = parent:CreateTexture(nil, layer or "OVERLAY")
-    t:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
-    t:SetSize(w, h)
-    t:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
-    return t
-end
-
--- A pink square with the line number in ink; `dashed` draws only a muted outline (a part with no picture).
-local function HelpBadge(parent, n, x, y, dashed)
-    local size = HelpModules.PIN
-    local holder = CreateFrame("Frame", nil, parent)
-    holder:SetSize(size, size)
-    holder:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -y)
-    if dashed then
-        Outline(holder, C.muted, 1)
-    else
-        HelpRect(holder, 0, 0, size, size, C.pink, "ARTWORK")
-    end
-    local fs = Label(holder, tostring(n), 11, dashed and C.muted or C.ink)
-    fs:SetPoint("CENTER", holder, "CENTER", 0, 0)
-    holder.fsNumber = fs
-    return holder
-end
-
--- One page (a class, or one form or spec): the picture block, then the numbered lines. Returns the frame and its height.
-local function BuildHelpModulePage(parent, page)
-    local f = CreateFrame("Frame", nil, parent)
-    f:SetWidth(CONTENT_W)
-    local L = HelpModules.Layout(page, CONTENT_W, PictureSize)
-    local bx, by, bw, bh = L.box[1], L.box[2], L.box[3], L.box[4]
-    local box = CreateFrame("Frame", nil, f)
-    box:SetSize(bw, bh)
-    box:SetPoint("TOPLEFT", f, "TOPLEFT", bx, -by)
-    -- The fill goes on the page, under the picture and arrows: the box is a child frame, so anything it draws covers
-    -- the page's own textures. The box keeps only its outline.
-    HelpRect(f, bx, by, bw, bh, C.track, "BACKGROUND")
-    Outline(box, C.line, 1)
-    f.fsPicture = HelpPicture(f, L.picture[1], L.picture[2], L.picture[3], HelpModules.SCALE)
-    f.fsArrows = {}
-    for _, r in ipairs(L.arrows) do f.fsArrows[#f.fsArrows + 1] = HelpRect(f, r[1], r[2], r[3], r[4], C.cyan) end
-    f.fsPins = {}
-    for _, p in ipairs(L.pins) do f.fsPins[#f.fsPins + 1] = HelpBadge(f, p[1], p[2], p[3]) end
-    if L.caption then
-        local cap = Label(f, "OTHER STATES", 9, C.muted)
-        cap:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -(L.caption + 4))
-    end
-    for _, e in ipairs(L.extras) do
-        local n, name, x, y, w, h = e[1], e[2], e[3], e[4], e[5], e[6]
-        local holder = CreateFrame("Frame", nil, f)
-        holder:SetSize(w, h)
-        holder:SetPoint("TOPLEFT", f, "TOPLEFT", x, -y)
-        HelpPicture(holder, name, 0, 0, 1)
-        Outline(holder, C.line, 1)
-        HelpBadge(holder, n, 0, 0)
-    end
-    local shown = {}
-    for _, p in ipairs(page.pins or {}) do shown[p[1]] = true end
-    for _, e in ipairs(page.extras or {}) do shown[e.n] = true end
-    local y = L.h + HELP_GAP
-    local textW = CONTENT_W - HelpModules.PIN - 8
-    local function line(text, color, badge, dashed)
-        local fs = Label(f, text, 11, color)
-        fs:SetWidth(textW)
-        fs:SetJustifyH("LEFT")
-        fs:SetJustifyV("TOP")
-        fs:SetSpacing(3)
-        fs:SetPoint("TOPLEFT", f, "TOPLEFT", HelpModules.PIN + 8, -(y + 3))
-        if badge then HelpBadge(f, badge, 0, y, dashed) end
-        y = y + math.max(HelpModules.PIN, math.ceil(fs:GetStringHeight() or 0) + 4) + 6
-        return fs
-    end
-    for n, ln in ipairs(page.lines) do
-        line("|cffff2e97" .. ln[1] .. ":|r " .. ln[2], C.text, n, not shown[n])
-    end
-    if page.note then line(page.note, C.muted) end
-    f:SetHeight(y)
-    return f, y
-end
-
--- A tab row: one MakeButton per item, `widths` given, the selected one pink.
-local function HelpTabs(parent, items, height, size, onPick)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(CONTENT_W, height)
-    row.fsButtons = {}
-    local x = 0
-    for i, it in ipairs(items) do
-        local b = MakeButton(row, { width = it.width, height = height, ring = C.line, text = it.text, size = size, textColor = C.muted })
-        b:SetPoint("TOPLEFT", row, "TOPLEFT", x, 0)
-        b.fsValue = it.value
-        HoverStyle(b, C.cyan)
-        b:SetScript("OnClick", function() onPick(it.value) end)
-        row.fsButtons[i] = b
-        x = x + it.width + 3
-    end
-    function row.Mark(value)
-        for _, b in ipairs(row.fsButtons) do
-            local on = b.fsValue == value
-            b.fsSelected = on
-            if on then Restyle(b, C.pink, C.text, Mix(C.ink, C.pink, 0.22), 0.5) else Restyle(b, C.line, C.muted, C.ink, 0) end
-        end
-    end
-    return row
-end
-
--- The page the player most likely needs: a Druid in bear or cat form sees that form.
-local function OwnPageIndex(token)
-    if token == "DRUID" and type(GetShapeshiftFormID) == "function" then
-        local form = GetShapeshiftFormID()
-        if form == 5 or form == 8 then return 2 end
-        if form == 1 then return 3 end
-    end
-    return 1
-end
-
--- The class modules block. Like UI.Text it must be the last row on its page: it resizes with the class shown.
-function UI.HelpModules(content)
-    local block = CreateFrame("Frame", nil, content)
-    block:SetHeight(HELP_TAB_H)
-    UI.Stack(content, block)
-    local c = Cursor(content)
-    local base = c.y - block:GetHeight()
-    local own
-    if type(UnitClass) == "function" then own = select(2, UnitClass("player")) end
-    local state = { token = HelpModules.CLASSES[own or ""] and own or HelpModules.ORDER[1] }
-    state.page = state.token == own and OwnPageIndex(own) or 1
-    local built, subRows = {}, {}
-    local render
-    local n = #HelpModules.ORDER
-    local tabW = math.floor((CONTENT_W - 3 * (n - 1)) / n)
-    local items = {}
-    for i, token in ipairs(HelpModules.ORDER) do items[i] = { value = token, text = HelpClassName(token), width = tabW } end
-    local tabs = HelpTabs(block, items, HELP_TAB_H, 10, function(token)
-        if token ~= state.token then state.token, state.page = token, 1 end
-        render()
-    end)
-    tabs:SetPoint("TOPLEFT", block, "TOPLEFT", 0, 0)
-    block.fsTabs = tabs
-    local rule = HelpRect(block, 0, HELP_TAB_H, CONTENT_W, 1, C.pink, "ARTWORK")
-    block.fsRule = rule
-    render = function()
-        tabs.Mark(state.token)
-        local pages = HelpModules.CLASSES[state.token].pages
-        local y = HELP_TAB_H + 1 + HELP_GAP
-        for token, sub in pairs(subRows) do sub:SetShown(token == state.token) end
-        if #pages > 1 then
-            local sub = subRows[state.token]
-            if not sub then
-                local list = {}
-                for i, page in ipairs(pages) do list[i] = { value = i, text = page.label, width = #page.label * 7 + 24 } end
-                sub = HelpTabs(block, list, HELP_SUB_H, 10, function(i) state.page = i; render() end)
-                sub:SetPoint("TOPLEFT", block, "TOPLEFT", 0, -y)
-                subRows[state.token] = sub
-            end
-            sub:Show()
-            sub.Mark(state.page)
-            y = y + HELP_SUB_H + HELP_GAP
-        end
-        local key = state.token .. state.page
-        for k, entry in pairs(built) do entry.frame:SetShown(k == key) end
-        local entry = built[key]
-        if not entry then
-            local frame, h = BuildHelpModulePage(block, pages[state.page])
-            entry = { frame = frame, h = h }
-            built[key] = entry
-        end
-        entry.frame:ClearAllPoints()
-        entry.frame:SetPoint("TOPLEFT", block, "TOPLEFT", 0, -y)
-        entry.frame:Show()
-        local h = y + entry.h
-        block:SetHeight(h)
-        c.y = base + h
-        CW.RefreshScroll()
-    end
-    block.fsState = state
-    Track(render)
-    return block
-end
-
-local function HelpPage(page)
-    UI.Header(page, "Getting started")
-    UI.Value(page, function() return "|cff22e0ff/fsconfig|r  this window, or the STU key on the minimap" end)
-    UI.Value(page, function() return "|cff22e0ff/fsedit|r  move and resize frames" end)
-    UI.Value(page, function() return "|cff22e0ff/fsgun on|r or |cff22e0ffoff|r  the Gunsight HUD" end)
-    UI.Value(page, function() return "|cff22e0ff/fsbug|r  what went wrong: saves a bug report to paste into a GitHub issue" end)
-    UI.Value(page, function() return "A |cff22e0ff~|r in front of a timer means it is counted from your own cast." end)
-    UI.Header(page, "Class modules")
-    if HelpModules and FS.HelpPicturesArt then UI.HelpModules(page) end
-end
-
-CW.RegisterCategory({ key = "help", label = "Help", order = 10, build = HelpPage })

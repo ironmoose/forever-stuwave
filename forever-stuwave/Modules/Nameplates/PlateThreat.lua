@@ -1,0 +1,3 @@
+-- Forever STUwave: tank aggro colours and threat text on nameplates (stub for ticket C3; empty until that ticket lands)
+
+local _, FS = ...

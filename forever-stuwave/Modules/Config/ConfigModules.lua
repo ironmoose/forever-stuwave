@@ -1,0 +1,3 @@
+-- Forever STUwave: the power buttons and the module rows (stub for ticket B5; empty until that ticket lands)
+
+local _, FS = ...

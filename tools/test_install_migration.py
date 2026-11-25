@@ -18,20 +18,39 @@ RUNTIME = REPO / "forever-stuwave"
 INSTALLER = REPO / "tools" / "deploy-forever-stuwave.sh"
 # Frozen from the pre-reorganization manifest: dependency order must survive moves.
 LOAD_ORDER = (
-    "ErrorLog.lua", "Nameplates.lua", "Theme.lua", "Layout.lua", "Config.lua", "FrameHelpers.lua",
-    "IconStyleData.lua", "IconStyle.lua", "SpellArt.lua", "ChevronCastBar.lua", "HeldArt.lua", "ButtonSkins.lua", "ScrollBarSkins.lua", "ControlKit.lua", "CheckSkins.lua", "SliderSkins.lua", "FieldSkins.lua", "DropdownSkins.lua", "ItemSlotSkins.lua", "TabSkins.lua", "InsetSkins.lua", "PanelSkins.lua", "Tracker.lua", "TrackerSeat.lua", "ChatCore.lua", "ChatTabs.lua",
-    "ChatEditBox.lua", "ChatTermBar.lua", "ChatWindowState.lua", "ChatFrameSkin.lua",
-    "ChatSlashCommands.lua", "ChatFormat.lua", "UnitFrames.lua", "TargetAuras.lua",
-    "PartyFrames.lua", "RaidFrames.lua", "CastBars.lua", "Buffs.lua", "Professions.lua", "ActionBars.lua",
-    "Console.lua", "StanceBar.lua", "PetFrame.lua", "PetDock.lua", "PetActionBar.lua",
-    "PetCastBar.lua", "Minimap.lua", "InstanceBanner.lua", "QuestTimer.lua", "Panels.lua", "Mail.lua", "Character.lua", "Reputation.lua", "Currency.lua", "Inspect.lua", "Talents.lua", "TalentBgArt.lua", "TalentBackdrops.lua", "CharBgArt.lua", "CharBackdrop.lua", "Commerce.lua", "Quest.lua", "Maps.lua", "Bespoke.lua", "Services.lua", "GroupKit.lua", "Social.lua", "Guild.lua", "ChatSettings.lua", "PvP.lua", "Collections.lua", "Charters.lua", "OddsEnds.lua", "GuildBank.lua", "Tooltip.lua", "TooltipAnchor.lua", "Popups.lua", "Menus.lua", "Settings.lua", "System.lua",
-    "Bags.lua", "Loot.lua", "LootRolls.lua", "GroupPopups.lua", "DataBar.lua", "XPBar.lua", "Deck.lua", "MicroBars.lua",
-    "BagBar.lua", "HudText.lua", "HudAlerts.lua", "LossOfControl.lua", "IssueReporter.lua", "AuctionHouse.lua", "LookingForGroup.lua", "DamageMeter.lua", "Diagnostics.lua",
-    "HudSpells.lua", "HudProfiles.lua", "HudLogic.lua", "Gunsight.lua", "GunsightAreas.lua", "TargetDebuffs.lua", "ShamanTotems.lua", "GunsightDots.lua",
-    "PaladinArt.lua", "GunsightSeals.lua", "WarlockArt.lua", "WarlockState.lua", "GunsightFrame.lua", "GunsightBoxes.lua", "GunsightTape.lua",
-    "GunsightTags.lua", "GunsightMyBuffs.lua",
-    "ConsoleKeys.lua", "ClassShoulder.lua", "SealBar.lua", "TotemPiece.lua", "TotemBar.lua", "TotemPresets.lua", "TotemDial.lua", "ShamanBuffs.lua", "BuffTab.lua", "FiveSecondTab.lua", "ThunderClapTab.lua", "AmmoTab.lua", "CombatHud.lua", "GunsightClass.lua", "GunsightShamanShocks.lua", "GunsightShaman.lua", "GunsightShamanDrop.lua", "WarriorShouts.lua", "WarriorWindows.lua", "WarriorPowerUpArt.lua", "WarriorPowerUps.lua", "GunsightWarrior.lua", "GunsightWarriorClick.lua", "PriestShields.lua", "PriestRight.lua", "GunsightPriest.lua", "GunsightPriestClick.lua", "MageState.lua", "GunsightMage.lua", "GunsightMageClick.lua", "HunterState.lua", "GunsightHunter.lua", "RogueArt.lua", "RogueState.lua", "GunsightRogue.lua", "DruidArt.lua", "DruidState.lua", "GunsightDruid.lua", "DruidBearArt.lua", "GunsightDruidBear.lua", "DruidCatArt.lua", "GunsightDruidCat.lua", "DruidFlowerArt.lua", "GunsightDruidFlower.lua", "DruidClearcastingArt.lua", "DruidClearcasting.lua", "GunsightWarlock.lua", "NameplateCombo.lua", "Questie.lua", "FSCheck.lua",
-    "BugReport.lua", "CharacterExport.lua", "Hitch.lua", "HelpModules.lua", "HelpPicturesArt.lua", "ConfigWindow.lua", "MenuButton.lua", "LayoutEdit.lua",
+    "ErrorLog.lua", "Nameplates.lua", "Theme.lua", "Layout.lua", "Config.lua", "ProfileCodec.lua", "ModuleSwitch.lua",
+    "Role.lua", "FrameHelpers.lua", "IconStyleData.lua", "IconStyle.lua", "SpellArt.lua", "ChevronCastBar.lua", "HeldArt.lua",
+    "ButtonSkins.lua", "ScrollBarSkins.lua", "ControlKit.lua", "CheckSkins.lua", "SliderSkins.lua", "FieldSkins.lua",
+    "DropdownSkins.lua", "ItemSlotSkins.lua", "TabSkins.lua", "InsetSkins.lua", "PanelSkins.lua", "Tracker.lua", "TrackerSeat.lua",
+    "ChatCore.lua", "ChatTabs.lua", "ChatEditBox.lua", "ChatTermBar.lua", "ChatWindowState.lua", "ChatFrameSkin.lua",
+    "ChatSlashCommands.lua", "ChatFormat.lua", "UnitFrames.lua", "TargetAuras.lua", "PartyFrames.lua", "RaidFrames.lua",
+    "CastBars.lua", "Buffs.lua", "Professions.lua", "ActionBars.lua", "Console.lua", "StanceBar.lua", "PetFrame.lua",
+    "PetDock.lua", "PetActionBar.lua", "PetCastBar.lua", "Minimap.lua", "InstanceBanner.lua", "QuestTimer.lua", "Panels.lua",
+    "Mail.lua", "Character.lua", "Reputation.lua", "Currency.lua", "Inspect.lua", "Talents.lua", "TalentBgArt.lua", "TalentBackdrops.lua",
+    "CharBgArt.lua", "CharBackdrop.lua", "Commerce.lua", "Quest.lua", "Maps.lua", "Bespoke.lua", "Services.lua", "GroupKit.lua",
+    "Social.lua", "Guild.lua", "ChatSettings.lua", "PvP.lua", "Collections.lua", "Charters.lua", "OddsEnds.lua", "GuildBank.lua",
+    "Tooltip.lua", "TooltipAnchor.lua", "Popups.lua", "Menus.lua", "Settings.lua", "System.lua", "Bags.lua", "Loot.lua",
+    "LootRolls.lua", "GroupPopups.lua", "DataBar.lua", "XPBar.lua", "Deck.lua", "MicroBars.lua", "BagBar.lua", "HudText.lua",
+    "HudAlerts.lua", "LossOfControl.lua", "IssueReporter.lua", "AuctionHouse.lua", "LookingForGroup.lua", "DamageMeter.lua",
+    "Diagnostics.lua", "HudSpells.lua", "HudProfiles.lua", "HudLogic.lua", "Gunsight.lua", "GunsightAreas.lua", "TargetDebuffs.lua",
+    "ShamanTotems.lua", "GunsightDots.lua", "PaladinArt.lua", "GunsightSeals.lua", "WarlockArt.lua", "WarlockState.lua",
+    "GunsightFrame.lua", "GunsightBoxes.lua", "GunsightTape.lua", "GunsightTags.lua", "GunsightMyBuffs.lua", "ConsoleKeys.lua",
+    "ClassShoulder.lua", "SealBar.lua", "ShapeshiftTab.lua", "CallPetTab.lua", "PortalsTab.lua", "ConjureTab.lua", "PoisonsTab.lua",
+    "DemonTab.lua", "TotemPiece.lua", "TotemBar.lua", "TotemPresets.lua", "TotemDial.lua", "ShamanBuffs.lua", "BuffTab.lua",
+    "FiveSecondTab.lua", "ThunderClapTab.lua", "AmmoTab.lua", "CombatHud.lua", "GunsightClass.lua", "GunsightShamanShocks.lua",
+    "GunsightShaman.lua", "GunsightShamanDrop.lua", "WarriorShouts.lua", "WarriorWindows.lua", "WarriorPowerUpArt.lua",
+    "WarriorPowerUps.lua", "GunsightWarrior.lua", "GunsightWarriorClick.lua", "PriestShields.lua", "PriestRight.lua",
+    "GunsightPriest.lua", "GunsightPriestClick.lua", "MageState.lua", "GunsightMage.lua", "GunsightMageClick.lua", "HunterState.lua",
+    "GunsightHunter.lua", "RogueArt.lua", "RogueState.lua", "GunsightRogue.lua", "DruidArt.lua", "DruidState.lua", "GunsightDruid.lua",
+    "DruidBearArt.lua", "GunsightDruidBear.lua", "DruidCatArt.lua", "GunsightDruidCat.lua", "DruidFlowerArt.lua", "GunsightDruidFlower.lua",
+    "DruidClearcastingArt.lua", "DruidClearcasting.lua", "GunsightWarlock.lua", "NameplateCombo.lua", "PlateThreat.lua",
+    "Questie.lua", "FSCheck.lua", "BugReport.lua", "CharacterExport.lua", "Hitch.lua", "HelpModules.lua", "HelpPicturesArt.lua",
+    "ConfigSpec.lua", "ConfigWindow.lua", "ConfigBuilders.lua", "ConfigPageUnitFrames.lua", "ConfigPageParty.lua", "ConfigPageRaid.lua",
+    "ConfigPagePet.lua", "ConfigPagePlates.lua", "ConfigPageScreen.lua", "ConfigPageAddonTabs.lua", "ConfigPageClassModules.lua",
+    "ConfigPageGunsight.lua", "ConfigPageChat.lua", "ConfigPageMinimap.lua", "ConfigPageTracker.lua", "ConfigPageDataBar.lua",
+    "ConfigPageSkins.lua", "ConfigPageRoles.lua", "ConfigPageProfiles.lua", "ConfigPageHelp.lua", "ConfigSearch.lua",
+    "ConfigFooter.lua", "ConfigFlash.lua", "ConfigTargets.lua", "ConfigShare.lua", "ConfigModules.lua", "ConfigPageBars.lua",
+    "MenuButton.lua", "LayoutEdit.lua",
 )
 
 
@@ -86,7 +105,7 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 172
+    assert len(set(modules)) == 208
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))

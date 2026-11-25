@@ -1,0 +1,3 @@
+-- Forever STUwave: Druid shapeshift tab (stub for ticket T1; empty until that ticket lands)
+
+local _, FS = ...

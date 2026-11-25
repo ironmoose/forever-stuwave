@@ -1,0 +1,3 @@
+-- Forever STUwave: the config search box and its results (stub for ticket B1; empty until that ticket lands)
+
+local _, FS = ...

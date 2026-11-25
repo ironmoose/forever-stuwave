@@ -50,7 +50,7 @@ HERE = Path(__file__).resolve().parent
 ADDON = HERE.parent / "forever-stuwave"
 FSTAB = Path(os.environ.get("FIVESECONDTAB_LUA", ADDON / "Modules/ActionBars/FiveSecondTab.lua"))
 CLASSSHOULDER = ADDON / "Modules/ActionBars/ClassShoulder.lua"
-CONFIGWINDOW = ADDON / "Modules/Config/ConfigWindow.lua"
+CONFIGWINDOW = ADDON / "Modules/Config/ConfigPageAddonTabs.lua"
 TOC = Path(os.environ.get("TOC_FILE", ADDON / "forever-stuwave.toc"))
 MOCKUP = HERE.parent / "mockups" / "five-second-rule-compact-2026-10-14.html"
 LED_GENERATOR = HERE / "assets" / "generate_led_segments.py"
@@ -1938,12 +1938,12 @@ def check_no_em_dashes_and_no_flagged_words_in_the_new_files():
 
 def check_the_config_window_builds_the_motion_rows_under_a_master():
     text = CONFIGWINDOW.read_text(encoding="utf-8")
-    assert "FiveSecondTab" in text, "ConfigWindow.lua does not read FS.FiveSecondTab.SETTINGS"
-    block = text.split("local function FiveSecondGroup", 1)[1].split("\nend\n", 1)[0]
+    assert "FiveSecondTab" in text, "ConfigPageAddonTabs.lua does not read FS.FiveSecondTab.SETTINGS"
+    block = text.split('Module("FiveSecondTab"', 1)[1].split("-- The ammo tab", 1)[0]
     for name in ("enabled", "pulse", "sound", "motion"):
         assert name in block, f"the five second group lacks {name}"
     assert "FX_NAMES" in block or all(n in block for n in FX_NAMES), "the motion rows are not listed"
-    assert "inset" in block, "the motion rows are not set under the master"
+    assert "needs" in block or "Toggles(content, regen" in block, "the motion rows are not set under the master"
 
 
 def check_the_class_shoulder_names_the_cue_as_a_shoulder_after_every_class_tab():

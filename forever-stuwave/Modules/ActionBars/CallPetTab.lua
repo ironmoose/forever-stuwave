@@ -1,0 +1,3 @@
+-- Forever STUwave: Hunter call pet tab (stub for ticket T2; empty until that ticket lands)
+
+local _, FS = ...

@@ -1,0 +1,3 @@
+-- Forever STUwave: profile export and import string codec (stub for ticket B4; empty until that ticket lands)
+
+local _, FS = ...

@@ -1,0 +1,3 @@
+-- Forever STUwave: the shared style blocks for the frame Style tabs (stub for ticket C1; empty until that ticket lands)
+
+local _, FS = ...

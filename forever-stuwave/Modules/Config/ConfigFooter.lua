@@ -1,0 +1,3 @@
+-- Forever STUwave: the footer buttons (stub for ticket B2; empty until that ticket lands)
+
+local _, FS = ...
