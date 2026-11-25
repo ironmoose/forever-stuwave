@@ -251,6 +251,37 @@ function T.showing_again_restores_alpha_and_mouse()
     eq(shown(FS.target), true)
 end
 
+function T.focus_and_boss_frames_follow_their_show_switches_and_start_shown()
+    local C = boot()
+    eq(C.Get("unitFrames.showFocus"), true)
+    eq(C.Get("unitFrames.showBoss"), true)
+    eq(FS.focus ~= nil and #FS.boss > 0, true, "focus and boss frames exist")
+    C.Set("unitFrames.showFocus", false)
+    eq(hidden(FS.focus), true, "focus hidden")
+    for _, frame in ipairs(FS.boss) do eq(shown(frame), true, "boss untouched") end
+    eq(shown(FS.player), true, "player untouched")
+    C.Set("unitFrames.showBoss", false)
+    for _, frame in ipairs(FS.boss) do eq(hidden(frame), true, "every boss frame hidden") end
+    C.Set("unitFrames.showFocus", true)
+    C.Set("unitFrames.showBoss", true)
+    eq(shown(FS.focus), true)
+    for _, frame in ipairs(FS.boss) do eq(shown(frame), true) end
+    eq(#__log, 0, "no Hide, Show or unit watch calls")
+end
+
+function T.a_focus_or_boss_change_in_combat_waits_for_the_end_of_combat()
+    local C = boot()
+    __combat = true
+    C.Set("unitFrames.showFocus", false)
+    C.Set("unitFrames.showBoss", false)
+    eq(shown(FS.focus), true, "focus unchanged in combat")
+    eq(__blocked, 0, "nothing restricted was attempted")
+    endCombat()
+    eq(hidden(FS.focus), true)
+    for _, frame in ipairs(FS.boss) do eq(hidden(frame), true) end
+    eq(__blocked, 0)
+end
+
 function T.the_frames_stay_built_and_the_target_keeps_its_unit_watch()
     local C = boot()
     C.Set("unitFrames.hidePlayer", true)

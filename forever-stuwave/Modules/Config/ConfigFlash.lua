@@ -1,0 +1,3 @@
+-- Forever STUwave: the hover flash on the thing a setting changes (stub for ticket B3; empty until that ticket lands)
+
+local _, FS = ...

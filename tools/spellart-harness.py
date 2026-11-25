@@ -553,8 +553,8 @@ def check_sources() -> None:
           len(pos) == 7 and pos["Core/IconStyleData.lua"] < pos["Core/IconStyle.lua"] < pos["Core/SpellArt.lua"]
           < min(pos["Modules/ActionBars/StanceBar.lua"], pos["Modules/ActionBars/MicroBars.lua"]), f"{pos}")
     check("sources.the_old_baked_data_file_is_gone", not (ADDON / "Core" / "SpellArtData.lua").exists())
-    cw = read("Modules/Config/ConfigWindow.lua")
-    check("sources.unit_frames_page_offers_the_spell_icon_style", "SpellArt" in cw and "UI.Dropdown" in cw and "spellstyle" in read("Core/SpellArt.lua"))
+    cw = read("Modules/Config/ConfigPageAddonTabs.lua")
+    check("sources.addon_tabs_page_offers_the_spell_icon_style", "SpellArt" in cw and "UI.Segmented" in cw and "spellstyle" in read("Core/SpellArt.lua"))
 
 
 def main() -> int:

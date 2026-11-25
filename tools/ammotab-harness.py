@@ -43,7 +43,7 @@ ADDON = HERE.parent / "forever-stuwave"
 TAB = ADDON / "Modules/ActionBars/AmmoTab.lua"
 STATE = ADDON / "Modules/CombatHud/HunterState.lua"
 TOC = ADDON / "forever-stuwave.toc"
-CONFIGWINDOW = ADDON / "Modules/Config/ConfigWindow.lua"
+CONFIGWINDOW = ADDON / "Modules/Config/ConfigPageAddonTabs.lua"
 
 
 def _load(name: str, filename: str):
@@ -422,7 +422,7 @@ def check_config_page_and_toc():
     i = toc.index("Modules/ActionBars/AmmoTab.lua")
     assert toc.index("Modules/ActionBars/ThunderClapTab.lua") < i < toc.index("Modules/Config/ConfigWindow.lua"), "toc order"
     cw = CONFIGWINDOW.read_text(encoding="utf-8")
-    assert "local function AmmoTabGroup" in cw and "AmmoTabGroup(page)\n" in cw, "no config group"
+    assert 'Module("AmmoTab"' in cw and "Ammo tab" in cw, "no config group"
     lua = boot(klass="ROGUE")
     S = tab(lua).SETTINGS
     for name, key in (("enabled", "ammotab.enabled"), ("lowwarn", "ammotab.lowwarn"), ("motion", "ammotab.motion")):

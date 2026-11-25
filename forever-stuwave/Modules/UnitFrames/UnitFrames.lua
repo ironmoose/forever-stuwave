@@ -1112,6 +1112,11 @@ end
 local HIDE_KEYS = { player = "unitFrames.hidePlayer", target = "unitFrames.hideTarget" }
 FS.Config.RegisterDefault(HIDE_KEYS.player, false)
 FS.Config.RegisterDefault(HIDE_KEYS.target, false)
+-- Focus and the boss frames store a show flag instead (the config window says "Show X", on by default); an off switch
+-- hides that frame the same way. The five boss frames share one switch.
+local SHOW_KEYS = { focus = "unitFrames.showFocus", boss = "unitFrames.showBoss" }
+FS.Config.RegisterDefault(SHOW_KEYS.focus, true)
+FS.Config.RegisterDefault(SHOW_KEYS.boss, true)
 
 local visibilityEvents = CreateFrame("Frame")
 local appliedHidden = {}
@@ -1138,12 +1143,21 @@ local function ApplyVisibility()
             appliedHidden[unit] = hidden
         end
     end
+    local function Seat(frame, hidden)
+        frame:SetAlpha(hidden and 0 or 1)
+        frame:EnableMouse(not hidden)
+        appliedHidden[frame.unit] = hidden
+    end
+    if FS.focus then Seat(FS.focus, FS.Config.Get(SHOW_KEYS.focus) == false) end
+    for _, frame in ipairs(FS.boss or {}) do Seat(frame, FS.Config.Get(SHOW_KEYS.boss) == false) end
 end
 
 visibilityEvents:RegisterEvent("PLAYER_LOGIN")
 visibilityEvents:SetScript("OnEvent", ApplyVisibility)
 FS.Config.OnChange(HIDE_KEYS.player, ApplyVisibility)
 FS.Config.OnChange(HIDE_KEYS.target, ApplyVisibility)
+FS.Config.OnChange(SHOW_KEYS.focus, ApplyVisibility)
+FS.Config.OnChange(SHOW_KEYS.boss, ApplyVisibility)
 
 local function FramesStateLine()
     local parts = {}

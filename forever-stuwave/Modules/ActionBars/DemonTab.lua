@@ -1,0 +1,3 @@
+-- Forever STUwave: Warlock summon demon tab (stub for ticket T6; empty until that ticket lands)
+
+local _, FS = ...

@@ -1,0 +1,3 @@
+-- Forever STUwave: which frame each setting points at (stub for ticket B3; empty until that ticket lands)
+
+local _, FS = ...

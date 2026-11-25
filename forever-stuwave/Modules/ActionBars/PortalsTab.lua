@@ -1,0 +1,3 @@
+-- Forever STUwave: Mage portals and teleports tab (stub for ticket T3; empty until that ticket lands)
+
+local _, FS = ...

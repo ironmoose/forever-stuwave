@@ -42,7 +42,7 @@ HERE = Path(__file__).resolve().parent
 ADDON = HERE.parent / "forever-stuwave"
 TAB = ADDON / "Modules/ActionBars/ThunderClapTab.lua"
 TOC = ADDON / "forever-stuwave.toc"
-CONFIGWINDOW = ADDON / "Modules/Config/ConfigWindow.lua"
+CONFIGWINDOW = ADDON / "Modules/Config/ConfigPageAddonTabs.lua"
 
 
 def _load(name: str, filename: str):
@@ -375,7 +375,7 @@ def check_config_page_and_toc():
     i = toc.index("Modules/ActionBars/ThunderClapTab.lua")
     assert toc.index("Modules/ActionBars/FiveSecondTab.lua") < i < toc.index("Modules/Config/ConfigWindow.lua"), "toc order"
     cw = CONFIGWINDOW.read_text(encoding="utf-8")
-    assert "local function ThunderClapGroup" in cw and "ThunderClapGroup(page)\n" in cw, "no config group"
+    assert 'Module("ThunderClapTab"' in cw and "Thunder Clap tab" in cw, "no config group"
     lua = boot()
     S = tab(lua).SETTINGS
     assert S.enabled.key == "thunderclap.enabled" and S.enabled.default is True

@@ -1,0 +1,3 @@
+-- Forever STUwave: Rogue poisons tab (stub for ticket T5; empty until that ticket lands)
+
+local _, FS = ...

@@ -5,12 +5,16 @@
 ## Author: ironmoose
 ## IconTexture: Interface\AddOns\forever-stuwave\Media\Textures\addon_icon
 ## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog, ForeverSTUwaveExport
+## SavedVariablesPerCharacter: ForeverSTUwaveCharDB
 
 Core/ErrorLog.lua
 Modules/Nameplates/Nameplates.lua
 Core/Theme.lua
 Core/Layout.lua
 Core/Config.lua
+Core/ProfileCodec.lua
+Core/ModuleSwitch.lua
+Core/Role.lua
 Core/FrameHelpers.lua
 Core/IconStyleData.lua
 Core/IconStyle.lua
@@ -123,6 +127,12 @@ Modules/CombatHud/GunsightMyBuffs.lua
 Modules/ActionBars/ConsoleKeys.lua
 Modules/ActionBars/ClassShoulder.lua
 Modules/ActionBars/SealBar.lua
+Modules/ActionBars/ShapeshiftTab.lua
+Modules/ActionBars/CallPetTab.lua
+Modules/ActionBars/PortalsTab.lua
+Modules/ActionBars/ConjureTab.lua
+Modules/ActionBars/PoisonsTab.lua
+Modules/ActionBars/DemonTab.lua
 Modules/ActionBars/TotemPiece.lua
 Modules/ActionBars/TotemBar.lua
 Modules/ActionBars/TotemPresets.lua
@@ -168,6 +178,7 @@ Modules/CombatHud/DruidClearcastingArt.lua
 Modules/CombatHud/DruidClearcasting.lua
 Modules/CombatHud/GunsightWarlock.lua
 Modules/Nameplates/NameplateCombo.lua
+Modules/Nameplates/PlateThreat.lua
 Modules/Compat/Questie.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua
@@ -175,6 +186,32 @@ Modules/Diagnostics/CharacterExport.lua
 Modules/Diagnostics/Hitch.lua
 Modules/Config/HelpModules.lua
 Modules/Config/HelpPicturesArt.lua
+Modules/Config/ConfigSpec.lua
 Modules/Config/ConfigWindow.lua
+Modules/Config/ConfigBuilders.lua
+Modules/Config/ConfigPageUnitFrames.lua
+Modules/Config/ConfigPageParty.lua
+Modules/Config/ConfigPageRaid.lua
+Modules/Config/ConfigPagePet.lua
+Modules/Config/ConfigPagePlates.lua
+Modules/Config/ConfigPageScreen.lua
+Modules/Config/ConfigPageAddonTabs.lua
+Modules/Config/ConfigPageClassModules.lua
+Modules/Config/ConfigPageGunsight.lua
+Modules/Config/ConfigPageChat.lua
+Modules/Config/ConfigPageMinimap.lua
+Modules/Config/ConfigPageTracker.lua
+Modules/Config/ConfigPageDataBar.lua
+Modules/Config/ConfigPageSkins.lua
+Modules/Config/ConfigPageRoles.lua
+Modules/Config/ConfigPageProfiles.lua
+Modules/Config/ConfigPageHelp.lua
+Modules/Config/ConfigSearch.lua
+Modules/Config/ConfigFooter.lua
+Modules/Config/ConfigFlash.lua
+Modules/Config/ConfigTargets.lua
+Modules/Config/ConfigShare.lua
+Modules/Config/ConfigModules.lua
+Modules/Config/ConfigPageBars.lua
 Modules/Config/MenuButton.lua
 Core/LayoutEdit.lua

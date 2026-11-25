@@ -43,7 +43,7 @@ MODULE = (CH / "DruidClearcasting.lua").read_text(encoding="utf-8")
 TOC = (ROOT / "forever-stuwave/forever-stuwave.toc").read_text(encoding="utf-8")
 LAYOUT = (ROOT / "forever-stuwave/Core/Layout.lua").read_text(encoding="utf-8")
 LAYOUTEDIT = (ROOT / "forever-stuwave/Core/LayoutEdit.lua").read_text(encoding="utf-8")
-CONFIGWINDOW = (ROOT / "forever-stuwave/Modules/Config/ConfigWindow.lua").read_text(encoding="utf-8")
+CONFIGWINDOW = (ROOT / "forever-stuwave/Modules/Config/ConfigPageClassModules.lua").read_text(encoding="utf-8")
 MEDIA = ROOT / "forever-stuwave/Media/Textures"
 BG = (10, 4, 22)
 GW, GH, SPX = 150, 96, 2.5
@@ -486,8 +486,8 @@ def static_checks() -> list[str]:
         errs.append("Layout.lua has no druidclearcasting entry")
     elif (int(m.group(3)), int(m.group(4))) != (375, 240):
         errs.append("the druidclearcasting entry must be 375 x 240 (150 x 96 sprite px at 2.5)")
-    if "DruidGroup(page)" not in CONFIGWINDOW or "FS.DruidClearcasting" not in CONFIGWINDOW:
-        errs.append("ConfigWindow.lua does not build the Druid alert group")
+    if "FS.DruidClearcasting" not in CONFIGWINDOW or "CC.SETTING.key" not in CONFIGWINDOW:
+        errs.append("ConfigPageClassModules.lua does not build the Druid alert group")
     for needle in ("COMBAT_LOG_EVENT_UNFILTERED", "CreateFrame(\"Button\"", "SecureActionButton", "SecureHandler"):
         for line in MODULE.splitlines():
             if needle in line and not line.lstrip().startswith("--"):

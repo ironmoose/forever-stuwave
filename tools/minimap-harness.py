@@ -860,7 +860,7 @@ def coords_setting_checks() -> None:
     tag = [r for r in regions(g.Minimap.fsBody) if r.color is not None and r.points.BOTTOMLEFT is not None
            and bool(g.__same(r.points.BOTTOMLEFT.rel, g.Minimap))]
     check("[coords] the setting registers its own key and the config window has the switch",
-          g.FS.MinimapCoords.SETTING.key == "minimap.coords" and "FS.MinimapCoords" in CONFIGWINDOW_SRC)
+          g.FS.MinimapCoords.SETTING.key == "minimap.coords" and "FS.MinimapCoords" in (ADDON / "Modules/Config/ConfigPageMinimap.lua").read_text(encoding="utf-8"))
     check("[coords] switched off: the coords and their tag are hidden",
           coords.shown is False and len(tag) > 0 and all(r.shown is False for r in tag))
     lua.execute('FS.Config.Set("minimap.coords", true)')

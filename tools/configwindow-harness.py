@@ -296,7 +296,9 @@ function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc, areasSrc, helpSrc, h
         assert(load(helpSrc, "@HelpModules.lua"))("forever-stuwave", FS)
         assert(load(helpArtSrc, "@HelpPicturesArt.lua"))("forever-stuwave", FS)
     end
-    assert(load(windowSrc, "@ConfigWindow.lua"))("forever-stuwave", FS)
+    for _, chunk in ipairs(windowSrc) do
+        assert(load(chunk[2], "@" .. chunk[1]))("forever-stuwave", FS)
+    end
     if opts.beforeLogin then opts.beforeLogin() end
     if opts.noLogin ~= true then
         Fire("ADDON_LOADED", "forever-stuwave")
@@ -406,57 +408,77 @@ local function reload(opts)       -- a relog over the same saved variable
     return boot(opts)
 end
 
+-- The first release had two big pages; their rows now sit on several pages and tabs. These checks look at rows and
+-- values, not at where a row lives, so openOld opens every tab of the pages that took the old page's rows and leaves them
+-- all shown. The tab and page structure has its own checks below.
+local OLD_PAGES = {
+    unitframes = { "unit", "party", "raid", "plates", "ab", "tabs", "chat", "mini", "track", "skins" },
+    gunsight = { "gunsight", "classmod" },
+}
+local function openOld(W, key)
+    local want = {}
+    for _, page in ipairs(OLD_PAGES[key]) do want[page] = true end
+    for _, page in ipairs(OLD_PAGES[key]) do
+        for _, c in ipairs(W.Categories()) do
+            if c.key == page then
+                for _, t in ipairs(c.tabs) do W.Open(page, t.key) end
+            end
+        end
+    end
+    for _, o in ipairs(ALL) do
+        if o.kind == "ScrollFrame" and want[o.fsPageKey] then o.shown = true end
+    end
+end
+
 -------------------------------------------------------------------------------
 -- Categories
 -------------------------------------------------------------------------------
 
-function T.categories_register_sorted_by_order()
+local BASE = "unit,party,raid,pet,cast,plates,gunsight,ab,auras,tabs,classmod,chat,mini,bags,track,data,skins,role,profiles,help"
+
+function T.categories_register_sorted_by_group_then_order()
     local W = boot()
-    eq(keys(W.Categories()), "unitframes,gunsight,profiles,help")
+    eq(keys(W.Categories()), BASE)
     local c = W.Categories()
-    eq(c[1].label, "Unit Frames"); eq(c[1].order, 1)
-    eq(c[2].label, "Gunsight HUD"); eq(c[2].order, 2)
-    eq(c[3].label, "Profiles"); eq(c[3].order, 9)
+    eq(c[1].label, "Unit Frames"); eq(c[1].group, "FRAMES")
+    eq(c[7].label, "Gunsight HUD"); eq(c[7].group, "SCREEN")
+    eq(c[19].label, "Profiles"); eq(c[19].group, "GENERAL")
 end
 
 function T.register_before_the_window_is_built_sorts_in()
     local W = boot()
-    yes(W.RegisterCategory({ key = "layout", label = "Layout", order = 3, build = function() end }))
-    eq(keys(W.Categories()), "unitframes,gunsight,layout,profiles,help")
+    yes(W.RegisterCategory({ key = "mine", label = "Mine", group = "GENERAL", order = 1.5, build = function() end }))
+    eq(keys(W.Categories()), "unit,party,raid,pet,cast,plates,gunsight,ab,auras,tabs,classmod,chat,mini,bags,track,data,skins,role,mine,profiles,help")
     W.Open()
     local nav = {}
     for _, o in ipairs(ALL) do if o.fsCategory and o:IsVisible() then nav[#nav + 1] = o.fsCategory end end
-    eq(table.concat(nav, ","), "unitframes,gunsight,layout,profiles,help", "nav entries in order")
+    eq(table.concat(nav, ","), "unit,party,raid,pet,cast,plates,gunsight,ab,auras,tabs,classmod,chat,mini,bags,track,data,skins,role,mine,profiles,help", "nav entries in order")
 end
 
 function T.register_after_the_window_is_built_adds_a_nav_entry()
     local W = boot()
     W.Open()
     yes(win() ~= nil, "built")
-    yes(W.RegisterCategory({ key = "layout", label = "Layout", order = 3, build = function() end }))
-    local fs = findText("Layout", win())
+    yes(W.RegisterCategory({ key = "mine", label = "Mine", group = "GENERAL", order = 1.5, build = function() end }))
+    local fs = findText("Mine", win())
     yes(fs, "nav entry for the late category")
-    local button = owner(fs, "fsCategory")
-    eq(button.fsCategory, "layout")
-    eq(button.fsNumber:GetText(), "03")
-    local p = findText("Profiles", win())
-    eq(owner(p, "fsCategory").fsNumber:GetText(), "04", "Profiles renumbered after the late entry")
+    eq(owner(fs, "fsCategory").fsCategory, "mine")
 end
 
 function T.a_page_builds_once_and_only_when_first_shown()
     local W = boot()
     local built = 0
-    W.RegisterCategory({ key = "layout", label = "Layout", order = 3, build = function(content)
+    W.RegisterCategory({ key = "mine", label = "Mine", group = "GENERAL", order = 1.5, build = function(content)
         built = built + 1
         yes(content and content.isFrame, "build gets a content frame")
     end })
     W.Open()
     eq(built, 0, "not built while another page is shown")
-    W.Open("layout")
+    W.Open("mine")
     eq(built, 1)
     W.Open("profiles")
-    W.Open("layout")
-    W.Close(); W.Open("layout")
+    W.Open("mine")
+    W.Close(); W.Open("mine")
     eq(built, 1, "built once")
 end
 
@@ -466,7 +488,7 @@ function T.a_throwing_page_build_does_not_kill_the_window()
     W.Open("bad")
     yes(W.IsShown(), "window still open")
     yes(#__errors >= 1, "the error was forwarded")
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     yes(row("Your cast bar"), "other pages still work")
 end
 
@@ -474,18 +496,18 @@ function T.register_rejects_bad_specs_and_replaces_a_repeated_key()
     local W = boot()
     no(W.RegisterCategory(nil)); no(W.RegisterCategory({})); no(W.RegisterCategory({ key = "x" }))
     no(W.RegisterCategory({ key = "x", label = "X", build = "nope" }))
-    eq(#W.Categories(), 4)
-    W.RegisterCategory({ key = "layout", label = "Layout", order = 3, build = function() end })
-    W.RegisterCategory({ key = "layout", label = "Layout 2", order = 3, build = function() end })
-    eq(#W.Categories(), 5, "a repeated key replaces")
-    eq(W.Categories()[3].label, "Layout 2")
+    eq(#W.Categories(), 20)
+    W.RegisterCategory({ key = "mine", label = "Mine", build = function() end })
+    W.RegisterCategory({ key = "mine", label = "Mine 2", build = function() end })
+    eq(#W.Categories(), 21, "a repeated key replaces")
+    eq(W.Categories()[21].label, "Mine 2")
 end
 
 function T.equal_orders_sort_by_key()
     local W = boot()
-    W.RegisterCategory({ key = "b", label = "B", order = 5, build = function() end })
-    W.RegisterCategory({ key = "a", label = "A", order = 5, build = function() end })
-    eq(keys(W.Categories()), "unitframes,gunsight,a,b,profiles,help")
+    W.RegisterCategory({ key = "b", label = "B", group = "GENERAL", order = 5, build = function() end })
+    W.RegisterCategory({ key = "a", label = "A", group = "GENERAL", order = 5, build = function() end })
+    eq(keys(W.Categories()), "unit,party,raid,pet,cast,plates,gunsight,ab,auras,tabs,classmod,chat,mini,bags,track,data,skins,role,profiles,help,a,b")
 end
 
 -------------------------------------------------------------------------------
@@ -522,9 +544,9 @@ end
 
 function T.the_window_keeps_one_fixed_size_on_every_page()
     local W = boot()
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     local w, h = win():GetWidth(), win():GetHeight()
-    eq(w, 780); eq(h, 560)
+    eq(w, 960); eq(h, 640)
     for _, key in ipairs({ "gunsight", "profiles", "unitframes" }) do
         W.Open(key)
         eq(win():GetWidth(), w, key .. " width"); eq(win():GetHeight(), h, key .. " height")
@@ -542,7 +564,7 @@ function T.the_window_opens_in_combat_and_a_toggle_only_fades_a_protected_piece(
     local W = boot()
     local frame = protectedPiece()
     __combat = true
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     yes(W.IsShown())
     yes(press("Proc posts"))
     eq(FS.Gunsight.IsPieceOn("prc"), false)
@@ -561,7 +583,7 @@ function T.a_profile_switch_in_combat_defers_a_protected_piece()
     FS.Config.SetActiveProfile("Raid")
     FS.Config.Set("gunsight.pieces.prc", false)
     FS.Config.SetActiveProfile("Default")
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     yes(frame:IsShown())
     __combat = true
     yes(FS.Config.SetActiveProfile("Raid"))
@@ -597,9 +619,6 @@ function T.chrome_title_subtitle_footer_and_close()
     yes(findText("FOREVER |cffff2e97STU|rWAVE", f), "title with STU in pink")
     yes(hasText(f, "1.0.0-beta.1"), "version from the toc")
     yes(hasText(f, "/fsconfig"), "slash in the subtitle and footer")
-    yes(findText("Changes apply instantly", f))
-    yes(findText("open with", f))
-    yes(findText("// settings", f))
     no(findText("X", f), "no font X of its own: the close is the shared STUwave X")
     local made = FS.ButtonSkins.CLOSE
     eq(#made, 1, "one shared close button")
@@ -608,28 +627,26 @@ function T.chrome_title_subtitle_footer_and_close()
     no(W.IsShown(), "the X closes the window")
 end
 
-function T.the_nav_numbers_follow_order_and_selection_follows_open()
+function T.selection_follows_open_and_a_nav_click_opens_the_page()
     local W = boot()
+    openOld(W, "gunsight")
     W.Open("gunsight")
     local nav = owner(findText("Gunsight HUD", win()), "fsCategory")
-    eq(nav.fsNumber:GetText(), "02")
     yes(nav.fsSelected, "selected entry flagged")
     no(owner(findText("Unit Frames", win()), "fsCategory").fsSelected == true)
-    yes(hasText(win(), "GUNSIGHT HUD"), "category label top right")
     click("Profiles", win())
     yes(findText("Profile in use", win()), "clicking a nav entry opens it")
-    yes(hasText(win(), "PROFILES"))
 end
 
-function T.the_first_open_shows_the_lowest_order_page_and_a_reopen_keeps_the_last_one()
+function T.the_first_open_shows_the_first_page_and_a_reopen_keeps_the_last_one()
     local W = boot()
     W.Open()
-    yes(findText("Hide player frame", win()), "first page is Unit Frames")
+    yes(findText("Show player frame", win()), "first page is Unit Frames")
     W.Open("gunsight")
     W.Close()
     W.Open()
     yes(row("Your cast bar"), "a plain reopen returns to the page that was showing")
-    no(findText("Hide player frame", win()), "the Unit Frames page is hidden")
+    no(findText("Show player frame", win()), "the Unit Frames page is hidden")
 end
 
 -------------------------------------------------------------------------------
@@ -645,22 +662,22 @@ end
 
 function T.unit_frames_toggles_write_config_and_follow_changes()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
-    local r = row("Hide player frame")
+    openOld(W, "unitframes")
+    local r = row("Show player frame")
+    yes(r.control.fsChecked, "shown by default")
+    press("Show player frame")
+    eq(FS.Config.Get("unitFrames.hidePlayer"), true, "the inverted row writes the old key")
     no(r.control.fsChecked)
-    press("Hide player frame")
-    eq(FS.Config.Get("unitFrames.hidePlayer"), true)
-    yes(r.control.fsChecked)
     eq(FS.Config.Get("unitFrames.hideTarget"), false, "the other key is untouched")
     FS.Config.Set("unitFrames.hidePlayer", false)
-    no(r.control.fsChecked, "an external change shows")
-    press("Hide target frame")
+    yes(r.control.fsChecked, "an external change shows")
+    press("Show target frame")
     eq(FS.Config.Get("unitFrames.hideTarget"), true)
 end
 
 function T.the_unit_frames_page_has_the_professions_panel_toggle()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     local r = row("Professions panel")
     yes(r, "a Professions panel row")
     yes(r.control.fsChecked, "shown by default")
@@ -674,7 +691,7 @@ end
 
 function T.the_unit_frames_page_has_the_background_grid_toggle()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     local r = row("Background grid")
     yes(r, "a Background grid row")
     yes(r.control.fsChecked, "shown by default")
@@ -689,17 +706,17 @@ end
 
 function T.the_toggle_states_show_on_and_off()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
-    eq(#texts(row("Hide player frame")), 2, "label and state, nothing else on a row")
-    local r = row("Hide player frame")
-    yes(findText("OFF", r))
-    FS.Config.Set("unitFrames.hidePlayer", true)
+    openOld(W, "unitframes")
+    eq(#texts(row("Show player frame")), 2, "label and state, nothing else on a row")
+    local r = row("Show player frame")
     yes(findText("ON", r))
+    FS.Config.Set("unitFrames.hidePlayer", true)
+    yes(findText("OFF", r))
 end
 
 function T.no_page_has_inline_help_text()
     local W = boot({ preWindow = unitFramesDefaults })
-    for _, key in ipairs({ "unitframes", "gunsight", "profiles" }) do
+    for _, key in ipairs({ "unit", "gunsight", "profiles" }) do
         W.Open(key)
         local page
         for _, o in ipairs(ALL) do
@@ -714,18 +731,18 @@ function T.no_page_has_inline_help_text()
         end
         yes(seen >= 3, key .. ": page texts were collected")
     end
-    W.Open("unitframes")
-    yes(hasText(win(), "PLAYER AND TARGET"))
+    W.Open("unit")
+    yes(hasText(win(), "FRAMES"))
 end
 
 function T.the_unit_frames_header_explains_itself_in_a_tooltip()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    W.Open("unit")
     local icon
     for _, o in ipairs(ALL) do if o.fsTip and o:IsVisible() then icon = o end end
     yes(icon, "a ? icon on the header")
     icon.scripts.OnEnter(icon)
-    eq(TOOLTIP.text, "Hidden frames stay click-through and invisible.")
+    eq(TOOLTIP.text, "A frame that is off stays click-through and invisible.")
     eq(TOOLTIP.owner, icon)
     yes(TOOLTIP.shown)
     icon.scripts.OnLeave(icon)
@@ -734,15 +751,15 @@ end
 
 function T.a_profile_switch_updates_every_control()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
-    local r = row("Hide player frame")
+    openOld(W, "unitframes")
+    local r = row("Show player frame")
     FS.Config.NewProfile("Raid")
     FS.Config.Set("unitFrames.hidePlayer", true)       -- on Default
-    yes(r.control.fsChecked)
+    no(r.control.fsChecked)
     yes(FS.Config.SetActiveProfile("Raid"))
-    no(r.control.fsChecked, "Raid has the default")
+    yes(r.control.fsChecked, "Raid has the default")
     FS.Config.SetActiveProfile("Default")
-    yes(r.control.fsChecked)
+    no(r.control.fsChecked)
 end
 
 -------------------------------------------------------------------------------
@@ -756,7 +773,7 @@ local PIECE_LABELS = {
 
 function T.every_gunsight_piece_has_a_label_and_a_row()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     eq(#FS.Gunsight.PIECES, 8)
     for _, key in ipairs(FS.Gunsight.PIECES) do
         yes(PIECE_LABELS[key], "no label for piece " .. key)
@@ -772,11 +789,10 @@ end
 
 function T.the_party_frames_are_no_gunsight_piece_and_the_pieces_pair_up_evenly()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     no(row("Party frames"), "the party frames have their own switch, not a Gunsight row")
-    no(hasText(win(), "Party frames"), "and no text for them on the page")
     -- six piece toggles in three left and right pairs: every left one has a right one beside it, none is alone
-    local labels = { "Your cast bar", "Target cast bar", "Target side areas", "Soul shards", "Proc posts", "Buff reminders" }
+    local labels = { "Your cast bar", "Target cast bar", "Target side areas", "Proc posts", "Buff reminders", "Soul shards" }
     for i = 1, #labels, 2 do
         local left, right = row(labels[i]), row(labels[i + 1])
         eq(left.points[1].y, right.points[1].y, labels[i] .. " and " .. labels[i + 1] .. " share a line")
@@ -787,7 +803,7 @@ end
 
 function T.gunsight_page_has_no_aura_rows_yet()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local page = row("Gunsight HUD").parent
     for _, t in ipairs(texts(page)) do
         yes(not t:lower():find("aura"), "unbuilt setting shown: " .. t)
@@ -796,7 +812,7 @@ end
 
 function T.gunsight_toggles_write_config_and_drive_the_live_piece()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local seen = {}
     FS.Gunsight.OnPieceChanged(function(key, on) seen[#seen + 1] = key .. "=" .. tostring(on) end)
     yes(FS.Gunsight.IsPieceOn("you"))
@@ -813,20 +829,20 @@ end
 
 function T.the_master_toggle_writes_config_and_waits_for_a_reload()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     yes(row("Gunsight HUD").control.fsChecked)
     press("Gunsight HUD")
     eq(FS.Config.Get("gunsight.enabled"), false)
     eq(FS.Gunsight.IsEnabled(), true, "the HUD is built for this session, so the switch applies after /reload")
     local W2 = reload()
     eq(FS.Gunsight.IsEnabled(), false, "after the reload")
-    W2.Open("gunsight")
+    openOld(W2, "gunsight")
     no(row("Gunsight HUD").control.fsChecked)
 end
 
 function T.the_master_toggle_applies_live_and_prompts_a_reload_only_for_what_cannot_be_live()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     no(hasText(win(), "Reload to"), "no prompt while the HUD matches what was built")
     eq(findText("Reload", win()), nil, "and no Reload button")
     local sr = stubSecureReload()
@@ -852,7 +868,7 @@ end
 
 function T.a_gunsight_off_at_login_prompts_a_reload_to_build_it()
     local W = boot({ db = { gunsight = { enabled = false } } })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     no(hasText(win(), "Reload to"), "nothing owed at login")
     press("Gunsight HUD")
     eq(FS.Gunsight.IsActive(), false, "the pieces were never built")
@@ -868,7 +884,7 @@ end
 
 function T.the_master_toggle_explains_the_reload_in_a_tooltip()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local r = row("Gunsight HUD")
     local icon
     for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then icon = o end end
@@ -879,7 +895,7 @@ end
 
 function T.a_profile_switch_moves_the_live_pieces_and_the_toggles()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     FS.Config.NewProfile("Raid")
     FS.Config.SetActiveProfile("Raid")
     FS.Config.Set("gunsight.pieces.buff", false)
@@ -960,7 +976,7 @@ end
 
 function T.fsgun_and_the_window_show_the_same_state()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local slash = SlashCmdList.FSGUN
     slash("piece shard off")
     eq(FS.Config.Get("gunsight.pieces.shard"), false, "/fsgun writes through FS.Config")
@@ -1143,7 +1159,8 @@ end
 
 function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_class()
     local W = boot({ preWindow = withFiveSecond(true) })
-    W.Open("unitframes")
+    W.SetFolded("tabs/general/Mana regen effects", false)
+    openOld(W, "unitframes")
     yes(headerY("MANA REGEN"), "a Mana regen header")
     yes(row("Mana regen module").control.fsChecked, "the tab is on by default")
     yes(row("Regen pulse").control.fsChecked, "the pulse is on by default")
@@ -1160,6 +1177,7 @@ function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_clas
     press("Cast flash")
     eq(FS.Config.Get("fivesecond.fx.flash"), false)
     eq(FS.Config.Get("fivesecond.fx.sweep"), true, "the other effects are untouched")
+    FS.Config.Set("fivesecond.enabled", true)
     for label, tip in pairs({ ["Mana regen module"] = "Tip one.", ["Regen pulse"] = "Tip two.", ["Regen sound"] = "Tip three.",
         ["Animate the tab"] = "Tip five.", ["Cast flash"] = "Tip six.", ["Regen sweep"] = "Tip seven." }) do
         local r, found = row(label), nil
@@ -1169,13 +1187,61 @@ function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_clas
     end
 end
 
+-- ---- A2: the disabled / requires model ----
+
+local function iconOf(r)
+    for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then return o end end
+end
+
+function T.a_row_with_needs_dims_with_its_reason_and_lights_when_the_parent_flips()
+    local W = boot({ preWindow = withFiveSecond(true) })
+    W.SetFolded("tabs/general/Mana regen effects", false)
+    openOld(W, "unitframes")
+    local child = row("Regen pulse")
+    yes(child.control.enabled, "on while Mana regen module is on")
+    no(child.fsRowOff, "not marked off")
+    press("Mana regen module")                      -- one click turns the parent off
+    no(child.control.enabled, "the child control takes no input")
+    yes(child.fsRowOff, "marked off in the same refresh")
+    local icon = iconOf(child)
+    local lines = {}
+    for line in icon.fsTip:gmatch("[^\n]+") do lines[#lines + 1] = line end
+    eq(lines[1], "Regen pulse", "the first line is the label")
+    eq(lines[2], "Requires |cffffffffMana regen module|r to be on.", "then the reason")
+    eq(lines[3], "Tip two.", "then the row tip")
+    eq(W.RowByKey("fivesecond.pulse").disabled, true, "the registry records it for search")
+    yes(W.RowByKey("fivesecond.pulse").why:find("Requires", 1, true))
+    press("Mana regen module")
+    yes(child.control.enabled, "the child lights at once when the parent is back on")
+    eq(iconOf(child).fsTip, "Tip two.", "the plain tip returns")
+end
+
+function T.a_disabled_row_ignores_a_press_and_an_enabled_fn_without_a_reason_is_reported()
+    local W = boot()
+    local flag = false
+    W.RegisterCategory({ key = "dis", label = "Dis", group = "GENERAL", order = 62, build = function(c)
+        W.UI.Toggle(c, { label = "Gated", get = function() return false end, set = function() end,
+            enabled = function() return flag end, reason = "Turn the gate on first." })
+        W.UI.Toggle(c, { label = "Unexplained", get = function() return false end, set = function() end,
+            enabled = function() return flag end })
+    end })
+    W.Open("dis")
+    eq(#__errors, 1, "the row with enabled() and no reason is reported")
+    yes(tostring(__errors[1]):find("Unexplained", 1, true))
+    no(press("Gated"), "a disabled row takes no press")
+    eq(iconOf(row("Gated")).fsTip, "Gated\nTurn the gate on first.")
+    flag = true
+    W.RefreshAll()
+    yes(press("Gated"), "enabled once the function says so")
+end
+
 function T.the_five_second_rule_group_is_left_out_for_other_classes_and_clients()
     local W = boot({ preWindow = withFiveSecond(false) })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     no(row("Regen pulse"), "a class without mana has no row")
     no(headerY("MANA REGEN"), "and no header")
     W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     no(row("Regen pulse"), "a client without the tab has no row")
 end
 
@@ -1192,7 +1258,8 @@ end
 
 function T.the_unit_frames_page_has_the_buff_tab_combat_state_switch_for_a_shaman()
     local W = boot({ preWindow = withBuffTab(true) })
-    W.Open("unitframes")
+    W.UIState("tabsCls", "SHAMAN")
+    openOld(W, "unitframes")
     yes(headerY("SHAMAN BUFF TAB"), "a Shaman buff tab header")
     yes(row("Buff tab combat state").control.fsChecked, "on by default")
     press("Buff tab combat state")
@@ -1201,12 +1268,13 @@ function T.the_unit_frames_page_has_the_buff_tab_combat_state_switch_for_a_shama
     for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
     eq(found, "Tip four.", "explained by a ? tip")
     eq(#texts(r), 3, "label, state and the ? icon only, no helper line")
-    W = boot({ preWindow = withBuffTab(false) })
-    W.Open("unitframes")
-    no(row("Buff tab combat state"), "a character without the tab has no row")
+    W = boot({ preWindow = withBuffTab(true) })
+    W.UIState("tabsCls", "MAGE")
+    openOld(W, "unitframes")
+    no(row("Buff tab combat state"), "another class on the strip has no row")
     no(headerY("SHAMAN BUFF TAB"), "and no header")
     W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     no(row("Buff tab combat state"), "a client without the tab has no row")
 end
 
@@ -1231,43 +1299,33 @@ local function withIconStyle(micro, spells)
     end
 end
 
-function T.the_unit_frames_page_has_one_icon_style_group_with_both_dropdowns_and_a_tip_each()
+function T.the_icon_style_rows_have_a_tip_each_and_write_their_own_key()
     local W = boot({ preWindow = withIconStyle(true, true) })
-    W.Open("unitframes")
-    yes(headerY("ICON STYLE"), "an Icon style header")
-    no(headerY("CLASS TAB ICONS"), "the old class tab header is gone")
-    yes(headerY("ICON STYLE") < yOf("Micro menu icons") and yOf("Micro menu icons") < yOf("Spell icons"), "micro first, then spells, under the one header")
+    openOld(W, "unitframes")
+    yes(headerY("MICRO MENU") and headerY("ICON STYLE"), "a Micro menu and an Icon style header")
     for label, tip in pairs({ ["Micro menu icons"] = "Micro tip.", ["Spell icons"] = "Spell tip." }) do
         local r, found = row(label), nil
         for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
         eq(found, tip, label .. ": explained by a ? tip")
-        eq(row(label).control.fsLabel:GetText(), "Gradient", label .. ": gradient by default")
-        openMenu(label)
-        eq(menuTexts(), "Gradient,Stock", label .. ": the two styles")
-        click("Stock", menu())
-        eq(row(label).control.fsLabel:GetText(), "Stock")
-        eq(table.concat(texts(r), "|"), label .. "|?|Stock|v", label .. ": label, ? icon, value and arrow only, no helper line")
+        yes(row(label).control, label .. ": a control")
+        click("Stock", r)
     end
     eq(FS.Config.Get("icons.microstyle"), "stock")
     eq(FS.Config.Get("icons.spellstyle"), "stock")
-    openMenu("Micro menu icons")
-    click("Gradient", menu())
+    click("Gradient", row("Micro menu icons"))
     eq(FS.Config.Get("icons.microstyle"), "gradient")
     eq(FS.Config.Get("icons.spellstyle"), "stock", "the other setting is untouched")
 end
 
-function T.the_icon_style_group_leaves_out_what_does_not_apply()
+function T.the_icon_style_rows_leave_out_what_does_not_apply()
     local W = boot({ preWindow = withIconStyle(true, false) })
-    W.Open("unitframes")
-    yes(headerY("ICON STYLE") and row("Micro menu icons"), "the micro row stays for a class with no spell tiles")
+    openOld(W, "unitframes")
+    yes(row("Micro menu icons"), "the micro row stays for a class with no spell tiles")
     no(row("Spell icons"), "no spell row until a tab drew an icon")
     W = boot({ preWindow = withIconStyle(false, true) })
-    W.Open("unitframes")
-    yes(headerY("ICON STYLE") and row("Spell icons"), "the spell row stays without the micro bar")
+    openOld(W, "unitframes")
+    yes(row("Spell icons"), "the spell row stays without the micro bar")
     no(row("Micro menu icons"), "a client without the micro bar has no micro row")
-    W = boot({ preWindow = withIconStyle(false, nil) })
-    W.Open("unitframes")
-    no(headerY("ICON STYLE"), "neither: no header either")
 end
 
 -- ---- the Shaman totem presets group on the Unit Frames page (TotemPresets.lua's SETTINGS) ----
@@ -1292,7 +1350,8 @@ end
 
 function T.the_unit_frames_page_has_the_totem_presets_group_with_one_switch_and_one_tip_per_row()
     local W = boot({ preWindow = withTotemPresets(true) })
-    W.Open("unitframes")
+    W.UIState("tabsCls", "SHAMAN")
+    openOld(W, "unitframes")
     yes(headerY("TOTEM PRESETS"), "a Totem presets header")
     for name, def in pairs(PRESET_ROWS) do
         local r = row(def.label)
@@ -1312,12 +1371,13 @@ function T.the_unit_frames_page_has_the_totem_presets_group_with_one_switch_and_
     eq(FS.Config.Get("totems.dial"), true, "a switch touches only itself")
     press("Name plates")
     eq(FS.Config.Get("totems.dialPlate"), false)
-    W = boot({ preWindow = withTotemPresets(false) })
-    W.Open("unitframes")
-    no(row("Preset 1"), "a character without the tab has no row")
+    W = boot({ preWindow = withTotemPresets(true) })
+    W.UIState("tabsCls", "MAGE")
+    openOld(W, "unitframes")
+    no(row("Preset 1"), "another class on the strip has no row")
     no(headerY("TOTEM PRESETS"), "and no header")
     W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     no(row("Preset 1"), "a client without the presets has no row")
 end
 
@@ -1332,8 +1392,8 @@ end
 
 function T.the_unit_frames_page_has_the_stuwave_nameplates_switch_with_a_tip()
     local W = boot({ preWindow = withNameplates })
-    W.Open("unitframes")
-    yes(headerY("NAMEPLATES"), "a Nameplates header")
+    openOld(W, "unitframes")
+    yes(headerY("WHAT SHOWS"), "a What shows header")
     local r = row("STUwave nameplates")
     yes(r, "a STUwave nameplates row")
     yes(r.control.fsChecked, "on by default")
@@ -1348,18 +1408,16 @@ function T.the_unit_frames_page_has_the_stuwave_nameplates_switch_with_a_tip()
     yes(r.control.fsChecked, "an external change shows")
     FS.Config.Set(FS.Gunsight.CONFIG_ENABLED, false)
     yes(r.control.enabled, "the Gunsight master switch off does not dim it")
-    yes(headerY("PLAYER AND TARGET") < headerY("NAMEPLATES") and headerY("NAMEPLATES") < yOf("STUwave nameplates"),
-        "the switch sits under its own header")
+    yes(headerY("WHAT SHOWS") < yOf("STUwave nameplates"), "the switch sits under its own header")
 end
 
 function T.the_nameplates_group_is_left_out_without_the_nameplate_module()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
-    no(headerY("NAMEPLATES"), "no header")
+    openOld(W, "unitframes")
     no(row("STUwave nameplates"), "no switch")
     W = boot({ preWindow = function() unitFramesDefaults(); FS.Nameplates = {} end })
-    W.Open("unitframes")
-    no(headerY("NAMEPLATES"), "a module with no setting entry has no group")
+    openOld(W, "unitframes")
+    no(row("STUwave nameplates"), "a module with no setting entry has no switch")
 end
 
 -- ---- the chat line tint switch on the Unit Frames page (ChatFormat.lua's BAND_SETTING) ----
@@ -1371,15 +1429,15 @@ function T.the_unit_frames_page_has_the_chat_line_tint_switch()
         FS.Config.RegisterDefault(BANDS_KEY, true)
         FS.ChatFormat = { BAND_SETTING = { key = BANDS_KEY, label = "Guild and party line tint", tip = "Bands tip." } }
     end })
-    W.Open("unitframes")
-    yes(headerY("CHAT"), "a Chat header")
+    openOld(W, "unitframes")
+    yes(headerY("LINE TINT"), "a Line tint header")
     local r = row("Guild and party line tint")
     yes(r and r.control.fsChecked, "on by default")
     press("Guild and party line tint")
     eq(FS.Config.Get(BANDS_KEY), false)
     W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
-    no(headerY("CHAT"), "no chat module, no group")
+    openOld(W, "unitframes")
+    no(row("Guild and party line tint"), "no chat module, no row")
 end
 
 -- ---- the party frames group on the Unit Frames page (PartyFrames.lua's switch, LayoutEdit's Move and Reset) ----
@@ -1399,40 +1457,38 @@ local function stubLayoutEdit()
     FS.LayoutEdit = E
     return E
 end
+local function tipOfRow(label)
+    local r, found = row(label), nil
+    for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
+    return found
+end
 local function rowY(label) return -row(label).points[1].y end
 local function printedHas(needle) return table.concat(__printed, "\n"):find(needle, 1, true) ~= nil end
 
-function T.the_unit_frames_page_has_a_party_frames_group_between_player_and_target_and_panels()
+function T.the_party_page_has_the_switch_and_no_move_or_reset_rows()
     local W = boot({ preWindow = withPartyFrames })
-    W.Open("unitframes")
-    local player, party, panels = headerY("PLAYER AND TARGET"), headerY("PARTY FRAMES"), headerY("PANELS")
-    yes(player and party and panels, "the three headers")
-    yes(player < party and party < panels, "the party frames group sits between the two")
-    local show, move, reset = rowY("Show party frames"), rowY("Move party frames"), rowY("Reset position")
-    yes(party < show and show < move and move < reset and reset < panels, "its three rows, in order, inside the group")
+    openOld(W, "unitframes")
+    yes(headerY("PARTY FRAMES"), "the group header")
     eq(#texts(row("Show party frames")), 3, "the switch row: label, state and the ? icon, no helper line")
-    eq(#texts(row("Move party frames")), 3, "the Move row: label, button and the ? icon")
-    eq(#texts(row("Reset position")), 3, "the Reset row: label, button and the ? icon")
-    yes(findText("Move", row("Move party frames")), "the button reads Move")
-    yes(findText("Reset", row("Reset position")), "the button reads Reset")
+    no(row("Move party frames"), "moving happens in the layout editor")
+    no(row("Reset position"), "and so does resetting")
 end
 
 function T.the_party_frames_group_is_left_out_without_the_party_frames()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
-    no(headerY("PARTY FRAMES"), "no header")
+    openOld(W, "unitframes")
     no(row("Show party frames"), "no switch")
     W = boot({ preWindow = function() unitFramesDefaults(); FS.PartyFrames = {} end })
-    W.Open("unitframes")
-    no(headerY("PARTY FRAMES"), "a module with no saved key has no group")
+    openOld(W, "unitframes")
+    no(row("Show party frames"), "a module with no saved key has no switch")
     W = boot({ preWindow = withPartyFrames })
-    W.Open("gunsight")
-    no(hasText(win(), "party"), "the Gunsight HUD page says nothing about them")
+    openOld(W, "gunsight")
+    no(row("Show party frames"), "the Gunsight HUD page has no row for them")
 end
 
 function T.the_party_frames_switch_is_their_own_key_and_the_gunsight_master_switch_does_not_dim_it()
     local W = boot({ preWindow = withPartyFrames })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     local r = row("Show party frames")
     yes(r.control.fsChecked, "on by default")
     press("Show party frames")
@@ -1442,7 +1498,6 @@ function T.the_party_frames_switch_is_their_own_key_and_the_gunsight_master_swit
     yes(r.control.fsChecked, "an external change shows")
     FS.Config.Set(FS.Gunsight.CONFIG_ENABLED, false)
     yes(r.control.enabled, "the Gunsight master switch off does not dim it")
-    yes(row("Move party frames").control.enabled and row("Reset position").control.enabled, "nor the buttons")
     yes(press("Show party frames"), "and it still works")
     eq(FS.Config.Get(PARTY_KEY), false)
     eq(FS.Config.Get(FS.Gunsight.CONFIG_ENABLED), false, "the master switch is untouched")
@@ -1452,92 +1507,17 @@ end
 
 function T.every_party_frames_row_explains_itself_in_a_tip()
     local W = boot({ preWindow = withPartyFrames })
-    W.Open("unitframes")
-    local function tipOf(label)
-        local r, found = row(label), nil
-        for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
-        return found
-    end
-    local show, move, reset = tipOf("Show party frames"), tipOf("Move party frames"), tipOf("Reset position")
+    openOld(W, "unitframes")
+    local show = tipOfRow("Show party frames")
     yes(show and show:find("own switch", 1, true) and show:find("HUD on or off", 1, true),
         "the switch says the party frames have their own switch and follow it with the HUD on or off: " .. tostring(show))
-    yes(move and move:find("Party handle", 1, true) and move:find("right-click", 1, true),
-        "Move says to drag the Party handle and right-click to reset: " .. tostring(move))
-    yes(reset and reset:find("design seat", 1, true), "Reset says where the frames go: " .. tostring(reset))
-    for _, tip in ipairs({ show, move, reset }) do
-        yes(not tip:lower():find("bot", 1, true) and not tip:find("tape", 1, true), "neutral wording: " .. tip)
-    end
-    local page
-    for _, o in ipairs(ALL) do if o.kind == "ScrollFrame" and o:IsVisible() and o.fsPageKey == "unitframes" then page = o end end
-    for _, t in ipairs(texts(page)) do
-        yes(#t <= 40 and not t:find("[^.]%.$"), "no inline help text on the page: " .. t)
-    end
+    yes(not show:lower():find("bot", 1, true) and not show:find("tape", 1, true), "neutral wording: " .. show)
 end
 
-function T.move_hands_over_to_the_layout_editor_and_asks_to_come_back_to_this_page()
-    local W = boot({ preWindow = withPartyFrames })
-    W.Open("unitframes")
-    local E = stubLayoutEdit()
-    yes(click("Move", row("Move party frames")), "Move was pressed")
-    eq(#E.entered, 1, "one hand over")
-    eq(E.entered[1], "unitframes", "DONE or Esc comes back to the Unit Frames page")
-    eq(#E.resets, 0)
-    eq(#__errors, 0)
-    -- The editor refused (combat, Blizzard Edit Mode). The stub only answers false; layoutedit-harness pins that
-    -- the real editor refuses before it closes the window.
-    E.enterResult = false
-    click("Move", row("Move party frames"))
-    eq(#E.entered, 2)
-    yes(win():IsShown(), "and this window is left as it was")
-end
-
-function T.move_and_reset_say_so_when_the_layout_editor_is_not_there()
-    local W = boot({ preWindow = withPartyFrames })
-    W.Open("unitframes")
-    click("Move", row("Move party frames"))
-    yes(printedHas("layout editor"), "Move says it cannot")
-    __printed = {}
-    click("Reset", row("Reset position"))
-    click("Confirm", dialog())
-    yes(printedHas("layout editor"), "and so does Reset")
-    eq(#__errors, 0)
-end
-
-function T.reset_position_asks_then_puts_only_the_party_frames_back()
-    local W = boot({ preWindow = withPartyFrames })
-    W.Open("unitframes")
-    local E = stubLayoutEdit()
-    click("Reset", row("Reset position"))
-    yes(dialog():IsVisible(), "it asks first")
-    eq(#E.resets, 0, "nothing until confirmed")
-    click("Cancel", dialog())
-    eq(#E.resets, 0)
-    click("Reset", row("Reset position"))
-    click("Confirm", dialog())
-    eq(#E.resets, 1)
-    eq(E.resets[1], "party", "the party frames only")
-    local b = owner(findText("Reset", row("Reset position")))
-    yes(b.fsWarn, "it wears the warning skin like the other resets")
-end
-
-function T.reset_position_before_the_party_frames_exist_does_nothing_and_says_so()
-    local W = boot({ preWindow = withPartyFrames })
-    FS.partyContainer = nil                   -- a login in combat: the container is built at the first regen
-    W.Open("unitframes")
-    local E = stubLayoutEdit()
-    click("Reset", row("Reset position"))
-    click("Confirm", dialog())
-    eq(#E.resets, 0, "nothing to reseat yet")
-    yes(printedHas("not up yet"), "and it says so")
-    eq(#__errors, 0)
-end
-
-function T.read_only_settings_dim_the_party_frames_switch_and_both_buttons()
+function T.read_only_settings_dim_the_party_frames_switch()
     local W = boot({ db = "junk", preWindow = withPartyFrames })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     no(row("Show party frames").control.enabled, "switch")
-    no(row("Move party frames").control.enabled, "Move")
-    no(row("Reset position").control.enabled, "Reset")
 end
 
 -- ---- the raid frames switch (RaidFrames.lua), the row under the party switch ----
@@ -1550,21 +1530,6 @@ local function withRaidFrames()
     FS.Config.RegisterDefault(RAID_KEY, true)
     FS.RaidFrames = { CONFIG_KEY = RAID_KEY, NeedsReload = function() return raidReloadLine end }
 end
-local function tipOfRow(label)
-    local r, found = row(label), nil
-    for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
-    return found
-end
-
-function T.the_raid_frames_switch_sits_under_the_party_frames_switch()
-    local W = boot({ preWindow = withRaidFrames })
-    W.Open("unitframes")
-    local party, panels = headerY("PARTY FRAMES"), headerY("PANELS")
-    local show, raid, move = rowY("Show party frames"), rowY("Show raid frames"), rowY("Move party frames")
-    yes(raid, "the raid frames switch")
-    yes(party < show and show < raid and raid < move and move < panels, "right under the party switch, in the party group")
-    eq(#texts(row("Show raid frames")), 3, "label, state and the ? icon: no reload prompt while nothing is owed")
-end
 
 local function withRaidPreview()
     withRaidFrames()
@@ -1575,78 +1540,32 @@ local function withRaidPreview()
     FS.RaidFrames.Preview = pv
 end
 
-function T.the_raid_move_and_reset_rows_need_the_raid_preview()
+function T.the_raid_layout_row_needs_the_raid_preview()
     local W = boot({ preWindow = withRaidFrames })
-    W.Open("unitframes")
-    no(row("Move raid frames"), "no preview, no Move row")
-    no(row("Reset raid position"), "and no Reset row")
+    openOld(W, "unitframes")
+    no(row("Raid layout"), "no preview, no layout row")
     W = boot({ preWindow = withRaidPreview })
-    W.Open("unitframes")
-    local party, panels = headerY("PARTY FRAMES"), headerY("PANELS")
-    local reset, size = rowY("Reset position"), rowY("Raid layout")
-    local moveRaid, resetRaid = rowY("Move raid frames"), rowY("Reset raid position")
-    yes(size and moveRaid and resetRaid, "the size row and both rows")
-    yes(party < reset and reset < size and size < moveRaid and moveRaid < resetRaid and resetRaid < panels,
-        "under the party rows, inside the group")
-    eq(#texts(row("Move raid frames")), 3, "label, button and the ? icon")
-    eq(#texts(row("Reset raid position")), 3, "label, button and the ? icon")
-    yes(findText("Move", row("Move raid frames")) and findText("Reset", row("Reset raid position")))
-    local tip = tipOfRow("Move raid frames")
-    yes(tip and tip:find("preview", 1, true) and tip:find("size picked above", 1, true), tostring(tip))
-    yes(not tip:find("follows the party", 1, true), "the grid no longer follows the party frames: " .. tostring(tip))
-    yes(not tip:find("\226\128\148", 1, true), "no em dash")
+    openOld(W, "unitframes")
+    yes(row("Raid layout"), "the layout row")
     local sizeTip = tipOfRow("Raid layout")
     yes(sizeTip and sizeTip:find("own seat", 1, true), tostring(sizeTip))
-end
-
-function T.raid_move_hands_over_to_the_editor_and_reset_resets_the_size_picked()
-    local W = boot({ preWindow = withRaidPreview })
-    W.Open("unitframes")
-    local E = stubLayoutEdit()
-    yes(click("Move", row("Move raid frames")))
-    eq(#E.entered, 1)
-    eq(E.entered[1], "unitframes", "DONE or Esc comes back to this page")
-    click("Reset", row("Reset raid position"))
-    yes(dialog():IsVisible(), "it asks first")
-    yes(hasText(dialog(), "up to 10"), "and names the size it resets")
-    eq(#E.resets, 0)
-    click("Confirm", dialog())
-    eq(E.resets[1], "raid10", "the size on show, not the party frames or another size")
-    -- The size picker on this page is the setting the editor's panel changes: Reset follows it.
     click("25", row("Raid layout"))
     eq(FS.Config.Get("raid.previewSize"), 25, "the picker writes the saved size")
-    click("Reset", row("Reset raid position"))
-    yes(hasText(dialog(), "up to 25"))
-    click("Confirm", dialog())
-    eq(E.resets[2], "raid25")
-    eq(#__errors, 0)
-end
-
-function T.raid_move_and_reset_say_so_when_the_layout_editor_is_not_there()
-    local W = boot({ preWindow = withRaidPreview })
-    W.Open("unitframes")
-    click("Move", row("Move raid frames"))
-    yes(printedHas("layout editor"), "Move says it cannot")
-    __printed = {}
-    click("Reset", row("Reset raid position"))
-    click("Confirm", dialog())
-    yes(printedHas("layout editor"), "and so does Reset")
-    eq(#__errors, 0)
 end
 
 function T.the_raid_frames_switch_is_left_out_without_the_raid_frames()
     local W = boot({ preWindow = withPartyFrames })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     no(row("Show raid frames"), "no raid module, no switch")
     yes(row("Show party frames"), "the party rows stay")
     W = boot({ preWindow = function() withPartyFrames(); FS.RaidFrames = {} end })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     no(row("Show raid frames"), "a module with no saved key has no switch")
 end
 
 function T.the_raid_frames_switch_is_its_own_key()
     local W = boot({ preWindow = withRaidFrames })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     local r = row("Show raid frames")
     yes(r.control.fsChecked, "on by default")
     press("Show raid frames")
@@ -1661,7 +1580,7 @@ end
 
 function T.the_raid_frames_switch_explains_itself_and_prompts_the_reload_it_owes()
     local W = boot({ preWindow = withRaidFrames })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     local tip = tipOfRow("Show raid frames")
     yes(tip and tip:find("game's raid frames", 1, true) and tip:find("/reload", 1, true),
         "the tip says it replaces the game's raid frames and that giving them back takes a reload: " .. tostring(tip))
@@ -1687,26 +1606,26 @@ end
 
 function T.read_only_settings_dim_the_raid_frames_switch()
     local W = boot({ db = "junk", preWindow = withRaidFrames })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     no(row("Show raid frames").control.enabled, "switch")
 end
 
 function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mockups_order()
     local W = boot({ preWindow = withTagsAndMyBuffs })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local order = {
         headerY("TARGET SIDE"), yOf("Upper area"), yOf("Lower area"),
         headerY("TARGET BOX TAGS"), yOf("Level and rank"), yOf("Player class icon"), yOf("Health percent"), yOf("Target of target"),
-        headerY("PLAYER SIDE"), yOf("My buffs"), yOf("Next cast"),
     }
     for i = 1, #order do yes(order[i], "missing row or header number " .. i) end
-    for i = 2, #order do yes(order[i] > order[i - 1], "order broken at item " .. i) end
-    yes(headerY("PIECES") > order[#order], "the pieces list follows the new groups")
+    for i = 2, #order do yes(order[i] >= order[i - 1], "order broken at item " .. i) end
+    yes(headerY("PLAYER SIDE") and yOf("My buffs") > headerY("PLAYER SIDE") and yOf("Next cast") > yOf("My buffs"),
+        "the Player side tab: header, My buffs, Next cast")
 end
 
 function T.the_keep_fallen_debuffs_toggle_sits_under_the_area_dropdowns_on_by_default_and_writes_its_key()
     local W = boot({ preWindow = function() withTags(); withDots() end })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local label = "Keep fallen-off debuffs as a reapply reminder"
     yes(row(label), "the row exists")
     yes(yOf(label) > yOf("Lower area") and yOf(label) < headerY("TARGET BOX TAGS"), "it sits in Target side, under the area dropdowns")
@@ -1720,7 +1639,7 @@ end
 
 function T.the_keep_fallen_debuffs_toggle_explains_itself_in_a_tip_not_helper_text()
     local W = boot({ preWindow = function() withTags(); withDots() end })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local ctl = row("Keep fallen-off debuffs as a reapply reminder")
     local tip
     for _, o in ipairs(ALL) do
@@ -1738,7 +1657,7 @@ end
 
 function T.without_the_debuffs_module_there_is_no_keep_fallen_row()
     local W = boot({ preWindow = withTags })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     no(row("Keep fallen-off debuffs as a reapply reminder"), "no row")
     yes(row("Upper area") and row("Lower area"), "the dropdowns still build")
 end
@@ -1746,7 +1665,7 @@ end
 function T.in_a_release_build_my_buffs_has_no_row_and_player_side_keeps_next_cast()
     local W = boot({ preWindow = withTags })
     eq(FS.Features and FS.Features.myBuffs, nil, "the flag is not switched on")
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     no(row("My buffs"), "no My buffs row")
     no(hasText(win(), "My buffs"), "no My buffs text anywhere on the page")
     yes(headerY("PLAYER SIDE") and yOf("Next cast") > headerY("PLAYER SIDE"), "Player side still holds Next cast")
@@ -1756,7 +1675,7 @@ end
 
 function T.next_cast_moved_out_of_the_pieces_list()
     local W = boot({ preWindow = withTags })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     no(row("Next cast tile"), "the old pieces row is gone")
     yes(yOf("Next cast") > headerY("PLAYER SIDE") and yOf("Next cast") < headerY("PIECES"), "Next cast sits in Player side")
     for _, label in ipairs({ "Your cast bar", "Target cast bar", "Soul shards", "Proc posts", "Buff reminders" }) do
@@ -1767,7 +1686,7 @@ end
 
 function T.player_side_toggles_write_their_piece_keys()
     local W = boot({ preWindow = withTagsAndMyBuffs })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     yes(row("My buffs").control.fsChecked and row("Next cast").control.fsChecked, "both default on")
     press("My buffs")
     eq(FS.Config.Get("gunsight.pieces.mybuffs"), false)
@@ -1780,7 +1699,7 @@ end
 
 function T.target_box_tag_toggles_write_the_gunsight_tags_settings_keys()
     local W = boot({ preWindow = withTags })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     for label, key in pairs({ ["Level and rank"] = TAG_KEYS.level, ["Health percent"] = TAG_KEYS.health, ["Target of target"] = TAG_KEYS.tot,
                               ["Player class icon"] = TAG_KEYS.classIcon }) do
         yes(row(label).control.fsChecked, label .. " opens on")
@@ -1792,7 +1711,7 @@ end
 
 function T.the_player_class_icon_toggle_explains_itself_in_a_tip_not_helper_text()
     local W = boot({ preWindow = withTags })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local ctl = row("Player class icon")
     yes(ctl, "the row exists")
     local tip
@@ -1810,7 +1729,7 @@ end
 
 function T.the_tags_group_is_absent_without_the_tags_module()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     no(row("Level and rank"), "no tag rows without FS.GunsightTags")
     no(hasText(win(), "TARGET BOX TAGS"), "no tags header")
     yes(row("Upper area") and row("Next cast"), "the other groups still build")
@@ -1818,7 +1737,7 @@ end
 
 function T.the_area_dropdowns_show_the_default_labels_and_list_the_four_modules_in_order()
     local W = boot({ preWindow = withTags })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     eq(row("Upper area").control.fsLabel:GetText(), "Target Debuffs Horizontal")
     eq(row("Lower area").control.fsLabel:GetText(), "Class Module")
     openMenu("Upper area")
@@ -1827,7 +1746,7 @@ end
 
 function T.picking_in_an_area_dropdown_writes_the_key_and_swaps_with_the_other_area()
     local W = boot({ preWindow = withTags })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     openMenu("Upper area")
     click("Class Module", menu())
     eq(FS.Gunsight.GetArea("upper"), "class")
@@ -1847,7 +1766,7 @@ end
 
 function T.the_area_dropdowns_follow_a_profile_switch()
     local W = boot({ preWindow = withTags })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     FS.Config.NewProfile("Raid")
     FS.Config.SetActiveProfile("Raid")
     FS.Config.Set("gunsight.target.upper", "empty")
@@ -1858,7 +1777,7 @@ end
 
 function T.the_group_headers_carry_the_mockups_tooltips()
     local W = boot({ preWindow = withTags })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local side = tipFor("TARGET SIDE")
     yes(side, "a ? tip on Target side")
     yes(side:find("only the debuffs you applied", 1, true), "tip says what Target debuffs shows")
@@ -1872,7 +1791,7 @@ end
 
 function T.the_dropdown_text_option_maps_the_value_to_its_label()
     local W = boot({ preWindow = withTags })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local b = row("Upper area").control
     eq(b.fsValue, "debuffsH", "the control keeps the raw value")
     eq(b.fsLabel:GetText(), "Target Debuffs Horizontal", "the text option decides what shows")
@@ -1888,17 +1807,18 @@ end
 -- Presses the track at a fraction of its width, then lets go.
 local function clickTrack(t, frac)
     t.left = 40
-    __cursorX = 40 + frac * 150
+    __cursorX = 40 + frac * 160
     t.scripts.OnMouseDown(t, "LeftButton")
     t.scripts.OnMouseUp(t, "LeftButton")
 end
 
 function T.the_target_bar_group_has_the_mockups_header_and_rows_in_order()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     yes(hasText(win(), MC.header:upper()), "header " .. MC.header)
     local labels = { MC.health.label, MC.resource.label, MC.width.label, MC.numbers.label, MC.format.label }
-    local last = -row("Buff reminders").points[1].y
+    local last = headerY(MC.header:upper())
+    yes(last, "the header is on the page")
     for _, label in ipairs(labels) do
         local r = sliderRow(label)
         local y = -r.points[1].y
@@ -1909,7 +1829,7 @@ end
 
 function T.the_target_bar_sliders_open_on_the_mockups_readouts_and_positions()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local S = boxSettings()
     for _, pair in ipairs({ { MC.health, S.hpHeight }, { MC.resource, S.powerHeight }, { MC.width, S.width } }) do
         local mock, def = pair[1], pair[2]
@@ -1925,7 +1845,7 @@ end
 
 function T.bar_width_carries_the_mockups_tooltip_and_the_heights_carry_none()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     eq(tipOf(sliderRow(MC.width.label)), MC.width.tip)
     eq(tipOf(sliderRow(MC.health.label)), nil)
     eq(tipOf(sliderRow(MC.resource.label)), nil)
@@ -1933,7 +1853,7 @@ end
 
 function T.the_target_bar_sliders_write_their_config_keys()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local S = boxSettings()
     for _, pair in ipairs({ { MC.health, S.hpHeight }, { MC.resource, S.powerHeight }, { MC.width, S.width } }) do
         local mock, def = pair[1], pair[2]
@@ -1947,7 +1867,7 @@ end
 
 function T.show_numbers_is_off_until_the_player_turns_it_on()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local S = boxSettings()
     no(row(MC.numbers.label).control.fsChecked, "off by default: approved visuals do not change on their own")
     eq(FS.Config.Get(S.numbers.key), false)
@@ -1958,7 +1878,7 @@ end
 
 function T.number_format_offers_the_mockups_options_in_order_and_follows_show_numbers()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local S = boxSettings()
     local holder = row(MC.format.label).control
     local shown = {}
@@ -1989,14 +1909,14 @@ end
 
 function T.number_format_is_a_sub_row_of_show_numbers()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     eq(sliderRow(MC.format.label).fsLabel.points[1].x, 16, "indented under its toggle, as .row.sub1")
     eq(sliderRow(MC.numbers.label).fsLabel.points[1].x, 0)
 end
 
 function T.a_profile_switch_moves_the_target_bar_controls()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local S = boxSettings()
     FS.Config.NewProfile("Raid")
     FS.Config.SetActiveProfile("Raid")
@@ -2011,7 +1931,7 @@ end
 
 function T.the_target_bar_group_is_absent_without_the_boxes_module()
     local W = boot({ noBoxes = true })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     yes(row("Buff reminders"), "the pieces still build")
     no(row(MC.health.label), "no slider without GunsightBoxes")
     no(hasText(win(), MC.header:upper()))
@@ -2020,7 +1940,7 @@ end
 function T.the_target_bar_controls_work_in_combat()
     local W = boot()
     __combat = true
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local S = boxSettings()
     clickTrack(sliderRow(MC.health.label).control, 1)
     eq(FS.Config.Get(S.hpHeight.key), S.hpHeight.max)
@@ -2030,25 +1950,23 @@ end
 
 -- ---- the class module background slider (Target side group) ----------------------------
 
-local PLATE_LABEL = "Class module background"
+local PLATE_LABEL = "Opacity"
 local function plateDef() return FS.GunsightAreas.SETTINGS.background end
 
 function T.the_class_module_background_slider_sits_in_the_target_side_group_at_the_default()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local r = assert(row(PLATE_LABEL), "no row " .. PLATE_LABEL)
     local def = plateDef()
     eq(r.fsReadout:GetText(), "80%")
     eq(r.control.fsValue, 80)
     eq(FS.Config.Get(def.key), def.default)
     no(FS.Config.IsStored(def.key), "the default pins nothing")
-    yes(yOf(PLATE_LABEL) > yOf("Lower area"), "below the area dropdowns")
-    yes(yOf(PLATE_LABEL) < -row("Buff reminders").points[1].y, "above the pieces list")
 end
 
 function T.the_class_module_background_slider_goes_from_0_to_100_in_steps_of_5_and_writes_its_key()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local def = plateDef()
     local t = sliderRow(PLATE_LABEL).control
     clickTrack(t, 1)
@@ -2063,7 +1981,7 @@ end
 
 function T.the_class_module_background_slider_explains_itself_in_a_tip_not_helper_text()
     local W = boot()
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local tip = tipOf(sliderRow(PLATE_LABEL))
     yes(tip and tip:find("plate", 1, true), "a ? tooltip says what it is")
     yes(tip and tip:find("0", 1, true), "and that 0 removes it")
@@ -2079,7 +1997,7 @@ end
 function T.the_class_module_background_slider_follows_a_profile_switch_and_works_in_combat()
     local W = boot()
     __combat = true
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     local def = plateDef()
     clickTrack(sliderRow(PLATE_LABEL).control, 0.25)
     eq(FS.Config.Get(def.key), 25)
@@ -2093,7 +2011,7 @@ end
 
 function T.the_class_module_background_slider_is_absent_without_the_areas_module()
     local W = boot({ noAreas = true })
-    W.Open("gunsight")
+    openOld(W, "gunsight")
     no(row(PLATE_LABEL), "no slider without FS.GunsightAreas")
     yes(row("Upper area") and row("Next cast"), "the other groups still build")
 end
@@ -2112,9 +2030,9 @@ function T.profiles_page_shows_the_active_profile_and_this_character()
     profilesPage()
     yes(findText("Profile in use", win()))
     yes(findText("Default", win()), "dropdown shows the active profile")
-    yes(hasText(win(), "This character: "), "character line")
+    yes(findText("This character", win()), "character line")
     yes(hasText(win(), "Bob-Realm"), "character label")
-    for _, label in ipairs({ "New profile", "Copy from...", "Rename", "Delete", "Reset profile" }) do
+    for _, label in ipairs({ "NEW PROFILE", "COPY FROM...", "RENAME", "DELETE", "RESET" }) do
         yes(findText(label, win()), "button " .. label)
     end
     yes(hasText(win(), "ACTIVE PROFILE") and hasText(win(), "MANAGE"))
@@ -2144,7 +2062,7 @@ end
 
 function T.new_profile_asks_for_a_name_creates_and_switches()
     profilesPage()
-    click("New profile", win())
+    click("NEW PROFILE", win())
     yes(dialog() and dialog():IsVisible(), "prompt opens")
     local box = editBox()
     yes(box, "edit box")
@@ -2159,7 +2077,7 @@ end
 function T.a_bad_profile_name_shows_the_reason_and_keeps_the_prompt_open()
     profilesPage()
     FS.Config.NewProfile("Raid")
-    click("New profile", win())
+    click("NEW PROFILE", win())
     editBox():SetText("raid")
     click("OK", dialog())
     yes(dialog():IsVisible(), "still open")
@@ -2174,12 +2092,12 @@ end
 
 function T.enter_accepts_and_escape_cancels_the_prompt()
     profilesPage()
-    click("New profile", win())
+    click("NEW PROFILE", win())
     local box = editBox()
     box:SetText("Raid")
     box.scripts.OnEnterPressed(box)
     eq(FS.Config.ActiveProfile(), "Raid")
-    click("Rename", win())
+    click("RENAME", win())
     box = editBox()
     box.scripts.OnEscapePressed(box)
     no(dialog():IsVisible())
@@ -2189,11 +2107,11 @@ end
 
 function T.rename_is_off_for_default_and_renames_the_active_profile()
     profilesPage()
-    no(click("Rename", win()), "disabled on Default")
+    no(click("RENAME", win()), "disabled on Default")
     FS.Config.NewProfile("Raid")
     FS.Config.SetActiveProfile("Raid")
     FS.ConfigWindow.RefreshAll()
-    yes(click("Rename", win()))
+    yes(click("RENAME", win()))
     local box = editBox()
     eq(box:GetText(), "Raid", "prefilled with the current name")
     box:SetText("Mythic")
@@ -2209,7 +2127,7 @@ function T.copy_from_lists_other_profiles_asks_and_copies()
     FS.Config.SetActiveProfile("Raid")
     FS.Config.Set("test.value", 7)
     FS.Config.SetActiveProfile("Default")
-    click("Copy from...", win())
+    click("COPY FROM...", win())
     local items = texts(menu())
     eq(table.concat(items, ","), "Raid", "the active profile is not offered")
     click("Raid", menu())
@@ -2222,18 +2140,18 @@ end
 
 function T.copy_from_is_off_when_there_is_nothing_to_copy()
     profilesPage()
-    no(click("Copy from...", win()))
+    no(click("COPY FROM...", win()))
 end
 
 function T.delete_is_off_for_default_and_the_active_profile()
     profilesPage()
-    no(click("Delete", win()), "only Default exists")
+    no(click("DELETE", win()), "only Default exists")
     FS.Config.NewProfile("Raid")
     FS.ConfigWindow.RefreshAll()
-    yes(owner(findText("Delete", win())).enabled, "Raid can be deleted from Default")
+    yes(owner(findText("DELETE", win())).enabled, "Raid can be deleted from Default")
     FS.Config.SetActiveProfile("Raid")
     FS.ConfigWindow.RefreshAll()
-    no(owner(findText("Delete", win())).enabled, "Raid is active, Default cannot go")
+    no(owner(findText("DELETE", win())).enabled, "Raid is active, Default cannot go")
 end
 
 function T.delete_offers_only_deletable_profiles_and_confirms()
@@ -2242,13 +2160,13 @@ function T.delete_offers_only_deletable_profiles_and_confirms()
     FS.Config.NewProfile("Alts")
     FS.Config.SetActiveProfile("Alts")
     FS.ConfigWindow.RefreshAll()
-    click("Delete", win())
+    click("DELETE", win())
     eq(table.concat(texts(menu()), ","), "Raid", "not Default, not the active Alts")
     click("Raid", menu())
     yes(dialog():IsVisible(), "confirm first")
     click("Cancel", dialog())
     eq(table.concat(FS.Config.ListProfiles(), ","), "Default,Alts,Raid", "cancel deletes nothing")
-    click("Delete", win()); click("Raid", menu())
+    click("DELETE", win()); click("Raid", menu())
     click("Confirm", dialog())
     eq(table.concat(FS.Config.ListProfiles(), ","), "Default,Alts")
 end
@@ -2257,25 +2175,25 @@ function T.reset_profile_asks_then_resets()
     profilesPage()
     FS.Config.RegisterDefault("test.value", 1)
     FS.Config.Set("test.value", 5)
-    click("Reset profile", win())
+    click("RESET", win())
     yes(dialog():IsVisible(), "confirm first")
     eq(FS.Config.Get("test.value"), 5, "unchanged until confirmed")
     click("Cancel", dialog())
     eq(FS.Config.Get("test.value"), 5)
-    click("Reset profile", win())
+    click("RESET", win())
     click("Confirm", dialog())
     eq(FS.Config.Get("test.value"), 1)
 end
 
 function T.the_destructive_buttons_use_the_warning_skin()
     profilesPage()
-    local del, reset = owner(findText("Delete", win())), owner(findText("Reset profile", win()))
+    local del, reset = owner(findText("DELETE", win())), owner(findText("RESET", win()))
     local pink, violet = FS.Theme.COLOR_HEALTH, FS.Theme.COLOR_BORDER
     local function ringIs(b, c) local r = b.fsSkin.border.ring.color; return r[1] == c[1] and r[2] == c[2] and r[3] == c[3] end
     local function textIs(b, c) return b.fsLabel.themeColor == c end
     yes(ringIs(del, pink) and ringIs(reset, pink), "the ring is pink")
     yes(textIs(del, pink) and textIs(reset, pink), "the label is pink")
-    local rename = owner(findText("Rename", win()))
+    local rename = owner(findText("RENAME", win()))
     yes(ringIs(rename, violet), "a plain button keeps the violet ring")
     yes(textIs(rename, FS.Theme.COLOR_POWER), "and the cyan label")
 end
@@ -2296,10 +2214,10 @@ end
 
 function T.read_only_config_disables_every_control_and_says_why()
     local W = boot({ db = "junk", preWindow = unitFramesDefaults })
-    W.Open("unitframes")
-    local r = row("Hide player frame")
+    openOld(W, "unitframes")
+    local r = row("Show player frame")
     no(r.control.enabled, "toggle disabled")
-    press("Hide player frame")
+    press("Show player frame")
     eq(FS.Config.Get("unitFrames.hidePlayer"), false)
     local icon
     for _, o in ipairs(ALL) do if o.fsReadOnlyIcon and o:IsVisible() then icon = o end end
@@ -2307,14 +2225,14 @@ function T.read_only_config_disables_every_control_and_says_why()
     icon.scripts.OnEnter(icon)
     yes(TOOLTIP.text:lower():find("read-only", 1, true))
     W.Open("profiles")
-    no(owner(findText("New profile", win())).enabled, "profile buttons disabled")
-    W.Open("gunsight")
+    no(owner(findText("NEW PROFILE", win())).enabled, "profile buttons disabled")
+    openOld(W, "gunsight")
     no(row("Gunsight HUD").control.enabled)
 end
 
 function T.the_read_only_icon_is_hidden_when_settings_are_writable()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     for _, o in ipairs(ALL) do if o.fsReadOnlyIcon then no(o:IsVisible(), "icon hidden") end end
 end
 
@@ -2344,11 +2262,11 @@ end
 local function track(label) return row(label).control end
 local function pressAt(t, frac, button)
     t.left = 100
-    __cursorX = 100 + frac * 150
+    __cursorX = 100 + frac * 160
     t.scripts.OnMouseDown(t, button or "LeftButton")
 end
 local function dragTo(t, frac)
-    __cursorX = 100 + frac * 150
+    __cursorX = 100 + frac * 160
     local fn = t.scripts.OnUpdate
     if fn then fn(t, 0.016) end
 end
@@ -2359,8 +2277,8 @@ function T.a_slider_is_built_from_theme_pieces_and_never_a_blizzard_slider()
     local r = row("Level")
     eq(d.frames.keyed, r, "the builder returns its row frame")
     yes(r.control, "the track is the control")
-    eq(r.control.w, 150); eq(r.control.h, 12)
-    eq(r.control.fsThumb.w, 8); eq(r.control.fsThumb.h, 12)
+    eq(r.control.w, 160); eq(r.control.h, 20)
+    eq(r.control.fsThumb.w, 12); eq(r.control.fsThumb.h, 20)
     for _, o in ipairs(ALL) do
         yes(o.kind ~= "Slider", "a Blizzard Slider was created")
         eq(o.template, nil, "a frame template was used")
@@ -2380,7 +2298,7 @@ function T.sliders_auto_stack_below_the_previous_row()
         yes(y > last, name .. " stacks below the previous")
         last = y
     end
-    eq(d.frames.keyed:GetHeight(), 28, "a normal row")
+    eq(d.frames.keyed:GetHeight(), 32, "a normal row")
 end
 
 function T.the_thumb_and_fill_follow_the_value()
@@ -2388,10 +2306,10 @@ function T.the_thumb_and_fill_follow_the_value()
     local t = track("Level")
     local at = t.fsThumb.points[1]
     eq(at.point, "CENTER"); eq(at.relPoint, "LEFT"); eq(at.rel, t)
-    eq(at.x, 60, "6 of 2..12 is 40% of 150")
-    eq(t.fsFill.w, 60); yes(t.fsFill:IsShown())
+    eq(at.x, 64, "6 of 2..12 is 40% of 160")
+    eq(t.fsFill.w, 64); yes(t.fsFill:IsShown())
     FS.Config.Set("demo.level", 12)
-    eq(t.fsThumb.points[1].x, 150); eq(t.fsFill.w, 150)
+    eq(t.fsThumb.points[1].x, 160); eq(t.fsFill.w, 160)
     FS.Config.Set("demo.level", 2)
     eq(t.fsThumb.points[1].x, 0); no(t.fsFill:IsShown(), "no fill at the minimum")
     eq(#t.fsThumb.points, 1, "the thumb is re-anchored, not stacked")
@@ -2420,7 +2338,7 @@ function T.dragging_follows_the_cursor_clamps_and_stops_on_release()
     dragTo(t, -0.6); eq(FS.Config.Get("demo.level"), 2, "clamped to the minimum")
     release(t)
     eq(t.scripts.OnUpdate, nil, "OnUpdate removed on release")
-    __cursorX = 100 + 0.9 * 150
+    __cursorX = 100 + 0.9 * 160
     eq(FS.Config.Get("demo.level"), 2, "later cursor moves change nothing")
 end
 
@@ -2487,7 +2405,7 @@ function T.a_get_set_slider_reads_and_writes_through_its_functions()
     d.store.v = 9
     d.W.RefreshAll()
     eq(row("Manual").fsReadout:GetText(), "<9>", "get/set controls re-read on RefreshAll")
-    eq(t.fsThumb.points[1].x, 135)
+    eq(t.fsThumb.points[1].x, 144)
 end
 
 function T.keyed_sliders_follow_external_changes_and_profile_switches()
@@ -2497,7 +2415,7 @@ function T.keyed_sliders_follow_external_changes_and_profile_switches()
     FS.Config.NewProfile("Raid")
     FS.Config.SetActiveProfile("Raid")
     eq(row("Level").fsReadout:GetText(), "6 px", "Raid has the default")
-    eq(track("Level").fsThumb.points[1].x, 60)
+    eq(track("Level").fsThumb.points[1].x, 64)
     FS.Config.SetActiveProfile("Default")
     eq(row("Level").fsReadout:GetText(), "11 px")
 end
@@ -2506,7 +2424,7 @@ function T.an_out_of_range_stored_value_is_drawn_clamped()
     local d = sliderDemo()
     FS.Config.Set("demo.level", 99)
     eq(row("Level").fsReadout:GetText(), "12 px")
-    eq(track("Level").fsThumb.points[1].x, 150)
+    eq(track("Level").fsThumb.points[1].x, 160)
     FS.Config.Set("demo.level", "junk")
     eq(row("Level").fsReadout:GetText(), "2 px", "a non number reads as the minimum")
 end
@@ -2657,7 +2575,7 @@ function T.big_button_spans_the_page_by_anchors_not_by_a_held_width()
     eq(big:GetHeight(), 36)
     eq(big.fsLabel.points[1].rel, big, "label is centred on the button")
     eq(big.fsLabel.points[1].point, "CENTER")
-    yes(frames.small:GetWidth() >= 70, "a regular button keeps its text width")
+    yes(frames.small:GetWidth() >= 40, "a regular button keeps its text width")
     eq(#frames.small.points, 1, "a regular button is anchored on the left only")
 end
 
@@ -2677,7 +2595,7 @@ function T.closing_the_window_closes_its_popups()
     local W = boot()
     W.Open("profiles")
     FS.Config.NewProfile("Raid")
-    click("New profile", win())
+    click("NEW PROFILE", win())
     yes(dialog():IsVisible())
     W.Close()
     no(dialog():IsVisible())
@@ -2685,11 +2603,11 @@ end
 
 function T.refresh_on_open_picks_up_changes_made_while_closed()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     W.Close()
     FS.Config.Set("unitFrames.hideTarget", true)
-    W.Open("unitframes")
-    yes(row("Hide target frame").control.fsChecked)
+    openOld(W, "unitframes")
+    no(row("Show target frame").control.fsChecked)
 end
 
 -------------------------------------------------------------------------------
@@ -2736,7 +2654,7 @@ end
 
 function T.closing_hides_our_tooltip_but_not_one_that_belongs_to_another_frame()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     local icon
     for _, o in ipairs(ALL) do if o.fsTip and o:IsVisible() then icon = o end end
     icon.scripts.OnEnter(icon)
@@ -2746,7 +2664,7 @@ function T.closing_hides_our_tooltip_but_not_one_that_belongs_to_another_frame()
     local other = CreateFrame("Frame", nil, UIParent)
     GameTooltip:SetOwner(other)
     GameTooltip:Show()
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     W.Close()
     yes(TOOLTIP.shown, "another frame's tooltip is left alone")
 end
@@ -2772,15 +2690,15 @@ end
 
 function T.a_refused_or_failing_write_is_reported()
     local W = boot({ preWindow = unitFramesDefaults })
-    W.Open("unitframes")
+    openOld(W, "unitframes")
     local realSet = FS.Config.Set
     FS.Config.Set = function() return false end
     __printed = {}
-    press("Hide player frame")
+    press("Show player frame")
     yes(table.concat(__printed, " "):find("read-only", 1, true), "a refused Set is said in chat")
     FS.Config.Set = function() error("boom") end
     __printed = {}
-    press("Hide player frame")
+    press("Show player frame")
     yes(table.concat(__printed, " "):lower():find("could not be changed", 1, true), "a throwing Set is said too")
     yes(#__errors >= 1, "and forwarded")
     FS.Config.Set = realSet
@@ -2795,14 +2713,14 @@ end
 
 function T.a_disabled_button_does_not_hover_tint()
     profilesPage()
-    local rename = owner(findText("Rename", win()))
+    local rename = owner(findText("RENAME", win()))
     no(rename.enabled, "Rename is off on Default")
     local before = rename.fsFill.color
     local r, g, b = before[1], before[2], before[3]
     rename.scripts.OnEnter(rename)
     local after = rename.fsFill.color
     yes(after[1] == r and after[2] == g and after[3] == b, "no tint while disabled")
-    local new = owner(findText("New profile", win()))
+    local new = owner(findText("NEW PROFILE", win()))
     local nr = new.fsFill.color[1]
     new.scripts.OnEnter(new)
     yes(new.fsFill.color[1] ~= nr, "an enabled button does tint")
@@ -2816,7 +2734,7 @@ function T.re_registering_a_built_key_updates_the_label_but_never_rebuilds()
     W.RegisterCategory({ key = "demo", label = "Demo", order = 3, build = function() first = first + 1 end })
     W.Open("demo")
     W.RegisterCategory({ key = "demo", label = "Demo 2", order = 3, build = function() second = second + 1 end })
-    W.Open("gunsight"); W.Open("demo")
+    openOld(W, "gunsight"); W.Open("demo")
     eq(first, 1); eq(second, 0, "first build wins")
     yes(findText("Demo 2", win()), "the nav shows the new label")
 end
@@ -2831,7 +2749,7 @@ function T.escape_closes_only_the_dialog_or_the_menu_not_the_window()
     profilesPage()
     FS.Config.NewProfile("Raid")
     FS.ConfigWindow.RefreshAll()
-    click("New profile", win())
+    click("NEW PROFILE", win())
     local overlay = dialog().parent
     yes(overlay.keyboard, "the dialog listens for keys while it is up")
     overlay.scripts.OnKeyDown(overlay, "A")
@@ -2842,7 +2760,7 @@ function T.escape_closes_only_the_dialog_or_the_menu_not_the_window()
     no(dialog():IsVisible())
     no(overlay.keyboard, "keyboard capture is off once it closes")
     yes(win():IsShown(), "the window stays")
-    click("Copy from...", win())
+    click("COPY FROM...", win())
     local catcher = menu().parent
     yes(catcher.keyboard)
     catcher.scripts.OnKeyDown(catcher, "ESCAPE")
@@ -2862,8 +2780,8 @@ function T.open_close_and_profile_switches_leak_nothing()
     eq(registered, 1, "one OnAnyChange registration")
     for _, key in ipairs({ "gunsight", "profiles", "unitframes" }) do W.Open(key) end
     W.Close()
+    W.Open(); W.Close(); openOld(W, "gunsight")
     local frames = #ALL
-    W.Open(); W.Close(); W.Open("gunsight")
     FS.Config.NewProfile("Raid")
     FS.Config.SetActiveProfile("Raid")
     FS.Config.SetActiveProfile("Default")
@@ -2878,7 +2796,7 @@ end
 -------------------------------------------------------------------------------
 
 -- Page heights: 28 per row, 12 viewport rows' worth is 432 (the content area), so 30 rows overflow and 3 fit.
-local VIEW_H, STEP = 432, 42
+local VIEW_H, STEP = 488, 42
 local function tallDemo()
     local W = boot()
     local state = { v = false, picked = "a" }
@@ -2925,9 +2843,9 @@ function T.content_taller_than_the_panel_gets_a_clipped_scroll_range()
     eq(sf.fsRange, holder:GetHeight() - VIEW_H, "range = content height past the viewport")
     eq(sf.fsRange, expectedRange("Row 30"), "and it matches where the last row really ends")
     -- The real client sizes a scroll child only from what it is told: width = content + side padding, height = holder + padding.
-    eq(child.w, 550 + 2 * 8, "the scroll child has an explicit width")
+    eq(child.w, FS.ConfigWindow.D.CONTENT_W + 2 * 8, "the scroll child has an explicit width")
     eq(child.h, holder:GetHeight() + 6 + 4, "and an explicit height that follows the holder")
-    eq(holder.w, 550, "the holder has the content width")
+    eq(holder.w, FS.ConfigWindow.D.CONTENT_W, "the holder has the content width")
     -- every row of the page lives under the clipped scroll child
     local rowFrame = row("Row 30")
     yes(under(child, rowFrame), "the last row is inside the scroll child")
@@ -2941,8 +2859,8 @@ function T.the_viewport_height_the_range_math_uses_matches_the_frames_chrome_anc
     local function pointY(frame, point)
         for _, p in ipairs(frame.points) do if p.point == point then return p.y end end
     end
-    -- the content area runs from the well's top inset to its bottom inset; the window is 560 tall
-    local contentH = 560 - (-pointY(well, "TOPLEFT")) - pointY(well, "BOTTOMRIGHT")
+    -- the content area runs from the well's top inset to its bottom inset; the window is 640 tall
+    local contentH = 640 - (-pointY(well, "TOPLEFT")) - pointY(well, "BOTTOMRIGHT")
         - (-pointY(content, "TOPLEFT")) - pointY(content, "BOTTOMRIGHT")
     eq(contentH, VIEW_H, "VIEW_H is the height the content frame really has")
     eq(content.parent, well)
@@ -2981,23 +2899,9 @@ function T.a_page_that_fits_has_no_scroll_range_and_no_scrollbar()
     no(bar():IsShown(), "no bar when it fits")
     wheel(sf, -1)
     eq(sf:GetVerticalScroll(), 0, "nothing to scroll")
-    W.Open("unitframes")
-    eq(scrollOf("unitframes").fsRange, 0, "the Unit Frames page fits")
+    W.Open("unit")
+    eq(scrollOf("unit").fsRange, 0, "the Unit Frames page fits")
     no(bar():IsShown())
-end
-
-function T.the_gunsight_page_that_bled_past_the_panel_now_scrolls_to_its_last_row()
-    local W = boot()
-    W.Open("gunsight")
-    local sf = scrollOf("gunsight")
-    yes(sf.fsRange > 0, "the Gunsight HUD page is taller than the panel")
-    local last = row("Number format")
-    yes(last, "the last row exists")
-    local bottom = -last.points[1].y + last:GetHeight()
-    eq(bottom, sf.fsHolder:GetHeight(), "the holder ends at the last row")
-    for _ = 1, 100 do wheel(sf, -1) end
-    eq(sf:GetVerticalScroll(), sf.fsRange, "scrolled to the end, the last row's bottom meets the panel bottom")
-    eq(sf.fsHolder:GetHeight() - sf:GetVerticalScroll(), VIEW_H)
 end
 
 function T.the_scrollbar_thumb_tracks_the_offset()
@@ -3155,14 +3059,14 @@ function T.refreshscroll_and_showing_the_window_remeasure_a_page_whose_rows_chan
     eq(sf.fsRange, before, "nothing re-measured yet")
     W.RefreshScroll()
     eq(sf.fsRange, expectedRange("Extra 2"), "the range follows the new last row")
-    eq(sf.fsRange, before + 2 * 28)
+    eq(sf.fsRange, before + 2 * 32)
     eq(sf._scrollChild.h, sf.fsHolder:GetHeight() + 6 + 4, "the scroll child grew with it")
     yes(bar():IsShown())
     W.Close()
     addRow("Extra 3")
     win():Show()
     eq(sf.fsRange, expectedRange("Extra 3"), "showing the window re-measures")
-    eq(sf.fsRange, before + 3 * 28)
+    eq(sf.fsRange, before + 3 * 32)
 end
 
 function T.clicking_the_rail_jumps_the_thumb_to_the_click_and_the_hit_areas_are_wider_than_the_look()
@@ -3245,6 +3149,21 @@ def mockup_target_bars() -> dict:
     }
 
 
+def config_files() -> list[Path]:
+    """Every Modules/Config/Config*.lua the .toc loads, in .toc order (ConfigWindow.lua may be a mutant copy)."""
+    toc = [ln.strip() for ln in TOC_FILE.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("##")]
+    out = []
+    for entry in toc:
+        if entry.startswith("Modules/Config/Config"):
+            path = ADDON / entry
+            out.append(WINDOW_FILE if path.name == "ConfigWindow.lua" else path)
+    return out
+
+
+def config_sources() -> list[list[str]]:
+    return [[p.name, p.read_text(encoding="utf-8")] for p in config_files()]
+
+
 def to_lua(lua, value):
     """A nested dict / list / scalar as Lua tables."""
     if isinstance(value, dict):
@@ -3265,7 +3184,7 @@ def boot() -> "LuaRuntime":
     lua.globals().__areasSrc = AREAS_FILE.read_text(encoding="utf-8")
     lua.globals().__helpSrc = HELP_FILE.read_text(encoding="utf-8")
     lua.globals().__helpArtSrc = HELP_ART_FILE.read_text(encoding="utf-8")
-    lua.globals().__windowSrc = WINDOW_FILE.read_text(encoding="utf-8") if WINDOW_FILE.exists() else "error('ConfigWindow.lua is missing')"
+    lua.globals().__windowSrc = to_lua(lua, config_sources())
     lua.execute(CHECKS)
     return lua
 
@@ -3308,7 +3227,8 @@ def source_checks() -> list[tuple[str, str | None]]:
 
 
 # Checks that provoke an error on purpose; every other check must forward none.
-EXPECTS_ERRORS = {"a_throwing_page_build_does_not_kill_the_window", "a_refused_or_failing_write_is_reported"}
+EXPECTS_ERRORS = {"a_throwing_page_build_does_not_kill_the_window", "a_refused_or_failing_write_is_reported",
+                  "a_disabled_row_ignores_a_press_and_an_enabled_fn_without_a_reason_is_reported"}
 
 
 def main() -> int:

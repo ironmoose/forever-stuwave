@@ -45,7 +45,7 @@ MODULE = (CH / "WarriorPowerUps.lua").read_text(encoding="utf-8")
 TOC = (ROOT / "forever-stuwave/forever-stuwave.toc").read_text(encoding="utf-8")
 LAYOUT = (ROOT / "forever-stuwave/Core/Layout.lua").read_text(encoding="utf-8")
 LAYOUTEDIT = (ROOT / "forever-stuwave/Core/LayoutEdit.lua").read_text(encoding="utf-8")
-CONFIGWINDOW = (ROOT / "forever-stuwave/Modules/Config/ConfigWindow.lua").read_text(encoding="utf-8")
+CONFIGWINDOW = (ROOT / "forever-stuwave/Modules/Config/ConfigPageClassModules.lua").read_text(encoding="utf-8")
 MEDIA = ROOT / "forever-stuwave/Media/Textures"
 BG = (10, 4, 22)
 GW, GH, SPX = 150, 96, 2.5
@@ -517,8 +517,8 @@ def static_checks() -> list[str]:
         errs.append("Layout.lua has no warriorpowerup entry")
     elif (int(m.group(3)), int(m.group(4))) != (375, 240):
         errs.append(f"the warriorpowerup entry is {m.group(3)} x {m.group(4)}, want 375 x 240 (150 x 96 sprite px at 2.5)")
-    if "WarriorGroup(page)" not in CONFIGWINDOW or "PU.SETTING.key" not in CONFIGWINDOW:
-        errs.append("ConfigWindow.lua does not build the Warrior power-up group")
+    if "PU.SETTING.key" not in CONFIGWINDOW:
+        errs.append("ConfigPageClassModules.lua does not build the Warrior power-up group")
     if "OnEditChanged" not in LAYOUTEDIT:
         errs.append("LayoutEdit.lua has no OnEditChanged hook")
     for needle in ("COMBAT_LOG_EVENT_UNFILTERED", "CreateFrame(\"Button\"", "SecureActionButton", "SecureHandler"):
