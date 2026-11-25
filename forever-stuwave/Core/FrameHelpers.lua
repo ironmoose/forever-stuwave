@@ -547,10 +547,26 @@ function Helpers.CreatePillBar(parent, opts)
         self.fsPillInset = pillInset
         shell:SetHeight(height)
         if height ~= self.fsPillHeight then
+            -- A chrome built for a height is kept and shown again when the bar returns to it, so dragging a height
+            -- slider back and forth builds one chrome per height, not one per step.
+            local chromes = self.fsChromes
+            if not chromes then
+                chromes = {}
+                self.fsChromes = chromes
+                chromes[self.fsPillHeight] = { self.fsChromeHost, self.fsBorderHost }
+            end
             self.fsPillHeight = height
             self.fsChromeHost:Hide()
             if self.fsBorderHost then self.fsBorderHost:Hide() end
-            self.fsChromeHost, self.fsBorderHost = BuildPillChrome(shell, self.fsPillOpts, height)
+            local kept = chromes[height]
+            if kept then
+                self.fsChromeHost, self.fsBorderHost = kept[1], kept[2]
+                self.fsChromeHost:Show()
+                if self.fsBorderHost then self.fsBorderHost:Show() end
+            else
+                self.fsChromeHost, self.fsBorderHost = BuildPillChrome(shell, self.fsPillOpts, height)
+                chromes[height] = { self.fsChromeHost, self.fsBorderHost }
+            end
         end
         local newRadius = MaskRadius(height, pillInset)
         SeatBar(self, shell, pillInset)

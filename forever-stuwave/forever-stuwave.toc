@@ -42,6 +42,7 @@ Modules/Chat/ChatWindowState.lua
 Modules/Chat/ChatFrameSkin.lua
 Modules/Chat/ChatSlashCommands.lua
 Modules/Chat/ChatFormat.lua
+Modules/UnitFrames/FrameStyle.lua
 Modules/UnitFrames/UnitFrames.lua
 Modules/Auras/TargetAuras.lua
 Modules/UnitFrames/PartyFrames.lua
@@ -189,6 +190,7 @@ Modules/Config/HelpPicturesArt.lua
 Modules/Config/ConfigSpec.lua
 Modules/Config/ConfigWindow.lua
 Modules/Config/ConfigBuilders.lua
+Modules/Config/ConfigPageBars.lua
 Modules/Config/ConfigPageUnitFrames.lua
 Modules/Config/ConfigPageParty.lua
 Modules/Config/ConfigPageRaid.lua
@@ -212,6 +214,5 @@ Modules/Config/ConfigFlash.lua
 Modules/Config/ConfigTargets.lua
 Modules/Config/ConfigShare.lua
 Modules/Config/ConfigModules.lua
-Modules/Config/ConfigPageBars.lua
 Modules/Config/MenuButton.lua
 Core/LayoutEdit.lua

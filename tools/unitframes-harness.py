@@ -39,6 +39,7 @@ ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 # UNITFRAMES_LUA points the harness at a mutant copy (a check must fail on a broken one).
 UNITFRAMES_FILE = Path(os.environ.get("UNITFRAMES_LUA", ADDON / "Modules/UnitFrames/UnitFrames.lua"))
 CONFIG_FILE = ADDON / "Core/Config.lua"
+STYLE_FILE = ADDON / "Modules/UnitFrames/FrameStyle.lua"
 TARGETAURAS_FILE = ADDON / "Modules/Auras/TargetAuras.lua"
 
 MOCK = r"""
@@ -193,6 +194,7 @@ function(unitFramesSrc, configSrc, targetAurasSrc, opts)
         FS.FrameHelpers.SetTipSpell = real.FrameHelpers.SetTipSpell
     end
     assert(load(configSrc, "@Config.lua"))("forever-stuwave", FS)
+    assert(load(__styleSrc, "@FrameStyle.lua"))("forever-stuwave", FS)
     assert(load(unitFramesSrc, "@UnitFrames.lua"))("forever-stuwave", FS)
     assert(load(targetAurasSrc, "@TargetAuras.lua"))("forever-stuwave", FS)
     __log = {}     -- only calls made after the frames are built count
@@ -503,6 +505,7 @@ def boot() -> "LuaRuntime":
     lua.execute(MOCK)
     lua.globals().__session = lua.eval(SESSION)
     lua.globals().__unitFramesSrc = UNITFRAMES_FILE.read_text(encoding="utf-8")
+    lua.globals().__styleSrc = STYLE_FILE.read_text(encoding="utf-8")
     lua.globals().__configSrc = CONFIG_FILE.read_text(encoding="utf-8")
     lua.globals().__targetAurasSrc = TARGETAURAS_FILE.read_text(encoding="utf-8")
     lua.globals().__helpersSrc = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
