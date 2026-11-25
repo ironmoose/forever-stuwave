@@ -585,6 +585,15 @@ local function Register(f, event, ...)
     return pcall(f.RegisterEvent, f, event)
 end
 
+local lastCooling = {}
+
+local function TargetIsSeat()
+    for i = 1, #SEATS do
+        if Same("target", SEATS[i]) then return true end
+    end
+    return false
+end
+
 function Shields.Start()
     if started then return end
     started = true
@@ -595,7 +604,12 @@ function Shields.Start()
         elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
             Guard("cast", OnCast, a3)
         elseif event == "SPELL_UPDATE_COOLDOWN" then
-            Notify("cooldown")
+            -- fires several times per global cooldown; the module only cares when a cooldown starts or ends
+            local sc, mc = Shields.ShieldCooling(), Shields.MendingCooling()
+            if sc ~= lastCooling.shield or mc ~= lastCooling.mending then
+                lastCooling.shield, lastCooling.mending = sc, mc
+                Notify("cooldown")
+            end
         elseif event == "PLAYER_REGEN_DISABLED" then
             Notify("combat")                        -- the empty looks start to nudge; nothing to read
         else
@@ -609,6 +623,9 @@ function Shields.Start()
     for i, pair in ipairs(UNIT_PAIRS) do
         local f = CreateFrame("Frame")
         f:SetScript("OnEvent", function(_, event, unit)
+            -- A target who is also the player or in the party sends every change twice (once per token): the seat's
+            -- event handles it, so the target's copy is dropped instead of reading and repainting twice.
+            if unit == "target" and TargetIsSeat() then return end
             if event == "UNIT_ABSORB_AMOUNT_CHANGED" then Guard("absorb", OnAbsorb, unit)
             else Guard("aura", OnAura, unit) end
         end)

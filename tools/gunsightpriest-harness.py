@@ -649,6 +649,24 @@ case("a_mending_on_someone_outside_the_party_stays_out_with_no_seat_framed", """
     NoLog()
 """)
 
+case("a_party_member_targeted_is_read_once_per_change_not_twice", """
+    -- 2026-11-24, a Priest's report: hitching once he targeted his party's Warrior. Every aura or absorb change on him
+    -- came once as "target" and once as "party2", each a read and a full repaint.
+    AddParty(2, "G2", "Tank", "WARRIOR")
+    SetTarget("party2")
+    Build()
+    local n = 0
+    D.Subscribe(function() n = n + 1 end)
+    fire("UNIT_ABSORB_AMOUNT_CHANGED", "target")
+    check(n == 0, "the target copy of a party member's event is dropped, got " .. n)
+    fire("UNIT_ABSORB_AMOUNT_CHANGED", "party2")
+    check(n == 1, "the seat's own event still notifies, got " .. n)
+    SetTarget("friend")
+    fire("UNIT_ABSORB_AMOUNT_CHANGED", "target")
+    check(n == 2, "a target outside the party is still read, got " .. n)
+    NoLog()
+""")
+
 case("mending_locked_cooling_and_nudging", """
     __known[401859] = nil
     SetTarget("friend")

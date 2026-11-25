@@ -1517,7 +1517,10 @@ local function OnChange(reason, unit)
     local now = GetTime()
     if reason == "hit" and unit and type(UnitIsUnit) == "function" then
         local ok, same = pcall(UnitIsUnit, unit, Data.Watched())
-        if ok and not IsSecret(same) and same and not (castAt and now - castAt < 0.3) then hitAt = now end
+        -- a hit inside a running shake does not restart it: a tank's shield takes hits faster than the shake lasts, so every
+        -- hit restarting it kept the whole shield re-anchoring (2026-11-24, a Priest targeting his party's Warrior)
+        if ok and not IsSecret(same) and same and not (castAt and now - castAt < 0.3)
+            and not (hitAt and now - hitAt < C.SHAKE) then hitAt = now end
     elseif reason == "break" and unit then
         local ok, same = pcall(UnitIsUnit, unit, Data.Watched())
         if ok and not IsSecret(same) and same then breakAt = now end
