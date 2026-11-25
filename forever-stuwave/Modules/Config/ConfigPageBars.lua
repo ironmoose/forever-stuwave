@@ -155,8 +155,10 @@ Bars.SECTIONS = {
           tip = "Auto is today: mini boxes with a health rail at 10 players or fewer, tiles that fill from the bottom in a bigger raid. The Raid layout picker above the preview shows each." },
         { kind = "seg", suffix = "raidFmt", label = "Text", frames = { "raid" }, options = Style.RAID_TEXT_FORMATS,
           tip = "Low only shows the percent in red at 35% health or less, as today." },
-        { kind = "sl", suffix = "hpH", label = "Height", min = 2, max = 60, step = 1, unit = "px", tip = "Changes the frame height with it." },
-        { kind = "seg", suffix = "hpFmt", label = "Text", frames = Except("raid"), formats = "text", kind2 = "health" },
+        { kind = "sl", suffix = "hpH", label = "Height", min = 2, max = 60, step = 1, unit = "px", combat = true,
+          tip = "Changes the frame height with it." },
+        { kind = "seg", suffix = "hpFmt", label = "Text", frames = Except("raid"), formats = "text", kind2 = "health",
+          tip = "On the party frames a healer can also pick this on the Roles page. A pick made here wins over it." },
         { kind = "sl", suffix = "hpTs", label = "Text size", lim = { unit4 = { 6, 20, 0.5 }, other = { 5, 20, 0.5 } }, unit = "px", sub = true },
         { kind = "seg", suffix = "hpTa", label = "Text position", frames = Except("raid"), options = Style.TEXT_POSITIONS, sub = true,
           tip = "Where the text sits on the bar. Offset then nudges it left or right." },
@@ -165,7 +167,7 @@ Bars.SECTIONS = {
     } },
     { title = "Power bar", rows = {
         { kind = "dd", suffix = "mpStyle", label = "Bar style", frames = Except("raid"), looks = true, tip = "Its own pick, so the power bar can differ from the health bar." },
-        { kind = "sl", suffix = "mpH", label = "Height", min = 0, max = 40, step = 1, unit = "px",
+        { kind = "sl", suffix = "mpH", label = "Height", min = 0, max = 40, step = 1, unit = "px", combat = true,
           tip = "0 hides the power bar. Changes the frame height with it." },
         { kind = "seg", suffix = "mpFmt", label = "Text", frames = Except("raid"), formats = "text", kind2 = "power" },
         { kind = "sl", suffix = "mpTs", label = "Text size", frames = Except("raid"), lim = { unit4 = { 6, 20, 0.5 }, other = { 5, 20, 0.5 } }, unit = "px", sub = true },
@@ -273,7 +275,8 @@ Bars.WIRED = {
              mkBuff = true, mkSize = true, mkPos = true },
     party = { alpha = true, w = true, hpStyle = true, mpStyle = true, bgAlpha = true, threat = true, threatPct = true,
               threatX = true, mkHot = true, mkSize = true, mkPos = true, alerts = true, alertSide = true, alertSize = true,
-              alertMax = true, alertCleanse = true, alertBuffs = true },
+              alertMax = true, alertCleanse = true, alertBuffs = true, hpH = true, mpH = true, hpFmt = true, hpTs = true,
+              hpTa = true, hpTx = true, mpFmt = true, mpTs = true, mpTa = true, mpTx = true },
     pet = {},
 }
 local NOT_WIRED = "This setting is not applied to this frame yet."

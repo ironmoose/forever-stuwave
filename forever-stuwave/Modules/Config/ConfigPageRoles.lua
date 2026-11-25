@@ -34,6 +34,12 @@ local function Ready()
     return Role ~= nil and Role.SETTINGS ~= nil and Role.PICKS ~= nil and FS.Config ~= nil
 end
 
+-- Whether the party Style tab's own health Text was set: it wins over the healer's pick below (PartyFrames.HealthFormat).
+local function StyleTextSet()
+    local Style = FS.FrameStyle
+    return Style ~= nil and Style.IsStored("party", "hpFmt") == true
+end
+
 local function RoleNow()
     return FS.Role and (FS.Role.Current())
 end
@@ -171,9 +177,10 @@ function BUILD.healer(content)
     Switch(content, "heal.incoming", "Incoming heals")
     Switch(content, "heal.range", "Fade out of range")
     Switch(content, "heal.dispel", "Highlight what I can dispel")
-    -- The party frames show the percent today; the missing amount is not drawn yet, so the row says so instead of doing nothing
-    Choice(content, "heal.hp", "Health text", { tip = TIP_HEALTH, enabled = function() return false end,
-        reason = "Not applied yet: the party frames show the percent for now." })
+    -- The party frames draw the pick (PartyFrames.HealthFormat). The party Style tab's own Text wins once it was set, and then
+    -- this row does nothing, so it says so instead.
+    Choice(content, "heal.hp", "Health text", { tip = TIP_HEALTH, enabled = function() return not StyleTextSet() end,
+        reason = "The Text setting on the Party style tab is in use. Reset it there to pick here." })
     RoleSection(content, "Alerts", "healer")
     Switch(content, "heal.aggro", "A mob turns to me")
     Switch(content, "heal.aggro.snd", "Sound", Sub("heal.aggro", "A mob turns to me"))

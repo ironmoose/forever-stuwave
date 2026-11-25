@@ -472,7 +472,19 @@ end
 function T.rows_a_frame_does_not_apply_yet_say_so_and_the_raid_rows_it_does_apply_stay_live()
     local S, C, CW = boot()
     yes(FS.ConfigBars.IsWired("player", "hpH") and FS.ConfigBars.IsWired("raid", "w") and FS.ConfigBars.IsWired("party", "alpha"))
-    yes(not FS.ConfigBars.IsWired("raid", "hpFmt") and not FS.ConfigBars.IsWired("party", "hpH"))
+    yes(not FS.ConfigBars.IsWired("raid", "hpFmt") and not FS.ConfigBars.IsWired("party", "nameSize"))
+    -- the bar heights move the secure row, which waits out combat: their rows carry the tip that says so
+    local combat = {}
+    for _, section in ipairs(FS.ConfigBars.SECTIONS) do
+        for _, row in ipairs(section.rows) do
+            if row.suffix == "hpH" or row.suffix == "mpH" then combat[row.suffix] = row.combat end
+        end
+    end
+    yes(combat.hpH == true and combat.mpH == true, "the height rows say they apply after combat")
+    -- the party's bar heights and both text rows are applied now
+    for _, suffix in ipairs({ "hpH", "mpH", "hpFmt", "hpTs", "hpTa", "hpTx", "mpFmt", "mpTs", "mpTa", "mpTx" }) do
+        yes(FS.ConfigBars.IsWired("party", suffix), "party " .. suffix)
+    end
 end
 
 local function groupShared()
@@ -519,11 +531,15 @@ function T.the_party_tab_has_the_markers_and_the_cleanse_rows_and_the_raid_tab_i
     yes(CW.RowByKey("bars.mkMagic", "raid").row.fsRowOff == nil or CW.RowByKey("bars.mkMagic", "raid").row.fsRowOff == false)
     C.Set("bars.raid.mkDebuff", false); CW.RefreshAll()
     yes(CW.RowByKey("bars.mkMagic", "raid").row.fsRowOff, "Magic waits for Debuff markers")
-    -- the raid's text format and bar heights are applied now; the party's heights are not yet
+    -- the raid's text format and bar heights are applied now, and the party's heights and bar text with them
     yes(not CW.RowByKey("bars.raidFmt", "raid").row.fsRowOff and not CW.RowByKey("bars.hpH", "raid").row.fsRowOff)
     yes(not CW.RowByKey("bars.fh", "raid").row.fsRowOff, "raid height")
     CW.Open("party", "style")
-    yes(CW.RowByKey("bars.fh", "party").row.fsRowOff, "party height is not applied, so it is greyed")
+    yes(not CW.RowByKey("bars.fh", "party").row.fsRowOff, "party height is applied, so it is live")
+    for _, suffix in ipairs({ "hpH", "mpH", "hpFmt", "hpTs", "hpTa", "hpTx", "mpFmt", "mpTs", "mpTa", "mpTx" }) do
+        yes(not CW.RowByKey("bars." .. suffix, "party").row.fsRowOff, "party " .. suffix .. " is live")
+    end
+    yes(CW.RowByKey("bars.nameSize", "party").row.fsRowOff, "the party name size is not applied, so it is greyed")
     yes(not CW.RowByKey("bars.w", "party").row.fsRowOff and not CW.RowByKey("bars.hpStyle", "party").row.fsRowOff)
 end
 

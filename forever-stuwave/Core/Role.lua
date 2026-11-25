@@ -350,7 +350,7 @@ end
 Role.RepaintParty = RepaintParty
 Role.OnChange(RepaintParty)
 if FS.Config and FS.Config.OnChange then
-    for _, key in ipairs({ "heal.incoming", "heal.range", "heal.dispel" }) do FS.Config.OnChange(key, RepaintParty) end
+    for _, key in ipairs({ "heal.incoming", "heal.range", "heal.dispel", "heal.hp" }) do FS.Config.OnChange(key, RepaintParty) end
 end
 
 -------------------------------------------------------------------------------

@@ -493,6 +493,8 @@ local RAIL_POWER_SPEC = {
     bloomAlpha = RAIL_BLOOM_ALPHA,
     sparkAlpha = RAIL_SPARK_ALPHA,
     color = COLOR_POWER,
+    -- The power Text row (PartyFrames.WritePowerText): the same face as the health text, hidden until a format is chosen.
+    styleText = function(text) ApplyFontGeneric(text, FONT_MONO, HP_TEXT_SIZE, nil, "OUTLINE") end,
 }
 
 local RAIL_HEALTH_SPEC = {
@@ -1112,8 +1114,8 @@ local function BuildPetSlot(unit, frameName, parent, placeholderParent)
     placeholder:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
     placeholder:SetAlpha(PET_EMPTY_ALPHA)
     AddRoundedFill(placeholder, PET_EMPTY_FILL, PET_CHAMFER)
-    TintDashes(BuildDashEdge(placeholder, PET_WIDTH, BOX_HEIGHT, PET_CHAMFER, PET_DASH_SIZE, PET_DASH_GAP),
-        COLOR_STEEL[1], COLOR_STEEL[2], COLOR_STEEL[3], 1)
+    f.placeholderDashes = BuildDashEdge(placeholder, PET_WIDTH, BOX_HEIGHT, PET_CHAMFER, PET_DASH_SIZE, PET_DASH_GAP)
+    TintDashes(f.placeholderDashes, COLOR_STEEL[1], COLOR_STEEL[2], COLOR_STEEL[3], 1)
     f.placeholder = placeholder
     f:HookScript("OnShow", function() placeholder:Hide() end)
     f:HookScript("OnHide", function() placeholder:Show() end)
@@ -1267,10 +1269,13 @@ end
 --                 fill is never touched.
 -- Nothing here moves a rail: the box is anchored to the row, not to the rails.
 local function BuildRowBox(f, visual)
+    -- every frame on the box rect, so a bar height change (PartyFrames.SeatBars) resizes them together
+    f.boxSeats = {}
     local function seat(frame)
         frame:SetPoint("TOPLEFT", visual, "TOPLEFT", 0, -BOX_TOP)
         frame:SetPoint("TOPRIGHT", visual, "TOPRIGHT", 0, -BOX_TOP)
         frame:SetHeight(BOX_HEIGHT)
+        f.boxSeats[#f.boxSeats + 1] = frame
     end
 
     local box = CreateFrame("Frame", nil, visual)
@@ -1569,6 +1574,7 @@ local function BuildPartyRow(unit, frameName, parent, preview)
     local power = CreateLaserRail(visual, RAIL_POWER_SPEC)
     power.shell:SetPoint("TOPLEFT", health.shell, "BOTTOMLEFT", 0, -RAIL_PAIR_GAP)
     power.shell:SetPoint("TOPRIGHT", health.shell, "BOTTOMRIGHT", 0, -RAIL_PAIR_GAP)
+    if power.text then power.text:Hide() end
     f.power = power
 
     -- The halo wraps the pair, so it can only be built once both rails exist.
@@ -1771,6 +1777,7 @@ local function UpdateRowHealth(frame)
         SetLaserRailDesaturated(bar, true)
         SetLaserRailColor(bar, STATE_BAR_COLOR[1], STATE_BAR_COLOR[2], STATE_BAR_COLOR[3])
         bar.text:SetTextColor(1, 1, 1, 1)
+        bar.text:SetAlpha(1)   -- the missing-amount gate may have left it at 0
         if offline then
             bar.text:SetText(STATE_OFFLINE_TEXT)
         elseif HAS.UNIT_IS_GHOST and UnitIsGhost(unit) then
@@ -1816,7 +1823,7 @@ local function UpdateRowHealth(frame)
     bar:SetMinMaxValues(0, max)
     bar:SetValue(cur)
     UpdateRowOverlays(frame, max)
-    UpdateHealthPercentText(bar.text, unit, cur, max)
+    FS.PartyFrames.WriteHealthText(frame, cur, max)
     UpdateRowLowHealth(frame, false)
 end
 
@@ -1833,8 +1840,12 @@ local function UpdateRowPower(frame)
     else
         show = max > 0
     end
+    if frame.powerOff then show = false end   -- the power bar height is 0 (PartyFrames.SeatBars)
     frame.power.shell:SetShown(show)
-    if not show then return end
+    if not show then
+        if frame.power.text then frame.power.text:Hide() end
+        return
+    end
 
     local cur = UnitPower(unit) or 0
     -- Secret max (any unit but "player") cannot be compared; the engine
@@ -1850,6 +1861,7 @@ local function UpdateRowPower(frame)
     local powerType = UnitPowerType(unit)
     local color = POWER_COLORS[powerType] or COLOR_POWER
     SetLaserRailColor(bar, color[1], color[2], color[3])
+    FS.PartyFrames.WritePowerText(frame, cur, max)
 end
 
 -- A secret name (12.0) is returned as is: it cannot be trimmed, compared or measured, only handed
@@ -2462,11 +2474,341 @@ end
 local PartyFrames = {}
 FS.PartyFrames = PartyFrames
 
+-------------------------------------------------------------------------------
+-- Bar heights and bar text (the party style settings hpH, mpH, hpFmt, hpTs, hpTa, hpTx, mpFmt, mpTs, mpTa, mpTx)
+-------------------------------------------------------------------------------
+
+-- These are functions on the PartyFrames table with their private state in a do block: the file is at the file-scope local
+-- limit, and the update functions above reach them through FS.PartyFrames when they run.
+--
+-- Heights. The row is the built 52.4 plus what the rail pair grows or shrinks by (9 + 4 + 9 at the defaults), so the pair keeps
+-- the room under the name row it has today, and a power height of 0 takes the bar and the gap under the health bar out. The
+-- drawing (rails, box, dashes, glow) follows at once, in combat too (SeatBars); the secure row, the stack of rows and the
+-- pet slot follow out of combat (SizeRow). A power height of 0 keeps a hidden 1 px stand-in for the power shell whose bottom
+-- edge is the health rail's, because the dispel halo anchors its lower strips to the power rail.
+--
+-- Text. Health, power and the amount of health missing are secret on a party unit: they go only to SetFormattedText and the
+-- engine reads (AbbreviateNumbers, UnitHealthPercent, UnitPowerPercent, UnitHealthMissing). Nothing is compared or computed on
+-- one. The missing amount hides at full health by a Step curve over the health fraction driving the text's alpha, the same
+-- engine side gate the low health layers use.
+do
+    local DEFAULT_BARS = RAIL_CORE_HEIGHT .. "x" .. RAIL_CORE_HEIGHT
+    local DEFAULT_DASHES = MEMBER_WIDTH .. "x" .. BOX_HEIGHT
+    local abbreviateBroken, missingBroken, gateBroken = false, false, false
+    local percentBroken = { health = false, power = false }
+    local defaultTextKey
+
+    local MISSING_GATE
+    do
+        local ok, curve = pcall(function()
+            assert(Enum.LuaCurveType.Step ~= nil)
+            local gate = C_CurveUtil.CreateCurve()
+            gate:SetType(Enum.LuaCurveType.Step)
+            gate:AddPoint(0, 1)   -- any health below full: shown
+            gate:AddPoint(1, 0)   -- full: hidden
+            return gate
+        end)
+        if ok then MISSING_GATE = curve end
+    end
+
+    function PartyFrames.BarHeights()
+        local S = FS.FrameStyle
+        if not (S and S.Number) then return RAIL_CORE_HEIGHT, RAIL_CORE_HEIGHT end
+        return math.max(2, math.min(60, S.Number("party", "hpH"))), math.max(0, math.min(40, S.Number("party", "mpH")))
+    end
+
+    -- The row height for the bar heights now set. Exactly ROW_HEIGHT at the defaults.
+    function PartyFrames.RowHeight()
+        local hp, mp = PartyFrames.BarHeights()
+        local pair = hp + (mp > 0 and (RAIL_PAIR_GAP + mp) or 0)
+        return ROW_HEIGHT + (pair - RAIL_PAIR_HEIGHT)
+    end
+
+    -- The box's dashes (the dead, ghost and offline edge) for the width the row has and the box height now: one run per size,
+    -- the old runs stay hidden.
+    function PartyFrames.SeatDashes(row)
+        local box = row.box
+        if not (box and box.dashHost) then return end
+        local w, h = row.widthNow or MEMBER_WIDTH, PartyFrames.RowHeight() - BOX_TOP
+        local key = w .. "x" .. h
+        if (box.dashKey or DEFAULT_DASHES) == key then return end
+        box.dashSets = box.dashSets or { [DEFAULT_DASHES] = box.dashes }
+        for _, set in pairs(box.dashSets) do for _, d in ipairs(set) do d:Hide() end end
+        local set = box.dashSets[key]
+        if not set then
+            set = BuildDashEdge(box.dashHost, w, h, BOX_CHAMFER, BOX_DASH_SIZE, BOX_DASH_GAP)
+            box.dashSets[key] = set
+        end
+        for _, d in ipairs(set) do d:Show() end
+        box.dashes, box.dashKey, box.dashW, box.dashH = set, key, w, h
+        box.edgeR = nil   -- the dashes' tint is painted again
+        ApplyBoxEdge(row)
+    end
+
+    -- The pet slot's empty placeholder is dashed for the box height of the row it sits beside.
+    function PartyFrames.SeatPetDashes(pet, boxHeight)
+        local dashes = pet and pet.placeholderDashes
+        if not dashes or (pet.placeholderH or BOX_HEIGHT) == boxHeight then return end
+        pet.placeholderSets = pet.placeholderSets or { [BOX_HEIGHT] = dashes }
+        for _, set in pairs(pet.placeholderSets) do for _, d in ipairs(set) do d:Hide() end end
+        local set = pet.placeholderSets[boxHeight]
+        if not set then
+            set = BuildDashEdge(pet.placeholder, PET_WIDTH, boxHeight, PET_CHAMFER, PET_DASH_SIZE, PET_DASH_GAP)
+            TintDashes(set, COLOR_STEEL[1], COLOR_STEEL[2], COLOR_STEEL[3], 1)
+            pet.placeholderSets[boxHeight] = set
+        end
+        for _, d in ipairs(set) do d:Show() end
+        pet.placeholderDashes, pet.placeholderH = set, boxHeight
+    end
+
+    -- The plain drawing a bar height change moves: the rails, the box and its edge layers, the dashes, the heal glow. Nothing
+    -- here is secure, so it runs in combat.
+    function PartyFrames.SeatBars(row)
+        local hp, mp = PartyFrames.BarHeights()
+        local key = hp .. "x" .. mp
+        if (row.barsKey or DEFAULT_BARS) == key then return end
+        row.barsKey = key
+        local size = FS.FrameHelpers.SetLaserRailSize
+        local health, power = row.health, row.power
+        local height = PartyFrames.RowHeight()
+        row.visual:SetHeight(height)
+        for _, frame in ipairs(row.boxSeats or {}) do frame:SetHeight(height - BOX_TOP) end
+        size(health, hp, RAIL_BLOOM_SIZE, RAIL_SPARK_SIZE, RAIL_SPARK_SIZE)
+        local heal = health.healOverlay
+        if heal and heal.glow then heal.glow:SetHeight(hp) end
+        power.shell:ClearAllPoints()
+        if mp > 0 then
+            size(power, mp, RAIL_BLOOM_SIZE, RAIL_SPARK_SIZE, RAIL_SPARK_SIZE)
+            power.shell:SetPoint("TOPLEFT", health.shell, "BOTTOMLEFT", 0, -RAIL_PAIR_GAP)
+            power.shell:SetPoint("TOPRIGHT", health.shell, "BOTTOMRIGHT", 0, -RAIL_PAIR_GAP)
+            row.powerOff = false
+        else
+            size(power, 1, RAIL_BLOOM_SIZE, RAIL_SPARK_SIZE, RAIL_SPARK_SIZE)
+            power.shell:SetPoint("TOPLEFT", health.shell, "BOTTOMLEFT", 0, 1)
+            power.shell:SetPoint("TOPRIGHT", health.shell, "BOTTOMRIGHT", 0, 1)
+            row.powerOff = true
+            power.shell:Hide()
+            if power.text then power.text:Hide() end
+        end
+        PartyFrames.SeatDashes(row)
+    end
+
+    -- One rail's text: its face and size, then left, centre or right with a nudge in x. The default (centre, 0) is the one anchor
+    -- the rail was built with.
+    local function SeatOne(text, bar, size, align, offset)
+        ApplyFontGeneric(text, FONT_MONO, size, nil, "OUTLINE")
+        text:ClearAllPoints()
+        if align == "left" then
+            text:SetPoint("LEFT", bar, "LEFT", 4 + offset, 0)
+        elseif align == "right" then
+            text:SetPoint("RIGHT", bar, "RIGHT", -4 + offset, 0)
+        else
+            text:SetPoint("CENTER", bar, "CENTER", offset, 0)
+        end
+    end
+
+    function PartyFrames.SeatText(row)
+        local S = FS.FrameStyle
+        if not (S and S.Number) then return end
+        local function Key(prefix)
+            return table.concat({ S.Number("party", prefix .. "Ts"), tostring(S.Get("party", prefix .. "Ta")),
+                S.Number("party", prefix .. "Tx") }, "|")
+        end
+        local key = Key("hp") .. "|" .. Key("mp")
+        if not defaultTextKey then
+            defaultTextKey = table.concat({ S.Default("party", "hpTs"), S.Default("party", "hpTa"), S.Default("party", "hpTx"),
+                S.Default("party", "mpTs"), S.Default("party", "mpTa"), S.Default("party", "mpTx") }, "|")
+        end
+        if (row.textKey or defaultTextKey) == key then return end
+        row.textKey = key
+        local function Seat(bar, prefix)
+            if not bar.text then return end
+            local offset = S.Number("party", prefix .. "Tx")
+            SeatOne(bar.text, bar, S.Number("party", prefix .. "Ts"), S.Get("party", prefix .. "Ta"), offset)
+        end
+        Seat(row.health, "hp")
+        Seat(row.power, "mp")
+    end
+
+    -- The engine abbreviates a number (a secret one too) into a string for SetFormattedText. A client without it, or one that
+    -- refuses it (once: it latches and logs), gets the raw numbers.
+    local function Abbreviate(value)
+        if abbreviateBroken or type(AbbreviateNumbers) ~= "function" then return nil end
+        local ok, short = pcall(AbbreviateNumbers, value)
+        if ok and short then return short end
+        if not ok then
+            abbreviateBroken = true
+            FS.LogDegradeOnce("partyframes_abbreviate",
+                "|cffff4488Forever STUwave|r: AbbreviateNumbers refused a party bar value, writing the raw numbers")
+        end
+        return nil
+    end
+
+    -- "cur / max", with the percent after two spaces when it is given.
+    local function WriteNumber(text, cur, max, percent)
+        local a, b = Abbreviate(cur), Abbreviate(max)
+        if a and b then
+            local ok
+            if percent then
+                ok = pcall(text.SetFormattedText, text, "%s / %s  %.0f%%", a, b, percent)
+            else
+                ok = pcall(text.SetFormattedText, text, "%s / %s", a, b)
+            end
+            if ok then return true end
+        end
+        if percent then return (pcall(text.SetFormattedText, text, "%d / %d  %.0f%%", cur, max, percent)) end
+        return (pcall(text.SetFormattedText, text, "%d / %d", cur, max))
+    end
+
+    -- The engine's percent of a unit's health or power (a secret number, or plain), or nil when this client cannot give it.
+    local function ReadPercent(unit, kind)
+        if percentBroken[kind] then return nil end
+        local ok, percent
+        if kind == "health" then
+            if not (HEALTH_PERCENT_CURVE and type(UnitHealthPercent) == "function") then return nil end
+            ok, percent = pcall(UnitHealthPercent, unit, false, HEALTH_PERCENT_CURVE)
+        else
+            local S = FS.FrameStyle
+            local curve = S and S.PercentCurve and S.PercentCurve()
+            if not (curve and type(UnitPowerPercent) == "function") then return nil end
+            ok, percent = pcall(UnitPowerPercent, unit, nil, false, curve)
+        end
+        if ok and percent then return percent end
+        if not ok then
+            percentBroken[kind] = true
+            ReportOnce("party " .. kind .. " percent", percent)
+        end
+        return nil
+    end
+
+    -- The health text format: the party Style tab's own Text once it was set, else the healer's pick on the Roles page, else the
+    -- default. Role.Value is nil for a player who is not a healer.
+    function PartyFrames.HealthFormat()
+        local S = FS.FrameStyle
+        if not S then return "percent" end
+        if not S.IsStored("party", "hpFmt") then
+            local Role = FS.Role
+            local pick = Role and Role.Value and Role.Value("heal.hp")
+            if pick == "none" or pick == "percent" or pick == "missing" then return pick end
+        end
+        return S.Get("party", "hpFmt")
+    end
+
+    -- "-880": how much health a member is down, from the engine (UnitHealthMissing is secret and goes straight to
+    -- SetFormattedText). At full health a secret amount is hidden by the gate curve on the text's alpha. Returns false when this
+    -- client cannot do it (no API, no gate for a secret amount, a refusal), and the percent shows instead.
+    local function WriteMissing(text, unit)
+        if missingBroken or type(UnitHealthMissing) ~= "function" then return false end
+        local ok, amount = pcall(UnitHealthMissing, unit)
+        if not ok then
+            missingBroken = true
+            ReportOnce("party missing health", amount)
+            return false
+        end
+        if not amount then return false end
+        if IsSecret(amount) then
+            if not MISSING_GATE or gateBroken or type(UnitHealthPercent) ~= "function" then return false end
+            local okGate, alpha = pcall(UnitHealthPercent, unit, false, MISSING_GATE)
+            if not (okGate and type(alpha) == "number" and pcall(text.SetAlpha, text, alpha)) then
+                gateBroken = true
+                ReportOnce("party missing gate", "the gate curve was refused")
+                return false
+            end
+        else
+            text:SetAlpha(1)
+            if amount <= 0 then
+                text:SetText("")
+                text:Hide()
+                return true
+            end
+        end
+        text:Show()
+        local short = Abbreviate(amount)
+        if short then
+            if pcall(text.SetFormattedText, text, "-%s", short) then return true end
+        elseif pcall(text.SetFormattedText, text, "-%d", amount) then
+            return true
+        end
+        text:SetAlpha(1)
+        return false
+    end
+
+    -- Writes the live health text of a row: none, percent, number, both (number and percent) or missing.
+    function PartyFrames.WriteHealthText(frame, cur, max)
+        local text, unit = frame.health.text, frame.unit
+        local fmt = PartyFrames.HealthFormat()
+        if fmt == "none" then
+            text:SetAlpha(1)
+            text:Hide()
+            return
+        end
+        if fmt == "missing" and WriteMissing(text, unit) then return end
+        text:SetAlpha(1)
+        if fmt == "number" or fmt == "both" then
+            local percent = fmt == "both" and ReadPercent(unit, "health") or nil
+            text:Show()
+            if WriteNumber(text, cur, max, percent) then return end
+        end
+        UpdateHealthPercentText(text, unit, cur, max)
+    end
+
+    -- The power text: none, percent, number or both. Nothing shows for a row that is down or a bar that is off.
+    function PartyFrames.WritePowerText(frame, cur, max)
+        local text = frame.power.text
+        if not text then return end
+        local S = FS.FrameStyle
+        local fmt = S and S.Get("party", "mpFmt") or "none"
+        if frame.rowDown or not (fmt == "percent" or fmt == "number" or fmt == "both") then
+            text:Hide()
+            return
+        end
+        text:Show()
+        local unit = frame.unit
+        if fmt == "percent" then
+            local percent = ReadPercent(unit, "power")
+            if percent and pcall(text.SetFormattedText, text, "%.0f%%", percent) then return end
+            WriteNumber(text, cur, max)   -- no percent read here: the number shows
+            return
+        end
+        WriteNumber(text, cur, max, fmt == "both" and ReadPercent(unit, "power") or nil)
+    end
+
+    -- The preview row has no unit: the same texts from sample numbers (health 3120 of 4000, 880 missing; power 1100 of 2000).
+    function PartyFrames.WriteSampleText(row)
+        local S = FS.FrameStyle
+        local function Put(text, fmt, cur, max, missing)
+            if not text then return end
+            if fmt == "none" or not fmt then
+                text:Hide()
+                return
+            end
+            text:SetAlpha(1)
+            text:Show()
+            local percent = math.floor(cur / max * 100 + 0.5)
+            if fmt == "missing" then
+                local short = Abbreviate(missing)
+                text:SetFormattedText(short and "-%s" or "-%d", short or missing)
+            elseif fmt == "number" then
+                WriteNumber(text, cur, max)
+            elseif fmt == "both" then
+                WriteNumber(text, cur, max, percent)
+            else
+                text:SetFormattedText("%.0f%%", percent)
+            end
+        end
+        Put(row.health.text, PartyFrames.HealthFormat(), 3120, 4000, 880)
+        Put(row.power.text, S and S.Get("party", "mpFmt"), 1100, 2000)
+    end
+end
+
 -- What the party style settings (FrameStyle frame "party") change on one built row. The non-secure parts (opacity, fill,
--- bar looks, markers, aggro) follow at once, in combat too; the width and the tray seat are separate (SizeRow, SeatTray).
+-- bar looks and heights, bar text, markers, aggro) follow at once, in combat too; the secure size and the tray seat are
+-- separate (SizeRow, SeatTray).
 function PartyFrames.StyleRow(row)
     local S = FS.FrameStyle
     if not S then return end
+    PartyFrames.SeatBars(row)
+    PartyFrames.SeatText(row)
     row:SetAlpha(S.Number("party", "alpha") / 100)
     if row.boxFill then
         local default = S.Default("party", "bgAlpha")
@@ -2493,14 +2835,15 @@ function PartyFrames.SeatTray(row)
     local content, rowY = row.trayContent, row.trayY
     if not (S and content and rowY) then return end
     local size, side = S.Number("party", "alertSize"), S.Get("party", "alertSide")
-    local iconY = rowY - ((ROW_HEIGHT - size) / 2)
+    local height = row.heightNow or ROW_HEIGHT
+    local iconY = rowY - ((height - size) / 2)
     local petFrame = row.petFrame
     for slot, icon in ipairs(row.alertIcons) do
         icon:SetSize(size, size)
         icon:ClearAllPoints()
         if side == "right" and (petFrame or row.preview) then
             if slot == 1 then
-                icon:SetPoint("TOPLEFT", petFrame or row, "TOPRIGHT", PANEL_PAD + ALERT_TRAY_INSET, -((ROW_HEIGHT - size) / 2))
+                icon:SetPoint("TOPLEFT", petFrame or row, "TOPRIGHT", PANEL_PAD + ALERT_TRAY_INSET, -((height - size) / 2))
             else
                 icon:SetPoint("LEFT", row.alertIcons[slot - 1], "RIGHT", ALERT_GAP, 0)
             end
@@ -2513,19 +2856,38 @@ function PartyFrames.SeatTray(row)
     end
 end
 
--- The row's width (a secure size: out of combat, else owed to the regen pass) and what follows it: the pet slot, the box's
--- dashes and the name's room. Nothing is touched while the width is the default.
+-- The row's size (a secure size: out of combat, else owed to the regen pass) and what follows it: the stack of rows (the row
+-- and its pet slot sit one row height plus the gap lower for each row above), the pet slot's height and dashes, the box's
+-- dashes and the name's room. Nothing is touched while width and height are the defaults.
 function PartyFrames.SizeRow(row)
     local S = FS.FrameStyle
     if not S then return true end
     local custom = S.IsStored("party", "w")
     local want = custom and S.Number("party", "w") or MEMBER_WIDTH
-    if row.widthNow == nil and not custom then return true end
-    if row.widthNow == want then return true end
+    local wantHeight = PartyFrames.RowHeight()
+    local widthChanged, heightChanged = (row.widthNow or MEMBER_WIDTH) ~= want, (row.heightNow or ROW_HEIGHT) ~= wantHeight
+    if not (widthChanged or heightChanged) then return true end
     if not row.preview and InCombatLockdown() then return false end
-    row.widthNow = want
-    row:SetWidth(want)
-    row.rowWidth = want - 2 * PAD_X
+    row.widthNow, row.heightNow = want, wantHeight
+    if widthChanged then
+        row:SetWidth(want)
+        row.rowWidth = want - 2 * PAD_X
+    end
+    if heightChanged then
+        row:SetHeight(wantHeight)
+        local host, index = row.stackHost, row.stackIndex
+        if host and index then
+            local rowY = -PANEL_PAD - ((index - 1) * (wantHeight + ROW_GAP))
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", host, "TOPLEFT", PANEL_PAD, rowY)
+            row.trayY, row.petHome = rowY, { host, rowY }
+        end
+        local pet = row.petFrame
+        if pet then
+            pet:SetHeight(wantHeight)
+            PartyFrames.SeatPetDashes(pet, wantHeight - BOX_TOP)
+        end
+    end
     local pet, home = row.petFrame, row.petHome
     if pet and home then
         pet:ClearAllPoints()
@@ -2535,35 +2897,27 @@ function PartyFrames.SizeRow(row)
             pet:SetPoint("TOPRIGHT", home[1], "TOPRIGHT", -PANEL_PAD, home[2])
         end
     end
-    local box = row.box
-    if box and box.dashHost then
-        box.dashSets = box.dashSets or { [box.dashW or MEMBER_WIDTH] = box.dashes }
-        for _, dashes in pairs(box.dashSets) do for _, d in ipairs(dashes) do d:Hide() end end
-        local set = box.dashSets[want]
-        if not set then
-            set = BuildDashEdge(box.dashHost, want, BOX_HEIGHT, BOX_CHAMFER, BOX_DASH_SIZE, BOX_DASH_GAP)
-            box.dashSets[want] = set
-        end
-        for _, d in ipairs(set) do d:Show() end
-        box.dashes, box.dashW = set, want
-        box.edgeR = nil   -- the dashes' tint is painted again
-        ApplyBoxEdge(row)
-    end
-    if row.nameText and FitRowName then
+    PartyFrames.SeatDashes(row)
+    if widthChanged and row.nameText and FitRowName then
         row.nameConfirmed = false
         FitRowName(row, true)
     end
     return true
 end
 
--- Every row follows the settings: the party's own opacity, fill, looks, markers, aggro, tray and width.
+-- Every row follows the settings: the party's own opacity, fill, looks, bar heights and text, markers, aggro, tray and size.
 function PartyFrames.ApplyStyle()
     for _, row in ipairs(PartyFrames.rows or {}) do
         PartyFrames.StyleRow(row)
-        PartyFrames.SeatTray(row)
         if not PartyFrames.SizeRow(row) then PartyFrames.sizeOwed = true end
-        -- tray and markers read auras: only while the client allows it, else the old ones hold until the fight ends
-        if FS.AurasReadable() and row.unit and UnitExists(row.unit) then TryStep(row, "auras", UpdateAuras) end
+        PartyFrames.SeatTray(row)   -- after SizeRow: it centres on the row height the row has now
+        if row.unit and UnitExists(row.unit) then
+            -- the bars and their text read again: a format, a bar height of 0 or the healer's pick may have changed
+            TryStep(row, "health", UpdateRowHealth)
+            TryStep(row, "power", UpdateRowPower)
+            -- tray and markers read auras: only while the client allows it, else the old ones hold until the fight ends
+            if FS.AurasReadable() then TryStep(row, "auras", UpdateAuras) end
+        end
     end
 end
 
@@ -2588,6 +2942,8 @@ function PartyFrames.NewStylePreview(parent)
             bar:SetMinMaxValues(0, 100)
             bar:SetValue(bar == row.health and 78 or 55)
         end
+        row.power.shell:SetShown(not row.powerOff)
+        PartyFrames.WriteSampleText(row)
         local role = ROLE_STYLE.HEALER
         if role and row.roleTag then
             row.roleLetter:SetText(role[1])
@@ -2848,6 +3204,7 @@ local function Init()
 
         local member = BuildPartyRow(def.unit, "ForeverSTUwavePartyRow" .. i, content)
         member:SetPoint("TOPLEFT", content, "TOPLEFT", PANEL_PAD, rowY)
+        member.stackIndex, member.stackHost = i, content   -- SizeRow re-seats the row when the bar heights change its height
         if FS.FrameStyle then
             -- the party style settings: opacity, fill, looks, markers and aggro are plain regions (they apply in combat
             -- too); the width and the pet slot are secure and wait for the regen pass
@@ -2885,8 +3242,8 @@ local function Init()
         WireRowEvents(member)
         if FS.FrameStyle and FS.FrameStyle.Number then
             PartyFrames.StyleRow(member)
-            PartyFrames.SeatTray(member)
             PartyFrames.SizeRow(member)
+            PartyFrames.SeatTray(member)
         end
         rows[i] = member
     end
