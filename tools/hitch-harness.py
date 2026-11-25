@@ -40,7 +40,8 @@ C_AddOns = {
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, m) __said[#__said + 1] = m end }
 SlashCmdList = {}
 function CreateFrame()
-    return { scripts = {}, SetScript = function(self, n, fn) self.scripts[n] = fn end }
+    return { scripts = {}, SetScript = function(self, n, fn) self.scripts[n] = fn end,
+        RegisterAllEvents = function(self) self.all = true end, UnregisterAllEvents = function(self) self.all = false end }
 end
 FS = { IsSecret = function(v) return v == "SECRET" end }
 """
@@ -58,14 +59,19 @@ local function frame(dt, a, b, heap)
     f(H.frame, dt)
 end
 frame(0.008, 1, 1); frame(0.008, 1, 1); frame(0.008, 1, 1)
+H.events.scripts.OnEvent(H.events, "BAG_UPDATE"); H.events.scripts.OnEvent(H.events, "BAG_UPDATE")
+H.events.scripts.OnEvent(H.events, "UNIT_AURA")
 frame(0.120, 30, 2, 400)               -- a hitch with a heap drop, A to blame
 frame(0.008, 1, 1, 410)
 check(H.run.slowCount == 1 and H.run.slowWithGc == 1, "one slow frame, with a heap drop")
 check(#H.run.spikes == 2 and H.run.spikes[1]:find("A 30.00 ms", 1, true), "spikes kept with their time: " .. tostring(H.run.spikes[1]))
+check(H.run.spikes[1]:find(": BAG_UPDATE x2, UNIT_AURA", 1, true) and H.run.slow[1].events == "BAG_UPDATE x2, UNIT_AURA", "with the events of that frame")
+check(H.events.all, "listening to every event while sampling")
 local row = H.run.slow[1]
 check(row[1] == "A 30.00" and row[2] == "B 2.00" and row.gc, "the slow frame names A first: " .. tostring(row[1]))
 frame(10, 0, 0)
 check(H.run == nil and H.frame.scripts.OnUpdate == nil, "ends on time and removes its OnUpdate")
+check(not H.events.all and H.events.scripts.OnEvent == nil, "and stops listening")
 local saved = ForeverSTUwaveDB.hitch
 check(saved.addons[1].name == "A" and saved.addons[1].slowMs == 30, "saved, sorted by CPU in slow frames")
 check(saved.worstMs >= 119 and saved.moving == saved.frames, "worst frame and moving frames counted")

@@ -21,6 +21,28 @@ H.SPIKE_MS = 2          -- one addon using this much CPU in one frame is kept as
 H.KEEP = 80             -- slow frames kept
 H.TOP = 4               -- addons named per slow frame
 H.DEFAULT_S = 60
+H.EVENT_CAP = 200       -- events remembered per frame (a burst past it is counted, not listed)
+
+-- While sampling, one frame takes every event (RegisterAllEvents) and notes its name for the current frame, so a spike or
+-- a slow frame is kept with what fired in it. No events means a timer or an OnUpdate did the work.
+local evBuf, evCount = {}, 0
+local function NoteEvent(_, event)
+    evCount = evCount + 1
+    if evCount <= H.EVENT_CAP then evBuf[evCount] = event end
+end
+local function EventsLine()
+    if evCount == 0 then return "no events" end
+    local seen, order = {}, {}
+    for i = 1, math.min(evCount, H.EVENT_CAP) do
+        local e = evBuf[i]
+        if not seen[e] then seen[e] = 0; order[#order + 1] = e end
+        seen[e] = seen[e] + 1
+    end
+    for i = 1, #order do order[i] = order[i] .. (seen[order[i]] > 1 and (" x" .. seen[order[i]]) or "") end
+    local line = table.concat(order, ", ")
+    if evCount > H.EVENT_CAP then line = line .. (", +%d more"):format(evCount - H.EVENT_CAP) end
+    return line
+end
 
 local AddOns = C_AddOns or {}
 local NumAddOns = AddOns.GetNumAddOns or GetNumAddOns
@@ -45,6 +67,8 @@ local function Finish()
     local s = H.run
     H.run = nil
     H.frame:SetScript("OnUpdate", nil)
+    if H.events then H.events:UnregisterAllEvents(); H.events:SetScript("OnEvent", nil) end
+    evCount = 0
     local list = {}
     for i, name in ipairs(s.names) do
         list[#list + 1] = { name = name, totalMs = s.total[i], maxMs = s.max[i], slowMs = s.inSlow[i] }
@@ -88,7 +112,8 @@ local function Step(_, elapsed)
     if s.frames > 2 and #s.spikes < H.KEEP then
         for i = 1, #names do
             if deltas[i] >= H.SPIKE_MS then
-                s.spikes[#s.spikes + 1] = ("%.2f s %s %.2f ms (frame %.0f ms)"):format(GetTime() - s.startAt, names[i], deltas[i], ms)
+                s.spikes[#s.spikes + 1] = ("%.2f s %s %.2f ms (frame %.0f ms): %s"):format(GetTime() - s.startAt, names[i], deltas[i],
+                    ms, EventsLine())
             end
         end
     end
@@ -103,7 +128,8 @@ local function Step(_, elapsed)
         for i = 1, #names do s.inSlow[i] = s.inSlow[i] + deltas[i] end
         if #s.slow < H.KEEP then
             -- the top addons of this frame, by a few passes over the deltas (no sort table per frame)
-            local row = { t = GetTime() - s.startAt, ms = ms, gc = dropped or nil, moving = moving or nil, heapKb = heap }
+            local row = { t = GetTime() - s.startAt, ms = ms, gc = dropped or nil, moving = moving or nil, heapKb = heap,
+                events = EventsLine() }
             local used = {}
             for k = 1, H.TOP do
                 local best, bi = -1, nil
@@ -117,6 +143,7 @@ local function Step(_, elapsed)
             s.slow[#s.slow + 1] = row
         end
     end
+    evCount = 0
     if GetTime() >= s.stopAt then Finish() end
 end
 
@@ -145,6 +172,12 @@ function H.Start(seconds)
     H.run = s
     H.frame = H.frame or CreateFrame("Frame")
     H.frame:SetScript("OnUpdate", Step)
+    H.events = H.events or CreateFrame("Frame")
+    evCount = 0
+    if H.events.RegisterAllEvents then
+        H.events:SetScript("OnEvent", NoteEvent)
+        H.events:RegisterAllEvents()
+    end
     Say(("sampling %d addons for %d s. Play as usual."):format(#names, seconds))
 end
 
