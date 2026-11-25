@@ -43,6 +43,11 @@ function CreateFrame()
     return { scripts = {}, SetScript = function(self, n, fn) self.scripts[n] = fn end,
         RegisterAllEvents = function(self) self.all = true end, UnregisterAllEvents = function(self) self.all = false end }
 end
+__fa = { GetDebugName = function() return "TrackerEvents" end, GetScript = function(_, n) return n == "OnEvent" or nil end }
+__fb = { GetDebugName = function() return "Quiet" end, GetScript = function() return nil end }
+__fcpu = { [__fa] = 10, [__fb] = 5 }
+function EnumerateFrames(f) if f == nil then return __fa elseif f == __fa then return __fb end return nil end
+function GetFrameCPUUsage(f) return __fcpu[f] end
 FS = { IsSecret = function(v) return v == "SECRET" end }
 """
 
@@ -69,10 +74,12 @@ check(H.run.spikes[1]:find(": BAG_UPDATE x2, UNIT_AURA", 1, true) and H.run.slow
 check(H.events.all, "listening to every event while sampling")
 local row = H.run.slow[1]
 check(row[1] == "A 30.00" and row[2] == "B 2.00" and row.gc, "the slow frame names A first: " .. tostring(row[1]))
+__fcpu[__fa] = 200                      -- the tracker's handler did the work
 frame(10, 0, 0)
 check(H.run == nil and H.frame.scripts.OnUpdate == nil, "ends on time and removes its OnUpdate")
 check(not H.events.all and H.events.scripts.OnEvent == nil, "and stops listening")
 local saved = ForeverSTUwaveDB.hitch
+check(#saved.frameCpu == 1 and saved.frameCpu[1]:find("190.0 ms TrackerEvents OnEvent", 1, true), "names the busy frame: " .. tostring(saved.frameCpu[1]))
 check(saved.addons[1].name == "A" and saved.addons[1].slowMs == 30, "saved, sorted by CPU in slow frames")
 check(saved.worstMs >= 119 and saved.moving == saved.frames, "worst frame and moving frames counted")
 check(__said[#__said]:find("most CPU in slow frames: A", 1, true) and __said[#__said]:find("/fsbug", 1, true), "summed up in chat")

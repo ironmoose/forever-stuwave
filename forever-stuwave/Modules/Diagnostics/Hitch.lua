@@ -21,6 +21,7 @@ H.SPIKE_MS = 2          -- one addon using this much CPU in one frame is kept as
 H.KEEP = 80             -- slow frames kept
 H.TOP = 4               -- addons named per slow frame
 H.DEFAULT_S = 60
+H.FRAMES_KEPT = 25     -- frames named in the per-frame CPU list
 H.EVENT_CAP = 200       -- events remembered per frame (a burst past it is counted, not listed)
 
 -- While sampling, one frame takes every event (RegisterAllEvents) and notes its name for the current frame, so a spike or
@@ -63,6 +64,45 @@ local function LoadedNames()
     return out
 end
 
+-- Every frame's own script CPU (GetFrameCPUUsage, children not included), keyed by frame: taken once when a sample
+-- starts and once when it ends, so the difference names the handlers that did the work (a C_Timer callback has no frame
+-- and shows only in the addon totals). Two walks of every frame: a one-off cost outside the sampled frames.
+local function FrameCPU()
+    local out = {}
+    if type(EnumerateFrames) ~= "function" or type(GetFrameCPUUsage) ~= "function" then return out end
+    local f = EnumerateFrames()
+    while f do
+        local ok, v = pcall(GetFrameCPUUsage, f, false)
+        if ok and type(v) == "number" and v > 0 then out[f] = v end
+        f = EnumerateFrames(f)
+    end
+    return out
+end
+
+local function FrameName(f)
+    local ok, name = pcall(f.GetDebugName, f)
+    if ok and type(name) == "string" and name ~= "" then return name end
+    ok, name = pcall(f.GetName, f)
+    return ok and type(name) == "string" and name or tostring(f)
+end
+
+local function TopFrames(before)
+    local after, list = FrameCPU(), {}
+    for f, v in pairs(after) do
+        local d = v - (before[f] or 0)
+        if d > 0.05 then list[#list + 1] = { f = f, ms = d } end
+    end
+    table.sort(list, function(a, b) return a.ms > b.ms end)
+    local out = {}
+    for i = 1, math.min(#list, H.FRAMES_KEPT) do
+        local f = list[i].f
+        local ev = f.GetScript and f:GetScript("OnEvent") and "OnEvent" or ""
+        local up = f.GetScript and f:GetScript("OnUpdate") and "OnUpdate" or ""
+        out[i] = ("%.1f ms %s %s %s"):format(list[i].ms, FrameName(f), ev, up)
+    end
+    return out
+end
+
 local function Finish()
     local s = H.run
     H.run = nil
@@ -79,7 +119,7 @@ local function Finish()
     ForeverSTUwaveDB.hitch = {
         at = date and date("%Y-%m-%d %H:%M:%S") or nil, seconds = seconds, frames = s.frames, slowCount = s.slowCount,
         worstMs = s.worstMs, gcSteps = s.gcSteps, slowWithGc = s.slowWithGc, addons = list, slow = s.slow,
-        moving = s.moving, spikes = s.spikes,
+        moving = s.moving, spikes = s.spikes, frameCpu = TopFrames(s.frameCpu or {}),
     }
     local top = list[1]
     Say(("sample saved: %d frames, %d slow (worst %.0f ms, %d with a heap drop); most CPU in slow frames: %s. Type /fsbug to send it.")
@@ -167,6 +207,7 @@ function H.Start(seconds)
     local s = { names = names, last = {}, total = {}, max = {}, inSlow = {}, deltas = {}, slow = {}, spikes = {}, frames = 0,
         slowCount = 0, worstMs = 0, gcSteps = 0, slowWithGc = 0, moving = 0 }
     for i = 1, #names do s.total[i], s.max[i], s.inSlow[i], s.deltas[i] = 0, 0, 0, 0 end
+    s.frameCpu = FrameCPU()
     s.startAt = GetTime()
     s.stopAt = s.startAt + seconds
     H.run = s
