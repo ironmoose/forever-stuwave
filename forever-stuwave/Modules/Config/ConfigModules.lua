@@ -297,6 +297,7 @@ local held       -- the tab page the card hides
 -- pet bar, so turning the pet bar off brings it back.
 local OFF_NOTES = {
     ["m.pet"] = "The game's own pet unit frame comes back while this is off.",
+    ["m.data"] = "The XP bar goes with the data bar, and the game's own XP and reputation bars come back while this is off.",
 }
 local HELP_GAP_CARD = 6
 
