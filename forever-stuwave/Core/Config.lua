@@ -12,10 +12,13 @@ FS.Config = Config
 -------------------------------------------------------------------------------
 -- Schema
 --
--- ForeverSTUwaveDB.profiles       = { [name] = { settings = {}, layout = { v = 1, frames = {} } } }
+-- ForeverSTUwaveDB.profiles       = { [name] = { settings = {}, layout = { v = 1, frames = {} }, modules = {} } }
+--   modules holds { [key] = false } for each module power switch that is off in the profile (on is stored as nothing);
+--   Core/ModuleSwitch.lua reads and writes it through Config.ModuleStore.
 -- ForeverSTUwaveDB.profileKeys    = { [guid] = name }
 -- ForeverSTUwaveDB.profileLabels  = { [guid] = "Name-Realm" }, for display only
 -- ForeverSTUwaveDB.profilesVersion = 1
+-- ForeverSTUwaveDB.modulesMigrated = true once the old account wide ForeverSTUwaveDB.modules was copied into every profile
 -------------------------------------------------------------------------------
 
 local PROFILES_VERSION = 1
@@ -29,6 +32,7 @@ Config.NAME_MAX = NAME_MAX
 local defaults = {}
 local keyCallbacks = {}
 local anyCallbacks = {}
+local profileCallbacks = {}
 
 -- db is the saved table once it is loaded and writable; nil before ADDON_LOADED and in
 -- read-only mode, where every read answers from `detached` (defaults only) and every write is refused.
@@ -42,7 +46,7 @@ local activeName = DEFAULT_NAME
 local activeGuid = nil
 
 local function NewProfileTable()
-    return { settings = {}, layout = { v = 1, frames = {} } }
+    return { settings = {}, layout = { v = 1, frames = {} }, modules = {} }
 end
 
 local function DeepCopy(value, seen)
@@ -124,26 +128,30 @@ local function BindLayout(reseat)
     if reseat and layout.ReseatAll then layout.ReseatAll() end
 end
 
--- Call after the active profile's contents or identity changed; `oldSettings` is the table it replaced.
+-- Call after the active profile's contents or identity changed; `oldSettings` and `oldModules` are the tables it replaced.
+-- The settings callbacks run first, then the profile callbacks (Config.OnProfileChange), all inside the `reapplying` window.
 local reapplying = false
-local function Reapply(oldSettings)
+local function Reapply(oldSettings, oldModules)
     BindLayout(true)
     reapplying = true
     local ok, err = pcall(FireDifferences, oldSettings, ActiveTable().settings)
-    reapplying = false
     if not ok then FS.Layout.ForwardError(err) end
+    local modules = ActiveTable().modules
+    for i = 1, #profileCallbacks do Call(profileCallbacks[i], oldModules, modules) end
+    reapplying = false
 end
 
--- True while the change callbacks run because the active profile was switched, reset or imported, not because a row
--- changed. A key that mirrors an account wide value (nameplates.enabled) ignores these.
+-- True while the change callbacks run because the active profile was switched, copied over or reset, not because a row
+-- changed. A key that mirrors a module switch (nameplates.enabled) follows the switch of the profile now in use.
 function Config.Reapplying()
     return reapplying
 end
 
 local function SwitchTo(name)
-    local oldSettings = ActiveTable().settings
+    local old = ActiveTable()
+    local oldSettings, oldModules = old.settings, old.modules
     activeName = name
-    Reapply(oldSettings)
+    Reapply(oldSettings, oldModules)
 end
 
 -------------------------------------------------------------------------------
@@ -214,6 +222,7 @@ local function Normalize()
         else
             if type(profile.settings) ~= "table" then profile.settings = {} end
             if type(profile.layout) ~= "table" then profile.layout = { v = 1, frames = {} } end
+            if type(profile.modules) ~= "table" then profile.modules = {} end
         end
     end
     if type(db.profiles[DEFAULT_NAME]) ~= "table" then db.profiles[DEFAULT_NAME] = NewProfileTable() end
@@ -240,6 +249,33 @@ local function MigrateLayout()
     else
         db.layoutMigrated = true
     end
+end
+
+-- Module power switches used to be one account wide table (ForeverSTUwaveDB.modules, { [key] = false }). They belong to the
+-- profile now: once, every profile that exists gets a copy of what was off, so nobody's setup changes, and the old table is
+-- dropped. A key this version does not know is copied too (a later version may know it). The Nameplates switch was a
+-- per profile setting before it was a module switch (`nameplates.enabled`); where the account wide table never took it over
+-- (nameplatesSwitchMigrated), a profile that saved it off keeps the plates off.
+local LEGACY_MODULE_SETTINGS = { ["nameplates.enabled"] = "m.np" }
+
+local function MigrateModules()
+    if db.modulesMigrated == true then return end
+    local old = db.modules
+    for _, profile in pairs(db.profiles) do
+        if type(old) == "table" then
+            for key, value in pairs(old) do
+                if type(key) == "string" and value == false and profile.modules[key] == nil then profile.modules[key] = false end
+            end
+        end
+        if db.nameplatesSwitchMigrated ~= true then
+            for setting, module in pairs(LEGACY_MODULE_SETTINGS) do
+                if profile.settings[setting] == false and profile.modules[module] == nil then profile.modules[module] = false end
+            end
+        end
+    end
+    db.nameplatesSwitchMigrated = true
+    db.modules = nil
+    db.modulesMigrated = true
 end
 
 local function ResolveCharacter()
@@ -280,6 +316,7 @@ local function Load()
     db = saved
     Normalize()
     MigrateLayout()
+    MigrateModules()
     activeName = ResolveCharacter() or DEFAULT_NAME
     BindLayout(false)
 end
@@ -298,6 +335,13 @@ loader:SetScript("OnEvent", function(self, event, name)
         if resolved and resolved ~= activeName then SwitchTo(resolved) end
     end
 end)
+
+-- Loads the saved profiles now when this addon's ADDON_LOADED has not reached the loader above yet. Core/ModuleSwitch.lua asks
+-- before it reads the profile's module switches, so what it reads never depends on which of the two loaders runs first. A
+-- second call, or one after the event, does nothing.
+function Config.EnsureLoaded()
+    if not loaded then Load() end
+end
 
 -------------------------------------------------------------------------------
 -- Settings
@@ -353,6 +397,21 @@ function Config.OnAnyChange(fn)
     anyCallbacks[#anyCallbacks + 1] = fn
 end
 
+-- fn(oldModules, newModules): the active profile was switched, copied over, reset or resolved for the character at login.
+-- Runs once per such change, after every setting callback; the two tables are the module switches of the profile that was
+-- in use and of the one in use now (`oldModules` is nil only when there was none to compare).
+function Config.OnProfileChange(fn)
+    if type(fn) ~= "function" then return end
+    profileCallbacks[#profileCallbacks + 1] = fn
+end
+
+-- The active profile's module switches ({ [key] = false } for each one that is off), or nil while nothing may be written
+-- (before ADDON_LOADED, read-only mode): every module reads as on then. Core/ModuleSwitch.lua owns the contents.
+function Config.ModuleStore()
+    local profile = Writable()
+    return profile and profile.modules or nil
+end
+
 -------------------------------------------------------------------------------
 -- Profiles
 --
@@ -400,6 +459,7 @@ end
 -- Makes a new profile from `data` ({ settings = {}, layout = { frames = {} } }), which the caller has already validated
 -- (ProfileCodec). It only adds: a taken name is refused, the active profile is not switched and no callback fires. What is
 -- kept is copied (text, number and boolean values, lists of them), and a value equal to its default is stored as nothing.
+-- `data.modules` ({ [key] = on }), when given, becomes the profile's module switches (only the off ones are stored).
 function Config.ImportProfile(name, data)
     if not Writable() then return false, "settings are read-only" end
     local clean, err = CleanName(name)
@@ -420,21 +480,26 @@ function Config.ImportProfile(name, data)
     if type(layout) == "table" and type(layout.frames) == "table" then
         profile.layout.frames = DeepCopy(layout.frames)
     end
+    if type(data.modules) == "table" then
+        for key, on in pairs(data.modules) do
+            if type(key) == "string" and key ~= "" and on == false then profile.modules[key] = false end
+        end
+    end
     db.profiles[clean] = profile
     return true, clean
 end
 
--- Replaces the active profile's settings and layout with a copy of `from`'s.
+-- Replaces the active profile's settings, layout and module switches with a copy of `from`'s.
 function Config.CopyProfile(from)
     local active = Writable()
     if not active then return false, "settings are read-only" end
     local source = type(from) == "string" and db.profiles[from] or nil
     if not source then return false, "the profile to copy does not exist" end
     if from == activeName then return false, "that is the active profile" end
-    local oldSettings = active.settings
+    local oldSettings, oldModules = active.settings, active.modules
     local copy = DeepCopy(source)
-    active.settings, active.layout = copy.settings, copy.layout
-    Reapply(oldSettings)
+    active.settings, active.layout, active.modules = copy.settings, copy.layout, copy.modules or {}
+    Reapply(oldSettings, oldModules)
     return true
 end
 
@@ -462,13 +527,13 @@ function Config.DeleteProfile(name)
     return true
 end
 
--- Returns the active profile to the registered defaults and an empty layout.
+-- Returns the active profile to the registered defaults, an empty layout and every module on.
 function Config.ResetProfile()
     local active = Writable()
     if not active then return false, "settings are read-only" end
-    local oldSettings = active.settings
-    active.settings, active.layout = {}, { v = 1, frames = {} }
-    Reapply(oldSettings)
+    local oldSettings, oldModules = active.settings, active.modules
+    active.settings, active.layout, active.modules = {}, { v = 1, frames = {} }, {}
+    Reapply(oldSettings, oldModules)
     return true
 end
 

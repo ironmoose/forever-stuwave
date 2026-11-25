@@ -25,7 +25,7 @@ LOAD_ORDER = (
     "ChatCore.lua", "ChatTabs.lua", "ChatEditBox.lua", "ChatTermBar.lua", "ChatWindowState.lua", "ChatFrameSkin.lua",
     "ChatSlashCommands.lua", "ChatFormat.lua", "FrameStyle.lua", "FrameExtras.lua", "UnitFrames.lua", "TargetAuras.lua", "PartyFrames.lua", "RaidFrames.lua",
     "CastBars.lua", "Buffs.lua", "Professions.lua", "ActionBars.lua", "Console.lua", "StanceBar.lua", "PetFrame.lua",
-    "PetDock.lua", "PetActionBar.lua", "PetCastBar.lua", "Minimap.lua", "InstanceBanner.lua", "QuestTimer.lua", "Panels.lua",
+    "PetDock.lua", "PetActionBar.lua", "PetCastBar.lua", "Minimap.lua", "InstanceBanner.lua", "StockButton.lua", "QuestTimer.lua", "Panels.lua",
     "Mail.lua", "Character.lua", "Reputation.lua", "Currency.lua", "Inspect.lua", "Talents.lua", "TalentBgArt.lua", "TalentBackdrops.lua",
     "CharBgArt.lua", "CharBackdrop.lua", "Commerce.lua", "Quest.lua", "Maps.lua", "Bespoke.lua", "Services.lua", "GroupKit.lua",
     "Social.lua", "Guild.lua", "ChatSettings.lua", "PvP.lua", "Collections.lua", "Charters.lua", "OddsEnds.lua", "GuildBank.lua",
@@ -105,7 +105,7 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 210
+    assert len(set(modules)) == 211
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))

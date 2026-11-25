@@ -1,7 +1,10 @@
 -- Forever STUwave: module power switches
--- FS.ModuleSwitch: one on / off switch per part of the addon (Unit frames, Cast bars, Chat ...), kept account wide in
--- ForeverSTUwaveDB.modules ({ [key] = false } for a module that is off; on is stored as nothing). It is not a profile
--- setting: a module is built before the character's profile is known (Config.lua falls back to Default until PLAYER_LOGIN).
+-- FS.ModuleSwitch: one on / off switch per part of the addon (Unit frames, Cast bars, Chat ...), kept in the PROFILE
+-- (profile.modules, { [key] = false } for a module that is off; on is stored as nothing; Config.ModuleStore hands over the
+-- active profile's table). Config.lua resolves the character's profile at its own ADDON_LOADED, before this file reads it, so
+-- the session loads the switches of the profile in use. A later profile change (switch, copy, reset, or the character's
+-- profile resolving at PLAYER_LOGIN when its GUID was not readable earlier) is compared with what this session loaded: a
+-- module that differs waits for a Reload UI (Pending) and OnProfileChange hears about it; a live module follows at once.
 -- Loads after Config.lua and before every module, so a module can gate itself at file scope.
 --
 -- Gating a module (one call):
@@ -28,6 +31,7 @@ local built = {}          -- key -> true once the module called MarkBuilt
 local queue = {}          -- WhenOn calls made before ADDON_LOADED: { key, fn }
 local keyCallbacks = {}   -- key -> { fn(new, old, key) }
 local anyCallbacks = {}   -- { fn(key, new, old) }
+local profileCallbacks = {}   -- { fn(pendingCount, movedKeys) }
 local loaded = false
 
 local function Forward(err)
@@ -44,13 +48,12 @@ local function Call(fn, ...)
     if not ok then Forward(err) end
 end
 
--- The account wide table of switches that are off, or nil when the saved settings hold none (or it is not a table).
+-- The active profile's table of switches that are off, or nil while nothing may be written (before the saved settings are
+-- in, read-only mode): every switch reads as on then.
 local function Store()
-    local db = _G.ForeverSTUwaveDB
-    if type(db) ~= "table" then return nil end
-    local store = db.modules
-    if type(store) ~= "table" then return nil end
-    return store
+    local config = FS.Config
+    if not (config and config.ModuleStore) then return nil end
+    return config.ModuleStore()
 end
 
 -------------------------------------------------------------------------------
@@ -120,8 +123,8 @@ end
 
 function MS.Loaded() return loaded end
 
--- The switch as the next reload will see it: what the store holds now. Only the value false turns a module off, so a
--- damaged saved value leaves the module on.
+-- The switch as the next reload will see it: what the active profile holds now. Only the value false turns a module off, so
+-- a damaged saved value leaves the module on.
 function MS.Wanted(key)
     local store = Store()
     if store and store[key] == false then return false end
@@ -161,12 +164,9 @@ function MS.Snapshot()
     return snap
 end
 
--- True when a Set will be kept: the saved variables are in and Config did not put the settings in read-only mode.
+-- True when a Set will be kept: the saved variables are in and the active profile may be written (not read-only mode).
 function MS.IsWritable()
-    if not loaded or type(_G.ForeverSTUwaveDB) ~= "table" then return false end
-    local config = FS.Config
-    if config and config.IsReadOnly and config.IsReadOnly() then return false end
-    return true
+    return loaded and Store() ~= nil
 end
 
 -------------------------------------------------------------------------------
@@ -191,6 +191,8 @@ function MS.Built(key) return built[key] == true end
 
 local function Load()
     loaded = true
+    -- the switches are the profile's: have Config read the saved profiles first, whichever loader runs first
+    if FS.Config and FS.Config.EnsureLoaded then FS.Config.EnsureLoaded() end
     for _, key in ipairs(order) do session[key] = MS.Wanted(key) end
     local list = queue
     queue = {}
@@ -226,8 +228,8 @@ function MS.OnAnyChange(fn)
     return true
 end
 
--- Writes one switch. Returns true, or false and the reason. A normal module marks a reload pending (Pending); a live
--- module's session value follows. Setting the value it already has changes nothing and calls nothing.
+-- Writes one switch into the active profile. Returns true, or false and the reason. A normal module marks a reload pending
+-- (Pending); a live module's session value follows. Setting the value it already has changes nothing and calls nothing.
 function MS.Set(key, on)
     local m = mods[key]
     if not m then return false, "no such module" end
@@ -235,9 +237,8 @@ function MS.Set(key, on)
     if not MS.IsWritable() then return false, "settings are read-only" end
     local old = MS.Wanted(key)
     if old == on then return true end
-    local db = _G.ForeverSTUwaveDB
-    if type(db.modules) ~= "table" then db.modules = {} end
-    if on then db.modules[key] = nil else db.modules[key] = false end
+    local store = Store()
+    if on then store[key] = nil else store[key] = false end
     if m.live then session[key] = on end
     local list = keyCallbacks[key]
     if list then
@@ -246,6 +247,42 @@ function MS.Set(key, on)
     for i = 1, #anyCallbacks do Call(anyCallbacks[i], key, on, old) end
     return true
 end
+
+-- fn(pendingCount, movedKeys), called once after the active profile changed (a switch, a copy, a reset, the character's
+-- profile resolving at login): `movedKeys` are the modules whose switch differs between the profile that was in use and the
+-- one in use now, `pendingCount` how many modules wait for a reload as a result (PendingCount: the profile's switches against
+-- what this session loaded, so it also counts what an earlier change left waiting). The config window says so once from here.
+function MS.OnProfileChange(fn)
+    if type(fn) ~= "function" then return false end
+    profileCallbacks[#profileCallbacks + 1] = fn
+    return true
+end
+
+-- Config.OnProfileChange: the switches of the new profile are read now. A live module follows its new value at once (its
+-- change callbacks apply it); every other module keeps what this session loaded and shows as Pending when they differ.
+local function ProfileChanged(oldModules)
+    if not loaded then return end
+    local moved, changes = {}, {}
+    for _, key in ipairs(order) do
+        local old = not (type(oldModules) == "table" and oldModules[key] == false)
+        local new = MS.Wanted(key)
+        if old ~= new then
+            moved[#moved + 1] = key
+            changes[#changes + 1] = { key = key, new = new, old = old }
+            if mods[key].live then session[key] = new end
+        end
+    end
+    for _, change in ipairs(changes) do
+        local list = keyCallbacks[change.key]
+        if list then
+            for i = 1, #list do Call(list[i], change.new, change.old, change.key) end
+        end
+        for i = 1, #anyCallbacks do Call(anyCallbacks[i], change.key, change.new, change.old) end
+    end
+    local pending = MS.PendingCount()
+    for i = 1, #profileCallbacks do Call(profileCallbacks[i], pending, moved) end
+end
+if FS.Config and FS.Config.OnProfileChange then FS.Config.OnProfileChange(ProfileChanged) end
 
 -- The modules that are on and need `key`, directly or through another module, in registration order.
 function MS.Dependents(key)
@@ -298,7 +335,7 @@ function MS.SetWithDeps(key, on)
     return changed
 end
 
--- Every switch back on. Returns how many were off. A switch this version does not know is left alone.
+-- Every switch of the active profile back on. Returns how many were off. A switch this version does not know is left alone.
 function MS.TurnAllOn()
     local count = 0
     for _, key in ipairs(order) do

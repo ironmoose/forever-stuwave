@@ -66,7 +66,7 @@ local function Build(content)
               onClick = function(b)
                   I.OpenMenu(b, ProfileItems(Config.ActiveProfile()), function(from)
                       local active = Config.ActiveProfile()
-                      UI.Confirm(("Replace the settings and layout of %s with a copy of %s?"):format(active, from),
+                      UI.Confirm(("Replace the settings, layout and module switches of %s with a copy of %s?"):format(active, from),
                           function() Check(Config.CopyProfile(from)) end)
                   end)
               end },
@@ -95,7 +95,7 @@ local function Build(content)
         label = "Put this profile back to the defaults", tip = "Cannot be undone.",
         text = "RESET", warn = true,
         confirm = function()
-            return ("Put %s back to the defaults? Its layout positions are cleared too."):format(Config.ActiveProfile())
+            return ("Put %s back to the defaults? Its layout positions are cleared and every module is turned on."):format(Config.ActiveProfile())
         end,
         onClick = function() Check(Config.ResetProfile()) end,
     })

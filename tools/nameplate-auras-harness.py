@@ -1900,7 +1900,7 @@ check(FS.Config.Get("nameplates.enabled") == false, "the older key does not foll
 check(not evframe()._events.NAME_PLATE_UNIT_ADDED, "events stayed registered after switching off")
 """),
 
-    ("module switch: a saved off of nameplates.enabled turns the switch off once at login, and the key is a view of it afterwards", "true", r"""
+    ("module switch: the older key is a view of the switch (the switch writes it, the row writes the switch) and a stale saved off does not turn it off at login", "true", r"""
 local wanted = true
 local changed = {}
 local db = {}
@@ -1921,16 +1921,15 @@ FS.Config = {
 ForeverSTUwaveDB = db
 boot()
 check(wanted == true and evframe()._events.NAME_PLATE_UNIT_ADDED, "the module was on until login")
+-- Core/Config.lua carries a saved off of the key into the profile's module switches once, at load; the file itself reads nothing
 fire("PLAYER_ENTERING_WORLD"); drain()
-check(wanted == false, "a saved off of the older key did not turn the switch off")
-check(db.nameplatesSwitchMigrated == true, "the migration was not marked done")
-check(not evframe()._events.NAME_PLATE_UNIT_ADDED, "the plates still listen after the migration turned them off")
--- not again: the key now follows the switch, and a stale false does not turn it off a second time
+check(wanted == true, "a saved off of the older key turned the switch off at login")
+check(db.nameplatesSwitchMigrated == nil, "the file marked a migration it no longer owns")
+-- the key is a view of the switch: the switch writes it
+FS.ModuleSwitch.Set("m.np", false)
+check(store["nameplates.enabled"] == false and not evframe()._events.NAME_PLATE_UNIT_ADDED, "the switch did not write the key or silence the plates")
 FS.ModuleSwitch.Set("m.np", true)
 check(store["nameplates.enabled"] == true and evframe()._events.PLAYER_ENTERING_WORLD, "the switch did not write the key or bring the events back")
-store["nameplates.enabled"] = false
-check(fire("PLAYER_ENTERING_WORLD") == true, "the world event is not delivered while on")
-check(wanted == true, "the migration ran twice")
 -- the row writes the switch
 FS.Config.Set("nameplates.enabled", false)
 check(wanted == false, "the row did not write the switch")

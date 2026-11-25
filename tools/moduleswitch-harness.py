@@ -8,10 +8,17 @@ tree of tools/configwindow-harness.py (not the client). The checks pin:
     prototype (mockups/proto-src-2026-11-25/proto-pages.js: NAV entries with `m`, the Modules page rows)
   * WhenOn runs at this addon's ADDON_LOADED (after SavedVariables, before PLAYER_LOGIN), once, only for a module that is
     on; a late call runs at once; a throwing gate is forwarded and the others still run
-  * Set writes the account wide store (ForeverSTUwaveDB.modules, off stored as false, on as nothing); a normal module
+  * Set writes the active profile's store (profile.modules, off stored as false, on as nothing); a normal module
     marks a reload pending until the switch is turned back, a live one applies at once and calls its change callbacks
   * requires: turning one off turns its dependents off, turning one on pulls its requirements in; ALL ON turns every
-    switch back on; a profile switch, copy or reset never touches the store
+    switch of the profile in use back on
+  * per profile storage: a new profile starts with every module on, a copy carries the switches, Reset clears them, a
+    relog loads the switches of the character's profile; the old account wide table (ForeverSTUwaveDB.modules) is copied
+    into EVERY existing profile exactly once (and the older nameplates.enabled key of each profile with it)
+  * a profile change (switch, copy, reset, the character resolving late at login) is compared with what the session built:
+    a module that differs is pending (footer count, hot Reload button, Modules list, nav buttons repaint) and ONE chat line
+    names the count; a change that matches says nothing; a live module (Nameplates) follows at once and is never counted
+  * a profile string imported with the Modules box ticked puts its switches into the NEW profile (never the one in use)
   * every module page of the nav gets a power button (PWR x PWR from the SPEC, PWR_R from the nav item edge), the pages
     without a module get none; pink glyph on, dim off, cyan on hover; the nav text mutes when off
   * an off module shows the off card on its page with the prototype's wording; its big button turns the module back on
@@ -125,6 +132,11 @@ local function confirmDialog()
     error("no Confirm button")
 end
 local function errorsClean() eq(#__errors, 0, "no error forwarded: " .. table.concat(__errors, " | ")) end
+-- The saved module switches of a profile (the one in use by default): { [key] = false } for each module that is off.
+local function stored(key, name) return ForeverSTUwaveDB.profiles[name or FS.Config.ActiveProfile()].modules[key] end
+local function emptyProfile(modules)
+    return { settings = {}, layout = { v = 1, frames = {} }, modules = modules or {} }
+end
 
 -- ---- core ---------------------------------------------------------------------------------------------------------
 
@@ -163,15 +175,20 @@ function T.a_saved_off_switch_is_off_for_the_session_and_in_the_store()
 end
 
 function T.bad_saved_values_fail_open()
-    msboot({ db = { modules = { ["m.cast"] = "no", ["m.mini"] = 0, ["m.bags"] = false } } })
+    msboot({ db = { profiles = { Default = emptyProfile({ ["m.cast"] = "no", ["m.mini"] = 0, ["m.bags"] = false }) } } })
     eq(MS().On("m.cast"), true, "only the value false turns a module off")
     eq(MS().On("m.mini"), true)
     eq(MS().On("m.bags"), false)
-    msboot({ db = { modules = "garbage" } })
-    eq(MS().On("m.bags"), true, "a store that is not a table reads as all on")
+    msboot({ db = { profiles = { Default = { settings = {}, layout = { v = 1, frames = {} }, modules = "garbage" } } } })
+    eq(MS().On("m.bags"), true, "a profile store that is not a table reads as all on")
     yes(MS().Set("m.bags", false), "and is replaced on the first write")
-    eq(type(ForeverSTUwaveDB.modules), "table")
-    eq(ForeverSTUwaveDB.modules["m.bags"], false)
+    eq(type(ForeverSTUwaveDB.profiles.Default.modules), "table")
+    eq(stored("m.bags"), false)
+    msboot({ db = { modules = "garbage" } })
+    eq(MS().On("m.bags"), true, "an old account wide table that is not a table reads as all on")
+    eq(ForeverSTUwaveDB.modules, nil, "and is dropped")
+    yes(MS().Set("m.bags", false))
+    eq(stored("m.bags"), false)
 end
 
 function T.when_on_runs_at_addon_loaded_after_saved_variables_and_before_login()
@@ -231,7 +248,7 @@ function T.set_writes_the_store_and_marks_a_reload_for_a_normal_module()
     msboot()
     eq(MS().Pending("m.cast"), false)
     yes(MS().Set("m.cast", false))
-    eq(ForeverSTUwaveDB.modules["m.cast"], false, "off is stored as false")
+    eq(stored("m.cast"), false, "off is stored as false in the profile in use")
     eq(MS().Wanted("m.cast"), false)
     eq(MS().On("m.cast"), true, "the session value does not move until a reload")
     eq(MS().Pending("m.cast"), true)
@@ -245,7 +262,7 @@ function T.turning_a_switch_back_before_the_reload_clears_the_pending_mark()
     msboot()
     MS().Set("m.cast", false)
     MS().Set("m.cast", true)
-    eq(ForeverSTUwaveDB.modules["m.cast"], nil, "on is stored as nothing")
+    eq(stored("m.cast"), nil, "on is stored as nothing")
     eq(MS().Pending("m.cast"), false)
     eq(MS().PendingCount(), 0)
     -- off at load, turned on now: it waits for a reload to be built
@@ -297,6 +314,7 @@ function T.set_refuses_unknown_keys_bad_values_and_read_only_settings()
     ok, why = MS().Set("m.cast", false)
     eq(ok, false); yes(why:find("read-only", 1, true))
     eq(ForeverSTUwaveDB.modules, nil, "nothing was written")
+    eq(ForeverSTUwaveDB.profiles, nil, "and no profile was made")
 end
 
 function T.built_follows_mark_built()
@@ -338,31 +356,322 @@ function T.turn_all_on_clears_every_switch_and_marks_a_reload()
     MS().OnAnyChange(function(key, new) log[#log + 1] = key .. "=" .. tostring(new) end)
     eq(MS().TurnAllOn(), 3, "three were off")
     for _, key in ipairs(MS().Keys()) do eq(MS().Wanted(key), true, key) end
-    eq(ForeverSTUwaveDB.modules["m.future"], false, "a key this version does not know is left alone")
-    eq(ForeverSTUwaveDB.modules["m.cast"], nil)
+    eq(stored("m.future"), false, "a key this version does not know is left alone")
+    eq(stored("m.cast"), nil)
     eq(table.concat(MS().PendingKeys(), ","), "m.cast,m.mini", "off at load and on now: a reload builds them; m.uf is back to what loaded")
     eq(#log, 3)
     eq(MS().TurnAllOn(), 0)
 end
 
-function T.the_store_is_account_wide_and_a_profile_switch_does_not_touch_it()
+function T.the_switches_are_stored_in_the_profile_and_a_new_profile_starts_with_every_module_on()
     msboot()
     local C = FS.Config
     MS().Set("m.cast", false)
-    local store = ForeverSTUwaveDB.modules
-    yes(C.NewProfile("Alt")); yes(C.SetActiveProfile("Alt"))
-    eq(MS().Wanted("m.cast"), false, "a new profile still has Cast bars off")
-    yes(C.CopyProfile("Default"))
-    yes(C.ResetProfile())
+    eq(stored("m.cast"), false, "off is stored in the profile in use")
+    eq(ForeverSTUwaveDB.modules, nil, "there is no account wide table")
+    yes(C.NewProfile("Alt"))
+    eq(stored("m.cast", "Alt"), nil, "a new profile holds no switch: every module on")
+    eq(MS().Wanted("m.cast"), false, "making a profile does not switch to it")
+    yes(C.SetActiveProfile("Alt"))
+    eq(MS().Wanted("m.cast"), true, "Alt has Cast bars on")
+    MS().Set("m.mini", false)
+    eq(stored("m.mini", "Alt"), false)
+    eq(stored("m.mini", "Default"), nil, "Default is untouched by a write made in Alt")
     yes(C.SetActiveProfile("Default"))
-    eq(MS().Wanted("m.cast"), false)
-    eq(ForeverSTUwaveDB.modules, store, "the same table, untouched")
-    eq(store["m.cast"], false)
+    eq(MS().Wanted("m.cast"), false); eq(MS().Wanted("m.mini"), true)
     for name, profile in pairs(ForeverSTUwaveDB.profiles) do
-        eq(profile.settings.modules, nil, name .. " holds no module switches")
-        for key in pairs(profile.settings) do eq(tostring(key):find("^m%.") == nil, true, "no m.* key in " .. name) end
+        eq(profile.settings.modules, nil, name .. " keeps its module switches out of the settings")
+        for key in pairs(profile.settings) do eq(tostring(key):find("^m%.") == nil, true, "no m.* setting in " .. name) end
     end
-    eq(MS().PendingCount(), 1)
+    errorsClean()
+end
+
+function T.a_copy_a_reset_and_a_profile_made_as_a_copy_carry_or_clear_the_switches()
+    msboot()
+    local C = FS.Config
+    MS().Set("m.cast", false)
+    MS().Set("m.mini", false)
+    yes(C.NewProfile("Twin", "Default"))
+    eq(stored("m.cast", "Twin"), false, "a profile made as a copy carries the switches")
+    eq(stored("m.mini", "Twin"), false)
+    stored("m.cast", "Twin")
+    ForeverSTUwaveDB.profiles.Twin.modules["m.cast"] = nil
+    eq(stored("m.cast", "Default"), false, "and the copy is its own table")
+    yes(C.NewProfile("Blank"))
+    yes(C.SetActiveProfile("Blank"))
+    yes(C.CopyProfile("Default"))
+    eq(MS().Wanted("m.cast"), false, "Copy from replaces the module switches too")
+    eq(MS().Wanted("m.mini"), false)
+    yes(C.ResetProfile())
+    eq(MS().Wanted("m.cast"), true, "Reset turns every module back on")
+    eq(next(ForeverSTUwaveDB.profiles.Blank.modules), nil)
+    eq(stored("m.cast", "Default"), false, "the other profile is untouched")
+    errorsClean()
+end
+
+function T.a_relog_loads_the_switches_of_the_profile_the_character_uses()
+    local db = {
+        profileKeys = { [__guid] = "Alt" },
+        profiles = { Default = emptyProfile(), Alt = emptyProfile({ ["m.cast"] = false, ["m.np"] = false }) },
+    }
+    msboot({ db = db })
+    eq(FS.Config.ActiveProfile(), "Alt")
+    eq(MS().On("m.cast"), false, "the session loads Alt's switch")
+    eq(MS().On("m.np"), false)
+    eq(MS().On("m.mini"), true)
+    eq(MS().PendingCount(), 0, "what loaded is what the profile wants")
+    msboot({ db = { profiles = { Default = emptyProfile(), Alt = emptyProfile({ ["m.cast"] = false }) } } })
+    eq(MS().On("m.cast"), true, "the same data, for a character on Default")
+end
+
+function T.the_switches_read_the_saved_profile_even_when_this_files_loader_runs_before_configs()
+    local db = { profileKeys = { [__guid] = "Alt" }, profiles = { Default = emptyProfile(), Alt = emptyProfile({ ["m.cast"] = false }) } }
+    msboot({ noLogin = true, db = db })
+    -- every ADDON_LOADED listener in the opposite order: ModuleSwitch's loader now runs before Config's
+    local at = {}
+    for i, f in ipairs(ALL) do
+        if f.events and f.events.ADDON_LOADED and f.scripts and f.scripts.OnEvent then at[#at + 1] = i end
+    end
+    yes(#at >= 2, "both loaders are there")
+    for a = 1, math.floor(#at / 2) do
+        local b = #at - a + 1
+        ALL[at[a]], ALL[at[b]] = ALL[at[b]], ALL[at[a]]
+    end
+    Fire("ADDON_LOADED", "forever-stuwave")
+    eq(MS().Loaded(), true)
+    eq(FS.Config.ActiveProfile(), "Alt")
+    eq(MS().On("m.cast"), false, "the profile was read first, whichever loader ran first")
+    eq(MS().Wanted("m.cast"), false)
+    errorsClean()
+end
+
+-- ---- migration of the old account wide table ----------------------------------------------------------------------------
+
+function T.the_account_wide_switches_are_copied_into_every_profile_once()
+    local db = {
+        modules = { ["m.cast"] = false, ["m.future"] = false, ["m.mini"] = true, ["junk"] = "x", [3] = false },
+        profileKeys = { [__guid] = "Alt" },
+        profiles = { Default = emptyProfile(), Alt = emptyProfile(), Third = { settings = {}, layout = { v = 1, frames = {} } } },
+    }
+    msboot({ db = db })
+    for _, name in ipairs({ "Default", "Alt", "Third" }) do
+        eq(stored("m.cast", name), false, name .. " got Cast bars off")
+        eq(stored("m.future", name), false, name .. " got a key this version does not know")
+        eq(stored("m.mini", name), nil, name .. ": only an off switch is copied")
+        eq(stored("junk", name), nil, name .. ": a value that is not false is not copied")
+    end
+    eq(ForeverSTUwaveDB.modules, nil, "the account wide table is gone")
+    eq(ForeverSTUwaveDB.modulesMigrated, true, "and marked done")
+    eq(MS().On("m.cast"), false, "the session loads the copy in the profile in use")
+    eq(MS().PendingCount(), 0, "so nothing waits on upgrade")
+    -- once: a switch changed since, and a table that turns up later, are not copied again
+    MS().Set("m.cast", true)
+    ForeverSTUwaveDB.modules = { ["m.chat"] = false }
+    local saved = ForeverSTUwaveDB
+    msboot({ db = saved })
+    eq(MS().Wanted("m.cast"), true, "the second login copies nothing back")
+    eq(stored("m.chat", "Alt"), nil)
+    eq(stored("m.cast", "Third"), false, "the profile that was not in use keeps its own copy")
+    errorsClean()
+end
+
+function T.a_profile_made_after_the_migration_starts_with_every_module_on()
+    msboot({ db = { modules = { ["m.cast"] = false } } })
+    yes(FS.Config.NewProfile("After"))
+    eq(stored("m.cast", "After"), nil)
+    yes(FS.Config.SetActiveProfile("After"))
+    eq(MS().Wanted("m.cast"), true)
+end
+
+function T.a_fresh_install_has_no_switch_stored_and_is_marked_migrated()
+    msboot()
+    eq(ForeverSTUwaveDB.modulesMigrated, true)
+    eq(next(ForeverSTUwaveDB.profiles.Default.modules), nil)
+    eq(MS().PendingCount(), 0)
+end
+
+function T.a_profile_that_saved_the_older_nameplates_key_off_keeps_its_plates_off()
+    local function off() return { settings = { ["nameplates.enabled"] = false }, layout = { v = 1, frames = {} } } end
+    local db = { profiles = { Default = emptyProfile(), Alt = off(), Third = off() } }
+    msboot({ db = db })
+    eq(stored("m.np", "Default"), nil, "a profile that never turned the plates off keeps them on")
+    eq(stored("m.np", "Alt"), false, "the saved off became the module switch of that profile")
+    eq(stored("m.np", "Third"), false, "in every profile that saved it, not only the one in use")
+    eq(ForeverSTUwaveDB.nameplatesSwitchMigrated, true)
+    -- a build that already moved it (the account wide table was the authority) does not read the older key again
+    local db2 = { nameplatesSwitchMigrated = true, profiles = { Default = emptyProfile(), Alt = off() } }
+    msboot({ db = db2 })
+    eq(stored("m.np", "Alt"), nil, "a stale older key does not turn the plates off after the first read")
+end
+
+-- ---- a profile change against what this session built ------------------------------------------------------------------
+
+local function chatLines()
+    local lines = {}
+    for _, line in ipairs(__printed) do
+        if line:find("for a reload", 1, true) then lines[#lines + 1] = line end
+    end
+    return lines
+end
+
+local function twoProfiles(altOff)
+    local modules = {}
+    for _, key in ipairs(altOff or {}) do modules[key] = false end
+    return { profileKeys = { [__guid] = "Default" }, profiles = { Default = emptyProfile(), Alt = emptyProfile(modules) } }
+end
+
+function T.a_profile_switch_that_differs_from_what_is_built_waits_for_a_reload_and_says_so_once()
+    local W = msboot({ db = twoProfiles({ "m.cast", "m.mini" }) })
+    W.Open("modules")
+    local C = FS.Config
+    local any, heard = {}, {}
+    MS().OnAnyChange(function(key, new, old) any[#any + 1] = key .. "=" .. tostring(new) end)
+    MS().OnProfileChange(function(pending, moved) heard[#heard + 1] = tostring(pending) .. ":" .. table.concat(moved, ",") end)
+    __printed = {}
+    yes(C.SetActiveProfile("Alt"))
+    eq(MS().Wanted("m.cast"), false); eq(MS().On("m.cast"), true, "what is built does not move until a reload")
+    eq(MS().PendingCount(), 2)
+    eq(table.concat(MS().PendingKeys(), ","), "m.cast,m.mini")
+    eq(table.concat(heard, "|"), "2:m.cast,m.mini", "one profile callback with the count and the moved keys")
+    eq(table.concat(any, ","), "m.cast=false,m.mini=false", "the any callback saw both moves")
+    local lines = chatLines()
+    eq(#lines, 1, "one chat line: " .. table.concat(__printed, " | "))
+    eq(lines[1], "|cffff4488Forever STUwave|r: 2 modules wait for a reload. Use Reload UI in /fsconfig.", "the footer's wording")
+    -- the footer counts them and the hot Reload button lights; the Modules list marks both rows
+    local pending = W.Footer.Pending()
+    eq(#pending, 2); eq(pending[1].label, "Cast bars"); eq(pending[2].label, "Minimap")
+    eq(W.Footer.reload.fsCount, 2, "the Reload UI count")
+    eq(W.Footer.reload.fsHot, true, "the Reload button is hot")
+    eq(W.RowByKey("m.cast", "modules").reload(), "Takes a Reload UI.")
+    -- and every part of the window shows the new profile at once
+    eq(navButton(W, "cast").fsPower.fsOn, false, "the nav power button is off")
+    eq(navButton(W, "mini").fsPower.fsOn, false)
+    eq(navButton(W, "unit").fsPower.fsOn, true)
+    eq(W.RowByKey("m.cast", "modules").row.control.fsChecked, false, "the Modules list toggle follows")
+    eq(W.RowByKey("m.uf", "modules").row.control.fsChecked, true)
+    yes(visibleText("RELOAD"), "the list tags the rows that wait")
+    errorsClean()
+end
+
+function T.a_profile_switch_that_matches_what_is_built_says_nothing_and_waits_for_nothing()
+    local W = msboot({ db = twoProfiles({}) })
+    W.Open("modules")
+    local heard = {}
+    MS().OnProfileChange(function(pending, moved) heard[#heard + 1] = pending .. ":" .. #moved end)
+    __printed = {}
+    yes(FS.Config.SetActiveProfile("Alt"))
+    eq(MS().PendingCount(), 0)
+    eq(#chatLines(), 0, "no chat line")
+    eq(table.concat(heard, "|"), "0:0", "the profile callback still ran, with nothing to wait for")
+    eq(#W.Footer.Pending(), 0)
+    eq(W.Footer.reload.fsHot ~= true, true, "the Reload button stays quiet")
+    -- a profile that turns a module off, then a profile that matches the build again: the wait ends
+    FS.Config.SetActiveProfile("Default")
+    FS.Config.SetActiveProfile("Alt")
+    ForeverSTUwaveDB.profiles.Alt.modules["m.cast"] = false
+    yes(FS.Config.SetActiveProfile("Default"))
+    eq(MS().PendingCount(), 0, "back on the profile that matches the build")
+    errorsClean()
+end
+
+function T.a_profile_switch_that_turns_a_module_that_is_off_at_load_on_waits_for_a_reload_too()
+    msboot({ db = { profileKeys = { [__guid] = "Alt" }, profiles = { Default = emptyProfile(), Alt = emptyProfile({ ["m.chat"] = false }) } } })
+    eq(MS().On("m.chat"), false)
+    __printed = {}
+    yes(FS.Config.SetActiveProfile("Default"))
+    eq(MS().Wanted("m.chat"), true); eq(MS().On("m.chat"), false)
+    eq(MS().Pending("m.chat"), true)
+    local lines = chatLines()
+    eq(#lines, 1)
+    yes(lines[1]:find(": 1 module waits for a reload. Use Reload UI in /fsconfig.", 1, true), lines[1])
+end
+
+function T.a_live_module_follows_a_profile_switch_at_once_and_is_not_counted()
+    msboot({ db = twoProfiles({ "m.np", "m.cast" }) })
+    local log = {}
+    MS().OnChange("m.np", function(new, old, key) log[#log + 1] = tostring(new) .. "/" .. tostring(old) .. "/" .. key end)
+    __printed = {}
+    yes(FS.Config.SetActiveProfile("Alt"))
+    eq(MS().On("m.np"), false, "Nameplates follows the profile now")
+    eq(MS().Pending("m.np"), false)
+    eq(table.concat(log, ","), "false/true/m.np", "its change callback applied it")
+    eq(table.concat(MS().PendingKeys(), ","), "m.cast", "only the module that needs a reload waits")
+    yes(chatLines()[1]:find(": 1 module waits for a reload.", 1, true), table.concat(__printed, " | "))
+    eq(#chatLines(), 1)
+    -- and back: the live module is on again, still nothing for it to wait on
+    __printed = {}
+    yes(FS.Config.SetActiveProfile("Default"))
+    eq(MS().On("m.np"), true)
+    eq(MS().PendingCount(), 0)
+    eq(#chatLines(), 0, "back on the profile that matches the build: no line")
+    eq(table.concat(log, ","), "false/true/m.np,true/false/m.np")
+    errorsClean()
+end
+
+function T.a_copy_and_a_reset_count_like_a_switch()
+    msboot({ db = twoProfiles({ "m.cast", "m.raid" }) })
+    local C = FS.Config
+    __printed = {}
+    yes(C.CopyProfile("Alt"))
+    eq(table.concat(MS().PendingKeys(), ","), "m.raid,m.cast", "in registration order")
+    eq(#chatLines(), 1, "Copy from says it once")
+    yes(chatLines()[1]:find(": 2 modules wait for a reload.", 1, true))
+    __printed = {}
+    yes(C.ResetProfile())
+    eq(MS().PendingCount(), 0, "Reset puts every module back on: it matches what is built")
+    eq(#chatLines(), 0)
+    -- a reset of a profile whose modules were off at load waits for them to come back
+    msboot({ db = { profiles = { Default = emptyProfile({ ["m.cast"] = false }) } } })
+    __printed = {}
+    yes(FS.Config.ResetProfile())
+    eq(MS().Pending("m.cast"), true)
+    eq(#chatLines(), 1)
+end
+
+function T.the_character_resolving_late_at_login_counts_as_a_profile_change()
+    -- the GUID was not readable at ADDON_LOADED, so Default was in use; PLAYER_LOGIN resolves the character's own profile
+    local db = { profileKeys = { [__guid] = "Alt" }, profiles = { Default = emptyProfile(), Alt = emptyProfile({ ["m.cast"] = false }) } }
+    local real = UnitGUID
+    UnitGUID = function() return nil end
+    msboot({ db = db, noLogin = true })
+    Fire("ADDON_LOADED", "forever-stuwave")
+    eq(FS.Config.ActiveProfile(), "Default")
+    eq(MS().On("m.cast"), true, "the session was built from Default")
+    eq(MS().PendingCount(), 0)
+    UnitGUID = real
+    __printed = {}
+    Fire("PLAYER_LOGIN")
+    eq(FS.Config.ActiveProfile(), "Alt")
+    eq(MS().Pending("m.cast"), true, "Alt turns Cast bars off, so it waits for a reload")
+    eq(#chatLines(), 1)
+    UnitGUID = real
+end
+
+function T.a_profile_change_in_read_only_mode_does_nothing_and_a_throwing_listener_does_not_stop_the_line()
+    msboot({ db = twoProfiles({ "m.cast" }) })
+    MS().OnProfileChange(function() error("listener boom") end)
+    __printed = {}
+    yes(FS.Config.SetActiveProfile("Alt"))
+    yes(table.concat(__errors, " "):find("listener boom", 1, true), "the throw was forwarded")
+    eq(#chatLines(), 1, "the chat line is not lost to another listener")
+    __errors = {}
+    msboot({ db = { profilesVersion = 99 } })
+    eq(MS().IsWritable(), false)
+    eq(MS().PendingCount(), 0)
+end
+
+function T.all_on_acts_on_the_profile_in_use_only()
+    msboot({ db = twoProfiles({ "m.cast" }) })
+    local C = FS.Config
+    ForeverSTUwaveDB.profiles.Default.modules["m.mini"] = false
+    ForeverSTUwaveDB.profiles.Default.modules["m.chat"] = false
+    eq(MS().TurnAllOn(), 2, "two were off in Default")
+    eq(stored("m.mini", "Default"), nil)
+    eq(stored("m.cast", "Alt"), false, "the other profile is untouched")
+    yes(C.SetActiveProfile("Alt"))
+    eq(MS().Wanted("m.cast"), false)
+    eq(MS().TurnAllOn(), 1)
+    eq(stored("m.cast", "Alt"), nil)
 end
 
 function T.snapshot_lists_every_switch()
@@ -664,7 +973,7 @@ function T.all_on_in_profiles_turns_every_module_back_on_and_marks_a_reload()
     local b = entry.row.control
     yes(visibleText("ALL ON"))
     local tip = entry.row.fsHelp and entry.row.fsHelp.fsTip or ""
-    eq(tip, "Every power button in the list back on. Takes a Reload UI.")
+    eq(tip, "Every power button in the list back on, for the profile in use. Takes a Reload UI.")
     press(b)
     for _, key in ipairs(MS().Keys()) do eq(MS().Wanted(key), true, key) end
     eq(table.concat(MS().PendingKeys(), ","), "m.cast,m.mini", "the two that were off at load wait for a reload")
@@ -1291,6 +1600,145 @@ function T.minimap_on_builds_the_body_defines_the_shape_and_marks_itself_built()
     yes(Minimap.fsPlaced, "the map was seated")
     yes(TouchesOn("Minimap") ~= "", "the stock map was reshaped")
     yes(TouchesOn("MinimapInstanceDifficulty") ~= "", "the banner was skinned")
+end
+
+local STOCK_FILE = "Modules/Minimap/StockButton.lua"
+local STOCK_NAME = "ForeverSTUwaveMinimapButton"
+local STOCK_KEY = "minimap.buttonAngle"
+-- The stock minimap with one more addon's button on it (a watched stub: every call that is not a read is recorded), a LibStub
+-- that records what it is asked for, and a config window whose Toggle counts. `extra` runs in `pre` after those.
+local libAsked, toggles
+local function stockWorld(off, opts)
+    opts = opts or {}
+    libAsked, toggles = {}, 0
+    Boot({ off = off, noRegen = opts.noRegen, watch = { "Minimap", "MinimapCluster", "MinimapBackdrop", "GameTimeFrame",
+        "TimeManagerClockButton", "ExpansionLandingPageMinimapButton", "EditModeManagerFrame", "MinimapInstanceDifficulty",
+        "LibDBIcon10_SomeAddon", "SomeOtherAddonMinimapButton" }, pre = function()
+        rawset(MinimapCluster, "InstanceDifficulty", MinimapInstanceDifficulty)
+        rawset(MinimapInstanceDifficulty, "ContentModes", {})
+        WatchTree("MinimapCluster", { MinimapContainer = true, Tracking = true, BorderTop = true, DielFrame = true,
+            IndicatorFrame = { MailFrame = true } })
+        LibStub = function(name) libAsked[#libAsked + 1] = tostring(name) end
+        rawset(Minimap, "GetCenter", function() return 1000, 700 end)
+        if opts.combat then InCombatLockdown = function() return true end end
+    end })
+    FS.ConfigWindow = { Toggle = function() toggles = toggles + 1 end }
+    Fire("UI_SCALE_CHANGED"); Fire("DISPLAY_SIZE_CHANGED"); Fire("EDIT_MODE_LAYOUTS_UPDATED")
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+local function stockButton()
+    local button = _G[STOCK_NAME]
+    yes(button, "the STU button was made")
+    return button
+end
+local function centreOf(button)
+    local p = button._points[#button._points]
+    eq(p[1], "CENTER"); eq(p[3], "CENTER")
+    return p[2], p[4], p[5]
+end
+
+function T.minimap_off_puts_the_stu_button_on_the_stock_map_and_moves_nothing_of_blizzards()
+    stockWorld({ "m.mini" })
+    loaded(STOCK_FILE); loaded(MINI_FILE)
+    eq(FS.ModuleSwitch.Built("m.mini"), false)
+    eq(BuiltBy(STOCK_FILE), 1, "one frame: the button")
+    local button = stockButton()
+    eq(button._parent, Minimap, "a child of the stock map, like an addon's own button")
+    eq(button._kind, "Button")
+    local rel, x, y = centreOf(button)
+    eq(rel, Minimap, "seated on the stock map's centre")
+    local rad = math.rad(135)
+    yes(math.abs(x - math.cos(rad) * 130) < 1e-6 and math.abs(y - math.sin(rad) * 131) < 1e-6, "on the rim, 5 outside the edge: " .. x .. ", " .. y)
+    for _, name in ipairs({ "Minimap", "MinimapCluster", "MinimapBackdrop", "GameTimeFrame", "TimeManagerClockButton",
+            "ExpansionLandingPageMinimapButton", "EditModeManagerFrame", "MinimapInstanceDifficulty" }) do
+        eq(TouchesOn(name, STOCK_FILE), "", name .. " is only read by the button")
+    end
+    eq(ErrorsFrom(STOCK_FILE), "")
+end
+
+function T.minimap_off_leaves_the_other_addons_buttons_where_their_addons_put_them()
+    stockWorld({ "m.mini" })
+    eq(Minimap.fsTray, nil, "no addon tray")
+    eq(Minimap.fsTrayToggle, nil)
+    no(MadeNamed("ForeverSTUwaveMinimapTrayToggle"), "no tray toggle")
+    no(MadeNamed("ForeverSTUwaveMinimapSTUKey"), "no key row key")
+    eq(TouchesOn("LibDBIcon10_SomeAddon"), "", "a library button is never reparented, hidden, hooked or re-anchored")
+    eq(TouchesOn("SomeOtherAddonMinimapButton"), "", "nor a stray *MinimapButton* frame")
+    for _, asked in ipairs(libAsked) do no(asked:find("LibDBIcon", 1, true), "nobody asks for LibDBIcon: " .. asked) end
+end
+
+function T.minimap_on_builds_no_stock_button_and_keeps_the_tray_and_the_key_row()
+    stockWorld({})
+    loaded(STOCK_FILE)
+    no(MadeNamed(STOCK_NAME), "the key row has the STU key: no second button on the rim")
+    eq(BuiltBy(STOCK_FILE), 0)
+    eq(_G[STOCK_NAME], nil)
+    yes(Minimap.fsTray, "the addon tray is built")
+    yes(MadeNamed("ForeverSTUwaveMinimapSTUKey"), "and the STU key")
+    eq(TouchesOn("Minimap", STOCK_FILE), "")
+end
+
+function T.the_stu_button_is_built_even_when_the_login_is_in_combat()
+    stockWorld({ "m.mini" }, { combat = true, noRegen = true })
+    yes(_G[STOCK_NAME], "a plain frame of ours: no secure frame is touched, so a fight does not hold it back")
+    eq(ErrorsFrom(STOCK_FILE), "")
+end
+
+function T.a_click_on_the_stock_map_button_opens_the_config_window()
+    stockWorld({ "m.mini" })
+    local button = stockButton()
+    button._scripts.OnClick(button, "LeftButton")
+    eq(toggles, 1, "the action of the STU key")
+    eq(ErrorsFrom(STOCK_FILE), "")
+end
+
+function T.a_drag_saves_the_angle_in_the_profile_and_a_profile_switch_moves_the_button()
+    stockWorld({ "m.mini" })
+    local C = FS.Config
+    local button = stockButton()
+    eq(C.Get(STOCK_KEY), 135, "the default angle")
+    button._scripts.OnDragStart(button)
+    yes(button._scripts.OnUpdate, "the drag runs an update")
+    GetCursorPosition = function() return 1000, 400 end   -- straight below the map's centre (1000, 700)
+    IsMouseButtonDown = function() return true end
+    button._scripts.OnUpdate(button, 0.016)
+    local _, x, y = centreOf(button)
+    yes(math.abs(x) < 1e-6 and math.abs(y + 131) < 1e-6, "the button follows the cursor round the rim: " .. x .. ", " .. y)
+    eq(C.IsStored(STOCK_KEY), false, "nothing is saved while the button is held")
+    button._scripts.OnDragStop(button)
+    eq(C.Get(STOCK_KEY), 270, "the release saves the angle")
+    eq(C.IsStored(STOCK_KEY), true)
+    eq(ForeverSTUwaveDB.profiles[C.ActiveProfile()].settings[STOCK_KEY], 270, "in the profile in use")
+    -- another profile has its own angle; coming back finds the saved one
+    yes(C.NewProfile("Alt")); yes(C.SetActiveProfile("Alt"))
+    local _, ax, ay = centreOf(button)
+    local rad = math.rad(135)
+    yes(math.abs(ax - math.cos(rad) * 130) < 1e-6 and math.abs(ay - math.sin(rad) * 131) < 1e-6, "Alt starts at the default angle")
+    yes(C.SetActiveProfile("Default"))
+    local _, bx, by = centreOf(button)
+    yes(math.abs(bx) < 1e-6 and math.abs(by + 131) < 1e-6, "Default is where it was dropped")
+    eq(ErrorsFrom(STOCK_FILE), "")
+end
+
+function T.the_stock_map_button_follows_a_scale_change_without_rebuilding()
+    stockWorld({ "m.mini" })
+    local button = stockButton()
+    local made = BuiltBy(STOCK_FILE)
+    Fire("UI_SCALE_CHANGED"); Fire("DISPLAY_SIZE_CHANGED")
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+    eq(BuiltBy(STOCK_FILE), made, "no second button")
+    eq(_G[STOCK_NAME], button)
+    -- a map of another size (Edit Mode, a scale change): the button is put on the new rim
+    rawset(Minimap, "GetWidth", function() return 300 end); rawset(Minimap, "GetHeight", function() return 300 end)
+    Fire("EDIT_MODE_LAYOUTS_UPDATED")
+    local _, x, y = centreOf(button)
+    local rad = math.rad(135)
+    yes(math.abs(x - math.cos(rad) * 155) < 1e-6 and math.abs(y - math.sin(rad) * 155) < 1e-6, "on the new rim: " .. x .. ", " .. y)
+    eq(ErrorsFrom(STOCK_FILE), "")
 end
 
 local TRACK_FILES = { "Modules/Tracker/Tracker.lua", "Modules/Tracker/TrackerSeat.lua", "Modules/Tracker/QuestTimer.lua",
@@ -2375,6 +2823,47 @@ function T.all_three_off_together_loads_and_runs_clean()
     for _, key in ipairs({ "m.uf", "m.party", "m.raid" }) do b5cClean(key); b5cNotBuilt(key) end
 end
 
+-- The config window's hover draws a sample of a frame whose module is off (ConfigFlash.lua) from the Style tab's own builders:
+-- they are plain frames from file scope code, so they must work with the module not built, and must start nothing of it.
+function T.the_style_samples_the_hover_draws_build_with_their_modules_off_and_start_nothing()
+    local keys = { "m.uf", "m.party", "m.raid", "m.pet" }
+    b5cWorld(keys)
+    for _, key in ipairs(keys) do eq(FS.ModuleSwitch.Built(key), false, key .. " is not built") end
+    local events, secure, named, touched, errors = #__evFrames, 0, 0, #__touched, #__errors
+    local base = CreateFrame
+    CreateFrame = function(kind, name, parent, template)
+        if type(template) == "string" and template:find("Secure", 1, true) then secure = secure + 1 end
+        if name then named = named + 1 end
+        return base(kind, name, parent, template)
+    end
+    local made = {}
+    for _, key in ipairs({ "player", "target", "focus", "boss" }) do
+        made[#made + 1] = { key, FS.UnitFrames.NewPreview(UIParent, key) }
+    end
+    for _, pair in ipairs({ { "party", FS.PartyFrames.NewStylePreview }, { "raid", FS.RaidFrames.NewStylePreview },
+        { "pet", FS.PetFrame.NewStylePreview } }) do
+        local pv = pair[2](UIParent)
+        yes(type(pv) == "table" and pv.frame and type(pv.Restyle) == "function", pair[1] .. " answers { frame, Restyle }")
+        made[#made + 1] = { pair[1], pv.frame }
+        local ok, err = pcall(pv.Restyle)
+        yes(ok, pair[1] .. " restyles with its module off: " .. tostring(err))
+    end
+    CreateFrame = base
+    for _, m in ipairs(made) do yes(type(m[2]) == "table", m[1] .. " sample is a frame") end
+    eq(#__evFrames, events, "no sample frame registered an event")
+    eq(secure, 0, "no sample frame is a secure button")
+    eq(named, 0, "no sample frame took a global name a real frame owns")
+    for _, key in ipairs(keys) do eq(FS.ModuleSwitch.Built(key), false, key .. " was not marked built by a sample") end
+    -- touches the load and login of the other modules made are not the samples' (some skin hooks the raid manager anyway)
+    local fresh = {}
+    for i = touched + 1, #__touched do fresh[#fresh + 1] = __touched[i] end
+    eq(table.concat(fresh, ", "), "", "the samples touched no Blizzard frame")
+    for _, key in ipairs({ "m.uf", "m.party", "m.raid" }) do
+        for _, name in ipairs(B5C[key].named) do no(MadeNamed(name), name .. " exists") end
+    end
+    eq(#__errors, errors, "the samples forwarded no error: " .. table.concat(__errors, " | ", errors + 1))
+end
+
 -- the group aura engine and the borrowed stock frames belong to the rows and cells, so with both off nothing is built or taken
 function T.with_party_and_raid_off_the_group_aura_engine_builds_nothing_and_no_compact_frame_loses_its_events()
     b5cWorld({ "m.party", "m.raid" })
@@ -2469,12 +2958,12 @@ function T.nameplates_loaded_off_switch_on_live_builds_from_then_on()
     eq(ErrorsFrom(NP_FILE), "", "no error")
 end
 
-function T.nameplates_a_saved_off_of_the_older_key_turns_the_module_off_once_and_the_key_keeps_following()
+function T.nameplates_a_saved_off_of_the_older_key_becomes_the_profiles_module_switch_at_load_and_the_key_keeps_following()
     local db = { profiles = { Default = { settings = { ["nameplates.enabled"] = false }, layout = { v = 1, frames = {} } } } }
     b5cWorld({}, { db = db })
     local MS, C = FS.ModuleSwitch, FS.Config
     eq(MS.Wanted("m.np"), false, "the saved off became the module switch")
-    eq(MS.On("m.np"), false)
+    eq(MS.On("m.np"), false, "from the first frame: the plates never start")
     eq(ForeverSTUwaveDB.nameplatesSwitchMigrated, true, "read once")
     for _, e in ipairs(B5C_PLATE_EVENTS) do b5cNobodyHears(e) end
     -- the older key is a view of the switch from now on: the module switch writes it, the row writes the switch
@@ -2486,6 +2975,70 @@ function T.nameplates_a_saved_off_of_the_older_key_turns_the_module_off_once_and
     C.Set("nameplates.enabled", true)
     eq(MS.On("m.np"), true)
     for _, e in ipairs(B5C_PLATE_EVENTS) do b5cSomebodyHears(e) end
+end
+
+function T.nameplates_follow_a_profile_switch_live_and_the_older_key_follows_the_switch_of_the_profile()
+    local function profile(modules, settings) return { settings = settings or {}, layout = { v = 1, frames = {} }, modules = modules } end
+    local db = { nameplatesSwitchMigrated = true,
+        profiles = { Default = profile({}), Alt = profile({ ["m.np"] = false }), Stale = profile({}, { ["nameplates.enabled"] = false }) } }
+    b5cWorld({}, { db = db })
+    local MS, C = FS.ModuleSwitch, FS.Config
+    __platesUp.nameplate1 = true
+    Fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+    yes(FS.framesByUnit.nameplate1, "a plate has its root")
+    yes(C.SetActiveProfile("Alt"))
+    eq(MS.On("m.np"), false, "the switch of the profile now in use")
+    eq(next(FS.framesByUnit), nil, "the roots are released at once, with no reload")
+    for _, e in ipairs(B5C_PLATE_EVENTS) do b5cNobodyHears(e) end
+    eq(C.Get("nameplates.enabled"), false, "the older key shows what the plates do")
+    eq(MS.PendingCount(), 0, "a live module never waits")
+    yes(C.SetActiveProfile("Default"))
+    eq(MS.On("m.np"), true)
+    yes(FS.framesByUnit.nameplate1, "the plate that is up gets its root back")
+    for _, e in ipairs(B5C_PLATE_EVENTS) do b5cSomebodyHears(e) end
+    eq(C.Get("nameplates.enabled"), true)
+    -- a profile whose older key is stale (off) but whose module switch is on: the switch decides, the key is put back
+    yes(C.SetActiveProfile("Stale"))
+    eq(MS.On("m.np"), true, "a stale older key does not turn the plates off on a profile switch")
+    eq(C.Get("nameplates.enabled"), true, "and is put back to the switch")
+    eq(ErrorsFrom(NP_FILE), "", "no error")
+end
+
+-- ---- profile share: the modules a string carries land in the NEW profile, and switching to it waits for a reload ------------
+
+function T.an_import_carries_the_modules_into_the_new_profile_only_when_ticked_and_switching_to_it_waits_for_a_reload()
+    b5cWorld({})
+    local MS, C, Share = FS.ModuleSwitch, FS.Config, FS.ConfigWindow.Share
+    yes(Share and FS.ProfileCodec, "the share dialog and the codec are loaded")
+    yes(MS.Set("m.cast", false)); yes(MS.Set("m.mini", false)); yes(MS.Set("m.np", false))
+    local text = FS.ProfileCodec.Export("all")
+    yes(text, "the profile exports with its module switches")
+    eq(MS.TurnAllOn(), 3)
+    local profiles = ForeverSTUwaveDB.profiles
+    local info = Share.Inspect(text)
+    yes(info.ok and info.hasModules, "the string carries module switches")
+    eq(#info.moduleChanges, 3, "three would start off in the new profile")
+    local ok, plain = Share.Apply(text, "Plain", false)
+    yes(ok, tostring(plain))
+    eq(next(profiles.Plain.modules), nil, "unticked: the new profile starts with every module on")
+    ok = Share.Apply(text, "Carried", true)
+    yes(ok)
+    eq(profiles.Carried.modules["m.cast"], false); eq(profiles.Carried.modules["m.mini"], false); eq(profiles.Carried.modules["m.np"], false)
+    eq(MS.PendingCount(), 0, "the profile in use is untouched by an import")
+    eq(C.ActiveProfile(), "Default", "and nothing is switched to")
+    -- switching to it: Nameplates (live) follows at once, the other two wait for a reload and one line says so
+    __printed = {}
+    yes(C.SetActiveProfile("Carried"))
+    eq(MS.On("m.np"), false)
+    eq(table.concat(MS.PendingKeys(), ","), "m.cast,m.mini")
+    local lines = {}
+    for _, line in ipairs(__printed) do if line:find("for a reload", 1, true) then lines[#lines + 1] = line end end
+    eq(#lines, 1, table.concat(__printed, " | "))
+    yes(lines[1]:find(": 2 modules wait for a reload. Use Reload UI in /fsconfig.", 1, true), lines[1])
+    yes(C.SetActiveProfile("Plain"))
+    eq(MS.PendingCount(), 0, "Plain matches what was built")
+    eq(MS.On("m.np"), true, "and Nameplates is on again at once")
+    eq(ErrorsFrom(NP_FILE), "", "no error")
 end
 
 function T.nameplates_the_module_switch_wins_over_a_stale_older_key_after_the_first_read()

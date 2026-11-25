@@ -2,8 +2,10 @@
 -- Every module of Core/ModuleSwitch.lua that has a page gets a power button in the nav (pink glyph on, dim glyph off, the
 -- nav text muted); an off module's page shows the off card instead of its settings. The Modules page lists all the switches
 -- with a RELOAD tag on the ones that wait for a Reload UI, and Profiles gets a Modules section with ALL ON. Everything here
--- reads and writes through FS.ModuleSwitch; the window is reached only through its extension points (NavSlot, On,
--- RegisterCategory, ExtendTab) and the shared builders. Without the store (a harness that does not load it) the file does nothing.
+-- reads and writes through FS.ModuleSwitch (the switches belong to the profile in use, so a profile change repaints the
+-- buttons, the card and the list, and says once in chat how many modules wait for a reload); the window is reached only
+-- through its extension points (NavSlot, On, RegisterCategory, ExtendTab) and the shared builders. Without the store (a
+-- harness that does not load it) the file does nothing.
 
 local _, FS = ...
 
@@ -464,7 +466,7 @@ CW.RegisterCategory({
 CW.ExtendTab("profiles", "p", { title = "Modules" }, function(content)
     UI.Button(content, {
         label = "Turn every module back on", regKey = "modules.allon", text = "ALL ON",
-        tip = "Every power button in the list back on. Takes a Reload UI.",
+        tip = "Every power button in the list back on, for the profile in use. Takes a Reload UI.",
         onClick = function()
             if not MS.IsWritable() then
                 I.Say("settings are read-only this session.")
@@ -498,10 +500,17 @@ if CW.AddReloadSource then
     end)
 end
 
--- Any change of a switch (a click, ALL ON, an import): repaint the buttons, the card, the tags and the list.
+-- Any change of a switch (a click, ALL ON, a profile change that moved it): repaint the buttons, the card, the tags and the list.
 MS.OnAnyChange(function()
     if not ui.frame then return end
     PaintAllNav()
     UpdateCard()
     CW.RefreshAll()
+end)
+
+-- A profile change (switch, copy, reset) that leaves modules waiting for a reload says so once, in the footer's wording. A
+-- live module follows the new profile at once, so it never counts; a change that matches what is built says nothing.
+MS.OnProfileChange(function(pending)
+    if pending <= 0 then return end
+    I.Say(("%d %s for a reload. Use Reload UI in /fsconfig."):format(pending, pending == 1 and "module waits" or "modules wait"))
 end)

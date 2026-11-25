@@ -27,6 +27,7 @@ local _, FS = ...
 -- Module power (Core/ModuleSwitch.lua). With the Minimap switch off the build at the end of this file never runs, and the
 -- callbacks that Layout.lua and Config.lua hold on to do nothing: Blizzard's minimap, its cluster and its buttons are never
 -- moved, hidden, masked or hooked. Active is read when a callback runs, never at file scope (the switch is not known yet).
+-- The STU key lives in the key row, so with the switch off StockButton.lua puts a round STU button on the stock map's rim instead.
 local MS = FS.ModuleSwitch
 local function Active() return MS == nil or MS.On("m.mini") end
 

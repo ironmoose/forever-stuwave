@@ -1194,21 +1194,19 @@ function T.the_modules_checkbox_shows_only_when_the_string_carries_them_and_is_o
     yes(ui.modulesBox:IsVisible(), "the string carries module switches")
     yes(findText("Also set which modules are on", ui.panel))
     no(ui.modulesBox.fsChecked, "off by default")
-    -- this client has them both on; ticking would turn Cast bars off
-    MS.Snapshot = function() return { ["m.cast"] = true, ["m.chat"] = true } end
-    MS.Wanted = function(k) return true end
     click("IMPORT AS NEW PROFILE", ui.panel)
-    eq(#MS.sets, 0, "unticked sets nothing")
-    -- again, ticked
+    eqt(ForeverSTUwaveDB.profiles["Default 2"].modules, {}, "unticked: the new profile starts with every module on")
+    eq(#MS.sets, 0, "and the module switches of the profile in use are not touched")
+    -- again, ticked: the new profile (not the one in use) carries the switches that are off
     click("IMPORT", win())
     paste(withModules)
     typeName("Second")
     ui.modulesBox.scripts.OnClick(ui.modulesBox)
     yes(ui.modulesBox.fsChecked, "ticked")
     click("IMPORT AS NEW PROFILE", ui.panel)
-    eq(#MS.sets, 1, "only the one that differs")
-    eq(MS.sets[1][1], "m.cast")
-    eq(MS.sets[1][2], false)
+    eqt(ForeverSTUwaveDB.profiles.Second.modules, { ["m.cast"] = false }, "only the switch that is off is kept")
+    eq(#MS.sets, 0, "the profile in use is still not touched")
+    eq(FS.Config.ActiveProfile(), "Default", "and nothing is switched to")
     -- a string with no modules, and a client without the switch, show no checkbox
     boot({ encoding = false })
     seed()
@@ -1221,26 +1219,32 @@ function T.the_modules_checkbox_shows_only_when_the_string_carries_them_and_is_o
     no(share().ui.modulesBox:IsVisible())
 end
 
-function T.the_modules_tip_says_what_would_change_and_when_a_reload_is_needed()
+function T.the_modules_tip_says_what_the_new_profile_starts_with_and_when_a_reload_is_needed()
     boot({ encoding = false, modules = { ["m.cast"] = false, ["m.chat"] = true, ["m.same"] = true } })
     seed()
     local MS = FS.ModuleSwitch
     local text = exportString("all")
-    MS.Snapshot = function() return { ["m.cast"] = true, ["m.chat"] = false, ["m.same"] = true } end
     profilesPage()
     click("IMPORT", win())
     local ui = share().ui
     paste(text)
-    eq(ui.modulesHelp.fsTip, "Turns off: Label m.cast.\nTurns on: Label m.chat.\nTakes a Reload UI.")
+    eq(ui.modulesHelp.fsTip, "The new profile starts with these off: Label m.cast.\nSwitching to it takes a Reload UI.")
+    -- the profile in use does not change what the tip says: it is about the new profile
+    MS.Snapshot = function() return { ["m.cast"] = true, ["m.chat"] = false, ["m.same"] = true } end
+    paste("")
+    paste(text)
+    eq(ui.modulesHelp.fsTip, "The new profile starts with these off: Label m.cast.\nSwitching to it takes a Reload UI.")
     -- a module that switches at once needs no reload
     MS.IsLive = function() return true end
     paste("")
     paste(text)
-    eq(ui.modulesHelp.fsTip, "Turns off: Label m.cast.\nTurns on: Label m.chat.", "every change is live")
-    MS.Snapshot = function() return { ["m.cast"] = false, ["m.chat"] = true, ["m.same"] = true } end
+    eq(ui.modulesHelp.fsTip, "The new profile starts with these off: Label m.cast.", "every switch is live")
+    -- a string that holds every module as on changes nothing
+    MS.Snapshot = function() return { ["m.cast"] = true, ["m.chat"] = true, ["m.same"] = true } end
+    local allOn = exportString("all")
     paste("")
-    paste(text)
-    eq(ui.modulesHelp.fsTip, "The modules in this string are already set the same here.")
+    paste(allOn)
+    eq(ui.modulesHelp.fsTip, "Every module in this string is on, the same as a new profile starts.")
 end
 
 function T.a_string_without_modules_shows_no_checkbox_and_the_box_resets_between_strings()

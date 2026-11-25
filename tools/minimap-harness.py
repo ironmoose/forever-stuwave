@@ -19,7 +19,11 @@ Loads Minimap.lua under lupa on a permissive mock WoW API, fires PLAYER_LOGIN, a
     real LibDBIcon-1.0 (minor 56): collected buttons become keys of a second row under a dashed amber rule (the body ends at
     the drawer while it is open), wrap onto more rows, are toggled by the row's fourth key (count and chevron, persisted),
     and combat defers every reparent;
-  * the Edit Mode seat compensation of the map itself (unchanged by the redesign).
+  * the Edit Mode seat compensation of the map itself (unchanged by the redesign);
+  * with the Minimap module OFF, StockButton.lua puts the STU button on the game's own round map: a small round button on the
+    rim at a saved angle (LibDBIcon's placement math, any map shape), pixel crisp rows at every UI scale, pink rim while hot,
+    left click opens the config window, drag moves it round the rim and saves the angle, a neutral tooltip; with the module on
+    it builds nothing.
 
     python3 tools/minimap-harness.py
 """
@@ -29,6 +33,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import struct
 import sys
 from pathlib import Path
 
@@ -43,6 +48,8 @@ THEME_SRC = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
 LAYOUT_SRC = Path(os.environ.get("LAYOUT_LUA", ADDON / "Core/Layout.lua")).read_text(encoding="utf-8")
 MINIMAP_SRC = Path(os.environ.get("MINIMAP_LUA", ADDON / "Modules/Minimap/Minimap.lua")).read_text(encoding="utf-8")
 FRAMEHELPERS_SRC = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
+# STOCK_LUA points the harness at a mutant copy of StockButton.lua (mutation checks).
+STOCK_SRC = Path(os.environ.get("STOCK_LUA", ADDON / "Modules/Minimap/StockButton.lua")).read_text(encoding="utf-8")
 CONFIGWINDOW_SRC = (ADDON / "Modules/Config/ConfigWindow.lua").read_text(encoding="utf-8")
 
 MOCK = r"""
@@ -2143,6 +2150,483 @@ def seat_log_checks() -> None:
 
 
 
+# ---- the STU button on the stock map (Minimap module off) -------------------------------------------------------------------
+
+STOCK_NAME = "ForeverSTUwaveMinimapButton"
+STOCK_KEY = "minimap.buttonAngle"
+STOCK_SIZE, STOCK_RIM, STOCK_DEFAULT = 28, 5, 135
+
+# The mock's pieces for StockButton.lua: a saved-settings stub (recording every Set), the module switch stub (`__off` says whether
+# the Minimap module is off), the config window's Toggle, a map whose centre and cursor the checks move, and a tooltip that keeps
+# what was put in it.
+STOCK_SETUP = r"""
+__log = {}
+FS.LogDegradeOnce = function(key, msg) __log[#__log + 1] = key end
+__cfg, __cfgDefault, __cfgCallbacks, __sets, __readOnly = {}, {}, {}, 0, false
+FS.Config = {
+    RegisterDefault = function(k, v) __cfgDefault[k] = v end,
+    Get = function(k) local v = __cfg[k]; if v == nil then return __cfgDefault[k] end return v end,
+    Set = function(k, v)
+        if __readOnly then return false end
+        local old = __cfg[k]
+        __cfg[k] = v; __sets = __sets + 1; __lastSet = v
+        if old ~= v then for _, fn in ipairs(__cfgCallbacks[k] or {}) do fn(v, old, k) end end
+        return true
+    end,
+    OnChange = function(k, fn) __cfgCallbacks[k] = __cfgCallbacks[k] or {}; table.insert(__cfgCallbacks[k], fn) end,
+}
+function __profile(k, v)   -- a profile switch: the stored value changes under the button and the change callbacks run
+    local old = __cfg[k]; __cfg[k] = v
+    for _, fn in ipairs(__cfgCallbacks[k] or {}) do fn(v, old, k) end
+end
+__secret = nil
+FS.IsSecret = function(v) return __secret ~= nil and v == __secret end
+__off = true
+FS.ModuleSwitch = { On = function(key) return not (key == "m.mini" and __off) end }
+__toggles = 0
+FS.ConfigWindow = { Toggle = function() __toggles = __toggles + 1 end }
+__center, __cursor, __mapScale, __mouseDown = { 1000, 700 }, { 1000, 700 }, 1, true
+Minimap.GetCenter = function() return __center[1], __center[2] end
+Minimap.GetEffectiveScale = function() return __mapScale end
+function __same(a, b) return a == b end
+function __count(name) local n = 0 for _, f in ipairs(allFrames) do if f.name == name then n = n + 1 end end return n end
+function GetCursorPosition() if __cursor then return __cursor[1], __cursor[2] end end
+function IsMouseButtonDown() return __mouseDown end
+function GameTooltip:SetOwner(o, anchor) self.owner, self.anchor, self.lines, self.point, self.shown = o, anchor, {}, nil, false end
+function GameTooltip:ClearAllPoints() self.point = nil end
+function GameTooltip:SetPoint(...) self.point = { ... } end
+function GameTooltip:AddLine(t) self.lines[#self.lines + 1] = t end
+"""
+
+
+def stock_world(factor: float = 1.0, off: bool = True, extra: str = "", login: bool = True) -> "LuaRuntime":
+    """StockButton.lua loaded under the mock with the real Theme.lua and FrameHelpers.lua (PixelUnit = `factor` UI units
+    per pixel); PLAYER_LOGIN fired unless `login` is false."""
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute("function ___run(...) " + MOCK + " end")
+    setup = ("FH_SRC = [==[" + FRAMEHELPERS_SRC + "]==]\n" + PIXELS % factor + STOCK_SETUP
+             + f"__off = {'true' if off else 'false'}\n" + extra)
+    lua.globals().___run(THEME_SRC, STOCK_SRC, "cut", None, LAYOUT_SRC, setup, None)
+    if login:
+        lua.execute('FireEvent("PLAYER_LOGIN")')
+    return lua
+
+
+def stock_offset(angle: float, half_w: float, half_h: float, shape: str = "ROUND") -> tuple[float, float]:
+    """LibDBIcon's placement, written out again: round quarters ride the circle STOCK_RIM outside the edge, square ones the
+    square with the diagonal pulled in."""
+    quarters = {
+        "ROUND": (1, 1, 1, 1), "SQUARE": (0, 0, 0, 0), "CORNER-TOPLEFT": (0, 0, 0, 1), "CORNER-TOPRIGHT": (0, 0, 1, 0),
+        "CORNER-BOTTOMLEFT": (0, 1, 0, 0), "CORNER-BOTTOMRIGHT": (1, 0, 0, 0), "SIDE-LEFT": (0, 1, 0, 1),
+        "SIDE-RIGHT": (1, 0, 1, 0), "SIDE-TOP": (0, 0, 1, 1), "SIDE-BOTTOM": (1, 1, 0, 0),
+        "TRICORNER-TOPLEFT": (0, 1, 1, 1), "TRICORNER-TOPRIGHT": (1, 0, 1, 1), "TRICORNER-BOTTOMLEFT": (1, 1, 0, 1),
+        "TRICORNER-BOTTOMRIGHT": (1, 1, 1, 0),
+    }[shape]
+    x, y = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+    quarter = 1 + (1 if x < 0 else 0) + (2 if y > 0 else 0)
+    w, h = half_w + STOCK_RIM, half_h + STOCK_RIM
+    if quarters[quarter - 1]:
+        return x * w, y * h
+    dw, dh = math.sqrt(2 * w * w) - 10, math.sqrt(2 * h * h) - 10
+    return max(-w, min(x * dw, w)), max(-h, min(y * dh, h))
+
+
+def stock_diameter(px: float) -> int:
+    return max(12, math.floor(STOCK_SIZE / px + 0.5))
+
+
+def stock_canvas(diameter: int) -> int:
+    canvas = min(math.floor(32 * diameter / STOCK_SIZE + 0.5), math.floor(32 * (diameter / 2 - 0.5) / 13))
+    return canvas - 1 if (canvas - diameter) % 2 else canvas
+
+
+def disc_pixels(diameter: int, radius: float) -> set:
+    """Every pixel (x, y) of a diameter-wide square whose centre is inside the circle of `radius` round the square's centre."""
+    c = diameter / 2
+    return {(x, y) for y in range(diameter) for x in range(diameter)
+            if (x + 0.5 - c) ** 2 + (y + 0.5 - c) ** 2 <= radius * radius + 1e-9}
+
+
+def stu_ink_radius() -> float:
+    """The farthest solid texel (alpha >= 128) of icon_stu.tga from the centre of its 32 texel canvas, in texels."""
+    data = (ADDON / "Media/Textures/icon_stu.tga").read_bytes()
+    width, height = struct.unpack_from("<HH", data, 12)
+    assert (width, height) == (32, 32) and data[16] == 32, "icon_stu.tga is a 32 x 32 BGRA canvas"
+    farthest = 0.0
+    for y in range(height):
+        for x in range(width):
+            if data[18 + (y * width + x) * 4 + 3] >= 128:
+                farthest = max(farthest, math.hypot(x + 0.5 - 16, y + 0.5 - 16))
+    return farthest
+
+
+def stock_rows(button, sublevel: int) -> list:
+    """The flat rows of the rim (sublevel 1) or the face (sublevel 2), in the order they were laid."""
+    return [r for r in regions(button) if r.layer == "BACKGROUND" and r.sublevel == sublevel and r.color is not None]
+
+
+def row_pixels(rows, px: float) -> set:
+    """The pixels the visible rows cover, from their seats (whole pixel counts from the button's top left)."""
+    covered = set()
+    for r in rows:
+        if not r.shown:
+            continue
+        x0 = round(r.points.TOPLEFT.x / px)
+        y = round(-r.points.TOPLEFT.y / px)
+        for x in range(x0, x0 + round(r.w / px)):
+            covered.add((x, y))
+    return covered
+
+
+def stock_button_checks() -> None:
+    """The STU button on the stock map while the Minimap module is off."""
+    px_worlds = (("1 unit per px", 1.0), ("1.2 px per unit", 1 / 1.2), ("0.5333 units per px", 768 / 1440), ("2 px per unit", 0.5),
+                 ("tiny UI", 3.0))
+
+    # --- built only while the module is off
+    lua = stock_world(off=False)
+    check("[stock] with the Minimap module on nothing is built (the key row has the STU key)", lua.globals()[STOCK_NAME] is None)
+    lua = stock_world(extra="FS.ModuleSwitch = nil", login=True)
+    check("[stock] with no module switch store at all nothing is built either", lua.globals()[STOCK_NAME] is None)
+    lua = stock_world(login=False)
+    check("[stock] nothing is built before PLAYER_LOGIN (the saved switches are not in at file scope)",
+          lua.globals()[STOCK_NAME] is None)
+    lua.execute('FireEvent("PLAYER_LOGIN")')
+    button = lua.globals()[STOCK_NAME]
+    check("[stock] with the module off the button is built at PLAYER_LOGIN", button is not None)
+    check("[stock] it is a Button that is a child of the stock Minimap, never of UIParent or a cluster",
+          button.otype == "Button" and lua.globals().__same(button.parent, lua.globals().Minimap))
+    check("[stock] it sits at MEDIUM strata, level 8, pinned (an addon's button on the stock map)",
+          button.strata == "MEDIUM" and button.level == 8 and button.fixedStrata and button.fixedLevel)
+    check("[stock] it takes the left button for clicks and drags", button.dragButtons == 1)
+    lua.execute('FireEvent("PLAYER_LOGIN")')
+    check("[stock] a second PLAYER_LOGIN builds no second button", lua.eval(f"__count('{STOCK_NAME}')") == 1)
+
+    # --- the ring placement: the saved angle, the default, LibDBIcon's math
+    pt = button.points.CENTER
+    ex, ey = stock_offset(STOCK_DEFAULT, 125, 125)
+    check(f"[stock] the default angle is the map's upper left ({STOCK_DEFAULT}) and the button's centre is on the rim, "
+          f"{STOCK_RIM} outside the map's edge (got {pt.x:.2f}, {pt.y:.2f}; want {ex:.2f}, {ey:.2f})",
+          lua.globals().__same(pt.rel, lua.globals().Minimap) and pt.relPoint == "CENTER" and near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6)
+          and lua.eval("FS.MinimapStockButton.DEFAULT_ANGLE") == STOCK_DEFAULT)
+    check("[stock] the angle is a registered profile setting with the default angle",
+          lua.eval(f"__cfgDefault['{STOCK_KEY}']") == STOCK_DEFAULT)
+    check("[stock] a build writes nothing into the saved settings", lua.eval("__sets") == 0)
+    for angle in (0, 30, 90, 180, 225, 270, 315, 359.9):
+        lua = stock_world(extra=f"__cfg['{STOCK_KEY}'] = {angle}")
+        pt = lua.globals()[STOCK_NAME].points.CENTER
+        ex, ey = stock_offset(angle, 125, 125)
+        check(f"[stock] angle {angle}: the centre is ({ex:.2f}, {ey:.2f}) (got {pt.x:.2f}, {pt.y:.2f})",
+              near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6))
+    for angle, want in ((495, 135), (-45, 315), (720, 0)):
+        lua = stock_world(extra=f"__cfg['{STOCK_KEY}'] = {angle}")
+        pt = lua.globals()[STOCK_NAME].points.CENTER
+        ex, ey = stock_offset(want, 125, 125)
+        check(f"[stock] a saved angle of {angle} reads as {want}", near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6))
+    for label, value in (("a string", "'left'"), ("NaN", "0/0"), ("infinity", "math.huge"), ("a table", "{}"), ("a boolean", "true")):
+        lua = stock_world(extra=f"__cfg['{STOCK_KEY}'] = {value}")
+        pt = lua.globals()[STOCK_NAME].points.CENTER
+        ex, ey = stock_offset(STOCK_DEFAULT, 125, 125)
+        check(f"[stock] a damaged saved angle ({label}) falls back to the default and does not throw",
+              near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6))
+    lua = stock_world(extra=f"__secret = 99; __cfg['{STOCK_KEY}'] = 99")
+    pt = lua.globals()[STOCK_NAME].points.CENTER
+    ex, ey = stock_offset(STOCK_DEFAULT, 125, 125)
+    check("[stock] a secret saved angle is never compared: the default is used",
+          near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6))
+
+    # an ellipse: the map is not always square, each half size has its own radius
+    lua = stock_world(extra="Minimap.w = 200; Minimap.h = 240")
+    pt = lua.globals()[STOCK_NAME].points.CENTER
+    ex, ey = stock_offset(STOCK_DEFAULT, 100, 120)
+    check(f"[stock] a 200 by 240 map: the rim is its own ellipse ({pt.x:.2f}, {pt.y:.2f} vs {ex:.2f}, {ey:.2f})",
+          near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6))
+
+    # the pure math, against a second written out copy, on every shape and a sweep of angles
+    shapes = ("ROUND", "SQUARE", "CORNER-TOPLEFT", "CORNER-TOPRIGHT", "CORNER-BOTTOMLEFT", "CORNER-BOTTOMRIGHT", "SIDE-LEFT",
+              "SIDE-RIGHT", "SIDE-TOP", "SIDE-BOTTOM", "TRICORNER-TOPLEFT", "TRICORNER-TOPRIGHT", "TRICORNER-BOTTOMLEFT",
+              "TRICORNER-BOTTOMRIGHT")
+    lua = stock_world()
+    worst = 0.0
+    for shape in shapes:
+        for angle in range(0, 360, 15):
+            gx, gy = lua.eval(f"FS.MinimapStockButton.Offset({angle}, 123, 117, '{shape}')")
+            wx, wy = stock_offset(angle, 123, 117, shape)
+            worst = max(worst, abs(gx - wx), abs(gy - wy))
+    check(f"[stock] Offset matches the placement math on all 14 shapes and 24 angles (worst {worst:.2e})", worst < 1e-9)
+    gx, gy = lua.eval("FS.MinimapStockButton.Offset(0, 100, 100, 'ROUND')")
+    check("[stock] due right on a round map is the radius plus the rim", near(gx, 105) and abs(gy) < 1e-9)
+    gx, gy = lua.eval("FS.MinimapStockButton.Offset(90, 100, 100, 'ROUND')")
+    check("[stock] due up on a round map is the radius plus the rim, above the centre", abs(gx) < 1e-9 and near(gy, 105))
+    gx, gy = lua.eval("FS.MinimapStockButton.Offset(45, 100, 100, 'SQUARE')")
+    check("[stock] the diagonal of a square map stays inside the square", abs(gx) <= 105 and abs(gy) <= 105 and gx > 90)
+    gx, gy = lua.eval("FS.MinimapStockButton.Offset(0, 100, 100, 'NOT-A-SHAPE')")
+    check("[stock] an unknown shape name counts as round", near(gx, 105))
+    check("[stock] AngleTo is the cursor's angle round the centre, 0 to 360",
+          near(lua.eval("FS.MinimapStockButton.AngleTo(10, 10, 20, 10)"), 0)
+          and near(lua.eval("FS.MinimapStockButton.AngleTo(10, 10, 10, 20)"), 90)
+          and near(lua.eval("FS.MinimapStockButton.AngleTo(10, 10, 0, 10)"), 180)
+          and near(lua.eval("FS.MinimapStockButton.AngleTo(10, 10, 10, 0)"), 270)
+          and near(lua.eval("FS.MinimapStockButton.AngleTo(10, 10, 20, 0)"), 315))
+
+    # a map another addon made square: GetMinimapShape is read when the button is placed
+    lua = stock_world(extra="function GetMinimapShape() return 'SQUARE' end")
+    pt = lua.globals()[STOCK_NAME].points.CENTER
+    ex, ey = stock_offset(STOCK_DEFAULT, 125, 125, "SQUARE")
+    check(f"[stock] GetMinimapShape SQUARE puts the button on the square rim ({pt.x:.2f}, {pt.y:.2f})",
+          near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6))
+    for label, body in (("throws", "error('boom')"), ("answers a number", "return 5"), ("answers nothing", "return nil")):
+        lua = stock_world(extra=f"function GetMinimapShape() {body} end")
+        pt = lua.globals()[STOCK_NAME].points.CENTER
+        ex, ey = stock_offset(STOCK_DEFAULT, 125, 125)
+        check(f"[stock] a GetMinimapShape that {label} counts as a round map", near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6))
+
+    # a map that cannot be read yet: nothing is placed and nothing throws, a later pass places it
+    lua = stock_world(extra="Minimap.GetWidth = function() return nil end")
+    check("[stock] a map with no readable width gets the button built and not placed, with no error",
+          lua.globals()[STOCK_NAME] is not None and lua.globals()[STOCK_NAME].points.CENTER is None
+          and lua.eval("#__log") == 0)
+    lua.execute("Minimap.GetWidth = function() return 250 end; FireEvent('UI_SCALE_CHANGED')")
+    check("[stock] and the next scale event places it", lua.globals()[STOCK_NAME].points.CENTER is not None)
+    lua = stock_world(extra="__secret = 250; Minimap.GetWidth = function() return 250 end")
+    check("[stock] a secret map width is never used", lua.globals()[STOCK_NAME].points.CENTER is None)
+    lua = stock_world(extra="Minimap = nil")
+    check("[stock] no Minimap at all: nothing is built and the failure is logged once",
+          lua.globals()[STOCK_NAME] is None and lua.eval("#__log") == 1)
+    lua = stock_world(extra="local real = CreateFrame; function CreateFrame(t, n, ...) if n then error('no frames') end return real(t, n, ...) end")
+    check("[stock] a build that throws is logged once and does not reach the client's handler",
+          lua.globals()[STOCK_NAME] is None and lua.eval("#__log") == 1)
+
+    # --- the look at every pixel size: whole pixel rows, a round disc, the mark inside the rim
+    ink = stu_ink_radius()
+    check(f"[stock look] the STU mark's solid texels reach {ink:.2f} texels from its centre, within the 13 the canvas is fitted for",
+          ink <= 13)
+    for label, factor in px_worlds:
+        lua = stock_world(factor)
+        button = lua.globals()[STOCK_NAME]
+        px = factor
+        d = stock_diameter(px)
+        rim, face = stock_rows(button, 1), stock_rows(button, 2)
+        check(f"[stock look, {label}] the button is {d} pixels wide and tall ({d * px:.3f} units), at least 12",
+              d >= 12 and near(button.w, d * px, 1e-9) and near(button.h, d * px, 1e-9))
+        want_rim, want_face = disc_pixels(d, d / 2), disc_pixels(d, d / 2 - 1)
+        got_rim, got_face = row_pixels(rim, px), row_pixels(face, px)
+        check(f"[stock look, {label}] the rim is the disc of {d} pixels, row by row ({len(got_rim)} pixels)", got_rim == want_rim)
+        check(f"[stock look, {label}] the face is the disc one pixel smaller, inside the rim ({len(got_face)} pixels)",
+              got_face == want_face and got_face < got_rim)
+        check(f"[stock look, {label}] the disc is symmetric left to right and top to bottom",
+              all((d - 1 - x, y) in got_rim and (x, d - 1 - y) in got_rim for x, y in got_rim))
+        area = len(got_rim)
+        check(f"[stock look, {label}] the rim's area is a circle's (pi r squared = {math.pi * (d / 2) ** 2:.0f}, got {area})",
+              abs(area - math.pi * (d / 2) ** 2) / (math.pi * (d / 2) ** 2) < 0.05)
+        check(f"[stock look, {label}] every row is flat, one pixel tall, whole pixels in x and y, pixel snapped",
+              all(r.h == px or near(r.h, px, 1e-9) for r in rim + face)
+              and all(whole(r.w, px) and whole(r.points.TOPLEFT.x, px) and whole(r.points.TOPLEFT.y, px) for r in rim + face)
+              and all(r.snap and r.bias == 0 for r in rim + face))
+        icon = [r for r in regions(button) if r.texture == STU_TEXTURE]
+        canvas = stock_canvas(d)
+        check(f"[stock look, {label}] the STU mark is one {canvas} pixel canvas, centred on whole pixels",
+              len(icon) == 1 and near(icon[0].w, canvas * px, 1e-9) and near(icon[0].h, canvas * px, 1e-9)
+              and near(icon[0].points.TOPLEFT.x, (d - canvas) / 2 * px, 1e-9)
+              and near(icon[0].points.TOPLEFT.y, -(d - canvas) / 2 * px, 1e-9)
+              and icon[0].layer == "ARTWORK" and (canvas - d) % 2 == 0 and icon[0].snap)
+        reach = ink * canvas / 32
+        check(f"[stock look, {label}] the mark's farthest solid texel ({reach:.2f} px) stays inside the face (radius {d / 2 - 1})",
+              reach <= d / 2 - 1 + 0.5)
+        check(f"[stock look, {label}] the rim is the Theme's cyan at rest, the face the button ink, opaque",
+              all(tint_is(r, lua.eval("FS.Theme.COLOR_POWER"), 0.75) for r in rim)
+              and all(tint_is(r, lua.eval("FS.Theme.COLOR_BUTTON_INK"), 1) for r in face))
+
+    # --- hover, press and the tooltip
+    lua = stock_world()
+    button = lua.globals()[STOCK_NAME]
+    pink, cyan = lua.eval("FS.Theme.COLOR_HEALTH"), lua.eval("FS.Theme.COLOR_POWER")
+    ink_face, dark = lua.eval("FS.Theme.COLOR_BUTTON_INK"), lua.eval("FS.Theme.COLOR_BAR_TRACK")
+    rim, face = stock_rows(button, 1), stock_rows(button, 2)
+    lua.globals().GameTooltip.shown = False
+    button.scripts.OnEnter(button)
+    check("[stock hover] the rim turns pink at full strength", all(tint_is(r, pink, 1) for r in rim))
+    tip = lua.globals().GameTooltip
+    lines = list(tip.lines.values())
+    check("[stock hover] the tooltip shows: neutral words, the name first, then what a click and a drag do",
+          tip.shown and tip.text == "Forever STUwave" and lines == ["Click to open the settings.", "Drag to move this button."]
+          and lua.globals().__same(tip.owner, button) and tip.anchor == "ANCHOR_NONE" and tip.point is not None)
+    check("[stock hover] the tooltip carries no word of automation, bots or tooling",
+          not re.search(r"bot|auto|macro|script|addon|tool", " ".join([tip.text] + lines), re.IGNORECASE))
+    button.scripts.OnMouseDown(button)
+    check("[stock press] a press darkens the face and keeps the pink rim",
+          all(tint_is(r, dark, 1) for r in face) and all(tint_is(r, pink, 1) for r in rim))
+    button.scripts.OnMouseUp(button)
+    check("[stock press] a release brings the face back", all(tint_is(r, ink_face, 1) for r in face))
+    button.scripts.OnLeave(button)
+    check("[stock hover] leaving turns the rim cyan at rest and hides the tooltip",
+          all(tint_is(r, cyan, 0.75) for r in rim) and not tip.shown)
+    button.scripts.OnEnter(button)
+    button.scripts.OnMouseDown(button)
+    button.scripts.OnLeave(button)
+    check("[stock press] leaving with the button held down puts the face back (no stuck press)",
+          all(tint_is(r, ink_face, 1) for r in face))
+    button.scripts.OnEnter(button)
+    button.scripts.OnHide(button)
+    check("[stock hover] hiding the button with the mouse on it clears the hover and the tooltip",
+          all(tint_is(r, cyan, 0.75) for r in rim) and not tip.shown)
+
+    # the tooltip opens on the side of the screen the button is not on
+    lua = stock_world(extra="UIParent.w, UIParent.h = 2560, 1440")
+    button = lua.globals()[STOCK_NAME]
+    for label, centre, want in (("top right", (2300, 1300), ("TOPRIGHT", "BOTTOMRIGHT")),
+                                ("top left", (200, 1300), ("TOPLEFT", "BOTTOMLEFT")),
+                                ("bottom middle", (1280, 100), ("BOTTOM", "TOP"))):
+        lua.execute(f"button = {STOCK_NAME}; button.GetCenter = function() return {centre[0]}, {centre[1]} end")
+        button.scripts.OnEnter(button)
+        point = list(lua.globals().GameTooltip.point.values())
+        check(f"[stock hover] a button in the {label} gets its tooltip at {want[0]} over {want[1]}",
+              point[0] == want[0] and lua.globals().__same(point[1], button) and point[2] == want[1])
+        button.scripts.OnLeave(button)
+
+    # --- the click: the same action as the STU key
+    lua = stock_world()
+    button = lua.globals()[STOCK_NAME]
+    button.scripts.OnClick(button, "LeftButton")
+    check("[stock click] a left click toggles the config window, once", lua.eval("__toggles") == 1)
+    lua.execute("FS.ConfigWindow = nil")
+    button.scripts.OnClick(button, "LeftButton")
+    check("[stock click] with no config window the click does nothing and does not throw", lua.eval("__toggles") == 1)
+    lua.execute("FS.ConfigWindow = {}")
+    button.scripts.OnClick(button, "LeftButton")
+    check("[stock click] a config window with no Toggle is left alone", lua.eval("__toggles") == 1)
+
+    # --- the drag: follows the cursor round the rim, saves the angle on release
+    lua = stock_world()
+    button = lua.globals()[STOCK_NAME]
+    sets0 = lua.eval("__sets")
+    lua.execute("GameTooltip.shown = true")
+    button.scripts.OnDragStart(button)
+    check("[stock drag] a drag start hides the tooltip, runs an update script and lights the rim",
+          not lua.globals().GameTooltip.shown and button.scripts.OnUpdate is not None
+          and all(tint_is(r, pink, 1) for r in stock_rows(button, 1)))
+    lua.execute("__cursor = { 1000, 900 }")   # straight above the map's centre (1000, 700): 90 degrees
+    button.scripts.OnUpdate(button, 0.016)
+    pt = button.points.CENTER
+    ex, ey = stock_offset(90, 125, 125)
+    check(f"[stock drag] the button follows the cursor round the rim: straight above is at ({pt.x:.2f}, {pt.y:.2f})",
+          near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6))
+    lua.execute("__cursor = { 1300, 700 }")   # to the right: 0 degrees
+    button.scripts.OnUpdate(button, 0.016)
+    pt = button.points.CENTER
+    check("[stock drag] the angle follows however far the cursor is from the rim", near(pt.x, 130) and abs(pt.y) < 1e-9)
+    lua.execute("__cursor = { 700, 400 }")   # lower left, 45 degrees past 180
+    button.scripts.OnUpdate(button, 0.016)
+    check("[stock drag] nothing is saved while the button is still held", lua.eval("__sets") == sets0)
+    button.scripts.OnDragStop(button)
+    saved = lua.eval(f"__cfg['{STOCK_KEY}']")
+    check(f"[stock drag] the release saves the angle once, to a tenth of a degree ({saved})",
+          lua.eval("__sets") == sets0 + 1 and near(saved, 225) and button.scripts.OnUpdate is None)
+    pt = button.points.CENTER
+    ex, ey = stock_offset(225, 125, 125)
+    check("[stock drag] and the button rests there with the rim back to cyan",
+          near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6) and all(tint_is(r, cyan, 0.75) for r in stock_rows(button, 1)))
+    lua.execute("__cursor = { 1000, 900 }")
+    button.scripts.OnDragStop(button)
+    check("[stock drag] a stray second release saves nothing more", lua.eval("__sets") == sets0 + 1)
+    # a map not at scale 1: the cursor is in screen pixels, the centre in the map's own units
+    lua = stock_world(extra="__mapScale = 2")
+    button = lua.globals()[STOCK_NAME]
+    button.scripts.OnDragStart(button)
+    lua.execute("__cursor = { 2000, 1700 }")   # (1000, 850) in map units: 150 above the centre (1000, 700): 90 degrees
+    button.scripts.OnUpdate(button, 0.016)
+    pt = button.points.CENTER
+    check("[stock drag] the cursor is divided by the map's effective scale", abs(pt.x) < 1e-6 and near(pt.y, 130))
+    # an unreadable cursor leaves the button where it was
+    lua.execute("GetCursorPosition = function() end")
+    button.scripts.OnUpdate(button, 0.016)
+    check("[stock drag] a cursor that cannot be read moves nothing and does not throw", near(button.points.CENTER.y, 130))
+    lua.execute("__secret = 5; GetCursorPosition = function() return 5, 5 end")
+    button.scripts.OnUpdate(button, 0.016)
+    check("[stock drag] a secret cursor is never used", near(button.points.CENTER.y, 130))
+    # the release the client never reported
+    lua = stock_world()
+    button = lua.globals()[STOCK_NAME]
+    button.scripts.OnDragStart(button)
+    lua.execute("__cursor = { 700, 700 }")   # 180 degrees
+    button.scripts.OnUpdate(button, 0.016)
+    lua.execute("__mouseDown = false")
+    button.scripts.OnUpdate(button, 0.016)
+    check("[stock drag] a drag whose release was never reported ends on the next update and saves where it was",
+          button.scripts.OnUpdate is None and near(lua.eval(f"__cfg['{STOCK_KEY}']"), 180) and lua.eval("__sets") == 1)
+    # hiding the button mid drag ends the drag
+    lua = stock_world()
+    button = lua.globals()[STOCK_NAME]
+    button.scripts.OnDragStart(button)
+    lua.execute("__cursor = { 1000, 900 }")
+    button.scripts.OnUpdate(button, 0.016)
+    button.scripts.OnHide(button)
+    check("[stock drag] hiding the button mid drag ends it and keeps the angle",
+          button.scripts.OnUpdate is None and near(lua.eval(f"__cfg['{STOCK_KEY}']"), 90))
+    # a drag that never moved saves nothing
+    lua = stock_world()
+    button = lua.globals()[STOCK_NAME]
+    button.scripts.OnDragStart(button)
+    button.scripts.OnDragStop(button)
+    check("[stock drag] a drag with no cursor update saves nothing", lua.eval("__sets") == 0)
+    # settings that cannot be written (read only): the button stays where it was dropped for the session
+    lua = stock_world(extra="__readOnly = true")
+    button = lua.globals()[STOCK_NAME]
+    button.scripts.OnDragStart(button)
+    lua.execute("__cursor = { 1000, 900 }")
+    button.scripts.OnUpdate(button, 0.016)
+    button.scripts.OnDragStop(button)
+    pt = button.points.CENTER
+    check("[stock drag] with read only settings the dropped angle is held for the session, not snapped back",
+          lua.eval("__sets") == 0 and abs(pt.x) < 1e-6 and near(pt.y, 130))
+    lua.execute("FireEvent('UI_SCALE_CHANGED')")
+    check("[stock drag] and a later re-seat keeps it", near(button.points.CENTER.y, 130))
+    lua.execute(f"__profile('{STOCK_KEY}', 0)")
+    check("[stock drag] a profile change takes the new profile's angle over the held one",
+          near(button.points.CENTER.x, 130) and abs(button.points.CENTER.y) < 1e-9)
+
+    # --- a profile switch, import or reset moves the button
+    lua = stock_world()
+    button = lua.globals()[STOCK_NAME]
+    lua.execute(f"__profile('{STOCK_KEY}', 270)")
+    ex, ey = stock_offset(270, 125, 125)
+    check("[stock profile] another profile's angle moves the button at once",
+          near(button.points.CENTER.x, ex, 1e-6) and near(button.points.CENTER.y, ey, 1e-6))
+
+    # --- a new UI scale lays the rows again on the new pixel
+    lua = stock_world(1.0)
+    button = lua.globals()[STOCK_NAME]
+    before = len(row_pixels(stock_rows(button, 1), 1.0))
+    lua.execute("PixelUtil = { GetPixelToUIUnitFactor = function() return 0.5 end }; FireEvent('UI_SCALE_CHANGED')")
+    px = 0.5
+    d = stock_diameter(px)
+    got = row_pixels(stock_rows(button, 1), px)
+    check(f"[stock rescale] a new UI scale lays the disc again on the new pixel ({before} then {len(got)} pixels, {d} wide)",
+          got == disc_pixels(d, d / 2) and near(button.w, d * px, 1e-9))
+    lua.execute("PixelUtil = { GetPixelToUIUnitFactor = function() return 1.0 end }; FireEvent('DISPLAY_SIZE_CHANGED')")
+    got = row_pixels(stock_rows(button, 1), 1.0)
+    check("[stock rescale] and back: the extra rows of the bigger disc are hidden, the small disc is exact",
+          got == disc_pixels(28, 14) and all(not r.shown for r in stock_rows(button, 1)[28:]))
+    n_timers = lua.eval("#__timers")
+    lua.execute("RunTimers()")
+    check(f"[stock rescale] each scale event also seats once more a frame later ({n_timers} timers) without error",
+          n_timers >= 1 and lua.eval("#__log") == 0)
+    lua.execute("Minimap.w, Minimap.h = 300, 300; FireEvent('EDIT_MODE_LAYOUTS_UPDATED')")
+    ex, ey = stock_offset(STOCK_DEFAULT, 150, 150)
+    check("[stock rescale] a new map size moves the button to the new rim",
+          near(button.points.CENTER.x, ex, 1e-6) and near(button.points.CENTER.y, ey, 1e-6))
+    lua.execute("button = " + STOCK_NAME + "; button.scripts.OnShow(button)")
+    check("[stock rescale] showing the button again seats it without rebuilding its rows",
+          lua.eval(f"__count('{STOCK_NAME}')") == 1)
+    # Blizzard frames are only read: the stock map and the cluster gain no script, no hook, no child and no point
+    lua = stock_world()
+    check("[stock] the stock map is left alone: no script and no hook of ours on it",
+          not list(lua.globals().Minimap.scripts.keys()) and lua.globals().Minimap.hooks is None)
+    check("[stock] and the cluster too", not list(lua.globals().MinimapCluster.scripts.keys()))
+    check("[stock] the only child the button adds to the stock map is itself",
+          [c.name for c in lua.globals().Minimap.children.values()] == [STOCK_NAME])
+
+
 def main() -> int:
     body_checks()
     spacing_checks()
@@ -2159,6 +2643,7 @@ def main() -> int:
     review_checks()
     mutation_gap_checks()
     seat_log_checks()
+    stock_button_checks()
     print("failures:", failures)
     return failures
 

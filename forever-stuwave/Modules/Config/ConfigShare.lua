@@ -2,7 +2,9 @@
 -- The // SHARE section of the Profiles page (Export this profile, Import a profile) and the two dialogs behind it. Export
 -- shows the active profile as one string, selected, for Ctrl+C. Import takes a pasted string, shows what is inside (or one
 -- pink reason), and adds it as a new profile under a name that is checked; it never overwrites and never switches. The string
--- format, the validation and the encoding are Core/ProfileCodec.lua; the profile itself is made by Config.ImportProfile.
+-- format, the validation and the encoding are Core/ProfileCodec.lua; the profile itself is made by Config.ImportProfile. The
+-- module switches a string carries go into the new profile only when the dialog's box is ticked (a profile made without them
+-- starts with every module on); they apply when the profile is switched to, like any profile change.
 --
 -- CW.Share: OpenExport, OpenImport, Close, Inspect(text), SuggestName(name), Apply(text, name, withModules); Share.ui holds
 -- the dialog's frames for the harness (tools/profilecodec-harness.py).
@@ -125,15 +127,14 @@ local function ModuleSwitch()
     if type(switch) == "table" and type(switch.Set) == "function" and type(switch.Snapshot) == "function" then return switch end
 end
 
--- The module switches the string would change here: { { key, label, on } ... } sorted by label.
+-- The module switches the string would turn off in the new profile (a new profile starts with every module on, so a switch
+-- the string holds as on changes nothing): { { key, label, on = false, live } ... } sorted by label.
 local function ModuleChanges(modules)
     local switch = ModuleSwitch()
     local list = {}
     if not (switch and modules) then return list end
-    local ok, now = pcall(switch.Snapshot)
-    if not (ok and type(now) == "table") then return list end
     for key, on in pairs(modules) do
-        if now[key] ~= on then
+        if on == false then
             local labelOk, label = true, nil
             if type(switch.Label) == "function" then labelOk, label = pcall(switch.Label, key) end
             local live = false
@@ -141,7 +142,7 @@ local function ModuleChanges(modules)
                 local liveOk, answer = pcall(switch.IsLive, key)
                 live = liveOk and answer == true
             end
-            list[#list + 1] = { key = key, label = (labelOk and label) or key, on = on, live = live }
+            list[#list + 1] = { key = key, label = (labelOk and label) or key, on = false, live = live }
         end
     end
     table.sort(list, function(a, b) return a.label < b.label end)
@@ -149,16 +150,14 @@ local function ModuleChanges(modules)
 end
 
 local function ModuleTip(list)
-    local on, off, waits = {}, {}, false
+    if #list == 0 then return "Every module in this string is on, the same as a new profile starts." end
+    local off, waits = {}, false
     for _, item in ipairs(list) do
-        table.insert(item.on and on or off, item.label)
+        off[#off + 1] = item.label
         if not item.live then waits = true end
     end
-    local lines = {}
-    if #off > 0 then lines[#lines + 1] = "Turns off: " .. table.concat(off, ", ") .. "." end
-    if #on > 0 then lines[#lines + 1] = "Turns on: " .. table.concat(on, ", ") .. "." end
-    if #lines == 0 then return "The modules in this string are already set the same here." end
-    if waits then lines[#lines + 1] = "Takes a Reload UI." end
+    local lines = { "The new profile starts with these off: " .. table.concat(off, ", ") .. "." }
+    if waits then lines[#lines + 1] = "Switching to it takes a Reload UI." end
     return table.concat(lines, "\n")
 end
 
@@ -175,23 +174,24 @@ function Share.Inspect(text)
     }
 end
 
--- Adds the profile `name` from the string `text`; with `withModules` it also sets the module switches the string carries.
--- Returns true and the name made, or false and a reason. Nothing is switched to, and nothing is overwritten.
+-- Adds the profile `name` from the string `text`; with `withModules` the new profile also gets the module switches the string
+-- carries (without it every module starts on). Returns true and the name made, or false and a reason. Nothing is switched to,
+-- and nothing is overwritten.
 function Share.Apply(text, name, withModules)
     local result = Share.Inspect(text)
     if not result.ok then return false, result.reason end
     if Config.IsReadOnly() then return false, "Settings are read-only this session" end
     local problem = NameProblem(name)
     if problem then return false, problem end
-    local ok, made = Config.ImportProfile(name, result.payload)
-    if not ok then return false, made end
-    local switch = ModuleSwitch()
-    if withModules and switch and result.payload.modules then
-        for _, item in ipairs(result.moduleChanges) do
-            local setOk, err = pcall(switch.Set, item.key, item.on)
-            if not setOk then I.Forward(err) end
+    local data = result.payload
+    if not withModules and data.modules ~= nil then
+        data = {}
+        for key, value in pairs(result.payload) do
+            if key ~= "modules" then data[key] = value end
         end
     end
+    local ok, made = Config.ImportProfile(name, data)
+    if not ok then return false, made end
     return true, made
 end
 

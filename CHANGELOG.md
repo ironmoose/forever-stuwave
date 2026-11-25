@@ -14,8 +14,9 @@ A rebuilt /fsconfig with search, tabs and a power button for every module, a pag
   - A setting that needs another one is dimmed, and its ? says which to turn on.
   - Footer: Reload UI (with a count of what is waiting for it), Reset page (asks first, only touches the page you are on) and Close.
   - Point at a setting and the frame it changes is outlined on screen. Profiles, Window has a switch to turn that off.
-  - A power button on every module's row on the left, and a Modules page that lists them all. Off, the game's own frame or window takes over after a Reload UI; Nameplates turns off at once. Profiles has an ALL ON button.
-  - Profiles: Export this profile makes a string you can copy, and Import a profile reads one into a new profile. It never writes over a profile you have. An export can hold your settings, your frame positions or both, and it carries which modules are on.
+  - A power button on every module's row on the left, and a Modules page that lists them all. Off, the game's own frame or window takes over after a Reload UI; Nameplates turns off at once. Profiles has an ALL ON button for the profile you are in.
+  - Which modules are on belongs to the profile. A new profile starts with every module on, Copy from brings the other profile's switches along, and Reset turns every module on. Switching, copying or resetting a profile that turns a module on or off prints one line in chat saying how many modules wait for a reload; the Reload UI button in /fsconfig counts them and lights up. A profile that had "STUwave nameplates" turned off keeps it off.
+  - Profiles: Export this profile makes a string you can copy, and Import a profile reads one into a new profile. It never writes over a profile you have. An export can hold your settings, your frame positions or both, and it carries which modules are on; Import can give the new profile those module switches (a box in the dialog, off unless you tick it).
 - Pages and tabs for what had no settings before:
   - Unit Frames: show or hide the focus and boss frames, and a Style tab for player, target, focus and boss: bar looks (cut, laser, flat, LED, slant, chevron or the game's own), bar heights, text formats, elite and rare mark, target of target, combat icon, portrait, a cast bar on the frame, PvP flag, leader crown and an aggro ring.
   - Party frames and Raid frames: a Style tab each, with a preview. Width, bar heights and looks, text formats, background opacity, markers for your heals over time and for debuffs you can remove, an aggro ring with the share of threat (off until you turn it on), and (party) a tray of cleansable debuffs and missing buffs. Raid frames also get Scale, Group columns or Grid, Frames per row and Sort by.
@@ -56,6 +57,7 @@ A rebuilt /fsconfig with search, tabs and a power button for every module, a pag
 ### Fixes
 - Druid: with the shapeshift tab on, the stance bar no longer draws the same forms a second time.
 - The quest timer drawer under the minimap follows the minimap's scale, and sits under the game's own map when ours is off.
+- With the Minimap module off, the STU key is not lost: a small round STUwave button sits on the rim of the game's own minimap like any addon's button. Click it to open the settings, drag it round the rim to move it (the place is saved in the profile). Other addons' minimap buttons stay where they were.
 
 ## 1.0.0-beta.5.2 (2026-11-24)
 

@@ -146,15 +146,15 @@ local ALPHA_NONTARGET_DIM = 0.75
 
 local FONT_FLAGS = "OUTLINE"
 
--- STUwave nameplates switch: the Nameplates module switch of Core/ModuleSwitch.lua ("m.np", account wide, the one live module).
+-- STUwave nameplates switch: the Nameplates module switch of Core/ModuleSwitch.lua ("m.np", kept per profile, the one live module).
 -- Off, this file registers no event, builds nothing on a plate, hides the roots it had built and leaves Blizzard's own
 -- UnitFrame on every plate as the game draws it, so the stock plates (and what other addons add to them) show instead. Live,
 -- no reload: see ApplyPlatesSetting. Blizzard keeps a plate's UnitFrame shown exactly while its unit exists
 -- (CompactUnitFrame_UpdateVisible), so giving it back is a plain Show.
--- Config key `nameplates.enabled` (the Config window row reads FS.Nameplates.SETTING) is the switch's older home: it is
--- read once into the module switch (Plates.MigrateSwitch) and then follows it both ways (Plates.MirrorSwitch), so the row
--- still turns the plates off and on, and the saved value stays right for one release in case the addon is rolled back. Without
--- Core/ModuleSwitch.lua (a test world) the key is the whole switch, as it was.
+-- Config key `nameplates.enabled` (the Config window row reads FS.Nameplates.SETTING) is the switch's older home: Config.lua
+-- carried a profile's saved off into that profile's module switches once (Core/Config.lua MigrateModules), and the key now
+-- follows the switch of the profile in use both ways (Plates.MirrorSwitch), so the row still turns the plates off and on.
+-- Without Core/ModuleSwitch.lua (a test world) the key is the whole switch, as it was.
 --
 -- This file sits at the parse gate's limit of file-scope locals (tools/parse-gate.py), so the switch, its cache and the
 -- Questie and build helpers below live in this one table (exported as FS.Nameplates): `on` is the cached switch (the Show
@@ -3041,10 +3041,10 @@ do
     end
     Plates.ApplySwitch = ApplyPlatesSetting
 
-    -- The older per profile key changed (the Nameplates page row, a profile switch): it is now a view of the module
-    -- switch, so it writes that and the module switch's own change callback applies it.
-    -- A profile switch is not a choice: the module switch is account wide, so another profile's saved copy of the older
-    -- key must not turn the plates off or on for every character. The key is put back to the switch instead.
+    -- The older per profile key changed (the Nameplates page row, a profile switch): it is a view of the module switch, so
+    -- it writes that and the module switch's own change callback applies it.
+    -- A profile switch is not a choice: the module switch of the profile now in use decides, so that profile's saved copy
+    -- of the older key must not turn the plates off or on against it. The key is put back to the switch instead.
     function Plates.OnKeyChange(new)
         local MS, config = FS.ModuleSwitch, FS.Config
         if MS and config and type(config.Reapplying) == "function" and config.Reapplying() then
@@ -3058,24 +3058,13 @@ do
         end
     end
 
-    -- The module switch changed: the older key follows, so the page row shows what the plates do and a rolled back addon
-    -- finds the same answer.
+    -- The module switch changed (a power button, a profile switch): the older key follows, so the page row shows what the
+    -- plates do.
     function Plates.MirrorSwitch(on)
         local config = FS.Config
         if config and type(config.Get) == "function" and type(config.Set) == "function" and config.Get(Plates.KEY) ~= on then
             config.Set(Plates.KEY, on)
         end
-    end
-
-    -- Once, at the first login after the module switch exists: a saved "off" of the older key (the active profile's) turns
-    -- the module switch off. The saved value is read when the config has resolved the character's profile, so this runs
-    -- from PLAYER_ENTERING_WORLD; the mark is account wide.
-    function Plates.MigrateSwitch()
-        local MS, config, db = FS.ModuleSwitch, FS.Config, _G.ForeverSTUwaveDB
-        if not (MS and config and type(config.Get) == "function" and type(db) == "table") then return end
-        if db.nameplatesSwitchMigrated or not MS.IsWritable() then return end
-        db.nameplatesSwitchMigrated = true
-        if config.Get(Plates.KEY) == false and MS.Wanted(Plates.MODULE) then MS.Set(Plates.MODULE, false) end
     end
 
     -- Defaults and change hooks of every key this module owns. FS.Config is not there when this file loads (.toc) and a
@@ -3321,7 +3310,6 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     -- the aura container pool (a no-op without the template, or in combat) and, once,
     -- registers the fallback row's readable callback (Theme.lua is loaded by now).
     if event == "PLAYER_ENTERING_WORLD" then
-        Plates.MigrateSwitch()
         Plates.EnterWorld()
         return
     end
