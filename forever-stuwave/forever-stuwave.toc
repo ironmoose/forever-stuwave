@@ -175,4 +175,5 @@ Modules/Diagnostics/CharacterExport.lua
 Modules/Config/HelpModules.lua
 Modules/Config/HelpPicturesArt.lua
 Modules/Config/ConfigWindow.lua
+Modules/Config/MenuButton.lua
 Core/LayoutEdit.lua
