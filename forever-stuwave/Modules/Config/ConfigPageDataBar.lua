@@ -303,7 +303,6 @@ local function Dress(row, rec, key)
     end)
     edit:HookScript("OnHide", function(self) self:ClearFocus() end)
     edit:SetScript("OnTabPressed", function(self) self:ClearFocus() end)
-    row.fsReleaseFocus = function() edit:ClearFocus() end
 
     Hint(up, "Move left")
     Hint(down, "Move right")
