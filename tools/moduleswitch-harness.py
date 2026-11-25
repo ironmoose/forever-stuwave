@@ -20,7 +20,7 @@ tree of tools/configwindow-harness.py (not the client). The checks pin:
   * turning off a module another module requires asks once, naming it, and a ? on the power button names the dependents
   * the Profiles Modules section's ALL ON button, read-only settings, the changed dot and reset of a list row
 
-The glyph art and the card are pending Parker's review; this proves behaviour, not looks.
+The glyph art and the card are pending the owner's review; this proves behaviour, not looks.
 
     python3 tools/moduleswitch-harness.py
 
