@@ -1768,7 +1768,6 @@ local function Apply()
     ApplyCombinedBags()
     ApplyBank()
     SyncGamepadBagBar()
-    WatchGamepad()
 end
 
 -- Verifies every numbered container, the combined-bag frame, and the bank
@@ -1788,6 +1787,7 @@ FS.PanelSkins.RegisterInspect("Bags", inspectEntries)
 local MS = FS.ModuleSwitch
 local function Start()
     if MS then MS.MarkBuilt("m.bags") end
+    WatchGamepad()
     FS.PanelSkins.DeferCombat(Apply, "m.bags")
 end
 if MS then MS.WhenOn("m.bags", Start) else Start() end
