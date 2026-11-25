@@ -724,6 +724,358 @@ def run_lua_checks() -> int:
     return failed
 
 
+# ---- the module gates (B5a): the real .toc in a tolerant mock client -------------------------------------------------------
+#
+# The checks above run Core/ModuleSwitch.lua inside the config window harness. These run EVERY file of the real .toc, in
+# order, in a mock client whose frames accept any call, then fire ADDON_LOADED, PLAYER_LOGIN and PLAYER_ENTERING_WORLD.
+# Each Blizzard frame a module may dim, hook or reparent is a stub that records every call that is not a read. A module
+# that is off must build nothing of its own, leave every one of those stubs untouched and keep its API tables defined; the
+# same module on must build and take over as before. One row per gated module.
+
+GATE_WORLD = r"""
+-- Gate world: a tolerant mock client for loading real module files and watching Blizzard frames.
+__touched, __made, __errors, __printed, __evFrames, __timers = {}, {}, {}, {}, {}, {}
+__phase, __loadFailed = "load", {}
+local watched = {}                 -- stub -> label
+local ownMT = {}
+
+local NUMBERS = {
+    GetWidth = 250, GetHeight = 252, GetScale = 1, GetEffectiveScale = 1, GetLeft = 100, GetRight = 350,
+    GetTop = 700, GetBottom = 450, GetAlpha = 1, GetFrameLevel = 1, GetNumPoints = 0, GetNumChildren = 0,
+    GetNumRegions = 0, GetStringWidth = 40, GetStringHeight = 10, GetValue = 0, GetID = 0, GetDrawLayer = nil,
+}
+local STRINGS = { GetFrameStrata = "MEDIUM", GetObjectType = "Frame", GetText = "", GetTexture = "", GetFont = "x" }
+
+local function isRead(name)
+    return name:find("^Get") or name:find("^Is") or name:find("^Has") or name:find("^Can") or name == "Hide" and false
+end
+
+local function Sponge(label, isWatched)
+    local self = { _label = label, _scripts = {}, _events = {}, _hooks = {}, _regions = {} }
+    if isWatched then watched[self] = label end
+    return setmetatable(self, ownMT)
+end
+
+ownMT.__index = function(t, k)
+    if type(k) ~= "string" or not k:find("^%u") then return nil end
+    if k == "SetScript" then
+        return function(self, name, fn)
+            if watched[self] then __touched[#__touched + 1] = self._label .. ":SetScript" end
+            self._scripts[name] = fn
+        end
+    elseif k == "HookScript" then
+        return function(self, name, fn)
+            if watched[self] then __touched[#__touched + 1] = self._label .. ":HookScript" end
+            self._hooks[name] = self._hooks[name] or {}
+            table.insert(self._hooks[name], fn)
+        end
+    elseif k == "GetScript" then
+        return function(self, name) return self._scripts[name] end
+    elseif k == "RegisterEvent" or k == "RegisterUnitEvent" then
+        return function(self, event)
+            if watched[self] then __touched[#__touched + 1] = self._label .. ":" .. k end
+            self._events[event] = true
+            if not self._listed then self._listed = true; __evFrames[#__evFrames + 1] = self end
+        end
+    elseif k == "UnregisterEvent" then
+        return function(self, event)
+            if watched[self] then __touched[#__touched + 1] = self._label .. ":UnregisterEvent" end
+            self._events[event] = nil
+        end
+    elseif k == "UnregisterAllEvents" then
+        return function(self)
+            if watched[self] then __touched[#__touched + 1] = self._label .. ":UnregisterAllEvents" end
+            self._events = {}
+        end
+    elseif k == "GetName" then
+        return function(self) return self._name end
+    elseif k == "GetParent" then
+        return function(self) return self._parent end
+    elseif k == "GetChildren" or k == "GetRegions" or k == "GetPoint" then
+        return function() end
+    elseif k == "SetParent" then
+        return function(self, p)
+            if watched[self] then __touched[#__touched + 1] = self._label .. ":SetParent" end
+            self._parent = p
+        end
+    elseif k == "Show" or k == "Hide" or k == "SetShown" then
+        return function(self, v)
+            if watched[self] then __touched[#__touched + 1] = self._label .. ":" .. k end
+            if k == "Show" then self._shown = true elseif k == "Hide" then self._shown = false else self._shown = v and true or false end
+        end
+    elseif k == "IsShown" or k == "IsVisible" then
+        return function(self) return self._shown ~= false end
+    elseif k:find("^Create") then
+        return function(self, ...)
+            local child = Sponge((self._label or "?") .. "." .. k)
+            child._parent = self
+            return child
+        end
+    elseif NUMBERS[k] ~= nil then
+        return function() return NUMBERS[k] end
+    elseif STRINGS[k] ~= nil then
+        return function() return STRINGS[k] end
+    elseif k:find("^Is") or k:find("^Has") or k:find("^Can") then
+        return function() return false end
+    elseif k:find("^Get") then
+        return function() end
+    end
+    return function(self, ...)
+        if watched[self] then __touched[#__touched + 1] = self._label .. ":" .. k end
+    end
+end
+ownMT.__newindex = function(t, k, v)
+    -- a script field or method written on a watched Blizzard stub counts as a touch
+    if watched[t] and type(k) == "string" and k:sub(1, 1) ~= "_" then
+        __touched[#__touched + 1] = t._label .. ":write:" .. k
+    end
+    rawset(t, k, v)
+end
+
+-- A Blizzard frame the module under test may only read: every non-read call on it is recorded.
+function Watch(name, fields)
+    local f = Sponge(name, true)
+    f._name = name
+    if fields then for k, v in pairs(fields) do rawset(f, k, v) end end
+    _G[name] = f
+    return f
+end
+
+local function stackFiles()
+    local set, level = {}, 3
+    while true do
+        local info = debug.getinfo(level, "S")
+        if not info then break end
+        set[(info.source:gsub("^@", ""))] = true
+        level = level + 1
+    end
+    return set
+end
+
+function CreateFrame(kind, name, parent, template)
+    local f = Sponge(name or ("(" .. tostring(kind) .. ")"))
+    f._name, f._kind, f._parent = name, kind, parent
+    __made[#__made + 1] = { name = name, phase = __phase, files = stackFiles() }
+    if name then _G[name] = f end
+    return f
+end
+
+function hooksecurefunc(a, b, c)
+    if type(a) == "string" then
+        __touched[#__touched + 1] = "hooksecurefunc:" .. a
+    elseif type(a) == "table" and watched[a] then
+        __touched[#__touched + 1] = watched[a] .. ":hooksecurefunc:" .. tostring(b)
+    end
+end
+
+UIParent = Sponge("UIParent")
+UIParent._name = "UIParent"
+Minimap = nil
+function InCombatLockdown() return false end
+function GetTime() return 100 end
+function geterrorhandler() return function(e) __errors[#__errors + 1] = tostring(e) end end
+function print(...) local t = {} for i = 1, select("#", ...) do t[#t + 1] = tostring((select(i, ...))) end __printed[#__printed + 1] = table.concat(t, " ") end
+C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end, NewTicker = function(_, fn) return { Cancel = function() end } end }
+function wipe(t) for k in pairs(t) do t[k] = nil end return t end
+function tinsert(t, v) table.insert(t, v) end
+function strtrim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+function GetPhysicalScreenSize() return 2560, 1440 end
+function GetScreenWidth() return 2560 end
+function GetScreenHeight() return 1440 end
+PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1440 end }
+function issecretvalue() return false end
+function CopyTable(t) local c = {} for k, v in pairs(t) do c[k] = type(v) == "table" and CopyTable(v) or v end return c end
+SlashCmdList = {}
+Enum = {}
+function InterfaceOptions_AddCategory() end
+function GetCVar() return nil end
+function IsLoggedIn() return false end
+function UnitClass() return "Shaman", "SHAMAN", 7 end
+function UnitName() return "Stu" end
+function UnitExists() return false end
+function RegisterUnitWatch() end
+function UnitGUID() return "Player-1" end
+time = os.time
+function GetLocale() return "enUS" end
+function GetAddOnMetadata() return "1.0.0" end
+C_AddOns = { GetAddOnMetadata = function() return "1.0.0" end, IsAddOnLoaded = function() return false end }
+
+function Fire(event, ...)
+    local list = {}
+    for i, f in ipairs(__evFrames) do list[i] = f end
+    for _, f in ipairs(list) do
+        if f._events[event] and f._scripts.OnEvent then
+            local ok, err = pcall(f._scripts.OnEvent, f, event, ...)
+            if not ok then __errors[#__errors + 1] = tostring(err) end
+        end
+    end
+end
+
+FS = {}
+function __load(path, src)
+    local fn, err = loadstring(src, "@" .. path)
+    if not fn then error(err, 0) end
+    return fn("forever-stuwave", FS)
+end
+
+-- assertions
+function yes(v, msg) if not v then error(msg or "expected true", 2) end end
+function no(v, msg) if v then error(msg or "expected false", 2) end end
+function eq(a, b, msg) if a ~= b then error((msg or "") .. " expected " .. tostring(b) .. " got " .. tostring(a), 2) end end
+
+-- The real .toc, in order, the way the client runs it: files, then the saved variables, then ADDON_LOADED and login.
+-- opts.off = module keys the saved store holds as false; opts.watch = Blizzard frames to record every non-read call on.
+function Boot(opts)
+    opts = opts or {}
+    for _, name in ipairs(opts.watch or {}) do Watch(name) end
+    if opts.pre then opts.pre() end
+    __phase = "load"
+    for _, rel in ipairs(__toc) do
+        local ok, err = pcall(__load, rel, __read(rel))
+        if not ok then __loadFailed[rel] = tostring(err) end
+    end
+    local modules = {}
+    for _, key in ipairs(opts.off or {}) do modules[key] = false end
+    ForeverSTUwaveDB = { modules = modules }
+    __phase = "run"
+    Fire("ADDON_LOADED", "forever-stuwave")
+    IsLoggedIn = function() return true end
+    Fire("PLAYER_LOGIN")
+    Fire("PLAYER_ENTERING_WORLD", true, false)
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+    Fire("PLAYER_REGEN_ENABLED")
+end
+
+-- every touch recorded on a watched Blizzard frame, as one string ("" when it was left alone)
+function TouchesOn(label)
+    local list = {}
+    for _, t in ipairs(__touched) do
+        if t == label or t:find("^" .. label .. ":") or t:find(label .. ":hooksecurefunc", 1, true) then list[#list + 1] = t end
+    end
+    return table.concat(list, ", ")
+end
+
+-- frames this file's code created after the files finished loading (at ADDON_LOADED, login or later); `except` names a
+-- file whose calls into this one do not count (another module using this module's API)
+function BuiltBy(file, except)
+    local n = 0
+    for _, m in ipairs(__made) do
+        if m.phase == "run" and m.files[file] and not (except and m.files[except]) then n = n + 1 end
+    end
+    return n
+end
+
+function MadeNamed(name)
+    for _, m in ipairs(__made) do if m.name == name then return true end end
+    return false
+end
+
+-- errors the client's handler heard from this file (its chunk name is the .toc path)
+function ErrorsFrom(file)
+    local list = {}
+    for _, e in ipairs(__errors) do
+        if e:find(file, 1, true) then list[#list + 1] = e end
+    end
+    return table.concat(list, " | ")
+end
+
+"""
+
+GATE_CHECKS = r"""
+local T = {}
+local TOCPATH = "forever-stuwave"
+
+-- the whole load must not have thrown inside the files this lane gates
+local function loaded(file)
+    eq(__loadFailed[file], nil, file .. " loads")
+    eq(ErrorsFrom(file), "", file .. " raised no error")
+end
+
+local CAST_FILE = "Modules/CastBars/CastBars.lua"
+local CAST_BLIZZARD = { "PlayerCastingBarFrame", "TargetFrameSpellBar" }
+
+function T.cast_bars_off_builds_none_of_its_frames_and_leaves_the_stock_bars_alone()
+    Boot({ off = { "m.cast" }, watch = CAST_BLIZZARD })
+    loaded(CAST_FILE)
+    eq(FS.ModuleSwitch.On("m.cast"), false)
+    eq(FS.ModuleSwitch.Built("m.cast"), false, "nothing was built")
+    eq(BuiltBy(CAST_FILE, "Modules/CombatHud/GunsightTape.lua"), 0, "no frame made after the files loaded")
+    no(MadeNamed("ForeverSTUwavePlayerCastBar"), "no player bar")
+    no(MadeNamed("ForeverSTUwaveTargetCastBar"), "no target bar")
+    eq(FS.playerCastBar, nil)
+    eq(FS.targetCastBar, nil)
+    for _, name in ipairs(CAST_BLIZZARD) do eq(TouchesOn(name), "", name .. " untouched") end
+end
+
+function T.cast_bars_off_keeps_the_api_so_a_reader_can_still_call_it()
+    Boot({ off = { "m.cast" }, watch = CAST_BLIZZARD })
+    local C = FS.CastBars
+    eq(type(C), "table", "FS.CastBars stays defined")
+    eq(C.SetIdleHint("player", "x"), false, "no bar to hint")
+    eq(C.SetRestAlpha(0.5), true)
+    C.SetIdleVisible(true)
+    eq(type(C.IsStackActive()), "boolean")
+    eq(FS.playerCastBar == nil and FS.targetCastBar == nil, true)
+    loaded(CAST_FILE)
+end
+
+function T.cast_bars_off_still_lets_the_gunsight_tapes_take_the_cast_state_machine()
+    Boot({ off = { "m.cast" }, watch = CAST_BLIZZARD })
+    eq(FS.CastBars.IsStackActive(), false, "the tapes hold the view")
+    eq(ErrorsFrom("Modules/CombatHud/GunsightTape.lua"), "")
+    for _, name in ipairs(CAST_BLIZZARD) do eq(TouchesOn(name), "", name .. " untouched") end
+end
+
+function T.cast_bars_on_builds_both_bars_and_dims_the_stock_ones_as_before()
+    Boot({ watch = CAST_BLIZZARD })
+    loaded(CAST_FILE)
+    eq(FS.ModuleSwitch.Built("m.cast"), true)
+    yes(MadeNamed("ForeverSTUwavePlayerCastBar"), "player bar")
+    yes(MadeNamed("ForeverSTUwaveTargetCastBar"), "target bar")
+    yes(FS.playerCastBar and FS.targetCastBar, "exported")
+    for _, name in ipairs(CAST_BLIZZARD) do yes(TouchesOn(name) ~= "", name .. " dimmed") end
+end
+
+return T
+"""
+
+_TOC_SOURCES: dict[str, str] = {}
+GATE_NAMES: list[str] = []
+
+
+def toc_files() -> list[str]:
+    return [ln.strip() for ln in (ADDON / "forever-stuwave.toc").read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.startswith("##") and ln.strip().endswith(".lua")]
+
+
+def read_toc_file(rel: str) -> str:
+    if rel not in _TOC_SOURCES:
+        _TOC_SOURCES[rel] = (ADDON / rel).read_text(encoding="utf-8")
+    return _TOC_SOURCES[rel]
+
+
+def run_gate_checks() -> int:
+    """Each gate row runs in a fresh mock client (the whole .toc loads in about 0.2 s). Returns the failure count."""
+    global GATE_NAMES
+    GATE_NAMES = re.findall(r"^function T\.([a-z0-9_]+)\(", GATE_CHECKS, re.M)
+    failed = 0
+    for name in GATE_NAMES:
+        try:
+            lua = base.LuaRuntime(unpack_returned_tuples=True, register_eval=False)
+            lua.execute(GATE_WORLD)
+            lua.globals().__toc = lua.table_from(toc_files())
+            lua.globals().__read = read_toc_file
+            checks = lua.execute(GATE_CHECKS)
+            checks[name]()
+            print(f"ok    {name}")
+        except LuaError as err:
+            failed += 1
+            print(f"FAIL  {name}: {' '.join(str(err).splitlines()[:2])[:500]}")
+    return failed
+
+
 # ---- python level checks ----------------------------------------------------------------------------------------------
 
 def check_the_files_are_clean() -> list[str]:
@@ -762,11 +1114,12 @@ def check_the_toc_loads_the_store_before_the_pages_that_gate_on_it() -> list[str
 
 def main() -> int:
     failed = run_lua_checks()
+    failed += run_gate_checks()
     py_checks = [
         ("the_files_are_clean", check_the_files_are_clean),
         ("the_toc_loads_the_store_before_the_pages_that_gate_on_it", check_the_toc_loads_the_store_before_the_pages_that_gate_on_it),
     ]
-    total = len(CHECK_NAMES) + len(py_checks)
+    total = len(CHECK_NAMES) + len(GATE_NAMES) + len(py_checks)
     for name, fn in py_checks:
         try:
             problems = fn()
