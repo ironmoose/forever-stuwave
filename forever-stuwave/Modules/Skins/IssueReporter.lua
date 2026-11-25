@@ -43,7 +43,7 @@
 -- Nothing here touches the widget's behaviour -- it stays draggable, and a new
 -- drag simply records a new position.
 
-local addonName, _ = ...
+local addonName, FS = ...
 
 -- Per-character SavedVariable, declared in the .toc. Blizzard's own table is
 -- written too, but ours is the one that is actually trusted to come back.

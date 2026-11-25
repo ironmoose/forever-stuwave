@@ -277,6 +277,8 @@ function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc, areasSrc, helpSrc, h
         return button.fsSkin
     end
     function Theme.AddCutSliceFill(panel, color, radius)
+        -- matches Core/Theme.lua: no fill without a positive radius
+        if not radius or radius <= 0 then return nil end
         local t = panel:CreateTexture(nil, "BACKGROUND")
         t:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
         t.cut = radius
