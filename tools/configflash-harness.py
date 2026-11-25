@@ -35,6 +35,8 @@ ADDON = ROOT / "forever-stuwave"
 CONFIG_DIR = ADDON / "Modules" / "Config"
 FLASH_FILE = CONFIG_DIR / "ConfigFlash.lua"
 TARGETS_FILE = CONFIG_DIR / "ConfigTargets.lua"
+LAYOUT_FILE = ADDON / "Core" / "Layout.lua"
+MS_FILE = ADDON / "Core" / "ModuleSwitch.lua"
 TOC_FILE = ADDON / "forever-stuwave.toc"
 MOCKUP = ROOT / "mockups" / "config-window-2026-11-25.html"
 
@@ -1273,14 +1275,17 @@ local function alertStub(W)
     return p
 end
 
-function T.a_class_with_no_pop_up_alert_never_previews_the_warriors_on_the_scale_row()
+function T.a_class_with_no_pop_up_alert_previews_the_sample_rung_not_the_warriors_on_the_scale_row()
     local W = boot()
     local p = alertStub(W)
     __alertClass = "PRIEST"
     local row = { fsTrack = { fsDragging = false }, fsEdit = { HasFocus = function() return false end } }
-    eq(W.Flash.ScaleOwner(), nil, "a priest owns no pop up alert")
+    eq(W.Flash.ScaleOwner(), "procs.placeholder", "a priest with no pop up alert tests the STAY RAD sample")
+    local shown = {}
+    FS.GunsightFrame = { Preview = { Show = function(class) shown[#shown + 1] = class; return true end, Hide = function() end } }
     W.SetHover({ key = "gunsight.alertScale", row = row })
     no(p.shown, "the scale row shows no Overpower on a priest")
+    eq(shown[#shown], "PLACEHOLDER", "the scale row shows the sample rung instead")
     W.SetHover(nil)
     __alertClass = "WARRIOR"
 end
@@ -1396,6 +1401,388 @@ function T.the_proc_rungs_piece_row_previews_a_class_rung_pair_and_its_test_butt
     UnitClass = nil
 end
 
+
+-- ---- a module that is off (or waiting for a Reload UI): the hover still answers, at the frame's layout seat ---------------
+-- The seats are the real entries of Core/Layout.lua, so a number here is what the client would seat the frame at. The frame itself was never built: a sample from the Style tab's own builder stands in at the
+-- seat (a plain frame, no unit, no event), or the dimmed outline says the module is off.
+
+-- Module power as the hover reads it: On(key) is the switch as this session loaded it, Wanted(key) the store now (they differ
+-- while a change waits for a Reload UI). Only that public contract is stood in for, so these checks do not depend on where the
+-- store keeps its values. `off` lists the keys this session loaded off.
+local function offboot(off)
+    local W = boot()
+    local session, wanted = {}, {}
+    for _, key in ipairs(off or {}) do session[key] = false; wanted[key] = false end
+    FS.ModuleSwitch = {
+        On = function(key) return session[key] ~= false end,
+        Wanted = function(key) return wanted[key] ~= false end,
+        Label = function(key) return key end,
+        Set = function(key, on) wanted[key] = on; return true end,
+    }
+    return W
+end
+
+-- The real seat entries of Core/Layout.lua, loaded into a scratch table so the stub FS.Layout keeps its helpers.
+local function realSeats(ids)
+    local scratch = {}
+    assert(load(__layoutSrc, "@Layout.lua"))("forever-stuwave", scratch)
+    for _, id in ipairs(ids) do
+        if not scratch.Layout[id] then error("Layout.lua has no seat " .. id, 2) end
+        FS.Layout[id] = scratch.Layout[id]
+    end
+end
+
+-- Records the scale a host is given (the mock keeps none).
+local function trackScale()
+    local base = CreateFrame
+    CreateFrame = function(...)
+        local f = base(...)
+        f.SetScale = function(self, k) self.scaleSet = k end
+        return f
+    end
+end
+
+local function partyStub()
+    local made = { rows = 0 }
+    FS.PartyFrames = FS.PartyFrames or {}
+    FS.PartyFrames.NewStylePreview = function(parent)
+        made.rows = made.rows + 1
+        local f = CreateFrame("Frame", nil, parent); f:SetSize(231, 68)
+        return { frame = f, Restyle = function() end }
+    end
+    return made
+end
+
+local function raidStub(seatId)
+    local made = { built = 0, shows = 0 }
+    FS.RaidFrames = {
+        NewStylePreview = function(parent)
+            made.built = made.built + 1
+            local f = CreateFrame("Frame", nil, parent); f:SetSize(172, 174)
+            return { frame = f, Restyle = function() end }
+        end,
+        Preview = {
+            SeatId = function() return seatId end,
+            IsShown = function() return false end,
+            Show = function() made.shows = made.shows + 1; return false end,    -- the real one answers false with the module off
+            Hide = function() end, Rect = function() return nil end,
+        },
+    }
+    return made
+end
+
+local function petStub()
+    local made = { built = 0 }
+    FS.PetFrame = FS.PetFrame or {}
+    FS.PetFrame.NewStylePreview = function(parent)
+        made.built = made.built + 1
+        local f = CreateFrame("Frame", nil, parent); f:SetSize(348, 68)
+        return { frame = f, Restyle = function() end }
+    end
+    return made
+end
+
+local function hostAnchor(g)
+    local p = g.host.points[1]
+    return p.point, p.x, p.y
+end
+
+local PARTY_ROW = { key = "bars.w", page = "party", tab = "style" }
+
+function T.a_party_row_hovered_with_party_frames_off_shows_the_sample_at_the_layout_seat_and_it_goes_with_the_hover()
+    local W = offboot({ "m.party" })
+    realSeats({ "party" })
+    local made = partyStub()
+    local seats = W.Targets.Seats(PARTY_ROW)
+    eq(#seats, 1, "the seat is answered although no frame was built")
+    yes(seats[1].hidden, "it is not on screen"); eq(seats[1].preview, "party", "and has a sample"); eq(seats[1].reason, "Module is off")
+    near(seats[1].left, 775.5); near(seats[1].bottom, 498); near(seats[1].width, 231); near(seats[1].height, 294)
+    eq(#W.Targets.Resolve(PARTY_ROW), 0, "nothing of it is showing")
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    eq(made.rows, 4, "the Style tab's party row, four of them")
+    local g = W.Flash.ghosts.party
+    yes(g and g.host:IsShown(), "the sample is up")
+    eq(g.host.parent, UIParent, "on UIParent, a plain host")
+    local point, x, y = hostAnchor(g)
+    eq(point, "TOPLEFT"); near(x, 775.5, "at the left of the seat"); near(y, 792, "and its top")
+    local o = overlays(W)[1]
+    yes(o, "the outline frames it"); eq(captionOf(o), nil, "a real sample needs no caption")
+    local ox, oy, ow, oh = rectOf(o)
+    near(ox, 775.5 - W.Spec.FLASH_OUT); near(ow, 231 + 2 * W.Spec.FLASH_OUT, "the outline is as wide as the sample")
+    near(oy, 514 - W.Spec.FLASH_OUT, "and as tall as the four rows (278)"); near(oh, 278 + 2 * W.Spec.FLASH_OUT)
+    W.Flash.Clear()
+    no(g.host:IsShown(), "gone when the hover ends"); eq(#overlays(W), 0)
+    W.Open("party", "style")
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    yes(g.host:IsShown())
+    W.Close()
+    no(g.host:IsShown(), "closing the window takes it down"); eq(#overlays(W), 0)
+    W.Open("party", "style")
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    W.Open("profiles", "p")
+    no(g.host:IsShown(), "a page change takes it down")
+end
+
+function T.the_party_sample_is_a_plain_frame_anchored_in_its_host()
+    local W = offboot({ "m.party" })
+    realSeats({ "party" })
+    partyStub()
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    local g = W.Flash.ghosts.party
+    local frame = g.made.frame
+    eq(frame.protected, false, "an insecure frame")
+    local anchored = false
+    for _, pt in ipairs(frame.points) do if pt.rel == g.host then anchored = true end end
+    yes(anchored, "the sample has an anchor in its host, so the client has a place to draw it")
+end
+
+function T.the_reason_says_off_or_off_until_a_reload_by_what_the_store_holds()
+    local W = offboot({ "m.party" })
+    realSeats({ "party" })
+    eq(W.Targets.Seats(PARTY_ROW)[1].reason, "Module is off", "off in the store and in this session")
+    yes(FS.ModuleSwitch.Set("m.party", true), "turned back on, which takes a Reload UI")
+    eq(FS.ModuleSwitch.On("m.party"), false, "this session still has it off")
+    eq(W.Targets.Seats(PARTY_ROW)[1].reason, "Off until a Reload UI")
+    FS.ModuleSwitch.Set("m.party", false)
+    eq(W.Targets.Seats(PARTY_ROW)[1].reason, "Module is off")
+end
+
+function T.with_party_frames_off_in_combat_nothing_is_built_and_the_dimmed_outline_says_so()
+    local W = offboot({ "m.party" })
+    realSeats({ "party" })
+    local made = partyStub()
+    __combat = true
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    eq(made.rows, 0, "nothing is built in combat")
+    local o = overlays(W)[1]
+    yes(o, "the seat is outlined"); eq(captionOf(o), "Module is off")
+    local x, y, w, h = rectOf(o)
+    near(x, 775.5 - W.Spec.FLASH_OUT); near(y, 498 - W.Spec.FLASH_OUT); near(w, 231 + 2 * W.Spec.FLASH_OUT); near(h, 294 + 2 * W.Spec.FLASH_OUT)
+    for _, e in ipairs(o.fsEdges) do near(e.color[1], W.C.muted[1], "dimmed") end
+    W.Flash.Clear()
+    __combat = false
+end
+
+function T.a_fight_starting_while_the_off_sample_is_up_takes_it_down()
+    local W = offboot({ "m.party" })
+    realSeats({ "party" })
+    partyStub()
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    local g = W.Flash.ghosts.party
+    yes(g.host:IsShown())
+    __combat = true
+    W.Flash.combatWatch.scripts.OnEvent(W.Flash.combatWatch, "PLAYER_REGEN_DISABLED")
+    no(g.host:IsShown(), "combat starting hides it")
+    tick(W, 0.06)
+    no(g.host:IsShown(), "and it stays down through the fight")
+    eq(captionOf(overlays(W)[1]), "Module is off")
+    __combat = false
+end
+
+function T.with_no_sample_builder_the_off_module_gets_the_dimmed_outline_and_its_caption()
+    local W = offboot({ "m.party" })
+    realSeats({ "party" })
+    FS.PartyFrames = nil
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    eq(captionOf(overlays(W)[1]), "Module is off")
+end
+
+function T.the_unit_frames_with_unit_frames_off_show_their_samples_at_their_layout_seats_in_ui_units()
+    local W = offboot({ "m.uf" })
+    realSeats({ "player", "target", "focus", "boss" })
+    FS.Config.RegisterDefault("bars.module", "player")
+    trackScale()
+    local made = sampleFrames()
+    local want = {
+        -- key of the row, ghost key, anchor point, x, y of that point (UIParent units), outline left and bottom
+        { "unitFrames.hidePlayer", "player", "TOPLEFT", 20, 1420, 20, 1347 },
+        { "unitFrames.hideTarget", "target", "TOPLEFT", 300, 1420, 300, 1347 },
+        { "unitFrames.showFocus", "focus", "CENTER", 557, 578, 427, 541.5 },
+        { "unitFrames.showBoss", "boss", "CENTER", 2008, 872, 1878, 835.5 },
+    }
+    for _, c in ipairs(want) do
+        local entry = { key = c[1], page = "unit", tab = "frames" }
+        local seats = W.Targets.Seats(entry)
+        eq(#seats, 1, c[1]); yes(seats[1].hidden, c[1] .. " hidden"); eq(seats[1].preview, c[2], c[1])
+        eq(seats[1].reason, "Module is off")
+        W.Flash.Show(entry); tick(W, 0.01)
+        eq(made.key, c[2], "the Style tab's " .. c[2] .. " frame is built")
+        local g = W.Flash.ghosts[c[2]]
+        yes(g and g.host:IsShown(), c[2] .. " sample is up")
+        local point, x, y = hostAnchor(g)
+        eq(point, c[3], c[2]); near(x, c[4], c[2] .. " x"); near(y, c[5], c[2] .. " y")
+        eq(g.host.scaleSet, 1, "the frames are drawn in UI units, as they are built")
+        local ox, oy, ow, oh = rectOf(overlays(W)[1])
+        near(ox, c[6] - W.Spec.FLASH_OUT, c[2] .. " outline left"); near(oy, c[7] - W.Spec.FLASH_OUT, c[2] .. " outline bottom")
+        near(ow, 260 + 2 * W.Spec.FLASH_OUT); near(oh, 73 + 2 * W.Spec.FLASH_OUT)
+        W.Flash.Clear()
+        no(g.host:IsShown(), c[2] .. " goes with the hover")
+    end
+    -- the Style tab's rows follow the picked frame the same way
+    FS.Config.Set("bars.module", "focus")
+    W.Flash.Show({ key = "bars.w", page = "unit", tab = "bars" }); tick(W, 0.01)
+    yes(W.Flash.ghosts.focus.host:IsShown(), "a Style row shows the picked frame's sample")
+    W.Flash.Clear()
+end
+
+function T.a_unit_frame_handed_back_to_the_game_gets_its_sample_while_unit_frames_are_on()
+    local W = offboot({})
+    realSeats({ "player", "target" })
+    sampleFrames()
+    FS.UnitFrames.Built = function(frame) return frame ~= "target" end     -- built for the player, handed to the game for the target
+    local target = W.Targets.Seats({ key = "unitFrames.hideTarget" })
+    eq(#target, 1); yes(target[1].hidden); eq(target[1].preview, "target"); eq(target[1].reason, "Uses the game's frame")
+    eq(#W.Targets.Seats({ key = "unitFrames.hidePlayer" }), 0, "a frame that was built and is simply not showing is as before")
+    W.Flash.Show({ key = "unitFrames.hideTarget" }); tick(W, 0.01)
+    yes(W.Flash.ghosts.target.host:IsShown(), "the sample stands at the target's seat")
+    W.Flash.Clear()
+end
+
+function T.the_stu_wave_frame_switches_on_the_frames_tab_point_at_their_own_frame()
+    local W = offboot({})
+    realSeats({ "player", "target", "focus", "boss" })
+    sampleFrames()
+    FS.UnitFrames.Built = function() return false end       -- all four handed back to the game, the switches turned back on
+    for _, c in ipairs({ { "usePlayer", "player" }, { "useTarget", "target" }, { "useFocus", "focus" }, { "useBoss", "boss" } }) do
+        local seats = W.Targets.Seats({ key = "unitFrames." .. c[1], page = "unit", tab = "frames" })
+        eq(#seats, 1, c[1]); yes(seats[1].hidden, c[1]); eq(seats[1].preview, c[2], c[1]); eq(seats[1].reason, "Uses the game's frame")
+    end
+    W.Flash.Show({ key = "unitFrames.useFocus", page = "unit", tab = "frames" }); tick(W, 0.01)
+    yes(W.Flash.ghosts.focus.host:IsShown(), "the focus switch shows the focus sample at its seat")
+    W.Flash.Clear()
+end
+
+function T.raid_frames_off_show_the_styled_raid_sample_at_the_seat_of_the_size_the_editor_would_show()
+    local W = offboot({ "m.raid" })
+    realSeats({ "raid10", "raid25" })
+    trackScale()
+    local made = raidStub("raid10")
+    local entry = { key = "bars.w", page = "raid", tab = "style" }
+    local seats = W.Targets.Seats(entry)
+    eq(#seats, 1); yes(seats[1].hidden); eq(seats[1].reason, "Module is off"); eq(seats[1].preview, "raid.sample")
+    W.Flash.Show(entry); tick(W, 0.01)
+    eq(made.built, 1, "the Raid style tab's own preview is built")
+    eq(made.shows, 0, "the Edit Mode raid preview is not asked for (it answers false with the module off)")
+    local g = W.Flash.ghosts["raid.sample"]
+    yes(g and g.host:IsShown(), "the sample is up")
+    local point, x, y = hostAnchor(g)
+    eq(point, "TOPLEFT"); near(x, 583.5, "raid10's top left"); near(y, 860)
+    eq(g.host.scaleSet, 1, "the sample is already in UIParent units")
+    local ox, oy, ow, oh = rectOf(overlays(W)[1])
+    near(ox, 583.5 - W.Spec.FLASH_OUT); near(oy, 860 - 174 - W.Spec.FLASH_OUT); near(ow, 172 + 2 * W.Spec.FLASH_OUT); near(oh, 174 + 2 * W.Spec.FLASH_OUT)
+    W.Flash.Clear()
+    no(g.host:IsShown())
+    FS.RaidFrames.Preview.SeatId = function() return "raid25" end
+    W.Flash.Show(entry); tick(W, 0.01)
+    local _, x25 = hostAnchor(W.Flash.ghosts["raid.sample"])
+    near(x25, 453.5, "the seat follows the size picked on the Raid page")
+    W.Flash.Clear()
+end
+
+function T.the_pet_bar_off_shows_the_pet_panel_sample_at_its_seat_in_design_units()
+    local W = offboot({ "m.pet" })
+    UIParent.w, UIParent.h = 1280, 720
+    FS.Layout.Scale = function() return 0.5 end
+    realSeats({ "petcontainer" })
+    trackScale()
+    local made = petStub()
+    local entry = { key = "bars.w", page = "pet", tab = "style" }
+    eq(W.Targets.Seats(entry)[1].reason, "Module is off")
+    W.Flash.Show(entry); tick(W, 0.01)
+    eq(made.built, 1)
+    local g = W.Flash.ghosts.petcontainer
+    yes(g and g.host:IsShown(), "the sample is up")
+    eq(g.host.scaleSet, 0.5, "drawn in design px, so it takes the layout scale")
+    local point, x, y = hostAnchor(g)
+    eq(point, "CENTER"); near(x, 458.5 / 0.5, "the seat's centre, in the host's own units"); near(y, 155 / 0.5)
+    local ox, oy, ow, oh = rectOf(overlays(W)[1])
+    near(ow, 348 * 0.5 + 2 * W.Spec.FLASH_OUT); near(oh, 68 * 0.5 + 2 * W.Spec.FLASH_OUT)
+    near(ox, 458.5 - 348 * 0.5 / 2 - W.Spec.FLASH_OUT, "centred on the seat"); near(oy, 155 - 68 * 0.5 / 2 - W.Spec.FLASH_OUT)
+    W.Flash.Clear()
+end
+
+function T.the_action_grid_and_data_bar_off_get_the_dimmed_outline_at_their_layout_seats()
+    local W = offboot({ "m.ab", "m.data" })
+    realSeats({ "grid", "databar" })
+    local grid = W.Targets.Seats({ key = "actionbars.grid" })
+    eq(#grid, 1); yes(grid[1].hidden); eq(grid[1].reason, "Module is off"); eq(grid[1].preview, nil, "no sample to build")
+    near(grid[1].left, 1280 + 2 - 1280); near(grid[1].bottom, 720 - 625 - 91.5); near(grid[1].width, 2560); near(grid[1].height, 183)
+    local bar = W.Targets.Seats({ key = "databar.seg.fps", page = "data", tab = "g" })
+    eq(#bar, 1); eq(bar[1].reason, "Module is off")
+    near(bar[1].bottom, 720 - 710 - 10); near(bar[1].width, 2560); near(bar[1].height, 20)
+    W.Flash.Show({ key = "actionbars.grid" }); tick(W, 0.01)
+    eq(captionOf(overlays(W)[1]), "Module is off", "the outline says why it is empty")
+    W.Flash.Clear()
+end
+
+function T.a_module_that_is_on_with_no_frame_yet_is_answered_as_before()
+    local W = offboot({})
+    realSeats({ "party", "petcontainer", "raid10", "player" })
+    partyStub(); petStub(); raidStub("raid10"); sampleFrames()
+    for _, entry in ipairs({ PARTY_ROW, { key = "x", page = "pet" }, { key = "x", page = "raid" }, { key = "unitFrames.hidePlayer" } }) do
+        eq(#W.Targets.Seats(entry), 0, "no frame and the module on: nothing is made up for " .. tostring(entry.page or entry.key))
+    end
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    eq(#overlays(W), 0)
+    W.Flash.Clear()
+end
+
+function T.a_party_frame_hidden_by_its_switch_with_no_rect_yet_still_gets_its_sample_at_the_layout_seat()
+    local W = offboot({})
+    realSeats({ "party" })
+    partyStub()
+    local container = seat("party", CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent))
+    container.shown = false
+    function container:GetRect() return nil end            -- never shown, never laid out: the client has no rect for it
+    FS.PartyFrames.IsShown = function() return false end   -- the "Show party frames" switch is off
+    local seats = W.Targets.Seats(PARTY_ROW)
+    eq(#seats, 1, "the hidden container is still a seat"); yes(seats[1].hidden)
+    near(seats[1].left, 775.5); near(seats[1].bottom, 498); near(seats[1].width, 231); near(seats[1].height, 294)
+    eq(seats[1].reason, "Turned off", "the switch, not a group, is why it is empty")
+    eq(seats[1].preview, "party")
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    yes(W.Flash.ghosts.party.host:IsShown(), "the sample draws")
+    W.Flash.Clear()
+    -- a visible frame whose rect is unreadable is not replaced by the seat
+    container.shown = true
+    eq(#W.Targets.Seats(PARTY_ROW), 0, "a showing frame with no rect is skipped as before")
+end
+
+function T.a_party_frame_hidden_by_its_switch_that_has_a_rect_keeps_its_own_rect()
+    local W = offboot({})
+    realSeats({ "party" })
+    partyStub()
+    local container = seat("party", target("ForeverSTUwavePartyContainer", 10, 20, 231, 294))
+    container.shown = false
+    FS.PartyFrames.IsShown = function() return false end
+    local seats = W.Targets.Seats(PARTY_ROW)
+    near(seats[1].left, 10); near(seats[1].bottom, 20, "the real frame's own rect wins over the layout seat")
+    eq(seats[1].reason, "Turned off")
+    FS.PartyFrames.IsShown = function() return true end
+    eq(W.Targets.Seats(PARTY_ROW)[1].reason, "Shows in a group", "the switch on: the group is why")
+end
+
+function T.every_off_seat_names_a_real_layout_entry_and_a_real_module_with_a_caption_a_player_may_read()
+    local W = offboot({})
+    realSeats({ "player", "target", "focus", "boss", "party", "petcontainer", "raid5", "raid10", "raid15", "raid20", "raid25", "raid40",
+        "grid", "databar" })
+    local known = {}
+    for _, key in ipairs(__moduleKeys) do known[key] = true end
+    local n = 0
+    for id, spec in pairs(W.Targets.OFF_SEATS) do
+        n = n + 1
+        yes(known[spec.module], id .. " names a module Core/ModuleSwitch.lua defines: " .. tostring(spec.module))
+        local layout = spec.layout
+        if type(layout) == "function" then layout = "raid10" end
+        yes(layout == nil or FS.Layout[layout], id .. " names a layout seat that exists")
+    end
+    yes(n >= 9, "the table covers the frames that have a power switch and a seat")
+    for _, text in ipairs({ "Module is off", "Off until a Reload UI", "Uses the game's frame", "Turned off" }) do
+        no(text:find("—", 1, true) or text:find("–", 1, true), "no dash")
+        no(text:lower():find("tape") or text:lower():find("bot") or text:lower():find("macro"), "neutral wording: " .. text)
+    end
+end
+
 -- Plain data for the python level checks (the real files, booted once).
 __helpers = {
     prefixes = function()
@@ -1412,6 +1799,12 @@ __helpers = {
 LAYOUT_NAMES: set[str] = set()
 
 
+def module_keys() -> list[str]:
+    """The module switches Core/ModuleSwitch.lua defines (its DEFINITIONS list), read from the file."""
+    text = MS_FILE.read_text(encoding="utf-8")
+    return re.findall(r'\{\s*"(m\.[a-z]+)"\s*,\s*"[^"]*"\s*,\s*"[a-z]+"', text)
+
+
 def run_lua_checks() -> int:
     global LAYOUT_NAMES
     LAYOUT_NAMES = {n for n in re.findall(r"^function T\.([a-z0-9_]+)\(", CHECKS, re.M)}
@@ -1420,6 +1813,11 @@ def run_lua_checks() -> int:
     for name in sorted(LAYOUT_NAMES):
         try:
             lua = base.boot()
+            lua.globals().__layoutSrc = LAYOUT_FILE.read_text(encoding="utf-8")
+            keys = lua.eval("{}")
+            for i, key in enumerate(module_keys(), 1):
+                keys[i] = key
+            lua.globals().__moduleKeys = keys
             lua.eval("__checks")[name]()
             leaked = list(lua.eval("__errors").values())
             if leaked:

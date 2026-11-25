@@ -9,6 +9,9 @@
 -- CW.Targets.Seats(entry) also answers the frames that have a seat but are not showing (a hidden frame, alpha 0, a piece
 -- that is off, a target side with no target): those rects carry `hidden = true`, a short `reason` ("Shows with a target")
 -- and the `preview` key the flash can build a sample for. Resolve answers only what is showing.
+-- A frame whose module is off this session (Core/ModuleSwitch.lua) or that was handed back to the game was never built, so it
+-- has no frame to ask: its seat is worked out from the layout entry alone (OFF below) and answered the same way, hidden, with
+-- the reason "Module is off" and the sample key, so the hover still has something to show.
 -- Harness: tools/configflash-harness.py.
 
 local _, FS = ...
@@ -54,30 +57,51 @@ local function Faded(frame)
     return a ~= nil and a <= 0
 end
 
+-- A plain table with the four fields as a rect; `place` keeps what a layout seat adds (its anchor point and the spot of it,
+-- and the scale a sample is drawn at), which the flash uses to seat a sample the way the real frame is seated.
+local function PlainRect(t, place)
+    local l, b, w, h = Num(t.left), Num(t.bottom), Num(t.width), Num(t.height)
+    if not (l and b and w and h and w > 0 and h > 0) then return nil end
+    local r = { left = l, bottom = b, width = w, height = h }
+    if place and type(t.point) == "string" then
+        local ax, ay = Num(t.ax), Num(t.ay)
+        if ax and ay then r.point, r.ax, r.ay = t.point, ax, ay end
+    end
+    return r
+end
+
 -- One thing a provider answered, as a rect { left, bottom, width, height } in UIParent units. A frame that is showing gives
 -- the plain rect. A frame that has a rect but is not showing (hidden, faded out, or held down by `hidden`) gives the same
 -- rect with `hidden = true`, `reason` and `preview` (what the provider says about why and what could stand in for it).
--- A provider may answer a wrapper { seat = frame, reason, preview, hidden, sample } to say those itself. `sample` (a key like
--- `preview`) is for a frame that IS showing but may be empty (a Gunsight area with no debuffs of yours): the flash puts the
--- sample in it for the hover. A plain table with the four fields is taken as it is (the quest tracker answers its own rect).
+-- A provider may answer a wrapper { seat = frame, reason, preview, hidden, sample, fallback, scale } to say those itself.
+-- `sample` (a key like `preview`) is for a frame that IS showing but may be empty (a Gunsight area with no debuffs of yours): the
+-- flash puts the sample in it for the hover. `fallback` (a rect, or a function answering one) stands in for the rect of a frame
+-- that is hidden and has never been laid out, so the client has none to give; a frame that is showing never takes it. `seat` may
+-- itself be a plain rect (a frame that was never built, seated from the layout); `scale` is then the scale its sample is drawn at.
+-- A plain table with the four fields is taken as it is (the quest tracker answers its own rect).
 local function Read(thing, ctx)
     if type(thing) ~= "table" then return nil end
     local ok, rect = pcall(function()
-        local frame, reason, preview, forced, sample = thing, nil, nil, false, nil
+        local frame, reason, preview, forced, sample, fallback, scale = thing, nil, nil, false, nil, nil, nil
         if thing.seat ~= nil then
             frame, reason, preview, forced, sample = thing.seat, thing.reason, thing.preview, thing.hidden == true, thing.sample
+            fallback, scale = thing.fallback, Num(thing.scale)
         end
         if type(frame) ~= "table" then return nil end
+        local r, hidden = nil, forced
         if type(frame.GetRect) ~= "function" then
-            local l, b, w, h = Num(frame.left), Num(frame.bottom), Num(frame.width), Num(frame.height)
-            if l and b and w and h and w > 0 and h > 0 then return { left = l, bottom = b, width = w, height = h } end
-            return nil
+            r = PlainRect(frame, scale ~= nil)
+            if r and scale then r.scale = scale end
+        else
+            r = Measure(frame)
+            if not hidden and type(frame.IsVisible) == "function" and frame:IsVisible() ~= true then hidden = true end
+            if not hidden and Faded(frame) then hidden = true end
+            if not r and hidden and fallback ~= nil then
+                if type(fallback) == "function" then fallback = fallback() end
+                if type(fallback) == "table" then r = PlainRect(fallback, false) end
+            end
         end
-        local r = Measure(frame)
         if not r then return nil end
-        local hidden = forced
-        if not hidden and type(frame.IsVisible) == "function" and frame:IsVisible() ~= true then hidden = true end
-        if not hidden and Faded(frame) then hidden = true end
         if hidden then
             r.hidden = true
             r.reason = reason or (ctx and ctx.reason) or T.GENERIC_REASON
@@ -95,7 +119,6 @@ end
 -- Finding frames
 -------------------------------------------------------------------------------
 
--- The frame a layout id is seated on (FS.Layout._applied), a shown one when there are several. Nothing when none.
 -- Why a seated frame is not showing, by layout id; the id is also the key of its preview (ConfigFlash.lua).
 local SEAT_REASONS = {
     target = "Shows with a target", tcast = "Shows with a target",
@@ -105,20 +128,142 @@ local SEAT_REASONS = {
 }
 local SEAT_PREVIEWS = { player = true, target = true, focus = true, boss = true, party = true, petcontainer = true }
 
+-- A frame that is off, or was never built: its seat from the layout entry alone. FS.Layout[id] holds the seat (the layout
+-- editor writes a saved move into it in place), so the rect is what FS.Layout.Apply would have given the frame: x and y in design
+-- px times the layout scale, or in plain UI units for an `unscaled` entry; the entry's `point` sits at `relPoint` of UIParent.
+-- Answers { left, bottom, width, height } in UIParent units, the entry's anchor point with its spot (point, ax, ay) and the
+-- scale it was worked out at (scale); nil without a usable entry or a UIParent that has a size.
+local function Fractions(point)
+    return point:find("LEFT") and 0 or point:find("RIGHT") and 1 or 0.5, point:find("BOTTOM") and 0 or point:find("TOP") and 1 or 0.5
+end
+
+local function SeatRect(id)
+    local L = type(id) == "string" and FS.Layout and FS.Layout[id]
+    if type(L) ~= "table" or type(L.point) ~= "string" or type(L.relPoint) ~= "string" then return nil end
+    local x, y, w, h = Num(L.x), Num(L.y), Num(L.w), Num(L.h)
+    if not (x and y and w and h and w > 0 and h > 0) then return nil end
+    local pw = UIParent and type(UIParent.GetWidth) == "function" and Num(UIParent:GetWidth())
+    local ph = UIParent and type(UIParent.GetHeight) == "function" and Num(UIParent:GetHeight())
+    if not (pw and ph and pw > 0 and ph > 0) then return nil end
+    local scale = 1
+    if L.unscaled ~= true and type(FS.Layout.Scale) == "function" then scale = Num(FS.Layout.Scale()) or 1 end
+    if scale <= 0 then return nil end
+    local rx, ry = Fractions(L.relPoint)
+    local ax, ay = pw * rx + x * scale, ph * ry + y * scale
+    local fx, fy = Fractions(L.point)
+    local width, height = w * scale, h * scale
+    return { left = ax - width * fx, bottom = ay - height * fy, width = width, height = height,
+        point = L.point, ax = ax, ay = ay, scale = scale }
+end
+
+T.OFF_REASON = "Module is off"
+T.PENDING_REASON = "Off until a Reload UI"
+T.GAME_REASON = "Uses the game's frame"
+T.SWITCH_REASON = "Turned off"
+
+-- The seat of the raid grid is the one of the size the Raid page's layout size shows (RaidFrames.Preview.SeatId).
+local function RaidSeatId()
+    local raid = FS.RaidFrames
+    local pv = type(raid) == "table" and raid.Preview
+    if type(pv) == "table" and type(pv.SeatId) == "function" then
+        local ok, id = pcall(pv.SeatId)
+        if ok and type(id) == "string" then return id end
+    end
+    return "raid10"
+end
+
+-- The frames a power switch (or a "STUwave frame" switch) can leave unbuilt, by the id their provider seats them under:
+-- `module` the Core/ModuleSwitch.lua key that builds it, `use` the unit frame the Unit Frames page can hand back to the game,
+-- `layout` the Layout.lua entry it sits at (the id itself when none is named; a function for the raid, whose seat follows a
+-- size), `preview` the key of the sample the flash can build (none: the dimmed outline says why), and `draw` what the sample is
+-- drawn in: "ui" the UI units the frame is built in (the unit frames, the raid grid, already scaled), "design" the design px of
+-- the pet panel (times the layout scale), none the party stack, fitted to the width of the seat as the real container's is.
+local OFF = {
+    player = { module = "m.uf", use = "player", preview = "player", draw = "ui" },
+    target = { module = "m.uf", use = "target", preview = "target", draw = "ui" },
+    focus = { module = "m.uf", use = "focus", preview = "focus", draw = "ui" },
+    boss = { module = "m.uf", use = "boss", preview = "boss", draw = "ui" },
+    party = { module = "m.party", preview = "party" },
+    petcontainer = { module = "m.pet", preview = "petcontainer", draw = "design" },
+    raid = { module = "m.raid", layout = RaidSeatId, preview = "raid.sample", draw = "ui" },
+    grid = { module = "m.ab" },
+    databar = { module = "m.data" },
+}
+T.OFF_SEATS = OFF
+
+-- Why a frame has none built this session, or nil when nothing says so: its module is off in this session (and the store
+-- says off, or says on and waits for a Reload UI), or the Unit Frames page handed the frame back to the game.
+local function OffReason(spec)
+    local MS = FS.ModuleSwitch
+    if spec.module and type(MS) == "table" and type(MS.On) == "function" and MS.On(spec.module) == false then
+        local wanted = type(MS.Wanted) == "function" and MS.Wanted(spec.module) == true
+        return wanted and T.PENDING_REASON or T.OFF_REASON
+    end
+    local UF = FS.UnitFrames
+    if spec.use and type(UF) == "table" and type(UF.Built) == "function" and UF.Built(spec.use) == false then
+        return T.GAME_REASON
+    end
+    return nil
+end
+
+-- The answer for a frame that was never built, as a wrapper Read understands; nil when it is built (or may yet be) or the
+-- layout has no seat for it.
+local function OffSeat(id)
+    local spec = OFF[id]
+    if not spec then return nil end
+    local reason = OffReason(spec)
+    if not reason then return nil end
+    local layout = spec.layout
+    if type(layout) == "function" then layout = layout() end
+    local rect = SeatRect(layout or id)
+    if not rect then return nil end
+    local scale = spec.draw == "ui" and 1 or spec.draw == "design" and rect.scale or nil
+    return { { seat = rect, hidden = true, reason = reason, preview = spec.preview, scale = scale } }
+end
+
+-- Frames that can be hidden by a switch of their own: when it is off that, not the group or the target, is why they are empty.
+local function Setting(key, want)
+    local Config = FS.Config
+    if not (Config and Config.Get) then return false end
+    local ok, v = pcall(Config.Get, key)
+    return ok and v == want
+end
+
+local SEAT_SWITCH = {
+    player = function() return Setting("unitFrames.hidePlayer", true) end,
+    target = function() return Setting("unitFrames.hideTarget", true) end,
+    focus = function() return Setting("unitFrames.showFocus", false) end,
+    boss = function() return Setting("unitFrames.showBoss", false) end,
+    party = function()
+        local party = FS.PartyFrames
+        return type(party) == "table" and type(party.IsShown) == "function" and party.IsShown() == false
+    end,
+}
+
+-- The frame a layout id is seated on (FS.Layout._applied), a shown one when there are several. A frame that was never built
+-- (its module is off) answers its layout seat instead (OffSeat); nothing when there is neither.
 local function Seat(id)
     return function()
         local applied = FS.Layout and FS.Layout._applied
-        if type(applied) ~= "table" then return nil end
         local found
-        for frame, info in pairs(applied) do
-            if type(info) == "table" and info.id == id and info.parent == nil then
-                local ok, shown = pcall(frame.IsShown, frame)
-                if ok and shown == true then found = frame; break end
-                found = found or frame
+        if type(applied) == "table" then
+            for frame, info in pairs(applied) do
+                if type(info) == "table" and info.id == id and info.parent == nil then
+                    local ok, shown = pcall(frame.IsShown, frame)
+                    if ok and shown == true then found = frame; break end
+                    found = found or frame
+                end
             end
         end
-        if not found then return nil end
-        return { { seat = found, reason = SEAT_REASONS[id], preview = SEAT_PREVIEWS[id] and id or nil } }
+        if not found then return OffSeat(id) end
+        local reason = SEAT_REASONS[id]
+        local switch = SEAT_SWITCH[id]
+        if switch then
+            local ok, off = pcall(switch)
+            if ok and off == true then reason = T.SWITCH_REASON end
+        end
+        return { { seat = found, reason = reason, preview = SEAT_PREVIEWS[id] and id or nil,
+            fallback = function() return SeatRect(id) end } }
     end
 end
 
@@ -234,7 +379,7 @@ P.target = Seat("target")
 P.focus = Seat("focus")
 P.boss = Seat("boss")
 P.party = First(Seat("party"), Named("ForeverSTUwavePartyContainer", "Shows in a group", "party"))
-P.raid = Named("ForeverSTUwaveRaidContainer", "Shows in a raid", "raid")
+P.raid = First(Named("ForeverSTUwaveRaidContainer", "Shows in a raid", "raid"), function() return OffSeat("raid") end)
 P.pet = First(Seat("petcontainer"), Named("FSPetContainer", "Shows with a pet", "petcontainer"))
 
 -- The Style tabs of the Unit Frames page share their rows between the four unit frames: the picker says which one.
@@ -311,10 +456,10 @@ P.classtabs = All(P.regen, P.ammo, P.bufftab, P.thunderclap, P.forms, P.callpet,
 
 -- Screen pieces
 P.console = Named("FSConsole")
-P.grid = Named("FSActionGrid")
+P.grid = First(Named("FSActionGrid"), function() return OffSeat("grid") end)
 P.micro = Named("ForeverSTUwaveMicroBar")
 P.buffs = All(First(Seat("buffs"), Named("ForeverSTUwaveBuffsContainer")), First(Seat("debuffs"), Named("ForeverSTUwaveDebuffsContainer")))
-P.databar = Named("ForeverSTUwaveDataBar")
+P.databar = First(Named("ForeverSTUwaveDataBar"), function() return OffSeat("databar") end)
 P.minimap = First(Named("Minimap"), Seat("minimap"))
 P.chat = First(Seat("chat"), Named("ChatFrame1"))
 P.professions = First(Seat("professions"), Named("ForeverSTUwaveProfessions"))
@@ -356,6 +501,8 @@ end
 local KEYS = {
     { "unitFrames.hidePlayer", "player" }, { "unitFrames.hideTarget", "target" },
     { "unitFrames.showFocus", "focus" }, { "unitFrames.showBoss", "boss" },
+    { "unitFrames.usePlayer", "player" }, { "unitFrames.useTarget", "target" },
+    { "unitFrames.useFocus", "focus" }, { "unitFrames.useBoss", "boss" },
     { "professions.shown", "professions" }, { "character.backdrop", "character" }, { "talents.backdrop", "talents" },
     { "skins.damageMeterRows", "damagemeter" },
     { "actionbars.grid", "grid" }, { "icons.microstyle", "micro" }, { "icons.spellstyle", "classtabs" },

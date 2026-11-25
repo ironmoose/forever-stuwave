@@ -44,7 +44,7 @@ local function PlateTab(content)
     local alertsSec = UI.Section(content, {
         title = "Alerts",
         tip = "The pop up alerts class modules show above your character: Overpower, Revenge and Victory Rush for Warriors, Clearcasting for Druids. "
-            .. "Test shows on those two classes.",
+            .. "A class with none yet tests a sample.",
     })
     local owner = CW.Flash and CW.Flash.ScaleOwner and CW.Flash.ScaleOwner()
     if owner and CW.Flash.AddTest then CW.Flash.AddTest(alertsSec, owner) end

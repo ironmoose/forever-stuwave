@@ -172,6 +172,10 @@ end
 -- Preview.Show / Hide, which only fades the real grid by alpha). Nothing here touches a secure frame, and nothing is
 -- built or shown in combat. A key with no maker (cast bars, the Gunsight, class tabs, nameplates, alerts) has no sample
 -- and gets the dimmed outline with its caption instead.
+-- A frame whose module is off was never built, so it has no rect to read: ConfigTargets answers its seat from the layout entry
+-- (`point`, the spot `ax`, `ay` and the `scale` its sample is drawn at). Such a sample is seated by the entry's own anchor point,
+-- at that scale, the way the real frame would be; the raid has no Edit Mode preview then, so it draws the Raid page's own
+-- sample (`raid.sample`, RaidFrames.NewStylePreview: plain frames, already in UIParent units).
 
 local ghosts = {}
 F.ghosts = ghosts
@@ -224,6 +228,15 @@ MAKERS.party = function(host)
         stack:SetSize(math.max(w, 1), math.max(y - 2, 1))
     end
     return { frame = stack, restyle = Restyle }
+end
+
+-- The Raid page's own sample (plain cells on made up members, no unit and no event), for a raid grid that was never built.
+MAKERS["raid.sample"] = function(host)
+    local raid = FS.RaidFrames
+    if not (raid and raid.NewStylePreview) then return nil end
+    local pv = raid.NewStylePreview(host)
+    if type(pv) ~= "table" or not pv.frame then return nil end
+    return { frame = pv.frame, restyle = pv.Restyle }
 end
 
 local function Plain(v)
@@ -302,8 +315,15 @@ local function ShowGunsightArea(rect, key, used)
     return rect, key
 end
 
+-- Where an anchor point sits on a frame, as shares of its width from the left and of its height from the bottom.
+local function Fractions(point)
+    return point:find("LEFT") and 0 or point:find("RIGHT") and 1 or 0.5, point:find("BOTTOM") and 0 or point:find("TOP") and 1 or 0.5
+end
+
 -- Shows the sample for a hidden rect (or for an area that is showing but may be empty: `rect.sample`) and answers the rect it
--- fills (and its key), or nil when there is none to show. `used` is the pass's set of keys in use.
+-- fills (and its key), or nil when there is none to show. `used` is the pass's set of keys in use. A rect from a frame that was
+-- never built carries `scale`, `point`, `ax` and `ay`: the sample is drawn at that scale and its own anchor point sits on that
+-- spot; any other rect has the sample fitted to its width, from its top left.
 local function ShowGhost(rect, used)
     local key = rect.preview or rect.sample
     if not key or InCombat() then return nil end
@@ -325,6 +345,12 @@ local function ShowGhost(rect, used)
             ghosts[key] = { failed = true }
             return nil
         end
+        -- a sample frame that has no anchor of its own is put at the top left of its host (the host is its size), so the client
+        -- has a place to draw it; the Style tab seats its samples itself
+        local frame = made.frame
+        if type(frame.GetPoint) == "function" and frame:GetPoint(1) == nil then
+            frame:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+        end
         g = { host = host, made = made, up = false }
         ghosts[key] = g
     end
@@ -334,16 +360,25 @@ local function ShowGhost(rect, used)
     end
     local w, h = Plain(g.made.frame:GetWidth()), Plain(g.made.frame:GetHeight())
     if not (w and h and w > 0 and h > 0) then return nil end
-    local scale = rect.width / w
+    local own = Plain(rect.scale)
+    local scale = own or rect.width / w
     if scale < 0.25 then scale = 0.25 elseif scale > 4 then scale = 4 end
-    local top = rect.bottom + rect.height
     g.host:SetScale(scale)
     g.host:SetSize(w, h)
     g.host:ClearAllPoints()
-    g.host:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", rect.left / scale, top / scale)
+    local seated
+    if own and type(rect.point) == "string" and Plain(rect.ax) and Plain(rect.ay) then
+        local fx, fy = Fractions(rect.point)
+        g.host:SetPoint(rect.point, UIParent, "BOTTOMLEFT", rect.ax / scale, rect.ay / scale)
+        seated = { left = rect.ax - w * scale * fx, bottom = rect.ay - h * scale * fy, width = w * scale, height = h * scale }
+    else
+        local top = rect.bottom + rect.height
+        g.host:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", rect.left / scale, top / scale)
+        seated = { left = rect.left, bottom = top - h * scale, width = w * scale, height = h * scale }
+    end
     g.host:Show()
     g.up = true
-    return { left = rect.left, bottom = top - h * scale, width = w * scale, height = h * scale }, key
+    return seated, key
 end
 
 -- Hides every sample that was not used this pass (`used` is the set of keys that were), or all of them when `used` is nil.
@@ -674,14 +709,14 @@ function F.AddTest(sec, id)
     return b
 end
 
--- Which alert the shared scale row stands for: the player's own class's, or nil for a class with no pop up alert (a
--- Priest is never shown a Warrior's Overpower as if it were theirs: no Test button and no hover sample on that class).
+-- Which alert the shared scale row stands for: the player's own class's, or the STAY RAD sample rung for a class with no
+-- pop up alert yet (a Priest is never shown a Warrior's Overpower as if it were theirs).
 local function ScaleOwner()
     local DC = FS.DruidClearcasting
     if DC and DC.Applies and DC.Applies() then return "druid" end
     local PU = FS.WarriorPowerUps
     if PU and PU.Applies and PU.Applies() then return "warrior" end
-    return nil
+    return "procs.placeholder"
 end
 
 F.ScaleOwner = ScaleOwner
@@ -734,7 +769,8 @@ for _, class in ipairs({ "WARLOCK", "PALADIN", "PLACEHOLDER" }) do
         id = "procs." .. class:lower(), label = class:sub(1, 1) .. class:sub(2):lower() .. " procs",
         api = RungApi(class),
         match = function(entry)
-            return entry.key == "gunsight.pieces.prc" and OwnRungClass() == class
+            return (entry.key == "gunsight.pieces.prc" and OwnRungClass() == class)
+                or (class == "PLACEHOLDER" and entry.key == ScaleKey() and ScaleOwner() == "procs.placeholder")
         end,
     })
 end
