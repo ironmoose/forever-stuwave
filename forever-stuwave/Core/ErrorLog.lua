@@ -902,28 +902,8 @@ function SecureReload.Button() return Ensure() end
 -- Lays the secure button over `target` (one of our own Reload buttons) for as long as the pointer is on
 -- it. Returns true when it is in place. Out of combat only.
 function SecureReload.Cover(target)
-    if Combat() then coverMiss = "in combat" return false end
-    if not target then coverMiss = "no target" return false end
-    local b = Ensure()
-    if not b then coverMiss = "no button: " .. tostring(buildMiss) return false end
-    local ok, err = pcall(function()
-        if not target:IsVisible() or (target.IsEnabled and not target:IsEnabled()) then error("hidden") end
-        local left, bottom = target:GetLeft(), target:GetBottom()
-        local w, h = target:GetWidth(), target:GetHeight()
-        if not left or not bottom or not w or not h or w <= 0 or h <= 0 then error("no rect") end
-        local s = target:GetEffectiveScale() / UIParent:GetEffectiveScale()
-        b:ClearAllPoints()
-        b:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left * s, bottom * s)
-        b:SetSize(w * s, h * s)
-        b:SetFrameStrata(target:GetFrameStrata())
-        b:SetFrameLevel(target:GetFrameLevel() + 10)
-        b:Show()
-    end)
-    covering = ok and target or nil
-    lastCovered = target
-    coverMiss = (not ok) and tostring(err) or nil
-    if not ok then Uncover() end
-    return ok
+    -- Not laid over our buttons any more: their own click calls ReloadUI (see Explain). Kept so old callers still load.
+    return false
 end
 
 function SecureReload.Covering() return covering end
@@ -931,29 +911,17 @@ function SecureReload.Covering() return covering end
 -- A Reload button of ours is clicked without the cover on it (in combat, or the cover could not be
 -- placed): say why nothing happened instead of doing nothing.
 function SecureReload.Explain()
-    local why = Refusal()
-    if not why then
-        why = "type /reload"
-        if coverMiss then why = why .. " (cover: " .. coverMiss .. ")"
-        elseif reloadButton then
-            local b = reloadButton
-            local function R(f)
-                if not f then return "nil" end
-                local ok, txt = pcall(function()
-                    local s = f:GetEffectiveScale() / UIParent:GetEffectiveScale()
-                    return ("%.0f,%.0f %.0fx%.0f %s/%d"):format((f:GetLeft() or -1) * s, (f:GetBottom() or -1) * s,
-                        (f:GetWidth() or 0) * s, (f:GetHeight() or 0) * s, tostring(f:GetFrameStrata()), f:GetFrameLevel() or -1)
-                end)
-                return ok and txt or "?"
-            end
-            local focus = "?"
-            local foci = type(GetMouseFoci) == "function" and GetMouseFoci() or nil
-            local top = type(foci) == "table" and foci[1] or (type(GetMouseFocus) == "function" and GetMouseFocus()) or nil
-            if top then focus = (top == b and "cover") or (top.GetName and top:GetName()) or tostring(top:GetObjectType()) end
-            why = why .. (" (cover %s %s; mouse on %s; last %s)"):format(tostring(b:IsShown()), R(b), focus, R(lastCovered))
-        end
+    -- Called from the click of one of our own Reload buttons. WoW Forever lets addon code reload inside a click or a
+    -- keypress, never from an event or a timer, and only when the reload is asked for first in that click (the same
+    -- finding EllesmereUI ships with). So ReloadUI comes before anything else here. Combat is still refused: a reload
+    -- mid-fight costs the fight.
+    if Combat() then Refuse("in combat") return end
+    local reload = _G.ReloadUI or (C_UI and C_UI.Reload)
+    if type(reload) == "function" then
+        reload()
+        return
     end
-    Refuse(why)
+    Refuse("type /reload")
 end
 
 local reloadEvents = CreateFrame("Frame")
@@ -973,12 +941,8 @@ Ensure()
 -- /fsreload: kept so the old habit gets an answer. It cannot reload (addon code cannot), so it says how.
 SLASH_FSRELOAD1 = "/fsreload"
 SlashCmdList["FSRELOAD"] = function()
-    local why = Refusal()
-    if why then
-        Say("reload refused -- " .. why .. ".")
-    else
-        Say("type /reload (this client only reloads from a typed or secure command).")
-    end
+    -- A slash command runs inside the Enter keypress, so it may reload.
+    SecureReload.Explain()
 end
 
 -------------------------------------------------------------------------------
