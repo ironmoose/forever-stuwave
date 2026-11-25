@@ -113,6 +113,54 @@ function Chat.ApplyAllFontSizes()
 end
 
 -------------------------------------------------------------------------------
+-- Background opacity
+-------------------------------------------------------------------------------
+
+-- The Chat page's Background opacity (chat.bgAlpha, percent): the alpha of the panel's dark fill only. The text, the
+-- tab strip, the term bar and the border keep their own alphas. 85 is today's fill (COLOR_TERM_BG's alpha), so an
+-- untouched profile paints exactly what it did before.
+Chat.BG = {
+    key = "chat.bgAlpha", min = 0, max = 100, step = 1,
+    default = math.floor(Chat.COLOR_TERM_BG[4] * 100 + 0.5),
+}
+
+-- The fill's alpha for the setting now; the colour's own alpha for the default or anything that is not a number.
+local function BackgroundAlpha()
+    local value
+    if FS.Config and FS.Config.Get then
+        local ok, stored = pcall(FS.Config.Get, Chat.BG.key)
+        if ok then value = stored end
+    end
+    if type(value) ~= "number" or value ~= value or value == Chat.BG.default then return Chat.COLOR_TERM_BG[4] end
+    return math.max(Chat.BG.min, math.min(Chat.BG.max, value)) / 100
+end
+
+-- Paints every skinned window's fill at the alpha now. Out of combat or in it: the backdrop is our own frame.
+function Chat.ApplyBackground()
+    local color = Chat.COLOR_TERM_BG
+    local alpha = BackgroundAlpha()
+    for _, frame in ipairs(Chat.skinnedChatFrames or {}) do
+        local fill = frame.fsBackdropFill
+        if fill and fill.SetVertexColor then fill:SetVertexColor(color[1], color[2], color[3], alpha) end
+    end
+end
+
+if FS.Config and FS.Config.RegisterDefault then
+    FS.Config.RegisterDefault(Chat.BG.key, Chat.BG.default)
+    FS.Config.OnChange(Chat.BG.key, Chat.ApplyBackground)
+end
+
+-- The fill texture of a backdrop skinned by Theme.SkinPanel: the first region of the chrome it returns.
+local function FillOf(chrome)
+    if type(chrome) ~= "table" then return nil end
+    local want = FS.Theme.SLICE_FILL_TEXTURE
+    for _, region in ipairs(chrome) do
+        if want and region.GetTexture and region:GetTexture() == want then return region end
+    end
+    return chrome[1]
+end
+
+-------------------------------------------------------------------------------
 -- Frame backdrop
 -------------------------------------------------------------------------------
 
@@ -231,7 +279,7 @@ function Chat.SkinChatFrame(frame, index)
     frame.fsBackdrop = backdrop
 
     if SkinPanel then
-        SkinPanel(backdrop, {
+        local chrome = SkinPanel(backdrop, {
             -- Our own frame, built empty a few lines up: there is no Blizzard
             -- art on it to strip, and it draws its own scanline and term bar
             -- below, so both are off here.
@@ -244,6 +292,7 @@ function Chat.SkinChatFrame(frame, index)
             glowSize = 6,
             glowAlpha = 0.3,
         })
+        frame.fsBackdropFill = FillOf(chrome)
 
         -- Faint inner cyan tint layered on top of the near-black terminal
         -- fill, matching the mock's .term inner wash; same chamfer as the
@@ -289,6 +338,7 @@ function Chat.SkinChatFrame(frame, index)
     -- at once. An empty table is a silent no-op, which is why a loop that had
     -- never run looked like working code.
     Chat.skinnedChatFrames[#Chat.skinnedChatFrames + 1] = frame
+    Chat.ApplyBackground()
 
     frame.fsChatSkin = true
     Chat.SkinChatScrollBar(frame)
