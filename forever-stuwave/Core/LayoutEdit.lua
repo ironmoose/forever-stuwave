@@ -1517,6 +1517,93 @@ function LayoutEdit.Select(id)
     RefreshPosition(changed)
 end
 
+-- The chat handle's resize corner: drag the bottom right square and the window's top left stays put while its size follows
+-- the pointer. The size is Chat.SetSize (the two settings the Chat page sliders write), so a drag and a slider cannot
+-- disagree; the top left stays fixed by moving the centre anchor half the size change.
+local CORNER = 10
+local resizing
+
+local function ChatCanResize()
+    return FS.Chat and type(FS.Chat.SetSize) == "function" and type(FS.Chat.GetSize) == "function" and FS.Chat.SIZE
+end
+
+local function CornerSize(handle)
+    local x, y = GetCursorPosition()
+    local es = UIParent:GetEffectiveScale()
+    local left, top = handle.cornerLeft, handle.cornerTop
+    if not (x and y and es and es > 0 and left and top) then return nil end
+    local unit = FS.Layout.Scale()
+    local spec = FS.Chat.SIZE
+    local w = math.floor((x / es - left) / unit + 0.5)
+    local h = math.floor((top - y / es) / unit + 0.5)
+    return math.max(spec.w.min, math.min(spec.w.max, w)), math.max(spec.h.min, math.min(spec.h.max, h))
+end
+
+local function SeatCornerPreview(handle, w, h)
+    local unit = FS.Layout.Scale()
+    handle:SetSize(math.max(w * unit, MIN_HANDLE), math.max(h * unit, MIN_HANDLE))
+    handle:ClearAllPoints()
+    handle:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", handle.cornerLeft, handle.cornerTop)
+    SeatOutline(handle)
+end
+
+local function StopCorner(handle, commit)
+    local corner = handle.corner
+    if corner then corner:SetScript("OnUpdate", nil) end
+    if resizing ~= handle then return end
+    resizing = nil
+    local w, h = handle.cornerW, handle.cornerH
+    handle.cornerW, handle.cornerH = nil, nil
+    local L = FS.Layout.chat
+    local oldW, oldH = FS.Chat.GetSize()
+    if commit and w and h and (w ~= oldW or h ~= oldH) and type(L) == "table" then
+        local x, y = L.x + (w - oldW) / 2, L.y - (h - oldH) / 2
+        FS.Chat.SetSize(w, h)
+        Commit("chat", x, y)
+    end
+    SyncHandle("chat")
+end
+
+local function NewCorner(handle)
+    local corner = CreateFrame("Button", nil, handle)
+    corner:SetSize(CORNER, CORNER)
+    corner:SetPoint("BOTTOMRIGHT", handle, "BOTTOMRIGHT", 0, 0)
+    corner:SetFrameLevel(handle:GetFrameLevel() + 2)
+    corner:EnableMouse(true)
+    corner:RegisterForDrag("LeftButton")
+    corner.fill = corner:CreateTexture(nil, "OVERLAY")
+    corner.fill:SetAllPoints(corner)
+    SnapToPixels(corner.fill)
+    local r, g, b = Cyan()
+    corner.fill:SetColorTexture(r, g, b, 0.9)
+    corner:SetScript("OnEnter", function(self) self.fill:SetColorTexture(1, 1, 1, 1) end)
+    corner:SetScript("OnLeave", function(self) self.fill:SetColorTexture(r, g, b, 0.9) end)
+    corner:SetScript("OnDragStart", function(self)
+        if not (editing and ChatCanResize()) then return end
+        LayoutEdit.CloseMenu()
+        ReleaseFields()
+        LayoutEdit.Select("chat")
+        local left, top = handle:GetLeft(), handle:GetTop()
+        if not (left and top) then return end
+        handle.cornerLeft, handle.cornerTop = left, top
+        resizing = handle
+        local elapsed = 0
+        self:SetScript("OnUpdate", function(_, dt)
+            elapsed = elapsed + (dt or 0)
+            if elapsed < SPEC.LIVE_EVERY then return end
+            elapsed = 0
+            local w, h = CornerSize(handle)
+            if not w then return end
+            handle.cornerW, handle.cornerH = w, h
+            SeatCornerPreview(handle, w, h)
+        end)
+    end)
+    corner:SetScript("OnDragStop", function() StopCorner(handle, true) end)
+    corner:SetScript("OnHide", function() StopCorner(handle, false) end)
+    corner:SetScript("OnMouseDown", function() if editing then LayoutEdit.Select("chat") end end)
+    return corner
+end
+
 local function NewHandle(def)
     local id = def.id
     local handle = CreateFrame("Frame", nil, UIParent)
@@ -1545,6 +1632,7 @@ local function NewHandle(def)
     handle.label:SetPoint("CENTER", handle, "CENTER")
     handle.label:SetText(def.label)
     handle.labelOutside = def.raid == true
+    if id == "chat" then handle.corner = NewCorner(handle) end
 
     handle:SetScript("OnMouseDown", function()
         if editing then LayoutEdit.Select(id) end
@@ -2147,6 +2235,14 @@ if FS.Config and type(FS.Config.OnChange) == "function" then
     for _, key in ipairs({ "layout.grid", "layout.snap", "layout.showGrid", "layout.posUnit" }) do
         FS.Config.OnChange(key, settingChanged)
     end
+    -- The chat window's size (the Chat page sliders, or the corner handle): the handle follows the saved size.
+    local function chatSizeChanged()
+        if not editing or resizing then return end
+        if FS.Chat and type(FS.Chat.SyncSize) == "function" then pcall(FS.Chat.SyncSize) end
+        if handles.chat and handles.chat:IsShown() then SyncHandle("chat") end
+        RefreshPosition(true)
+    end
+    for _, key in ipairs({ "chat.w", "chat.h" }) do FS.Config.OnChange(key, chatSizeChanged) end
 end
 
 -- A UI scale or resolution change moves every pixel: the handles, the panels' whole pixel rows and the grid's lines.

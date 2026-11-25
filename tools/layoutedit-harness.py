@@ -1044,6 +1044,75 @@ function T.the_chat_reseats_through_the_chat_modules_own_seat_function()
     eq(seen, 2, "a reset goes through it too")
 end
 
+local function fakeChat()
+    local size = { w = FS.Layout.chat.w, h = FS.Layout.chat.h }
+    local calls = {}
+    FS.Chat = { windowState = "normal", ReassertPrimaryChat = function() end,
+        SIZE = { w = { min = 300, max = 1000 }, h = { min = 150, max = 700 } } }
+    function FS.Chat.GetSize() return size.w, size.h end
+    function FS.Chat.SyncSize() FS.Layout.chat.w, FS.Layout.chat.h = size.w, size.h end
+    function FS.Chat.SetSize(w, h)
+        calls[#calls + 1] = { w, h }
+        size.w, size.h = w, h
+        FS.Chat.SyncSize()
+        return true
+    end
+    return calls, size
+end
+
+function T.the_chat_corner_resizes_through_chat_setsize_and_keeps_the_top_left()
+    edit()
+    local frame = seat("chat")
+    local calls, size = fakeChat()
+    FS.LayoutEdit.Enter()
+    setSnap(false)
+    local h = FS.LayoutEdit.GetHandle("chat")
+    eq(h.corner ~= nil, true, "the chat handle has a corner")
+    local left, top = h:GetLeft(), h:GetTop()
+    local unit = FS.Layout.Scale()
+    local oldW, oldH, L = size.w, size.h, FS.Layout.chat
+    local oldX, oldY = L.x, L.y
+    __cursor = { left + 800 * unit, top - 400 * unit }
+    h.corner._scripts.OnDragStart(h.corner)
+    h.corner._scripts.OnUpdate(h.corner, 1)
+    near(h:GetLeft(), left, 1e-6, "the top left stays while dragging")
+    near(h:GetWidth(), 800 * unit, 1e-6, "the handle follows the pointer")
+    eq(#calls, 0, "nothing is stored until the drop")
+    h.corner._scripts.OnDragStop(h.corner)
+    eq(#calls, 1); eq(calls[1][1], 800); eq(calls[1][2], 400)
+    near(FS.Layout.chat.x, oldX + (800 - oldW) / 2, 1e-6, "the centre moved half the change")
+    near(FS.Layout.chat.y, oldY - (400 - oldH) / 2, 1e-6)
+    near(h:GetLeft(), left, 1e-3, "after the drop the top left is still where it was")
+    near(h:GetTop(), top, 1e-3)
+    eq(h.corner._scripts.OnUpdate, nil, "no per frame work after the drop")
+end
+
+function T.the_chat_corner_is_clamped_to_the_slider_range()
+    edit()
+    seat("chat")
+    local calls = fakeChat()
+    FS.LayoutEdit.Enter()
+    setSnap(false)
+    local h = FS.LayoutEdit.GetHandle("chat")
+    __cursor = { h:GetLeft() + 5000, h:GetTop() - 5000 }
+    h.corner._scripts.OnDragStart(h.corner)
+    h.corner._scripts.OnUpdate(h.corner, 1)
+    h.corner._scripts.OnDragStop(h.corner)
+    eq(calls[1][1], 1000); eq(calls[1][2], 700)
+end
+
+function T.a_slider_change_moves_the_chat_handle()
+    edit()
+    seat("chat")
+    local _, size = fakeChat()
+    FS.LayoutEdit.Enter()
+    local h = FS.LayoutEdit.GetHandle("chat")
+    local before = h:GetWidth()
+    size.w = size.w + 100
+    FS.Config.Set("chat.w", size.w)
+    near(h:GetWidth(), before + 100 * FS.Layout.Scale(), 1e-6, "the handle follows the saved width")
+end
+
 function T.a_minimised_or_maximised_chat_has_no_handle()
     edit()
     FS.Chat = { windowState = "min", ReassertPrimaryChat = function() end }
