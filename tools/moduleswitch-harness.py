@@ -521,7 +521,7 @@ function T.the_card_power_button_turns_the_module_back_on()
     errorsClean()
 end
 
--- The Pet bar off card carries a ? (question 180): the game's pet unit frame is Unit frames' to hide, not this switch's.
+-- The Pet bar off card carries a ? (questions 180, 183): the game's pet unit frame comes back while the pet bar is off.
 function T.the_pet_bar_off_card_has_a_help_icon_saying_the_pet_unit_frame_belongs_to_unit_frames()
     local W = msboot({ db = { modules = { ["m.pet"] = false } } })
     W.Open("pet")
@@ -530,7 +530,7 @@ function T.the_pet_bar_off_card_has_a_help_icon_saying_the_pet_unit_frame_belong
     local help = card.fsHelp
     yes(help and help:IsShown(), "a ? on the card")
     local tip = help.fsTip
-    yes(tip:find("pet unit frame", 1, true) and tip:find("Unit frames", 1, true), "the tip names both: " .. tostring(tip))
+    yes(tip:find("pet unit frame", 1, true) and tip:find("comes back", 1, true), "the tip says the game's pet frame comes back: " .. tostring(tip))
     help.scripts.OnEnter(help)
     eq(TOOLTIP.text, tip, "hovering the ? shows it")
     -- seated on the second line, right of where its centred text ends

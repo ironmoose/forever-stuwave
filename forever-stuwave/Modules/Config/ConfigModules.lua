@@ -293,10 +293,10 @@ end
 local card
 local held       -- the tab page the card hides
 
--- A module whose off card adds one thing: a ? after the second line carries it. The game's pet unit frame is hidden by Unit
--- frames, not by the pet bar, so turning the pet bar off leaves it hidden while Unit frames is on.
+-- A module whose off card adds one thing: a ? after the second line carries it. The game's pet unit frame is hidden by the
+-- pet bar, so turning the pet bar off brings it back.
 local OFF_NOTES = {
-    ["m.pet"] = "The game's own pet unit frame is handled by Unit frames, not by this switch.",
+    ["m.pet"] = "The game's own pet unit frame comes back while this is off.",
 }
 local HELP_GAP_CARD = 6
 
