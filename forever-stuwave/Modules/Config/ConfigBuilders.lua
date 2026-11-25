@@ -93,8 +93,37 @@ local function RowReason(o)
     return false
 end
 
+-- The default as the row itself would show it ("on", "10 px", "Automatic"), or nil when the row has no registered default
+-- to look up (a get / set row, a colour) and the plain changed line has to do.
+local function DefaultText(entry)
+    local key = entry.cfgKey
+    local default = key and Config.GetDefault(key)
+    if default == nil or type(default) == "table" then return nil end
+    local o = entry.opts or {}
+    if type(default) == "boolean" then
+        if entry.inverted then default = not default end
+        return default and "on" or "off"
+    end
+    if entry.kind == "slider" then
+        local fmt = o.fmt
+        local ok, text = pcall(function()
+            if type(fmt) == "function" then return fmt(default) end
+            return (fmt or "%s"):format(default)
+        end)
+        return ok and tostring(text) or tostring(default)
+    elseif entry.kind == "segmented" then
+        for _, option in ipairs(o.options or {}) do
+            if option.value == default then return tostring(option.text) end
+        end
+    elseif entry.kind == "dropdown" and o.text then
+        local ok, text = pcall(o.text, default)
+        if ok then return tostring(text) end
+    end
+    return tostring(default)
+end
+
 -- The ? tip of a row: the plain tip, or (when the row is off) its label, the reason and the tip, and a last line when the
--- value differs from its default.
+-- value differs from its default ("Changed. Default: <value>").
 function I.RefreshTip(row)
     local icon, entry = row.fsHelp, row.fsEntry
     if not (icon and entry) then return end
@@ -107,7 +136,10 @@ function I.RefreshTip(row)
     end
     if o.tip then parts[#parts + 1] = o.tip end
     local changed = I.EntryChanged(entry)
-    if changed then parts[#parts + 1] = "Changed from the default." end
+    if changed then
+        local default = DefaultText(entry)
+        parts[#parts + 1] = default and ("Changed. Default: " .. default) or "Changed from the default."
+    end
     icon.fsTip = table.concat(parts, "\n")
     icon:SetShown(off or o.tip ~= nil or changed)
     icon:SetAlpha(1)
