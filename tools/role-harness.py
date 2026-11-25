@@ -553,6 +553,390 @@ check(R.SOURCE_TEXT.talents == "from talents" and R.SOURCE_TEXT.group == "from g
 ]
 
 
+# ---- the page tests: the real Role.lua and PlateThreat.lua under the config window mock ------------------------------
+
+def proto_roles() -> dict:
+    """The role page of proto-pages.js: {tab: {"label": .., "sections": [{title, role, hidden, tip, rows}]}}."""
+    src = PROTO.read_text(encoding="utf-8")
+    start = src.index(" {key:'role',label:'Roles',tabs:[")
+    end = src.index("\n {key:'party'", start)
+    block = src[start:end]
+
+    def text(field: str, chunk: str):
+        m = re.search(rf"(?:^|,){field}:'((?:[^'\\]|\\.)*)'", chunk)
+        return m.group(1).replace("\\'", "'") if m else None
+
+    tabs = {}
+    for tab in re.split(r"\n  \{key:'", block)[1:]:
+        key = tab.split("'", 1)[0]
+        label = re.search(r"label:'([^']*)'", tab).group(1)
+        sections = []
+        for sec in re.split(r"\{t:'", tab)[1:]:
+            title = sec.split("'", 1)[0]
+            head, _, body = sec.partition("rows:[")
+            section = {"title": title, "role": text("role", head), "hidden": "hidden:1" in head, "tip": text("tip", head), "rows": []}
+            for m in re.finditer(r"\{ty:'(\w+)',([^{}]*)\}", body):
+                ty, rest = m.groups()
+                row = {"ty": ty}
+                for field in ("k", "l", "tip", "needs", "nl", "u"):
+                    value = text(field, rest)
+                    if value is not None:
+                        row[field] = value
+                d = re.search(r"(?:^|,)d:('[^']*'|[0-9.]+|true|false)", rest)
+                if d:
+                    raw = d.group(1)
+                    row["d"] = raw.strip("'") if raw.startswith("'") else (raw == "true" if raw in ("true", "false") else float(raw))
+                for field in ("min", "max", "st"):
+                    f = re.search(rf"(?:^|,){field}:(\d+)", rest)
+                    if f:
+                        row[field] = int(f.group(1))
+                row["sub"] = bool(re.search(r"(?:^|,)sub:1", rest))
+                row["nodot"] = bool(re.search(r"(?:^|,)nodot:1", rest))
+                o = re.search(r"(?:^|,)o:(\[[^\]]*\])", rest)
+                if o:
+                    row["o"] = re.findall(r"'([^']*)'", o.group(1))
+                c = re.search(r"(?:^|,)c:\[(\[.*\])\]", rest)
+                if c:
+                    row["c"] = [list(pair) for pair in re.findall(r"\['(#[0-9a-f]{6})','([^']*)'\]", c.group(1))]
+                section["rows"].append(row)
+            sections.append(section)
+        tabs[key] = {"label": label, "sections": sections}
+    return tabs
+
+
+# Stored values of the prototype's option text.
+STORED = {"Auto": "auto", "Off": "off", "Aggro %": "pct", "Lead": "lead", "None": "none", "Percent": "percent",
+          "Missing": "missing"}
+
+PAGE_CHECKS = r"""
+local function roles(opts)
+    opts = opts or {}
+    return function()
+        -- the config window mock does not move a frame to a new parent: this does, as the client does
+        getmetatable(UIParent).SetParent = function(self, parent) self.parent = parent end
+        FS.IsSecret = function() return false end
+        UnitClass = function() return "Shaman", opts.class or "SHAMAN" end
+        UnitGroupRolesAssigned = function() return opts.group or "NONE" end
+        if not opts.noRole then assert(load(__ROLE, "@Core/Role.lua"))("forever-stuwave", FS) end
+        if not opts.noThreat then assert(load(__THREAT, "@Modules/Nameplates/PlateThreat.lua"))("forever-stuwave", FS) end
+    end
+end
+local TABS = { "tank", "healer", "melee", "ranged" }
+local function openAll(W) for _, tab in ipairs(TABS) do W.Open("role", tab) end end
+local function bandOf()
+    for _, o in ipairs(ALL) do if o.fsBand and o:IsShown() then return o end end
+end
+local function sections()
+    local out = {}
+    for _, o in ipairs(ALL) do
+        local sec = o.fsSection
+        if sec and o:IsVisible() then out[#out + 1] = { title = sec.title, meta = sec.meta:GetText(), color = sec.meta.themeColor } end
+    end
+    return out
+end
+local function hex(c)
+    return string.format("#%02x%02x%02x", math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5), math.floor(c[3] * 255 + 0.5))
+end
+local function arrows()
+    local strip = FS.ConfigWindow.I.ui.strips.role
+    local out = {}
+    for _, b in ipairs(strip.fsButtons) do
+        if b.fsRoleArrow and b.fsRoleArrow:IsShown() then out[#out + 1] = b.fsTabKey end
+    end
+    return table.concat(out, ",")
+end
+local function entries(tab)
+    local out = {}
+    for _, e in ipairs(FS.ConfigWindow.Rows()) do if e.page == "role" and (tab == nil or e.tab == tab) then out[#out + 1] = e end end
+    return out
+end
+
+function T.the_roles_page_has_every_prototype_row_with_its_label_key_range_default_and_tip()
+    local W = boot({ preWindow = roles() })
+    local seen, swatches = 0, 0
+    for _, tab in ipairs(__PROTO) do
+        W.Open("role", tab.key)
+        local at = 0
+        for _, sec in ipairs(tab.sections) do
+            if not sec.hidden then
+                for _, want in ipairs(sec.rows) do
+                    if want.ty == "swatch" then
+                        swatches = swatches + 1
+                        local found
+                        for _, e in ipairs(entries(tab.key)) do
+                            if e.kind == "swatch" and e.section == sec.title then found = e end
+                        end
+                        if not found then error("no swatch row in " .. tab.key .. " / " .. sec.title) end
+                        eq(found.label, want.l, "swatch label")
+                        eq(found.sub, true, "swatch sub")
+                        eq(found.needs, want.needs, "swatch needs")
+                        local have = FS.PlateThreat.SWATCHES[tab.key]
+                        eq(#have, #want.c, tab.key .. " swatch chips")
+                        for i, pair in ipairs(want.c) do
+                            eq(hex(have[i][1]), pair[1], tab.key .. " chip " .. i .. " colour")
+                            eq(have[i][2], pair[2], tab.key .. " chip " .. i .. " word")
+                            yes(findText(pair[2], found.row), tab.key .. " shows no chip " .. pair[2])
+                        end
+                    else
+                        seen = seen + 1
+                        local e = W.RowByKey(want.k, "role")
+                        if not e then error("no row " .. want.k .. " (" .. want.l .. ")") end
+                        eq(e.label, want.l, want.k .. " label")
+                        eq(e.tab, tab.key, want.k .. " tab")
+                        eq(e.section, sec.title, want.k .. " section")
+                        eq(e.sub, want.sub, want.k .. " sub")
+                        eq(e.needs, want.needs, want.k .. " needs")
+                        if want.ty == "sl" then
+                            eq(e.min, want.min, want.k .. " min"); eq(e.max, want.max, want.k .. " max")
+                            eq(FS.Config.Get(want.k), want.d, want.k .. " default")
+                            eq(e.row.fsUnit:GetText(), want.u, want.k .. " unit")
+                            eq(FS.Role.SETTINGS[want.k].step, want.st, want.k .. " step")
+                        elseif want.ty == "sw" then
+                            eq(FS.Config.Get(want.k), want.d, want.k .. " default")
+                            eq(e.kind, "switch", want.k .. " kind")
+                        else
+                            eq(FS.Config.Get(want.k), want.stored, want.k .. " default")
+                            local have = texts(e.row)
+                            for _, option in ipairs(want.o) do
+                                local found = false
+                                for _, t in ipairs(have) do if t == option then found = true end end
+                                yes(found, want.k .. " has no option " .. option)
+                            end
+                        end
+                        if want.tip then eq(e.tip, want.tip, want.k .. " tip") end
+                    end
+                end
+            end
+        end
+    end
+    yes(seen >= 16, "only " .. seen .. " prototype rows were checked")
+    eq(swatches, 3, "three swatch rows")
+end
+
+function T.the_sections_of_each_tab_are_the_prototype_sections_in_order()
+    local W = boot({ preWindow = roles() })
+    for _, tab in ipairs(__PROTO) do
+        W.Open("role", tab.key)
+        local want, have = {}, {}
+        for _, sec in ipairs(tab.sections) do if not sec.hidden then want[#want + 1] = sec.title end end
+        for _, s in ipairs(sections()) do have[#have + 1] = s.title end
+        eq(table.concat(have, ","), table.concat(want, ","), tab.key .. " sections")
+        for _, sec in ipairs(tab.sections) do
+            if sec.tip then
+                local found
+                for _, o in ipairs(ALL) do
+                    local s = o.fsSection
+                    if s and o:IsVisible() and s.title == sec.title then found = s.tip end
+                end
+                eq(found, sec.tip, sec.title .. " section tip")
+            end
+        end
+    end
+end
+
+function T.every_tab_carries_the_pinned_role_bar_with_the_five_picks_and_one_registry_row()
+    local W = boot({ preWindow = roles() })
+    for _, tab in ipairs(TABS) do
+        W.Open("role", tab)
+        local band = bandOf()
+        yes(band, "no band on " .. tab)
+        yes(findText("YOUR ROLE", band), tab .. " bar has no YOUR ROLE label")
+        local have = {}
+        for _, t in ipairs(texts(band)) do have[#have + 1] = t end
+        local joined = table.concat(have, "|")
+        for _, option in ipairs({ "Auto", "Tank", "Healer", "Melee", "Ranged" }) do
+            yes(joined:find(option, 1, true), tab .. " bar has no " .. option)
+        end
+        local tip
+        for _, o in ipairs(ALL) do if o.fsTip and under(band, o) then tip = o.fsTip end end
+        yes(tip and tip:find("Auto uses your group role", 1, true), tab .. " bar is not explained by the prototype tip")
+        yes(tip:find("Saved per character.", 1, true), "the prototype's last sentence")
+    end
+    local mine = 0
+    for _, e in ipairs(W.Rows()) do if e.page == "role" and e.key == "role" then mine = mine + 1 end end
+    eq(mine, 1, "Your role is one row for search")
+    local e = W.RowByKey("role", "role")
+    eq(e.label, "Your role"); eq(e.nodot, true, "the pick is not a changed setting")
+end
+
+function T.the_role_bar_is_not_a_row_of_the_scrolling_page()
+    local W = boot({ preWindow = roles() })
+    W.Open("role", "tank")
+    local band = bandOf()
+    local e = W.RowByKey("role", "role")
+    yes(under(band, e.row), "the bar row lives in the band")
+    local rec = FS.ConfigWindow.I.ui.tabRec
+    for _, item in ipairs(rec.page.fsHolder.fsFlow) do
+        yes(item.frame ~= e.row, "the bar row is still in the flow")
+    end
+end
+
+function T.the_bar_shows_what_auto_chose_and_a_pick_replaces_it()
+    local W = boot({ preWindow = roles() })
+    W.Open("role", "tank")
+    local band = bandOf()
+    yes(findText("MELEE, FROM CLASS", band), "Auto with no other reading says what chose it")
+    yes(click("Healer", band), "the Healer pick did not click")
+    eq(FS.Role.Pick(), "healer"); eq((FS.Role.Current()), "healer")
+    no(findText("MELEE, FROM CLASS", band), "the summary stays after a hand pick")
+    no(hasText(band, "FROM"), "no summary on a pick")
+    yes(click("Auto", band))
+    eq(FS.Role.Pick(), "auto")
+    yes(findText("MELEE, FROM CLASS", band), "the summary is back on Auto")
+end
+
+function T.the_bar_tip_says_why_auto_chose_what_it_chose()
+    local W = boot({ preWindow = roles() })
+    W.Open("role", "melee")
+    local band = bandOf()
+    local tip
+    for _, o in ipairs(ALL) do if o.fsTip and under(band, o) then tip = o.fsTip end end
+    yes(tip:find(FS.Role.Why(), 1, true), "the tip does not carry Role.Why()")
+    FS.Role.SetPick("tank")
+    for _, o in ipairs(ALL) do if o.fsTip and under(band, o) then tip = o.fsTip end end
+    yes(tip:find("You picked Tank by hand.", 1, true), "the tip did not follow the pick")
+end
+
+function T.a_section_is_tagged_your_role_or_the_role_it_is_for()
+    local W = boot({ preWindow = roles() })
+    local C = FS.ConfigWindow.C
+    W.Open("role", "tank")
+    for _, s in ipairs(sections()) do
+        eq(s.meta, "TANK ONLY", s.title); eq(s.color, C.amber, s.title .. " colour")
+    end
+    W.Open("role", "healer")
+    for _, s in ipairs(sections()) do eq(s.meta, "HEALER ONLY", s.title) end
+    W.Open("role", "melee")
+    for _, s in ipairs(sections()) do
+        eq(s.meta, "YOUR ROLE", s.title); eq(s.color, C.cyan, s.title .. " colour")
+    end
+    W.Open("role", "ranged")
+    for _, s in ipairs(sections()) do eq(s.meta, "RANGED ONLY", s.title) end
+end
+
+function T.a_role_change_retags_the_sections_and_moves_the_arrow_at_once()
+    local W = boot({ preWindow = roles() })
+    W.Open("role", "tank")
+    eq(arrows(), "melee", "the arrow starts on the Melee tab (a Shaman by class)")
+    FS.Role.SetPick("tank")
+    for _, s in ipairs(sections()) do eq(s.meta, "YOUR ROLE", s.title) end
+    eq(arrows(), "tank")
+    FS.Role.SetPick("healer")
+    for _, s in ipairs(sections()) do eq(s.meta, "TANK ONLY", s.title) end
+    eq(arrows(), "healer")
+    W.Open("role", "healer")
+    for _, s in ipairs(sections()) do eq(s.meta, "YOUR ROLE", s.title) end
+    FS.Role.SetPick("auto")
+    eq(arrows(), "melee", "back on Auto")
+end
+
+function T.the_tab_arrow_is_a_small_cyan_mark_in_the_tab_and_only_one_shows()
+    local W = boot({ preWindow = roles() })
+    W.Open("role", "tank")
+    local strip = FS.ConfigWindow.I.ui.strips.role
+    local shown = 0
+    for _, b in ipairs(strip.fsButtons) do
+        yes(b.fsRoleArrow, "every tab has an arrow object")
+        eq(b.fsRoleArrow:GetText(), "<")
+        eq(b.fsRoleArrow.themeColor, FS.ConfigWindow.C.cyan)
+        if b.fsRoleArrow:IsShown() then shown = shown + 1 end
+    end
+    eq(shown, 1)
+end
+
+function T.the_rows_of_another_role_stay_editable()
+    local W = boot({ preWindow = roles() })
+    W.Open("role", "tank")
+    eq(FS.Config.Get("tank.aggro"), true)
+    yes(press("Aggro colours"), "the tank's switch did not press while the role is melee")
+    eq(FS.Config.Get("tank.aggro"), false)
+    yes(press("Lost aggro"))
+    eq(FS.Config.Get("tank.lost"), false)
+end
+
+function T.dependent_rows_follow_their_switch()
+    local W = boot({ preWindow = roles() })
+    W.Open("role", "tank")
+    local sound, colours = W.RowByKey("tank.lost.snd", "role"), nil
+    for _, e in ipairs(entries("tank")) do if e.kind == "swatch" then colours = e end end
+    no(sound.disabled, "the sound row starts on")
+    no(colours.disabled, "the colours row starts on")
+    FS.Config.Set("tank.lost", false)
+    yes(W.RowByKey("tank.lost.snd", "role").disabled, "Sound follows Lost aggro")
+    FS.Config.Set("tank.aggro", false)
+    yes(colours.disabled, "Colours follows Aggro colours")
+    yes(colours.why and colours.why:find("Aggro colours", 1, true), "the reason names the switch")
+    W.Open("role", "melee")
+    FS.Config.Set("melee.warn", false)
+    yes(W.RowByKey("melee.pct", "role").disabled, "Warn at follows Warn near the tank")
+    FS.Config.Set("melee.aggro", false)
+    local swatch
+    for _, e in ipairs(entries("melee")) do if e.kind == "swatch" then swatch = e end end
+    yes(swatch.disabled, "the melee colours follow their switch")
+end
+
+function T.the_health_text_row_says_it_is_not_applied_yet()
+    local W = boot({ preWindow = roles() })
+    W.Open("role", "healer")
+    local e = W.RowByKey("heal.hp", "role")
+    yes(e.disabled, "the row does nothing yet and is greyed")
+    yes(e.why and e.why:find("Not applied yet", 1, true), "the reason says so")
+    eq(FS.Config.Get("heal.hp"), "missing")
+end
+
+function T.the_threat_text_and_warn_rows_write_their_keys()
+    local W = boot({ preWindow = roles() })
+    W.Open("role", "tank")
+    yes(click("Aggro %"), "Aggro % did not click")
+    eq(FS.Config.Get("tank.threat"), "pct")
+    yes(click("Lead"))
+    eq(FS.Config.Get("tank.threat"), "lead")
+    yes(click("Off"))
+    eq(FS.Config.Get("tank.threat"), "off")
+    W.Open("role", "ranged")
+    FS.Config.Set("ranged.pct", 100)
+    eq(W.RowByKey("ranged.pct", "role").row.fsEdit:GetText(), "100")
+end
+
+function T.the_page_leaves_out_what_the_modules_do_not_offer()
+    local W = boot({ preWindow = roles({ noThreat = true }) })
+    openAll(W)
+    for _, e in ipairs(entries()) do no(e.kind == "swatch", "a swatch row without the plate threat module") end
+    yes(W.RowByKey("tank.aggro", "role"), "the switch stays")
+    W = boot({ preWindow = roles({ noRole = true, noThreat = true }) })
+    openAll(W)
+    eq(#entries(), 0, "no role module, no rows")
+    no(bandOf(), "no role module, no bar")
+    eq(arrows(), "", "no arrow without a role")
+end
+
+function T.search_finds_the_role_rows_and_the_bar_jump_does_not_fail()
+    local W = boot({ preWindow = roles() })
+    openAll(W)
+    local e = W.RowByKey("role", "role")
+    yes(e, "the bar row is in the registry")
+    W.Open("role", "melee", "role")
+    eq(#__errors, 0, "a jump to the bar row forwarded an error")
+    local seen = {}
+    for _, row in ipairs(entries()) do seen[row.label] = (seen[row.label] or 0) + 1 end
+    eq(seen["Dim target out of melee range"], 1); eq(seen["Dim target out of spell range"], 1)
+    eq(seen["Your role"], 1)
+end
+
+function T.the_page_text_has_no_dash_characters()
+    local W = boot({ preWindow = roles() })
+    openAll(W)
+    local bad = string.char(0xE2, 0x80, 0x94)
+    local bad2 = string.char(0xE2, 0x80, 0x93)
+    for _, o in ipairs(ALL) do
+        local t = o.kind == "FontString" and o:GetText() or o.fsTip
+        if type(t) == "string" then
+            yes(not t:find(bad, 1, true) and not t:find(bad2, 1, true), "a dash in: " .. t)
+        end
+    end
+end
+"""
+
 # ---- python level checks -------------------------------------------------------------------------------------------
 
 DASHES = (chr(0x2014), chr(0x2013))
@@ -622,8 +1006,62 @@ def check_party_frames_local_count_did_not_grow() -> list[str]:
     return []
 
 
+BASE = load("configwindow_harness", "configwindow-harness.py")
+
+
+def run_page_checks(role_source: str, threat_source: str, rows: dict) -> int:
+    tabs = []
+    for key, tab in rows.items():
+        sections = []
+        for sec in tab["sections"]:
+            wanted = []
+            for item in sec["rows"]:
+                item = dict(item)
+                if item["ty"] == "seg" and "d" in item:
+                    item["stored"] = STORED[item["d"]]
+                wanted.append(item)
+            sections.append({"title": sec["title"], "hidden": sec["hidden"], "tip": sec["tip"], "rows": wanted})
+        tabs.append({"key": key, "label": tab["label"], "sections": sections})
+    names = sorted(re.findall(r"^function T\.([a-z0-9_]+)\(", PAGE_CHECKS, re.M))
+    original = BASE.CHECKS
+    BASE.CHECKS = original.replace("__checks = T", PAGE_CHECKS + "\n__checks = T")
+    failed = 0
+    try:
+        for name in names:
+            try:
+                lua = BASE.boot()
+                lua.globals().__ROLE = role_source
+                lua.globals().__THREAT = threat_source
+                lua.globals().__PROTO = BASE.to_lua(lua, tabs)
+                lua.eval("__checks")[name]()
+                leaked = list(lua.eval("__errors").values())
+                if leaked:
+                    raise LuaError(f"errors were forwarded to the error handler: {leaked}")
+                print(f"ok    {name}")
+            except LuaError as err:
+                failed += 1
+                print(f"FAIL  {name}\n      {' '.join(str(err).splitlines()[:3])[:700]}")
+    finally:
+        BASE.CHECKS = original
+    return failed
+
+
+def check_page_text_stays_neutral() -> list[str]:
+    """Client visible text keeps to the neutral wording."""
+    problems = []
+    terms = re.compile(r"(?<![a-z])bots?(?![a-z])|harness|pixel|bridge|beacon|python|automat|probe|recon", re.I)
+    for number, line in enumerate(PAGE.read_text(encoding="utf-8").splitlines(), 1):
+        if line.lstrip().startswith("--"):
+            continue
+        for literal in re.findall(r'"((?:[^"\\]|\\.)*)"', line):
+            if terms.search(literal):
+                problems.append(f"{PAGE.name}:{number}: {literal[:60]}")
+    return problems
+
+
 def main() -> int:
-    role_src = ROLE.read_text(encoding="utf-8")
+    role_source = role_src = ROLE.read_text(encoding="utf-8")
+    threat_source = THREAT.read_text(encoding="utf-8")
     talent_src = TALENT_ART.read_text(encoding="utf-8")
     failures = 0
     total = 0
@@ -640,6 +1078,7 @@ def main() -> int:
         ("no_dash_characters_in_the_role_files", check_no_dashes()),
         ("party_frames_reads_the_healer_switches", check_party_frames_gates()),
         ("party_frames_local_count", check_party_frames_local_count_did_not_grow()),
+        ("roles_page_text_uses_neutral_words", check_page_text_stays_neutral()),
     ):
         total += 1
         if problems:
@@ -647,6 +1086,13 @@ def main() -> int:
             print(f"FAIL  {label}\n      " + "\n      ".join(problems))
         else:
             print(f"ok    {label}")
+    rows = proto_roles()
+    if sorted(rows) != ["healer", "melee", "ranged", "tank"]:
+        print(f"FAIL  the prototype's role page has tabs {sorted(rows)}")
+        return 1
+    page_names = len(re.findall(r"^function T\.", PAGE_CHECKS, re.M))
+    total += page_names
+    failures += run_page_checks(role_source, threat_source, rows)
     print(f"{total - failures}/{total} checks passed")
     return 1 if failures else 0
 
