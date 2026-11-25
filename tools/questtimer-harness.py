@@ -59,6 +59,14 @@ function Frame(strata, level)
     return f
 end
 
+-- Tracker.lua's size settings watch PLAYER_LOGIN and PLAYER_REGEN_ENABLED on a frame of their own.
+function CreateFrame()
+    local f = Frame()
+    function f:RegisterEvent() end
+    function f:SetScript() end
+    return f
+end
+
 __watchers = {}
 __skinned = {}
 __mono = {}

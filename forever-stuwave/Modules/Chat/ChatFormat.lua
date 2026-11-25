@@ -596,19 +596,34 @@ end
 -- shown state, which Blizzard sets with plain numbers.
 local BAND_ALPHA = 0.12
 local EDGE_ALPHA = 0.55
-local BAND_COLORS = {
-    CHAT_MSG_GUILD = GREEN,
-    CHAT_MSG_OFFICER = GREEN,
-    CHAT_MSG_PARTY = CYAN,
-    CHAT_MSG_PARTY_LEADER = CYAN,
-    -- Player 2026-11-10: "when i get a whisper can we make sure the bg is a
-    -- different color like party and guild is". Pink, the whisper tag colour;
-    -- both directions, so a conversation reads as one block.
-    CHAT_MSG_WHISPER = PINK,
-    CHAT_MSG_WHISPER_INFORM = PINK,
-    CHAT_MSG_BN_WHISPER = PINK,
-    CHAT_MSG_BN_WHISPER_INFORM = PINK,
+
+-- The Chat page's Line tint settings (config keys chat.bandAlpha and chat.band.<kind>[C]). Strength is a percent of
+-- the band's alpha; the edge is EDGE_ALPHA at today's strength and scales with it (to at most 1). Each kind has its
+-- own switch and a colour picked from the five names; an unknown name or a junk value falls back to the kind's own
+-- default, so a hand-edited profile cannot leave a line without a colour.
+--
+-- Player 2026-11-10: "when i get a whisper can we make sure the bg is a different color like party and guild is".
+-- Pink, the whisper tag colour; both directions, so a conversation reads as one block. The raid kind is new and
+-- starts off; its default colour is amber (the raid TAG is orange, so the two read apart).
+local BAND_STRENGTH = { key = "chat.bandAlpha", min = 4, max = 30, step = 1, default = 12 }
+local BAND_COLOR_NAMES = { "Green", "Cyan", "Pink", "Amber", "Violet" }
+local BAND_HEX = { Green = GREEN, Cyan = CYAN, Pink = PINK, Amber = AMBER, Violet = "a855f7" }
+local BAND_KINDS = {
+    { id = "guild", label = "Guild and officer", default = true, color = "Green",
+      events = { "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER" } },
+    { id = "party", label = "Party", default = true, color = "Cyan",
+      events = { "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER" } },
+    { id = "whisper", label = "Whispers", default = true, color = "Pink",
+      events = { "CHAT_MSG_WHISPER", "CHAT_MSG_WHISPER_INFORM", "CHAT_MSG_BN_WHISPER", "CHAT_MSG_BN_WHISPER_INFORM" } },
+    { id = "raid", label = "Raid", default = false, color = "Amber",
+      events = { "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER", "CHAT_MSG_RAID_WARNING" } },
 }
+local BAND_EVENT_KIND = {}
+for _, kind in ipairs(BAND_KINDS) do
+    kind.key = "chat.band." .. kind.id
+    kind.colorKey = kind.key .. "C"
+    for _, event in ipairs(kind.events) do BAND_EVENT_KIND[event] = kind end
+end
 
 local function HexRGB(hex)
     return tonumber(hex:sub(1, 2), 16) / 255, tonumber(hex:sub(3, 4), 16) / 255, tonumber(hex:sub(5, 6), 16) / 255
@@ -631,6 +646,33 @@ local function BandsWanted()
     local config = FS.Config
     if not (config and config.Get) then return true end
     return config.Get(BAND_KEY) ~= false
+end
+
+local function ConfigValue(key)
+    local config = FS.Config
+    if not (config and config.Get) then return nil end
+    local ok, value = pcall(config.Get, key)
+    if ok then return value end
+end
+
+-- The band's alpha for the strength now: a percent, held to its range, 12 (today's 0.12) for anything else.
+local function BandAlpha()
+    local value = ConfigValue(BAND_STRENGTH.key)
+    if type(value) ~= "number" or value ~= value then return BAND_ALPHA end
+    value = math.max(BAND_STRENGTH.min, math.min(BAND_STRENGTH.max, value))
+    return value / 100
+end
+
+-- Whether a kind's lines are tinted: its own switch (a stored non boolean counts as the kind's default).
+local function KindOn(kind)
+    local value = ConfigValue(kind.key)
+    if type(value) ~= "boolean" then return kind.default end
+    return value
+end
+
+-- The kind's colour as the hex of the |cff escape style used all through this file.
+local function KindHex(kind)
+    return BAND_HEX[ConfigValue(kind.colorKey)] or BAND_HEX[kind.color]
 end
 
 local function LineEvent(line)
@@ -688,14 +730,16 @@ local function RefreshBands(frame)
         line.fsBand:Hide()
     end
     if not applied or not BandsWanted() or type(frame.visibleLines) ~= "table" then return end
+    local alpha = BandAlpha()
+    local edge = math.min(1, EDGE_ALPHA * alpha / BAND_ALPHA)
     for _, line in ipairs(frame.visibleLines) do
         local event = LineEvent(line)
-        local hex = event and BAND_COLORS[event]
-        if hex then
+        local kind = event and BAND_EVENT_KIND[event]
+        if kind and KindOn(kind) then
             local band = BandFor(frame, line)
-            local r, g, b = HexRGB(hex)
-            band.fill:SetColorTexture(r, g, b, BAND_ALPHA)
-            band.edge:SetColorTexture(r, g, b, EDGE_ALPHA)
+            local r, g, b = HexRGB(KindHex(kind))
+            band.fill:SetColorTexture(r, g, b, alpha)
+            band.edge:SetColorTexture(r, g, b, edge)
             band.wanted = true
             SyncBand(line)
         end
@@ -719,6 +763,16 @@ end
 if FS.Config and FS.Config.RegisterDefault then
     FS.Config.RegisterDefault(BAND_KEY, true)
     FS.Config.OnChange(BAND_KEY, RefreshAllBands)
+    -- Every setting repaints the bands at once; the lines already on screen are repainted with the next redraw of
+    -- each frame, which RefreshAllBands runs now.
+    FS.Config.RegisterDefault(BAND_STRENGTH.key, BAND_STRENGTH.default)
+    FS.Config.OnChange(BAND_STRENGTH.key, RefreshAllBands)
+    for _, kind in ipairs(BAND_KINDS) do
+        FS.Config.RegisterDefault(kind.key, kind.default)
+        FS.Config.OnChange(kind.key, RefreshAllBands)
+        FS.Config.RegisterDefault(kind.colorKey, kind.color)
+        FS.Config.OnChange(kind.colorKey, RefreshAllBands)
+    end
 end
 
 local function Enable()
@@ -863,4 +917,6 @@ FS.ChatFormat = {
     Disable = Disable,
     IsApplied = function() return applied end,
     BAND_SETTING = BAND_SETTING,
+    -- What the Chat page's Line tint section is built from: the strength range, the five colour names and the kinds.
+    BAND_SPEC = { strength = BAND_STRENGTH, colors = BAND_COLOR_NAMES, kinds = BAND_KINDS },
 }

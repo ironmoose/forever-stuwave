@@ -232,6 +232,80 @@ end
 -- calls this again once Minimap's real SCALED size is known.
 RefreshMetrics()
 
+-------------------------------------------------------------------------------
+-- Size and scale (the Minimap page: Width, Height, Scale)
+-------------------------------------------------------------------------------
+
+-- Width and Height write the layout entry's own w and h (design px, so the seat, the layout editor and the rescale pass all
+-- read one size); Scale is the Minimap frame's own scale, so the map, its key row, the tray and every text on it grow
+-- together about the map's centre. Defaults are today's entry (250 x 252) and 100%: an untouched profile writes nothing.
+--
+-- UNVERIFIED in game: whether the map can draw a rectangle (the shipped 250 x 252 is nearly square). Flip this to make the
+-- height follow the width (the height row then says why it is locked) if the map content turns out to stretch.
+local HEIGHT_FOLLOWS_WIDTH = false
+local Settings = {}
+FS.MinimapSettings = Settings
+do
+    local entry = FS.Layout and FS.Layout.minimap
+    local defaultW, defaultH = entry and entry.w or 250, entry and entry.h or 252
+    Settings.w = { key = "minimap.w", min = 150, max = 400, step = 1, default = defaultW }
+    Settings.h = { key = "minimap.h", min = 150, max = 400, step = 1, default = defaultH }
+    Settings.scale = { key = "minimap.scale", min = 50, max = 200, step = 5, default = 100 }
+    Settings.heightFollowsWidth = HEIGHT_FOLLOWS_WIDTH
+
+    -- The setting clamped to its range; the default for a missing, non-number or NaN value.
+    local function Value(spec)
+        local value
+        if FS.Config and FS.Config.Get then
+            local ok, stored = pcall(FS.Config.Get, spec.key)
+            if ok then value = stored end
+        end
+        if type(value) ~= "number" or value ~= value then return spec.default end
+        return math.max(spec.min, math.min(spec.max, value))
+    end
+
+    function Settings.Width() return Value(Settings.w) end
+
+    function Settings.Height()
+        if HEIGHT_FOLLOWS_WIDTH then
+            return math.floor(Settings.Width() * Settings.h.default / Settings.w.default + 0.5)
+        end
+        return Value(Settings.h)
+    end
+
+    -- The map's own scale as a factor; exactly 1 at the default.
+    function Settings.Scale()
+        local percent = Value(Settings.scale)
+        if percent == Settings.scale.default then return 1 end
+        return percent / 100
+    end
+
+    -- Copies the sliders onto the layout entry (before FS.Layout.Apply reads it); true when the entry changed.
+    function Settings.Sync()
+        local L = FS.Layout and FS.Layout.minimap
+        if not L then return false end
+        local w, h = Settings.Width(), Settings.Height()
+        local changed = L.w ~= w or L.h ~= h
+        L.w, L.h = w, h
+        return changed
+    end
+
+    -- After FS.Layout.Apply: sizes the map to the entry's scaled size and sets its scale. A scale already right is not
+    -- rewritten. True when the size or the scale differs from the last seat (the first seat counts as the baseline).
+    function Settings.Seat(mm)
+        if not (mm and Minimap) then return false end
+        if mm.scaledW and mm.scaledH and Minimap.SetSize then Minimap:SetSize(mm.scaledW, mm.scaledH) end
+        local want = Settings.Scale()
+        if Minimap.SetScale then
+            local have = Minimap.GetScale and Minimap:GetScale()
+            if type(have) ~= "number" or math.abs(have - want) > 1e-6 then Minimap:SetScale(want) end
+        end
+        local key = tostring(mm.scaledW) .. "x" .. tostring(mm.scaledH) .. "@" .. want
+        local changed = Settings.seated ~= nil and Settings.seated ~= key
+        Settings.seated = key
+        return changed
+    end
+end
 
 -------------------------------------------------------------------------------
 -- Layout (reposition + resize)
@@ -335,9 +409,10 @@ do
         if not (L and L.w and L.h and L.x and L.y) then return end
         local scale = (FS.Layout.Scale and FS.Layout.Scale()) or 1
         local f = FRAC[L.point] or FRAC.CENTER
+        local m = Settings.Scale()   -- the map's own scale (Minimap page): it grows about its centre
         return L, scale,
-            L.y * scale + (1 - f[2]) * L.h * scale,   -- map top, above the relPoint
-            L.x * scale - f[1] * L.w * scale          -- map left, right of the relPoint
+            L.y * scale + (1 - f[2]) * L.h * scale * m,   -- map top, above the relPoint
+            L.x * scale - f[1] * L.w * scale * m          -- map left, right of the relPoint
     end
 
     -- Same rule as Layout.lua's IsHeldInCombat: a protected frame refuses SetPoint
@@ -549,16 +624,17 @@ do
             return
         end
         local ok, err = pcall(function()
+            Settings.Sync()
             FS.Layout.Apply(cluster, "minimap")
-            local mm = FS.Layout.minimap
-            if mm and mm.scaledW and mm.scaledH and Minimap.SetSize then
-                Minimap:SetSize(mm.scaledW, mm.scaledH)
-            end
+            local resized = Settings.Seat(FS.Layout.minimap)
             LogSeat(why)
+            -- The rows, the tray and the map's furniture follow a new size or scale (not every re-seat).
+            if resized and Settings.Resized then Settings.Resized() end
         end)
         if not ok and FS.Layout.ForwardError then FS.Layout.ForwardError(err) end
         ScheduleCompensate()
     end
+    Settings.Reseat = Reseat
 
     -- One re-seat a frame from now, however many Blizzard calls ask for it.
     local function DeferReseat(why)
@@ -588,6 +664,11 @@ do
     if FS.Layout and FS.Layout.OnRescale then
         FS.Layout.OnRescale(function()
             LogSeat("rescale:" .. tostring(FS.Layout.rescaleWhy or "?"))
+            -- The pass above re-sized the cluster for the new UI scale; the map follows (its own size and scale, and the
+            -- rows and furniture when that changed). Nothing to do before the first seat.
+            if Minimap and Minimap.fsPlaced and Settings.Seat(FS.Layout.minimap) and Settings.Resized then
+                Settings.Resized()
+            end
             ScheduleCompensate()
         end)
     end
@@ -690,15 +771,14 @@ local function ApplyLayout()
     if not (FS.Layout and FS.Layout.Apply) then return end
 
     local target = MinimapCluster or Minimap
+    Settings.Sync()   -- the saved Width and Height (the saved variables load after file scope)
     if FS.Layout.Apply(target, "minimap") then
         -- Whether MinimapCluster:SetSize cascades to the child Minimap is
         -- UNVERIFIED on this client, so Minimap is sized explicitly here to
         -- guarantee the chrome (mask/border/glow, all applied to the bare
-        -- Minimap widget) matches the reserved footprint either way.
-        local mm = FS.Layout.minimap
-        if mm and mm.scaledW and mm.scaledH and Minimap.SetSize then
-            Minimap:SetSize(mm.scaledW, mm.scaledH)
-        end
+        -- Minimap widget) matches the reserved footprint either way. Settings.Seat
+        -- also sets the map's own scale (the Minimap page's Scale).
+        Settings.Seat(FS.Layout.minimap)
 
         if target ~= Minimap then
             ScheduleCompensate()
@@ -2808,6 +2888,53 @@ loader:SetScript("OnEvent", function(self)
     Apply()
 end)
 
+-- A new Width, Height or Scale: the map's furniture that was sized once at login follows the map (the highlight, the blip glow,
+-- the zone and north labels), then the rows, the divider, the coords and the tray seat again on the new pixel width. Runs from
+-- Reseat (Settings.Reseat), so a change made in combat waits for it like any other seat.
+function Settings.Resized()
+    RefreshMetrics()
+    local width = (Minimap.GetWidth and Minimap:GetWidth()) or Metrics.map
+    local highlight = Minimap.fsHighlight
+    if highlight then
+        local size = width * HIGHLIGHT_SIZE_FRACTION
+        highlight:SetSize(size, size)
+        highlight:ClearAllPoints()
+        highlight:SetPoint("CENTER", Minimap, "CENTER", -width * 0.20, width * 0.35)
+    end
+    local blip = Minimap.fsBlipGlow
+    if blip then
+        local size = Metrics.blip * BLIP_GLOW_SIZE_MULT
+        blip:SetSize(size, size)
+    end
+    local zone = Minimap.fsZoneLabel
+    if zone and ApplyFontGeneric then
+        zone:ClearAllPoints()
+        zone:SetPoint("TOP", Minimap, "TOP", 0, -(NORTH_INSET_Y + NORTH_FONT_SIZE + 2))
+        zone:SetWidth(math.max(1, width - 18))
+        ApplyFontGeneric(zone, FONT_ORBITRON, math.min(ZONE_FONT_SIZE, 13), COLOR_TEXT_WHITE, "")
+    end
+    local north = Minimap.fsNorthTick
+    if north and ApplyFontGeneric then
+        north:ClearAllPoints()
+        north:SetPoint("TOP", Minimap, "TOP", 0, -NORTH_INSET_Y)
+        ApplyFontGeneric(north, FONT_ORBITRON, NORTH_FONT_SIZE, COLOR_POWER, "")
+    end
+    if Minimap.fsBezel then
+        pcall(ReanchorTray)
+        pcall(RelayoutTray)
+        SeatRow()
+    end
+end
+
+if FS.Config and FS.Config.RegisterDefault then
+    for _, spec in ipairs({ Settings.w, Settings.h, Settings.scale }) do FS.Config.RegisterDefault(spec.key, spec.default) end
+end
+
 if FS.Config and FS.Config.OnChange then
     FS.Config.OnChange(COORDS_KEY, function() SeatRow() end)
+    -- Before the first seat (PLAYER_LOGIN) the saved values are read by ApplyLayout itself.
+    local function SizeChanged()
+        if Minimap and Minimap.fsPlaced and Settings.Reseat then Settings.Reseat("size") end
+    end
+    for _, spec in ipairs({ Settings.w, Settings.h, Settings.scale }) do FS.Config.OnChange(spec.key, SizeChanged) end
 end

@@ -823,8 +823,136 @@ function T.the_layouts_updated_event_still_rethrows_a_chat_seat_error()
     eq(ok, false, "the event path keeps rethrowing")
 end
 
+-- ---- the window size (the Chat page's Width and Height): one stored size, seated through the layout ----
+
+local function scaled() return FS.Layout.Scale() end
+
+function T.the_window_size_defaults_are_the_layout_entry()
+    local f = setup()
+    local w, h = FS.Chat.GetSize()
+    eq(w, 677, "width default")
+    eq(h, 373, "height default")
+    eq(FS.Config.Get("chat.w"), 677)
+    eq(FS.Config.Get("chat.h"), 373)
+    eq(f._w, 677 * scaled(), "the frame is seated at today's size")
+    eq(f._h, 373 * scaled())
+    eq(FS.Chat.SIZE.w.min, 300)
+    eq(FS.Chat.SIZE.w.max, 1000)
+    eq(FS.Chat.SIZE.h.min, 150)
+    eq(FS.Chat.SIZE.h.max, 700)
+end
+
+function T.a_changed_size_is_seated_at_once_and_keeps_the_anchor()
+    local f = setup()
+    local point = f._points[1]
+    FS.Config.Set("chat.w", 800)
+    FS.Config.Set("chat.h", 420)
+    eq(f._w, 800 * scaled(), "width followed")
+    eq(f._h, 420 * scaled(), "height followed")
+    eq(#f._points, 1, "one anchor, not stacked")
+    local p = f._points[1]
+    eq(p.point, point.point)
+    eq(p.x, point.x, "the seat did not move")
+    eq(p.y, point.y)
+end
+
+function T.the_slider_and_a_hand_resize_share_one_stored_size()
+    local f = setup()
+    FS.Config.Set("chat.w", 900)
+    eq(select(1, FS.Chat.GetSize()), 900, "the slider's write is the size")
+    -- a hand resize (the layout editor's corner) goes through the same call and the same keys
+    eq(FS.Chat.SetSize(720, 410), true)
+    eq(FS.Config.Get("chat.w"), 720, "the store the slider reads")
+    eq(FS.Config.Get("chat.h"), 410)
+    eq(f._w, 720 * scaled())
+    eq(f._h, 410 * scaled())
+    FS.Chat.SetSize(nil, 500)
+    eq(FS.Config.Get("chat.w"), 720, "a missing side keeps its value")
+    eq(FS.Config.Get("chat.h"), 500)
+end
+
+function T.the_stored_size_survives_the_edit_mode_reseat_and_a_rescale()
+    local f = setup()
+    FS.Config.Set("chat.w", 760)
+    FS.Config.Set("chat.h", 300)
+    EditModeManagerFrame:UpdateLayoutInfo()
+    eq(f._w, 760 * scaled(), "Blizzard's layout size does not win")
+    eq(f._h, 300 * scaled())
+    FS.Layout.ReseatAll()
+    eq(f._w, 760 * scaled(), "the layout watcher's Apply keeps it")
+    eq(f._h, 300 * scaled())
+    __fire("PLAYER_ENTERING_WORLD", true, false)
+    eq(f._w, 760 * scaled(), "and a login pass does")
+end
+
+function T.a_size_outside_the_range_or_not_a_number_is_held_to_the_range()
+    local f = setup()
+    FS.Config.Set("chat.w", 5000)
+    FS.Config.Set("chat.h", 10)
+    eq(f._w, 1000 * scaled(), "too wide holds at the maximum")
+    eq(f._h, 150 * scaled(), "too short holds at the minimum")
+    FS.Config.Set("chat.w", "wide")
+    eq(f._w, 677 * scaled(), "text is not a size: the default")
+    FS.Config.Set("chat.w", 0 / 0)
+    eq(f._w, 677 * scaled(), "nor is NaN")
+end
+
+function T.a_resize_in_combat_waits_for_combat_to_end()
+    local f = setup({ protected = true })
+    __combat = true
+    FS.Config.Set("chat.w", 850)
+    eq(f._w, 677 * scaled(), "a protected frame is not touched in combat")
+    eq(__blocked, 0, "and nothing was refused")
+    __combat = false
+    __fire("PLAYER_REGEN_ENABLED")
+    eq(f._w, 850 * scaled(), "seated when combat ends")
+end
+
+function T.the_default_size_leaves_no_stored_setting()
+    local f = setup()
+    FS.Config.Set("chat.w", 800)
+    FS.Config.Set("chat.w", 677)
+    eq(__cfg["chat.w"], nil, "back at the default stores nothing")
+    eq(f._w, 677 * scaled(), "and the frame is back at today's size")
+end
+
+function T.a_maximised_chat_stays_maximised_through_a_resize()
+    local f = setup()
+    FS.Chat.windowState = "max"
+    FS.Config.Set("chat.w", 820)
+    eq(FS.Chat.windowState, "max", "the state is untouched")
+    eq(f._w, 820 * scaled(), "the width follows")
+end
+
+function T.without_a_chat_frame_a_size_change_only_stores()
+    ChatFrame1 = nil
+    FS.Config.Set("chat.w", 900)
+    eq(select(1, FS.Chat.GetSize()), 900)
+end
+
 __checks = T
 """
+
+# FS.Config as the window size settings see it: defaults, Get, Set (fires the key's callbacks on a change) and OnChange.
+CONFIG_STUB = r"""
+__cfg, __cfgDefaults, __cfgCallbacks = {}, {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) __cfgDefaults[k] = v end,
+    Get = function(k) local v = __cfg[k]; if v == nil then return __cfgDefaults[k] end; return v end,
+    Set = function(k, v)
+        local old = FS.Config.Get(k)
+        if v == __cfgDefaults[k] then v = nil end
+        __cfg[k] = v
+        local new = FS.Config.Get(k)
+        if old ~= new then
+            for _, fn in ipairs(__cfgCallbacks[k] or {}) do fn(new, old, k) end
+        end
+        return true
+    end,
+    OnChange = function(k, fn) __cfgCallbacks[k] = __cfgCallbacks[k] or {}; table.insert(__cfgCallbacks[k], fn) end,
+}
+"""
+
 
 
 def repr_lua(text: str) -> str:
@@ -952,6 +1080,7 @@ def boot() -> "LuaRuntime":
         "FS = { Chat = { PAD_TOP = 40, ApplyDockState = function() end, "
         "termPanel = { SetFrameStrata = function() end, SetFrameLevel = function() end } } }"
     )
+    lua.execute(CONFIG_STUB)
     load = lua.eval(LOAD)
     for name in ("Core/Layout.lua", "Modules/Chat/ChatWindowState.lua"):
         load(name, (ADDON / name).read_text(encoding="utf-8"), lua.eval("FS"))
