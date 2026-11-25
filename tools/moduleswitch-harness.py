@@ -608,6 +608,40 @@ function T.a_live_module_follows_a_profile_switch_at_once_and_is_not_counted()
     errorsClean()
 end
 
+function T.a_swap_from_the_head_band_picker_lights_reload_ui_and_says_so_once_like_the_profiles_page()
+    local W = msboot({ db = twoProfiles({ "m.cast", "m.mini" }) })
+    W.Open("modules")
+    local picker
+    for _, o in ipairs(ALL) do if o.fsProfilePicker then picker = o end end
+    yes(picker, "the picker is in the head band")
+    local function pick(name)
+        picker.control.scripts.OnClick(picker.control)
+        local entry
+        for _, o in ipairs(ALL) do
+            if o.kind == "FontString" and o:IsVisible() and under(_G.ForeverSTUwaveConfigMenu, o) and o:GetText() == name then entry = o end
+        end
+        local b = entry.parent
+        while b and not b.scripts.OnClick do b = b.parent end
+        b.scripts.OnClick(b)
+    end
+    __printed = {}
+    pick("Alt")
+    eq(FS.Config.ActiveProfile(), "Alt")
+    eq(table.concat(MS().PendingKeys(), ","), "m.cast,m.mini", "the modules Alt turns off wait for a reload")
+    eq(#chatLines(), 1, "one chat line, not one per module")
+    yes(chatLines()[1]:find(": 2 modules wait for a reload. Use Reload UI in /fsconfig.", 1, true), chatLines()[1])
+    eq(W.Footer.reload.fsCount, 2, "the footer's Reload UI count")
+    eq(W.Footer.reload.fsHot, true, "the hot Reload button")
+    eq(picker.control.fsLabel:GetText(), "Alt", "the picker names the new profile")
+    -- back to the profile that matches the build: the wait ends, nothing is said
+    __printed = {}
+    pick("Default")
+    eq(MS().PendingCount(), 0)
+    eq(#chatLines(), 0, "a swap that matches the build says nothing")
+    eq(W.Footer.reload.fsHot ~= true, true, "the Reload button goes quiet")
+    errorsClean()
+end
+
 function T.a_copy_and_a_reset_count_like_a_switch()
     msboot({ db = twoProfiles({ "m.cast", "m.raid" }) })
     local C = FS.Config

@@ -2466,6 +2466,211 @@ function T.profiles_headers_and_rows_carry_their_tooltips()
 end
 
 -------------------------------------------------------------------------------
+-- Head band profile picker
+-------------------------------------------------------------------------------
+
+local function picker()
+    for _, o in ipairs(ALL) do if o.fsProfilePicker then return o end end
+end
+local function pickerLabel() return picker().control.fsLabel:GetText() end
+local function pickerMenu()       -- opens the picker's menu and returns the entries it lists, in order
+    local b = picker().control
+    b.scripts.OnClick(b)
+    yes(menu() and menu():IsVisible(), "the picker's menu opens")
+    local list = {}
+    for _, t in ipairs(texts(menu())) do list[#list + 1] = t end
+    return table.concat(list, ",")
+end
+-- Counts every call of Config.SetActiveProfile (the one door a profile switch goes through) and every profile change heard.
+local function watchSwitches()
+    local seen = { calls = {}, changes = 0 }
+    local real = FS.Config.SetActiveProfile
+    FS.Config.SetActiveProfile = function(name)
+        seen.calls[#seen.calls + 1] = tostring(name)
+        return real(name)
+    end
+    FS.Config.OnProfileChange(function() seen.changes = seen.changes + 1 end)
+    return seen
+end
+
+function T.the_head_band_has_a_profile_picker_in_the_dropdown_look()
+    local W = boot()
+    W.Open("profiles")
+    local p = picker()
+    yes(p, "a picker is built in the head band")
+    yes(p:IsVisible(), "and it shows")
+    eq(p.parent, win(), "a child of the window frame, not of a page")
+    local label
+    for _, o in ipairs(ALL) do if o.kind == "FontString" and o.parent == p then label = o end end
+    eq(label:GetText(), "PROFILE", "a neutral label")
+    eq(label.fontSize, W.Spec.SMALL, "in the small text size")
+    eq(label.themeColor, W.C.muted, "muted")
+    local b = p.control
+    eq(b.kind, "Button")
+    eq(pickerLabel(), "Default", "the button names the profile in use")
+    eq(b.h, W.Spec.BTN_H, "the dropdown height")
+    eq(b.w, W.Spec.NAV_W, "as wide as the nav column, which is also the menu's width")
+    eq(b.fsRing, W.C.violet, "violet ring, like the Profiles page dropdown")
+    eq(b.fsLabel.themeColor, W.C.cyan, "cyan text")
+    yes(b.fsCaret and #b.fsCaret.textures == 4 and b.fsCaret.direction == "down", "the drawn pixel caret")
+    local drawn = b.fsCaret.textures[1].color
+    yes(drawn and drawn[1] == W.C.cyan[1] and drawn[2] == W.C.cyan[2] and drawn[3] == W.C.cyan[3], "a cyan caret")
+    local row = W.RowByKey("prof", "profiles")
+    eq(row.row.control.h, b.h, "the same height as the row's dropdown")
+    eq(row.row.control.fsRing, b.fsRing, "and the same ring")
+    local n = 0
+    for _, e in ipairs(W.Rows()) do if e.key == "prof" then n = n + 1 end end
+    eq(n, 1, "the picker is no search row: the Profiles page row is the only one")
+    eq(#__errors, 0, "nothing forwarded")
+end
+
+function T.the_picker_is_there_on_every_page()
+    local W = boot()
+    for _, c in ipairs(W.Categories()) do
+        W.Open(c.key)
+        yes(picker():IsVisible(), "the picker shows on " .. c.key)
+    end
+end
+
+function T.the_picker_lists_every_profile_and_a_pick_switches_through_set_active_profile()
+    local W = boot()
+    FS.Config.NewProfile("Raid")
+    FS.Config.NewProfile("Alts")
+    W.Open("unit")
+    local seen = watchSwitches()
+    eq(pickerMenu(), "Default,Alts,Raid", "ListProfiles order, the same list as the Profiles page")
+    click("Raid", menu())
+    eq(table.concat(seen.calls, ","), "Raid", "one call of Config.SetActiveProfile")
+    eq(FS.Config.ActiveProfile(), "Raid")
+    eq(seen.changes, 1, "one profile change, so the module switch notice fires the same way")
+    no(menu():IsVisible(), "the menu closes on a pick")
+    eq(pickerLabel(), "Raid", "the picker names the new profile at once")
+    eq((W.Current()), "unit", "the page stays")
+    -- the entry in use is lit cyan in the menu, the others plain
+    pickerMenu()
+    local lit
+    for _, o in ipairs(ALL) do
+        if o.kind == "FontString" and under(menu(), o) and o:GetText() == "Raid" then lit = o end
+    end
+    eq(lit.themeColor, W.C.cyan, "the profile in use is cyan in the menu")
+    -- picking the profile already in use is a no-op for the store
+    click("Raid", menu())
+    eq(FS.Config.ActiveProfile(), "Raid")
+    eq(seen.changes, 1, "no second change for the same profile")
+end
+
+function T.the_picker_and_the_profile_row_swap_through_the_same_door()
+    local W = boot()
+    FS.Config.NewProfile("Raid")
+    W.Open("profiles")
+    local seen = watchSwitches()
+    -- from the head band
+    pickerMenu()
+    click("Raid", menu())
+    -- from the Profiles page's own "Profile in use" dropdown
+    local dd = W.RowByKey("prof", "profiles").row.control
+    dd.scripts.OnClick(dd)
+    click("Default", menu())
+    eq(table.concat(seen.calls, ","), "Raid,Default", "both rows call Config.SetActiveProfile")
+    eq(seen.changes, 2, "and each swap is one profile change")
+    eq(pickerLabel(), "Default"); eq(dd.fsLabel:GetText(), "Default")
+end
+
+function T.the_picker_keeps_the_module_reload_notice_of_a_profile_swap()
+    local W = boot()
+    local heard = {}
+    FS.Config.OnProfileChange(function(old, new) heard[#heard + 1] = (old == nil and "nil" or "tbl") .. "/" .. (new == nil and "nil" or "tbl") end)
+    FS.Config.NewProfile("Raid")
+    ForeverSTUwaveDB.profiles.Raid.modules = { ["m.cast"] = false }
+    W.Open("data")
+    pickerMenu()
+    click("Raid", menu())
+    eq(table.concat(heard, ","), "tbl/tbl", "the profile callbacks got both profiles' module tables")
+    eq(FS.Config.ModuleStore()["m.cast"], false, "the module switches now read from the picked profile")
+end
+
+function T.the_picker_follows_a_swap_from_the_profiles_page_or_from_anywhere()
+    local W = boot({ noGunsight = true })      -- Gunsight's width migration flips a setting on every swap; without it a swap can change nothing
+    FS.Config.NewProfile("Raid")
+    FS.Config.NewProfile("Alts")
+    W.Open("profiles")
+    -- the Profiles page's own dropdown
+    local dd = W.RowByKey("prof", "profiles").row.control
+    dd.scripts.OnClick(dd)
+    click("Raid", menu())
+    eq(pickerLabel(), "Raid", "a pick on the Profiles page moves the picker")
+    -- the API (a slash command, a login resolve): two profiles with the same settings, so no setting callback runs
+    local settingCallbacks = 0
+    FS.Config.OnAnyChange(function() settingCallbacks = settingCallbacks + 1 end)
+    yes(FS.Config.SetActiveProfile("Alts"))
+    eq(settingCallbacks, 0, "premise: the swap ran no setting callback")
+    eq(pickerLabel(), "Alts", "a swap with nothing to repaint still moves the picker")
+    -- a rename of the profile in use through the Profiles page
+    click("RENAME", win())
+    editBox():SetText("Mythic")
+    click("OK", dialog())
+    eq(pickerLabel(), "Mythic", "a rename shows")
+    -- a swap while the window is shut shows when it opens
+    W.Close()
+    yes(FS.Config.SetActiveProfile("Raid"))
+    W.Open("unit")
+    eq(pickerLabel(), "Raid", "opened on the profile now in use")
+    eq(#__errors, 0, "nothing forwarded")
+end
+
+function T.a_pick_that_fails_says_why_like_the_profile_row()
+    local W = boot()
+    FS.Config.NewProfile("Raid")
+    W.Open("unit")
+    pickerMenu()
+    FS.Config.DeleteProfile("Raid")          -- gone between the menu opening and the click
+    local entry
+    for _, o in ipairs(ALL) do
+        if o.kind == "FontString" and under(menu(), o) and o:GetText() == "Raid" then entry = o end
+    end
+    __printed = {}
+    owner(entry).scripts.OnClick(owner(entry))
+    eq(FS.Config.ActiveProfile(), "Default", "nothing switched")
+    yes(__printed[1] and __printed[1]:find("No such profile", 1, true), "the reason in chat: " .. tostring(__printed[1]))
+    eq(pickerLabel(), "Default")
+end
+
+function T.the_picker_is_off_while_settings_are_read_only_and_follows_the_profile_row_in_combat()
+    local W = boot({ db = "junk" })
+    W.Open("unit")
+    no(picker().control.enabled, "read-only settings disable the picker like the Profiles page")
+    W = boot()
+    FS.Config.NewProfile("Raid")
+    W.Open("profiles")
+    local dd = W.RowByKey("prof", "profiles").row.control
+    yes(picker().control.enabled and dd.enabled, "both are on while settings can be written")
+    __combat = true
+    W.RefreshAll()
+    eq(picker().control.enabled, dd.enabled, "combat changes neither: the Profiles page row does not refuse in combat, so neither does the picker")
+    pickerMenu()
+    click("Raid", menu())
+    eq(FS.Config.ActiveProfile(), "Raid", "a swap works in combat as it does on the Profiles page")
+    __combat = false
+end
+
+function T.a_long_profile_name_is_clipped_inside_the_picker_button()
+    local W = boot()
+    local long = string.rep("W", FS.Config.NAME_MAX)
+    yes(FS.Config.NewProfile(long))
+    yes(FS.Config.SetActiveProfile(long))
+    W.Open("unit")
+    local b = picker().control
+    eq(b.fsLabel:GetText(), long)
+    local left, right
+    for _, pt in ipairs(b.fsLabel.points) do
+        if pt.point == "LEFT" then left = pt end
+        if pt.point == "RIGHT" then right = pt end
+    end
+    yes(left and right, "the name is held between a left and a right anchor so it clips instead of running under the caret")
+    yes(right.x <= -(8 + 8), "the right anchor stops before the caret")
+end
+
+-------------------------------------------------------------------------------
 -- Read only
 -------------------------------------------------------------------------------
 

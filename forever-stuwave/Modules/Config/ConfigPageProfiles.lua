@@ -24,14 +24,7 @@ local function CharacterLabel()
     return "unknown"
 end
 
-local function ProfileItems(...)
-    local skip, items = {}, {}
-    for _, name in ipairs({ ... }) do skip[name] = true end
-    for _, name in ipairs(Config.ListProfiles()) do
-        if not skip[name] then items[#items + 1] = { value = name, text = name } end
-    end
-    return items
-end
+local ProfileItems = I.ProfileItems     -- the head band's picker lists the profiles through the same function
 
 local function Check(ok, err)
     if ok == false then I.Say(err) end
@@ -47,7 +40,7 @@ local function Build(content)
         label = "Profile in use", regKey = "prof", nodot = true,
         get = Config.ActiveProfile,
         items = function() return ProfileItems() end,
-        set = function(name) Check(Config.SetActiveProfile(name)) end,
+        set = I.SwitchProfile,     -- the head band's picker swaps through the same function
     })
     UI.Info(content, { label = "This character", value = CharacterLabel })
     UI.Section(content, { title = "Manage" })

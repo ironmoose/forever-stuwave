@@ -316,6 +316,95 @@ function T.a_folded_section_hides_its_rows_and_the_fold_is_kept_account_wide()
     yes(row("Inside"), "the open fold came back after a reload")
 end
 
+-- The head band: the profile picker sits in the band's right column, level with the brand and above the breadcrumb.
+-- __brandRealW is the brand string measured in the real font file (the mock's string widths are only 6 units a letter).
+local function pickerOf()
+    for _, o in ipairs(ALL) do if o.fsProfilePicker then return o end end
+end
+
+local function overlaps(a, b)
+    return math.min(a.r, b.r) - math.max(a.l, b.l) > 0 and math.min(a.t, b.t) - math.max(a.b, b.b) > 0
+end
+
+local function checkHeadBand(W, w, h, page, tab)
+    W.SetSize(w, h, false)
+    W.Open(page, tab)
+    local S, D = W.Spec, W.D
+    local where = ("%s/%s @ %dx%d: "):format(page, tostring(tab), w, h)
+    local rect = solveAll()
+    local win = rect(winFrame())
+    local pick = pickerOf()
+    yes(pick and pick:IsShown(), where .. "the picker shows")
+    local pr = rect(pick)
+    eq(pr.r, win.r - S.PAD, where .. "it ends on the window padding, where the breadcrumb ends")
+    eq(pr.t, win.t - D.BRAND_Y, where .. "it starts at the brand's line")
+    eq(pr.t - pr.b, S.BTN_H, where .. "one button high")
+    yes(pr.l >= win.l and pr.r <= win.r, where .. "inside the window")
+    yes(pr.t <= win.t - S.STRIP_H - 4, where .. "under the title strip and its X")
+    yes(pr.b >= win.t - D.BODY_T + 4, where .. "above the head rule")
+    -- the button is the right end of the picker, NAV_W wide, and the label stands to its left inside the picker
+    local b = pick.control
+    local br = rect(b)
+    eq(br.r, pr.r, where .. "the button is the picker's right end"); eq(br.r - br.l, S.NAV_W, where .. "NAV_W wide")
+    -- the brand, at its real width, ends well before the picker begins
+    local brandR = win.l + S.PAD + __brandRealW
+    yes(pr.l >= brandR + S.PAD, where .. ("clear of the brand: picker starts %.1f, brand ends %.1f"):format(pr.l, brandR))
+    -- the breadcrumb (the mock's width is 6 a character, colour codes counted, so this is wide) and the version line
+    local crumb = W.I.ui.crumb
+    local cr = { r = win.r - S.PAD, t = win.t - D.VER_Y }
+    cr.l, cr.b = cr.r - crumb:GetStringWidth(), cr.t - S.TEXT - 4
+    yes(not overlaps(pr, cr), where .. "the picker does not touch the breadcrumb")
+    yes(pr.b - cr.t >= 4, where .. "a gap of 4 above the breadcrumb, like brand to version: " .. (pr.b - cr.t))
+    local ver = W.I.ui.version
+    local vr = { l = win.l + S.PAD, t = win.t - D.VER_Y }
+    vr.r, vr.b = vr.l + ver:GetStringWidth(), vr.t - S.TEXT - 4
+    yes(not overlaps(pr, vr), where .. "nor the version line")
+    -- the menu it opens is the button's width and stays inside the window
+    b.scripts.OnClick(b)
+    local mr = solveAll()(menu())
+    eq(mr.l, br.l, where .. "the menu opens under the button's left edge")
+    yes(mr.r <= win.r, where .. "and ends inside the window: " .. mr.r .. " vs " .. win.r)
+    menu():Hide()
+    local catcher = menu():GetParent()
+    if catcher then catcher:Hide() end
+end
+
+function T.the_profile_picker_fits_the_head_band_at_the_default_minimum_and_maximum_size()
+    local W = boot()
+    local S = W.Spec
+    for _, size in ipairs({ { S.WIN_W, S.WIN_H }, { S.WIN_MIN_W, S.WIN_MIN_H }, { S.WIN_MAX_W, S.WIN_MAX_H } }) do
+        checkHeadBand(W, size[1], size[2], "gunsight", "player")
+    end
+end
+
+function T.the_profile_picker_never_touches_the_breadcrumb_of_any_page_at_the_minimum_size()
+    local W = boot()
+    local S = W.Spec
+    local n = 0
+    for _, cat in ipairs(W.Categories()) do
+        for _, tab in ipairs(cat.tabs) do
+            checkHeadBand(W, S.WIN_MIN_W, S.WIN_MIN_H, cat.key, tab.key)
+            n = n + 1
+        end
+    end
+    yes(n > 30, "pages and tabs were measured: " .. n)
+end
+
+function T.the_picker_stays_on_the_right_while_the_window_grows_and_shrinks()
+    local W = boot()
+    local S = W.Spec
+    W.Open("unit")
+    local own
+    for _, w in ipairs({ S.WIN_MAX_W, S.WIN_MIN_W, S.WIN_W, 1100 }) do
+        W.SetSize(w, S.WIN_H, false)
+        local rect = solveAll()
+        local win, pr = rect(winFrame()), rect(pickerOf())
+        eq(pr.r, win.r - S.PAD, "right aligned at width " .. w)
+        own = own or (pr.r - pr.l)
+        eq(pr.r - pr.l, own, "its own width does not follow the window, at width " .. w)
+    end
+end
+
 function T.the_slots_for_other_lanes_exist()
     local W = boot()
     W.Open()
@@ -343,10 +432,25 @@ end
 LAYOUT_NAMES: set[str] = set()
 
 
+def brand_width() -> float:
+    """The head band's brand string in the real display font at BRAND_SIZE (the mock measures 6 units a letter).
+
+    Advance widths summed from the font file, no kerning: close enough to decide whether the profile picker clears it.
+    """
+    from fontTools.ttLib import TTFont
+
+    addon = ROOT / "forever-stuwave"
+    size = float(re.search(r"^S\.BRAND_SIZE = (\d+)", (addon / "Modules/Config/ConfigSpec.lua").read_text(encoding="utf-8"), re.M).group(1))
+    font = TTFont(addon / "Media" / "Fonts" / "FSDisplay-Bold.ttf")
+    cmap, hmtx, upm = font.getBestCmap(), font["hmtx"], font["head"].unitsPerEm
+    return round(sum(hmtx[cmap[ord(c)]][0] for c in "FOREVER STUWAVE") * size / upm, 1)
+
+
 def run_lua_checks() -> int:
     global LAYOUT_NAMES
     LAYOUT_NAMES = {n for n in re.findall(r"^function T\.([a-z0-9_]+)\(", SOLVER + EXT_CHECKS, re.M) if not n.startswith("zz_")}
-    base.CHECKS = base.CHECKS.replace("__checks = T", SOLVER + EXT_CHECKS + "\n__checks = T")
+    prefix = f"__brandRealW = {brand_width()}\n"
+    base.CHECKS = base.CHECKS.replace("__checks = T", prefix + SOLVER + EXT_CHECKS + "\n__checks = T")
     failed = 0
     for name in sorted(LAYOUT_NAMES):
         try:

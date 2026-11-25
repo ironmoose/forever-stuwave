@@ -1109,12 +1109,12 @@ local function OpenMenu(anchor, items, onPick, current)
 end
 I.OpenMenu = OpenMenu
 
--- {label, tip, get, items, set, text, free}: `free` keeps it usable when settings are read-only (it picks a view, not a setting). `items` is a function returning {value, text} entries; `text(value)`
--- names the current value on the button (it shows tostring(value) without it).
-function UI.Dropdown(content, o)
-    local row = NewRow(content, o, "dropdown")
-    local b = MakeButton(row, { width = 200, height = S.BTN_H, ring = C.violet, textColor = C.cyan, chamfer = 6, text = "" })
-    b:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+-- The dropdown's button: violet ring, cyan name, the drawn caret, the hover and press fills. `o` is the builder's own options
+-- ({ get, items, set, text, free }, read when used); `clip` holds the name between its left inset and the caret, so a long
+-- one is cut short instead of running under it. UI.Dropdown seats one in a row and UI.HeadPicker in the head band, so the
+-- two look alike. b.fsPaint() reads the value again (the caller files it with Track).
+local function NewDropdownButton(parent, o, width, clip)
+    local b = MakeButton(parent, { width = width, height = S.BTN_H, ring = C.violet, textColor = C.cyan, chamfer = 6, text = "" })
     b.fsLabel:ClearAllPoints()
     b.fsLabel:SetPoint("LEFT", b, "LEFT", 10, 0)
     -- The caret is the prototype's small down triangle, drawn (see Pixel arrows). Its cell is a child of the button, so the
@@ -1124,20 +1124,51 @@ function UI.Dropdown(content, o)
     caretCell:SetPoint("RIGHT", b, "RIGHT", -8, 0)
     b.fsCaret = NewArrowGlyph(caretCell, "down")
     b.fsCaret.SetColor(C.cyan)
+    if clip then
+        b.fsLabel:SetPoint("RIGHT", b, "RIGHT", -(8 + CHEV_CELL + 4), 0)
+        b.fsLabel:SetJustifyH("LEFT")
+        b.fsLabel:SetWordWrap(false)
+    end
     HoverStyle(b, C.violet)
     b:SetScript("OnClick", function(self)
         if not self:IsEnabled() then return end
         OpenMenu(self, o.items(), o.set, o.get())
     end)
-    Track(function()
+    function b.fsPaint()
         local value = o.get()
         b.fsValue = value
         b.fsLabel:SetText(o.text and o.text(value) or tostring(value))
         SetLook(b, o.free or Writable())
-    end)
+    end
+    return b
+end
+
+-- {label, tip, get, items, set, text, free}: `free` keeps it usable when settings are read-only (it picks a view, not a setting). `items` is a function returning {value, text} entries; `text(value)`
+-- names the current value on the button (it shows tostring(value) without it).
+function UI.Dropdown(content, o)
+    local row = NewRow(content, o, "dropdown")
+    local b = NewDropdownButton(row, o, 200)
+    b:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    Track(b.fsPaint)
     I.AttachChanged(row, b)
     row.control = b
     return row
+end
+
+-- The head band's picker: a small muted label, then a dropdown button, in one frame BTN_H high that its caller seats (the
+-- window puts it at the right of the head band). {label, width, get, items, set, text, free}. It is no row: nothing in the
+-- registry, so search and the hover flash never see it, and built outside a tab, so every RefreshAll repaints it. A long
+-- name is clipped inside the button.
+function UI.HeadPicker(parent, o)
+    local host = CreateFrame("Frame", nil, parent)
+    local label = Label(host, o.label, S.SMALL, C.muted)
+    label:SetPoint("LEFT", host, "LEFT", 0, 0)
+    local b = NewDropdownButton(host, o, o.width, true)
+    b:SetPoint("RIGHT", host, "RIGHT", 0, 0)
+    host:SetSize(S.Snap(TextWidth(label)) + S.CTL_GAP + o.width, S.BTN_H)
+    host.control = b
+    Track(b.fsPaint)
+    return host
 end
 
 -------------------------------------------------------------------------------

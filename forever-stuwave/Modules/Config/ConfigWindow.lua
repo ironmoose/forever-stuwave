@@ -70,6 +70,26 @@ local function Say(text)
     print("|cffff4488Forever STUwave|r: " .. Capitalize(text))
 end
 
+-- The profiles as menu entries ({ value, text }), without the names passed in. The Profiles page and the head band's picker
+-- list them the same way.
+function I.ProfileItems(...)
+    local skip, items = {}, {}
+    for _, name in ipairs({ ... }) do skip[name] = true end
+    for _, name in ipairs(Config.ListProfiles()) do
+        if not skip[name] then items[#items + 1] = { value = name, text = name } end
+    end
+    return items
+end
+
+-- Swaps the profile in use. The Profiles page's "Profile in use" row and the head band's picker both come here, so a swap is
+-- the same swap from either: Config.SetActiveProfile, then the profile callbacks (the module switch notice among them). A
+-- refusal says why in chat. Neither refuses in combat: only read-only settings turn them off.
+function I.SwitchProfile(name)
+    local ok, err = Config.SetActiveProfile(name)
+    if ok == false then Say(err) end
+    return ok
+end
+
 local function Mix(a, b, t)
     return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t, 1 }
 end
@@ -1338,6 +1358,17 @@ local function BuildChrome(frame)
     ui.crumb:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -S.PAD, -D.VER_Y)
     ui.crumb:SetJustifyH("RIGHT")
 
+    -- the profile picker: the band's right column, level with the brand and above the breadcrumb (4 units clear of it, as the
+    -- brand is of the version line). It only swaps; the Profiles page keeps new, copy, rename, delete and reset.
+    ui.profilePick = UI.HeadPicker(frame, {
+        label = "PROFILE", width = S.NAV_W,
+        get = Config.ActiveProfile,
+        items = function() return I.ProfileItems() end,
+        set = I.SwitchProfile,
+    })
+    ui.profilePick:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -S.PAD, -D.BRAND_Y)
+    ui.profilePick.fsProfilePicker = true
+
     FS.ButtonSkins.NewCloseButton(frame, function() CW.Close() end) -- the shared STUwave X, seats itself top right
 
     local headRule = frame:CreateTexture(nil, "ARTWORK")
@@ -1587,6 +1618,12 @@ end
 Config.OnAnyChange(function(key, new, old)
     if ui.frame then CW.RefreshAll() end
     Fire("change", key, new, old)
+end)
+
+-- A swap between two profiles that hold the same settings runs no setting callback, so the profile callback repaints too:
+-- the head band's picker names the profile in use, wherever the swap came from (a page, a slash command, the login resolve).
+Config.OnProfileChange(function()
+    if ui.frame then CW.RefreshAll() end
 end)
 
 -- /fsconfig, /fsconfig <page>, /fsconfig <page> <tab>: a page or tab matches its key or its label, spaces ignored.
