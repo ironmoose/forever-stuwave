@@ -233,6 +233,181 @@ case("guild_and_party_rows_get_a_tinted_band_that_follows_the_row", """
 """)
 
 
+# ---- line tint settings (the Chat config page: strength, per kind switch and colour, the raid kind) ----
+
+BAND_SETUP = """
+    local textures = {}
+    function ChatFrame1:CreateTexture()
+        local t = { shown = true, alpha = 1 }
+        function t:SetPoint() end
+        function t:SetWidth() end
+        function t:SetColorTexture(r, g, b, a) self.rgba = { r, g, b, a } end
+        function t:SetAlpha(a) self.alpha = a end
+        function t:Show() self.shown = true end
+        function t:Hide() self.shown = false end
+        textures[#textures + 1] = t
+        return t
+    end
+    function ChatFrame1:AddOnDisplayRefreshedCallback(fn) self.refreshed = fn end
+    local function Row(event)
+        local r = { shown = true, alpha = 1, messageInfo = { extraData = { 0, 0, 0, event, n = 4 } } }
+        function r:IsShown() return self.shown end
+        function r:GetAlpha() return self.alpha end
+        function r:SetAlpha(a) self.alpha = a end
+        function r:SetShown(v) self.shown = v end
+        function r:Show() self.shown = true end
+        function r:Hide() self.shown = false end
+        return r
+    end
+    FS.ChatFormat.Disable(); FS.ChatFormat.Enable()
+    local guild, officer = Row("CHAT_MSG_GUILD"), Row("CHAT_MSG_OFFICER")
+    local party, leader = Row("CHAT_MSG_PARTY"), Row("CHAT_MSG_PARTY_LEADER")
+    local whisper, bnet = Row("CHAT_MSG_WHISPER"), Row("CHAT_MSG_BN_WHISPER_INFORM")
+    local raid, raidLeader, raidWarning = Row("CHAT_MSG_RAID"), Row("CHAT_MSG_RAID_LEADER"), Row("CHAT_MSG_RAID_WARNING")
+    local say = Row("CHAT_MSG_SAY")
+    ChatFrame1.visibleLines = { guild, officer, party, leader, whisper, bnet, raid, raidLeader, raidWarning, say }
+    local function Redraw() ChatFrame1.refreshed(ChatFrame1) end
+    local function Set(key, value)
+        __config[key] = value
+        if __onChange[key] then __onChange[key](value) end
+    end
+    local function Band(row) return row.fsBand end
+    local function Shown(row) return row.fsBand ~= nil and row.fsBand.fill.shown == true end
+    local function Rgb(row) local c = row.fsBand.fill.rgba; return c[1], c[2], c[3], c[4] end
+    local function Near(a, b) return math.abs(a - b) < 1e-9 end
+    Redraw()
+"""
+
+case("line_tint_defaults_are_todays_look_and_the_raid_kind_is_off", BAND_SETUP + """
+    assert(__config["chat.bandAlpha"] == 12, "strength default " .. tostring(__config["chat.bandAlpha"]))
+    assert(__config["chat.band.guild"] == true and __config["chat.band.party"] == true
+        and __config["chat.band.whisper"] == true, "guild, party and whisper start on")
+    assert(__config["chat.band.raid"] == false, "the raid kind starts off")
+    assert(__config["chat.band.guildC"] == "Green" and __config["chat.band.partyC"] == "Cyan"
+        and __config["chat.band.whisperC"] == "Pink" and __config["chat.band.raidC"] == "Amber", "default colours")
+    for _, row in ipairs({ guild, officer }) do
+        local r, g, b, a = Rgb(row)
+        assert(Near(r, 0x39 / 255) and g == 1 and Near(b, 0x14 / 255) and a == 0.12, "guild green at 0.12")
+        assert(row.fsBand.edge.rgba[4] == 0.55, "the edge stays 0.55 at the default strength")
+    end
+    for _, row in ipairs({ party, leader }) do
+        local r, g, b, a = Rgb(row)
+        assert(Near(r, 0x22 / 255) and Near(g, 0xe0 / 255) and b == 1 and a == 0.12, "party cyan at 0.12")
+    end
+    for _, row in ipairs({ whisper, bnet }) do
+        local r, g, b, a = Rgb(row)
+        assert(r == 1 and Near(g, 0x2e / 255) and Near(b, 0x97 / 255) and a == 0.12, "whisper pink at 0.12")
+    end
+    for _, row in ipairs({ raid, raidLeader, raidWarning, say }) do
+        assert(not Shown(row), "no band on a raid or say line by default")
+    end
+""")
+
+case("line_tint_strength_applies_at_once_to_every_band", BAND_SETUP + """
+    Set("chat.bandAlpha", 24)
+    local _, _, _, a = Rgb(guild)
+    assert(a == 0.24, "fill follows the strength: " .. tostring(a))
+    assert(Near(guild.fsBand.edge.rgba[4], 1), "the edge scales with it and stops at 1: " .. guild.fsBand.edge.rgba[4])
+    Set("chat.bandAlpha", 6)
+    _, _, _, a = Rgb(party)
+    assert(a == 0.06, "weaker: " .. tostring(a))
+    assert(Near(party.fsBand.edge.rgba[4], 0.55 * 0.06 / 0.12), "the edge shrinks with it")
+    Set("chat.bandAlpha", 12)
+    _, _, _, a = Rgb(guild)
+    assert(a == 0.12 and guild.fsBand.edge.rgba[4] == 0.55, "back to today's look exactly")
+""")
+
+case("line_tint_strength_is_clamped_to_its_range", BAND_SETUP + """
+    Set("chat.bandAlpha", 99)
+    local _, _, _, a = Rgb(guild)
+    assert(a == 0.30, "above the range holds at 30%: " .. tostring(a))
+    Set("chat.bandAlpha", 1)
+    _, _, _, a = Rgb(guild)
+    assert(a == 0.04, "below the range holds at 4%: " .. tostring(a))
+    Set("chat.bandAlpha", "strong")
+    _, _, _, a = Rgb(guild)
+    assert(a == 0.12, "text is not a strength, the default applies: " .. tostring(a))
+""")
+
+case("each_kind_has_its_own_switch", BAND_SETUP + """
+    Set("chat.band.guild", false)
+    assert(not Shown(guild) and not Shown(officer), "guild and officer share one switch and went off")
+    assert(Shown(party) and Shown(whisper), "party and whispers stay up")
+    Set("chat.band.party", false)
+    assert(not Shown(party) and not Shown(leader))
+    Set("chat.band.whisper", false)
+    assert(not Shown(whisper) and not Shown(bnet), "whispers go in both directions")
+    Set("chat.band.guild", true)
+    assert(Shown(guild) and Shown(officer), "switching back on brings the band back at once")
+""")
+
+case("the_master_switch_still_turns_every_kind_off", BAND_SETUP + """
+    Set("chat.lineBands", false)
+    for _, row in ipairs({ guild, party, whisper }) do assert(not Shown(row)) end
+    Set("chat.band.raid", true)
+    assert(not Shown(raid), "a kind on does not beat the master switch")
+    Set("chat.lineBands", true)
+    assert(Shown(guild) and Shown(raid), "master back on: the kinds that are on come back")
+""")
+
+case("each_kind_has_its_own_colour_from_the_five", BAND_SETUP + """
+    local want = {
+        Green = { 0x39 / 255, 1, 0x14 / 255 }, Cyan = { 0x22 / 255, 0xe0 / 255, 1 },
+        Pink = { 1, 0x2e / 255, 0x97 / 255 }, Amber = { 1, 0xb6 / 255, 0x48 / 255 },
+        Violet = { 0xa8 / 255, 0x55 / 255, 0xf7 / 255 },
+    }
+    for name, rgb in pairs(want) do
+        Set("chat.band.guildC", name)
+        local r, g, b = Rgb(guild)
+        assert(Near(r, rgb[1]) and Near(g, rgb[2]) and Near(b, rgb[3]), name .. " is not its colour")
+        local er, eg, eb = guild.fsBand.edge.rgba[1], guild.fsBand.edge.rgba[2], guild.fsBand.edge.rgba[3]
+        assert(Near(er, rgb[1]) and Near(eg, rgb[2]) and Near(eb, rgb[3]), name .. " edge is not its colour")
+    end
+    Set("chat.band.guildC", "Green")
+    Set("chat.band.partyC", "Violet")
+    local r = Rgb(party)
+    assert(Near(r, 0xa8 / 255), "party took its own colour")
+    local gr = Rgb(guild)
+    assert(Near(gr, 0x39 / 255), "and guild kept its own")
+    Set("chat.band.whisperC", "Magenta")
+    local wr, wg = Rgb(whisper)
+    assert(wr == 1 and Near(wg, 0x2e / 255), "an unknown colour name falls back to the kind's own default")
+""")
+
+case("the_raid_kind_covers_raid_leader_and_warning_lines", BAND_SETUP + """
+    Set("chat.band.raid", true)
+    for _, row in ipairs({ raid, raidLeader, raidWarning }) do
+        assert(Shown(row), "raid, raid leader and raid warning all take the band")
+        local r, g, b, a = Rgb(row)
+        assert(r == 1 and Near(g, 0xb6 / 255) and Near(b, 0x48 / 255) and a == 0.12, "amber at 0.12")
+    end
+    assert(not Shown(say), "a say line still has none")
+    Set("chat.band.raidC", "Cyan")
+    local r = Rgb(raidWarning)
+    assert(Near(r, 0x22 / 255), "the raid colour is its own")
+    Set("chat.band.raid", false)
+    assert(not Shown(raid) and not Shown(raidLeader) and not Shown(raidWarning), "off again at once")
+""")
+
+case("line_tint_settings_are_listed_for_the_config_page", """
+    local spec = FS.ChatFormat.BAND_SPEC
+    assert(spec and spec.strength.key == "chat.bandAlpha" and spec.strength.min == 4 and spec.strength.max == 30
+        and spec.strength.default == 12, "strength")
+    local names = {}
+    for i, n in ipairs(spec.colors) do names[i] = n end
+    assert(table.concat(names, ",") == "Green,Cyan,Pink,Amber,Violet", table.concat(names, ","))
+    local ids = {}
+    for i, kind in ipairs(spec.kinds) do
+        ids[i] = kind.id
+        assert(kind.key == "chat.band." .. kind.id and kind.colorKey == "chat.band." .. kind.id .. "C", kind.id)
+        assert(type(kind.label) == "string" and kind.label ~= "", "label")
+    end
+    assert(table.concat(ids, ",") == "guild,party,whisper,raid", table.concat(ids, ","))
+    assert(spec.kinds[1].label == "Guild and officer" and spec.kinds[3].label == "Whispers", "labels")
+    assert(spec.kinds[4].default == false and spec.kinds[4].color == "Amber", "raid: off, amber")
+""")
+
+
 def run_case(body: str) -> str | None:
     rt = LuaRuntime(unpack_returned_tuples=False)
     rt.globals().SRC = SRC

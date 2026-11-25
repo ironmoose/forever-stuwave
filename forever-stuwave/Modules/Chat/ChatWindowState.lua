@@ -73,12 +73,70 @@ local function LogSeat(ev, frame)
     while #log > SEAT_LOG_MAX do table.remove(log, SEAT_LOG_PIN + 1) end
 end
 
+-------------------------------------------------------------------------------
+-- Window size
+-------------------------------------------------------------------------------
+
+-- The primary window's size is two settings, chat.w and chat.h, in design px: the Width and Height sliders on the
+-- Chat page, and anything that resizes the window by hand (the layout editor's corner handle calls Chat.SetSize),
+-- write the same two keys, so a slider and a drag can never disagree. They default to the FS.Layout "chat" entry's w
+-- and h (677 x 373), which is today's size, so an untouched profile stores nothing and seats exactly as before.
+--
+-- FS.Layout.Apply sizes the frame from that entry, and so does every re-seat (a rescale, Blizzard's layout pass), so
+-- the entry itself carries the size: Chat.SyncSize copies the settings onto it, and Chat.SeatPrimaryChat does so just
+-- before each seat, which also covers the first seat of a login (the saved settings load after this file runs).
+local layoutEntry = FS.Layout and FS.Layout.chat
+local DEFAULT_W = layoutEntry and layoutEntry.w or 677
+local DEFAULT_H = layoutEntry and layoutEntry.h or 373
+Chat.SIZE = {
+    w = { key = "chat.w", min = 300, max = 1000, step = 1, default = DEFAULT_W },
+    h = { key = "chat.h", min = 150, max = 700, step = 1, default = DEFAULT_H },
+}
+
+-- The setting held to its range; the default for anything that is not a plain number.
+local function SizeValue(spec)
+    local value
+    if FS.Config and FS.Config.Get then
+        local ok, stored = pcall(FS.Config.Get, spec.key)
+        if ok then value = stored end
+    end
+    if type(value) ~= "number" or value ~= value or value - value ~= 0 then return spec.default end
+    return math.max(spec.min, math.min(spec.max, value))
+end
+
+-- The size now: width, height in design px.
+function Chat.GetSize()
+    return SizeValue(Chat.SIZE.w), SizeValue(Chat.SIZE.h)
+end
+
+-- Copies the settings onto the layout entry. True when that changed it.
+function Chat.SyncSize()
+    local entry = FS.Layout and FS.Layout.chat
+    if type(entry) ~= "table" then return false end
+    local w, h = Chat.GetSize()
+    if entry.w == w and entry.h == h then return false end
+    entry.w, entry.h = w, h
+    return true
+end
+
+-- Stores a new size (either side may be nil to keep it). The write fires the keys' callbacks, which seat the window.
+-- Returns false when the settings could not be written.
+function Chat.SetSize(w, h)
+    local config = FS.Config
+    if not (config and config.Set) then return false end
+    local ok = true
+    if w ~= nil then ok = config.Set(Chat.SIZE.w.key, w) ~= false and ok end
+    if h ~= nil then ok = config.Set(Chat.SIZE.h.key, h) ~= false and ok end
+    return ok
+end
+
 -- Seats the docked primary window (ChatFrame1 only) at the canonical
 -- FS.Layout "chat" anchor. No-ops if FS.Layout hasn't loaded or lacks Apply.
 -- `why` only labels the chatSeatLog entry.
 function Chat.SeatPrimaryChat(frame, why)
     if not frame then return end
     if not FS.Layout or type(FS.Layout.Apply) ~= "function" then return end
+    Chat.SyncSize()
     FS.Layout.Apply(frame, "chat")
     LogSeat(why or "seat", frame)
 end
@@ -145,6 +203,21 @@ local function DeferReassert()
     C_Timer.After(0, function()
         if deferPending then Chat.ReassertPrimaryChat() end
     end)
+end
+
+-- A size change seats the window again at once (out of combat; ReassertPrimaryChat holds a protected frame back and
+-- finishes at PLAYER_REGEN_ENABLED). Nothing to do before the window exists: the first seat reads the settings.
+local function ApplySize()
+    if not Chat.SyncSize() then return end
+    if ChatFrame1 then Chat.ReassertPrimaryChat() end
+end
+Chat.ApplySize = ApplySize
+
+if FS.Config and FS.Config.RegisterDefault then
+    FS.Config.RegisterDefault(Chat.SIZE.w.key, Chat.SIZE.w.default)
+    FS.Config.RegisterDefault(Chat.SIZE.h.key, Chat.SIZE.h.default)
+    FS.Config.OnChange(Chat.SIZE.w.key, ApplySize)
+    FS.Config.OnChange(Chat.SIZE.h.key, ApplySize)
 end
 
 local primaryHooked = false
