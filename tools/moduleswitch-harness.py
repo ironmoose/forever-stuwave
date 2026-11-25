@@ -739,6 +739,23 @@ __phase, __loadFailed = "load", {}
 local watched = {}                 -- stub -> label
 local ownMT = {}
 
+-- the files whose code is on the stack (the .toc path is each chunk's name)
+local function stackFiles()
+    local set, level = {}, 3
+    while true do
+        local info = debug.getinfo(level, "S")
+        if not info then break end
+        set[(info.source:gsub("^@", ""))] = true
+        level = level + 1
+    end
+    return set
+end
+__touchedBy = {}
+local function touch(entry)
+    __touched[#__touched + 1] = entry
+    __touchedBy[#__touched] = stackFiles()
+end
+
 local NUMBERS = {
     GetWidth = 250, GetHeight = 252, GetScale = 1, GetEffectiveScale = 1, GetLeft = 100, GetRight = 350,
     GetTop = 700, GetBottom = 450, GetAlpha = 1, GetFrameLevel = 1, GetNumPoints = 0, GetNumChildren = 0,
@@ -760,12 +777,12 @@ ownMT.__index = function(t, k)
     if type(k) ~= "string" or not k:find("^%u") then return nil end
     if k == "SetScript" then
         return function(self, name, fn)
-            if watched[self] then __touched[#__touched + 1] = self._label .. ":SetScript" end
+            if watched[self] then touch(self._label .. ":SetScript") end
             self._scripts[name] = fn
         end
     elseif k == "HookScript" then
         return function(self, name, fn)
-            if watched[self] then __touched[#__touched + 1] = self._label .. ":HookScript" end
+            if watched[self] then touch(self._label .. ":HookScript") end
             self._hooks[name] = self._hooks[name] or {}
             table.insert(self._hooks[name], fn)
         end
@@ -773,18 +790,18 @@ ownMT.__index = function(t, k)
         return function(self, name) return self._scripts[name] end
     elseif k == "RegisterEvent" or k == "RegisterUnitEvent" then
         return function(self, event)
-            if watched[self] then __touched[#__touched + 1] = self._label .. ":" .. k end
+            if watched[self] then touch(self._label .. ":" .. k) end
             self._events[event] = true
             if not self._listed then self._listed = true; __evFrames[#__evFrames + 1] = self end
         end
     elseif k == "UnregisterEvent" then
         return function(self, event)
-            if watched[self] then __touched[#__touched + 1] = self._label .. ":UnregisterEvent" end
+            if watched[self] then touch(self._label .. ":UnregisterEvent") end
             self._events[event] = nil
         end
     elseif k == "UnregisterAllEvents" then
         return function(self)
-            if watched[self] then __touched[#__touched + 1] = self._label .. ":UnregisterAllEvents" end
+            if watched[self] then touch(self._label .. ":UnregisterAllEvents") end
             self._events = {}
         end
     elseif k == "GetName" then
@@ -795,12 +812,12 @@ ownMT.__index = function(t, k)
         return function() end
     elseif k == "SetParent" then
         return function(self, p)
-            if watched[self] then __touched[#__touched + 1] = self._label .. ":SetParent" end
+            if watched[self] then touch(self._label .. ":SetParent") end
             self._parent = p
         end
     elseif k == "Show" or k == "Hide" or k == "SetShown" then
         return function(self, v)
-            if watched[self] then __touched[#__touched + 1] = self._label .. ":" .. k end
+            if watched[self] then touch(self._label .. ":" .. k) end
             if k == "Show" then self._shown = true elseif k == "Hide" then self._shown = false else self._shown = v and true or false end
         end
     elseif k == "IsShown" or k == "IsVisible" then
@@ -821,13 +838,13 @@ ownMT.__index = function(t, k)
         return function() end
     end
     return function(self, ...)
-        if watched[self] then __touched[#__touched + 1] = self._label .. ":" .. k end
+        if watched[self] then touch(self._label .. ":" .. k) end
     end
 end
 ownMT.__newindex = function(t, k, v)
     -- a script field or method written on a watched Blizzard stub counts as a touch
     if watched[t] and type(k) == "string" and k:sub(1, 1) ~= "_" then
-        __touched[#__touched + 1] = t._label .. ":write:" .. k
+        touch(t._label .. ":write:" .. k)
     end
     rawset(t, k, v)
 end
@@ -841,17 +858,6 @@ function Watch(name, fields)
     return f
 end
 
-local function stackFiles()
-    local set, level = {}, 3
-    while true do
-        local info = debug.getinfo(level, "S")
-        if not info then break end
-        set[(info.source:gsub("^@", ""))] = true
-        level = level + 1
-    end
-    return set
-end
-
 function CreateFrame(kind, name, parent, template)
     local f = Sponge(name or ("(" .. tostring(kind) .. ")"))
     f._name, f._kind, f._parent = name, kind, parent
@@ -862,9 +868,9 @@ end
 
 function hooksecurefunc(a, b, c)
     if type(a) == "string" then
-        __touched[#__touched + 1] = "hooksecurefunc:" .. a
+        touch("hooksecurefunc:" .. a)
     elseif type(a) == "table" and watched[a] then
-        __touched[#__touched + 1] = watched[a] .. ":hooksecurefunc:" .. tostring(b)
+        touch(watched[a] .. ":hooksecurefunc:" .. tostring(b))
     end
 end
 
@@ -948,11 +954,27 @@ function Boot(opts)
     Fire("PLAYER_REGEN_ENABLED")
 end
 
--- every touch recorded on a watched Blizzard frame, as one string ("" when it was left alone)
-function TouchesOn(label)
+-- Child frames of a watched Blizzard frame ({ Child = { GrandChild = true } }): each is a stub that records its own touches
+-- under "Parent.Child", and TouchesOn("Parent") reports them with the parent's own.
+local function attach(parent, label, tree)
+    for child, sub in pairs(tree) do
+        local stub = Sponge(label .. "." .. child, true)
+        rawset(parent, child, stub)
+        if type(sub) == "table" then attach(stub, label .. "." .. child, sub) end
+    end
+end
+function WatchTree(name, tree)
+    attach(_G[name] or Watch(name), name, tree)
+end
+
+-- every touch recorded on a watched Blizzard frame (and its watched children), as one string ("" when it was left alone);
+-- `file` keeps the touches made by code of that file (a frame several modules hook, like EditModeManagerFrame)
+function TouchesOn(label, file)
     local list = {}
-    for _, t in ipairs(__touched) do
-        if t == label or t:find("^" .. label .. ":") or t:find(label .. ":hooksecurefunc", 1, true) then list[#list + 1] = t end
+    for i, t in ipairs(__touched) do
+        if (t:find("^" .. label .. "[:.]") or t:find(label .. ":hooksecurefunc", 1, true)) and (file == nil or __touchedBy[i][file]) then
+            list[#list + 1] = t
+        end
     end
     return table.concat(list, ", ")
 end
@@ -1088,6 +1110,63 @@ function T.the_shaman_shield_tile_still_says_missing_while_buffs_are_on()
     Boot({})
     local view = FS.ShamanBuffs.Update(200)
     eq(view.shield.mode, "warn", "unchanged with the module on")
+end
+
+local MINI_FILE = "Modules/Minimap/Minimap.lua"
+local BANNER_FILE = "Modules/Minimap/InstanceBanner.lua"
+local MINI_BLIZZARD = { "Minimap", "MinimapCluster", "MinimapBackdrop", "GameTimeFrame", "TimeManagerClockButton",
+    "ExpansionLandingPageMinimapButton", "EditModeManagerFrame", "MinimapInstanceDifficulty" }
+local function miniWorld(off)
+    Boot({ off = off, watch = MINI_BLIZZARD, pre = function()
+        rawset(MinimapCluster, "InstanceDifficulty", MinimapInstanceDifficulty)
+        rawset(MinimapInstanceDifficulty, "ContentModes", {})
+        WatchTree("MinimapCluster", { MinimapContainer = true, Tracking = true, BorderTop = true, DielFrame = true,
+            IndicatorFrame = { MailFrame = true } })
+    end })
+    -- what the client does later: a rescale pass, a display change, the timers the build armed, the end of a fight
+    Fire("UI_SCALE_CHANGED"); Fire("DISPLAY_SIZE_CHANGED"); Fire("EDIT_MODE_LAYOUTS_UPDATED"); Fire("PLAYER_REGEN_ENABLED")
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+function T.minimap_off_builds_nothing_and_leaves_every_blizzard_minimap_frame_alone()
+    miniWorld({ "m.mini" })
+    loaded(MINI_FILE); loaded(BANNER_FILE)
+    eq(FS.ModuleSwitch.Built("m.mini"), false)
+    eq(BuiltBy(MINI_FILE), 0, "no frame made after the files loaded")
+    eq(BuiltBy(BANNER_FILE), 0, "no banner plate")
+    eq(_G.GetMinimapShape, nil, "the round map keeps its round answer")
+    for _, name in ipairs(MINI_BLIZZARD) do
+        eq(TouchesOn(name, MINI_FILE), "", name .. " untouched by the map")
+        eq(TouchesOn(name, BANNER_FILE), "", name .. " untouched by the banner")
+    end
+    eq(Minimap.fsBezel, nil)
+    eq(Minimap.fsPlaced, nil)
+end
+
+function T.minimap_off_keeps_its_settings_and_coords_tables()
+    miniWorld({ "m.mini" })
+    local S = FS.MinimapSettings
+    eq(type(S), "table")
+    eq(S.Width(), S.w.default); eq(S.Height(), S.h.default); eq(S.Scale(), 1)
+    eq(type(FS.MinimapCoords), "table")
+    eq(FS.MinimapCoords.KEY, "minimap.coords")
+    FS.Config.Set("minimap.scale", 150)
+    FS.Config.Set("minimap.coords", false)
+    eq(TouchesOn("Minimap"), "", "a changed setting does not reach the stock map")
+    eq(TouchesOn("MinimapCluster"), "")
+end
+
+function T.minimap_on_builds_the_body_defines_the_shape_and_marks_itself_built()
+    miniWorld({})
+    loaded(MINI_FILE); loaded(BANNER_FILE)
+    eq(FS.ModuleSwitch.Built("m.mini"), true)
+    eq(type(_G.GetMinimapShape), "function")
+    eq(_G.GetMinimapShape(), "SQUARE")
+    yes(Minimap.fsPlaced, "the map was seated")
+    yes(TouchesOn("Minimap") ~= "", "the stock map was reshaped")
+    yes(TouchesOn("MinimapInstanceDifficulty") ~= "", "the banner was skinned")
 end
 
 return T

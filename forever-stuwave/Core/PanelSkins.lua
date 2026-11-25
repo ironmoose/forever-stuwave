@@ -20,7 +20,7 @@ local PanelSkins = FS.PanelSkins
 -- One shared frame and queue: a frame can never be freed, so one per call (a window opened in combat over and over) piled up.
 -- The same function queued twice in one fight runs once.
 local deferQueue, deferQueued, deferFrame = {}, {}, nil
-function PanelSkins.DeferCombat(fn)
+local function RunDeferred(fn)
     if InCombatLockdown() then
         if deferQueued[fn] then return end
         deferQueued[fn] = true
@@ -41,6 +41,21 @@ function PanelSkins.DeferCombat(fn)
     else
         fn()
     end
+end
+
+-- Module power (Core/ModuleSwitch.lua). Every reskin registers itself through DeferCombat or WatchAddonLoad at file scope,
+-- before the saved switches are read. A call made then waits for ADDON_LOADED and never runs while its switch is off:
+-- `key` names the module the caller belongs to and defaults to the Window skins switch (m.skins); a caller that is not a
+-- skin (the instance banner, the quest tracker, the bags) passes its own. A call made later, when a window opens or combat
+-- ends, is not gated: nothing reaches it unless the file-scope registration ran.
+local MS = FS.ModuleSwitch
+
+function PanelSkins.DeferCombat(fn, key)
+    if MS and not MS.Loaded() then
+        MS.WhenOn(key or "m.skins", function() RunDeferred(fn) end)
+        return
+    end
+    RunDeferred(fn)
 end
 
 -------------------------------------------------------------------------------
@@ -178,17 +193,21 @@ end
 -- on ADDON_LOADED whenever `matches(loadedAddonName)` is true (default: any
 -- Blizzard_* module -- pass an explicit-name matcher when a panel knows its
 -- exact load-on-demand module, which is tighter; see AuctionHouse.lua).
-function PanelSkins.WatchAddonLoad(callback, matches)
+function PanelSkins.WatchAddonLoad(callback, matches, key)
     matches = matches or MatchesBlizzardPrefix
     local watcher = CreateFrame("Frame")
-    watcher:RegisterEvent("ADDON_LOADED")
-    watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
-    watcher:SetScript("OnEvent", function(_, event, loadedAddonName)
-        if event == "ADDON_LOADED" and not matches(loadedAddonName) then
-            return
-        end
-        callback()
-    end)
+    -- The frame is made at once (callers keep it); it listens only once its module is known to be on (see DeferCombat).
+    local function Arm()
+        watcher:RegisterEvent("ADDON_LOADED")
+        watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+        watcher:SetScript("OnEvent", function(_, event, loadedAddonName)
+            if event == "ADDON_LOADED" and not matches(loadedAddonName) then
+                return
+            end
+            callback()
+        end)
+    end
+    if MS and not MS.Loaded() then MS.WhenOn(key or "m.skins", Arm) else Arm() end
     return watcher
 end
 

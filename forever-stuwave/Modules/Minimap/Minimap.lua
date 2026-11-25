@@ -24,6 +24,12 @@
 
 local _, FS = ...
 
+-- Module power (Core/ModuleSwitch.lua). With the Minimap switch off the build at the end of this file never runs, and the
+-- callbacks that Layout.lua and Config.lua hold on to do nothing: Blizzard's minimap, its cluster and its buttons are never
+-- moved, hidden, masked or hooked. Active is read when a callback runs, never at file scope (the switch is not known yet).
+local MS = FS.ModuleSwitch
+local function Active() return MS == nil or MS.On("m.mini") end
+
 -------------------------------------------------------------------------------
 -- Theme (shared chrome + palette; see Theme.lua for signatures)
 -------------------------------------------------------------------------------
@@ -663,6 +669,7 @@ do
     -- this puts the correction back.
     if FS.Layout and FS.Layout.OnRescale then
         FS.Layout.OnRescale(function()
+            if not Active() then return end
             LogSeat("rescale:" .. tostring(FS.Layout.rescaleWhy or "?"))
             -- The pass above re-sized the cluster for the new UI scale; the map follows (its own size and scale, and the
             -- rows and furniture when that changed). Nothing to do before the first seat.
@@ -809,13 +816,9 @@ local function ApplySquareMask()
     end
 end
 
--- Edge-button libs (LibDBIcon, minimap button addons) query this to lay out
--- around the minimap shape; only define it if nothing else already has.
-if type(GetMinimapShape) ~= "function" then
-    function GetMinimapShape()
-        return "SQUARE"
-    end
-end
+-- Edge-button libs (LibDBIcon, minimap button addons) query GetMinimapShape to lay out around the minimap shape; the build
+-- defines it (below, only if nothing else already has), so it is never defined while the module is off and the stock round map
+-- keeps its round answer.
 
 
 -------------------------------------------------------------------------------
@@ -1873,7 +1876,7 @@ local function SeatRow()
 end
 
 if FS.Layout and FS.Layout.OnRescale then
-    FS.Layout.OnRescale(SeatRow)
+    FS.Layout.OnRescale(function() if Active() then SeatRow() end end)
 end
 
 -------------------------------------------------------------------------------
@@ -2842,8 +2845,8 @@ end
 -- DISPLAY_SIZE_CHANGED, which can move the map and bezel. Callbacks run after that pass
 -- (same OnRescale mechanism ScheduleCompensate above uses for the cluster).
 if FS.Layout and FS.Layout.OnRescale then
-    FS.Layout.OnRescale(ReanchorTray)
-    FS.Layout.OnRescale(RelayoutTray)
+    FS.Layout.OnRescale(function() if Active() then ReanchorTray() end end)
+    FS.Layout.OnRescale(function() if Active() then RelayoutTray() end end)
 end
 
 -------------------------------------------------------------------------------
@@ -2865,6 +2868,7 @@ local function Apply()
     ApplyReadout()
     ApplyMinimapTray()
     ApplyScanline()
+    if MS then MS.MarkBuilt("m.mini") end
 end
 
 -- PLAYER_LOGIN, not file scope. Two reasons, both bitten already elsewhere in
@@ -2873,20 +2877,28 @@ end
 -- GameTimeFrame, the expansion button, the addon compartment -- are not
 -- reliably present or stay re-shown when hidden that early. The sun and clock
 -- above the map survived a file-scope hide for exactly that reason.
-local loader = CreateFrame("Frame")
-loader:RegisterEvent("PLAYER_LOGIN")
-loader:SetScript("OnEvent", function(self)
-    self:UnregisterEvent("PLAYER_LOGIN")
-    if InCombatLockdown() then
-        self:RegisterEvent("PLAYER_REGEN_ENABLED")
-        self:SetScript("OnEvent", function(inner)
-            inner:UnregisterEvent("PLAYER_REGEN_ENABLED")
-            Apply()
-        end)
-        return
+local function Start()
+    if type(GetMinimapShape) ~= "function" then
+        function GetMinimapShape()
+            return "SQUARE"
+        end
     end
-    Apply()
-end)
+    local loader = CreateFrame("Frame")
+    loader:RegisterEvent("PLAYER_LOGIN")
+    loader:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_LOGIN")
+        if InCombatLockdown() then
+            self:RegisterEvent("PLAYER_REGEN_ENABLED")
+            self:SetScript("OnEvent", function(inner)
+                inner:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                Apply()
+            end)
+            return
+        end
+        Apply()
+    end)
+end
+if MS then MS.WhenOn("m.mini", Start) else Start() end
 
 -- A new Width, Height or Scale: the map's furniture that was sized once at login follows the map (the highlight, the blip glow,
 -- the zone and north labels), then the rows, the divider, the coords and the tray seat again on the new pixel width. Runs from
@@ -2931,7 +2943,7 @@ if FS.Config and FS.Config.RegisterDefault then
 end
 
 if FS.Config and FS.Config.OnChange then
-    FS.Config.OnChange(COORDS_KEY, function() SeatRow() end)
+    FS.Config.OnChange(COORDS_KEY, function() if Active() then SeatRow() end end)
     -- Before the first seat (PLAYER_LOGIN) the saved values are read by ApplyLayout itself.
     local function SizeChanged()
         if Minimap and Minimap.fsPlaced and Settings.Reseat then Settings.Reseat("size") end
