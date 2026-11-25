@@ -1345,6 +1345,58 @@ function T.the_quest_timer_lays_out_again_on_a_new_grid_when_the_minimap_scale_c
     yes(after.n >= before.n)
 end
 
+local BAGS_FILES = { "Modules/Bags/Bags.lua", "Modules/Bags/BagBar.lua" }
+local BAGS_BLIZZARD = { "MicroButtonAndBagsBar", "BagsBar", "MainMenuBarBackpackButton", "CharacterBag0Slot", "CharacterBag1Slot",
+    "KeyRingButton", "BagBarExpandToggle", "ContainerFrame1", "ContainerFrameCombinedBags", "BankFrame" }
+local bagCallbacks
+local function bagsWorld(off)
+    bagCallbacks = 0
+    Boot({ off = off, watch = BAGS_BLIZZARD, pre = function()
+        WatchPanel("ContainerFrame1"); WatchPanel("ContainerFrameCombinedBags"); WatchPanel("BankFrame")
+        EventRegistry = { RegisterCallback = function() bagCallbacks = bagCallbacks + 1 end }
+    end })
+    Fire("BAG_UPDATE"); Fire("BAG_UPDATE_DELAYED"); Fire("GAME_PAD_ACTIVE_CHANGED"); Fire("PLAYER_REGEN_ENABLED"); Fire("PLAYER_MONEY")
+    Fire("UI_SCALE_CHANGED")
+end
+
+function T.bags_off_builds_no_bar_hooks_no_bag_frame_and_dims_nothing()
+    bagsWorld({ "m.bags" })
+    for _, f in ipairs(BAGS_FILES) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.bags"), false)
+    eq(BuiltBy("Modules/Bags/Bags.lua"), 0)
+    eq(BuiltBy("Modules/Bags/BagBar.lua"), 0, "no bar, no secure slot buttons")
+    no(MadeNamed("ForeverSTUwaveBagBar"))
+    eq(bagCallbacks, 0, "no container open or close callback")
+    for _, name in ipairs(BAGS_BLIZZARD) do
+        for _, f in ipairs(BAGS_FILES) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+end
+
+function T.bags_off_keeps_its_tables_defined_and_inert()
+    bagsWorld({ "m.bags" })
+    eq(type(FS.BagBar), "table"); eq(FS.BagBar.bar, nil); eq(#FS.BagBar.slots, 0)
+    FS.BagBar.Refresh()
+    FS.BagBar.HideBlizzardBar()
+    eq(type(FS.BagHighlight), "table")
+    FS.BagHighlight.Set(1); FS.BagHighlight.Clear()
+    eq(type(FS.BagsWindow), "table")
+    -- (the bank window is also a Window skins frame, so only the bag files' own touches are counted)
+    for _, name in ipairs(BAGS_BLIZZARD) do
+        for _, f in ipairs(BAGS_FILES) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+end
+
+function T.bags_on_builds_the_bar_dims_the_stock_bag_bar_and_skins_the_bag_frames_as_before()
+    bagsWorld({})
+    for _, f in ipairs(BAGS_FILES) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.bags"), true)
+    yes(MadeNamed("ForeverSTUwaveBagBar"))
+    yes(FS.BagBar.bar and #FS.BagBar.slots > 0)
+    yes(bagCallbacks > 0, "the open and close callbacks are installed")
+    yes(TouchesOn("MicroButtonAndBagsBar", "Modules/Bags/BagBar.lua") ~= "", "the stock bag bar is dimmed")
+    yes(TouchesOn("ContainerFrame1", "Modules/Bags/Bags.lua") ~= "", "the bag frames are skinned")
+end
+
 return T
 """
 

@@ -229,7 +229,12 @@ local function DeckExport()
     return nil
 end
 
-local bar = CreateFrame("Frame", "ForeverSTUwaveBagBar", (DeckExport() and DeckExport().bagSlot) or UIParent)
+-- Module power (Core/ModuleSwitch.lua): the bar, its slots, its listeners and the dimming of the game's own bag bar are made
+-- by Build at the end of this file, only with the Bags switch on. Off, `bar` stays nil, the game's bag bar is never dimmed or
+-- hooked, and the functions below are never called. FS.BagBar stays defined.
+local MS = FS.ModuleSwitch
+local bar
+local built = false
 local fallbackHost
 
 -- Without the deck, a standalone host bottom-right so the bags are never lost.
@@ -687,8 +692,10 @@ local function BuildSlot(def)
     return slot
 end
 
-for _, def in ipairs(DEFS) do
-    slots[#slots + 1] = BuildSlot(def)
+local function BuildSlots()
+    for _, def in ipairs(DEFS) do
+        slots[#slots + 1] = BuildSlot(def)
+    end
 end
 
 -- Which slots exist on this client right now. Reagent needs the enum and a
@@ -915,7 +922,6 @@ local function RefreshAll()
     RefreshCursor()
 end
 
-local events = CreateFrame("Frame")
 local EVENT_HANDLERS = {
     PLAYER_ENTERING_WORLD = function() RefreshAll() HideBlizzardBar() end,
     BAG_UPDATE = RefreshFree,
@@ -936,29 +942,54 @@ local EVENT_HANDLERS = {
         end
     end,
 }
-for event in pairs(EVENT_HANDLERS) do
-    pcall(events.RegisterEvent, events, event)
-end
-events:SetScript("OnEvent", function(_, event, ...)
-    local handler = EVENT_HANDLERS[event]
-    if handler then handler(...) end
-end)
 
+-- Kept at file scope so it runs in the same place among the other rescale callbacks as before; does nothing until built.
 FS.Layout.OnRescale(function()
+    if not built then return end
     Structure()
     EachActive(ApplySlotState)
 end)
 
-InstallOpenTracking()
-HideBlizzardBar()
-RefreshAll()
+-- Each call does nothing (and answers nil) until the bar is built, so a caller never has to ask whether the module is on.
+local function WhenBuilt(fn)
+    return function(...)
+        if built then return fn(...) end
+    end
+end
 
 FS.BagBar = {
-    bar = bar,
+    bar = nil,   -- set by Build
     slots = slots,
-    Refresh = RefreshAll,
-    Structure = Structure,
-    ApplySlotState = ApplySlotState,
-    HideBlizzardBar = HideBlizzardBar,
-    BagOpen = BagOpen,
+    Refresh = WhenBuilt(RefreshAll),
+    Structure = WhenBuilt(Structure),
+    ApplySlotState = WhenBuilt(ApplySlotState),
+    HideBlizzardBar = WhenBuilt(HideBlizzardBar),
+    BagOpen = WhenBuilt(BagOpen),
 }
+
+local function Build()
+    bar = CreateFrame("Frame", "ForeverSTUwaveBagBar", (DeckExport() and DeckExport().bagSlot) or UIParent)
+    FS.BagBar.bar = bar
+    BuildSlots()
+    built = true
+    local events = CreateFrame("Frame")
+    for event in pairs(EVENT_HANDLERS) do
+        pcall(events.RegisterEvent, events, event)
+    end
+    events:SetScript("OnEvent", function(_, event, ...)
+        local handler = EVENT_HANDLERS[event]
+        if handler then handler(...) end
+    end)
+    InstallOpenTracking()
+    HideBlizzardBar()
+    RefreshAll()
+end
+
+if MS then
+    MS.WhenOn("m.bags", function()
+        Build()
+        MS.MarkBuilt("m.bags")
+    end)
+else
+    Build()
+end
