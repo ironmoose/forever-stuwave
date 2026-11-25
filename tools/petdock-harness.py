@@ -2266,6 +2266,26 @@ def check_an_owner_that_takes_the_pet_span_in_keeps_the_pet_patch_live() -> None
     assert pd.DockRight() == pd.C.DOCK_X + pd.C.W
 
 
+def check_docked_the_panel_wears_the_consoles_chassis_look() -> None:
+    # Parker 2026-11-24: the docked pet panel and the class shoulders beside it read as one piece of the Console
+    look = ("FS.Console = FS.Console or {}; FS.Console.FILL_TOP = { 45/255, 27/255, 78/255, 0.80 }; "
+            "FS.Console.OUTLINE_ALPHA = 0.72; FS.Console.GLOW = { texture = 'glow', size = 64, pad = 11, margin = 25, "
+            "mid0 = 28, mid1 = 36 }")
+    rt = runtime(1.0, after_load=look)
+    pd = rt.globals().FS.PetDock
+    chassis = pd.ChassisLook()
+    assert chassis is not None and abs(chassis.strokeAlpha - 0.72) < 1e-9 and chassis.haloAlpha == 1, "the Console's look"
+    sh = rt.eval("FS.PetDock._shoulder and FS.PetDock._shoulder()")
+    assert sh is not None, "no dock shoulder"
+    assert sh.fillTint is not None and abs(sh.fillTint[4] - 0.80) < 1e-9, "the fill is the chassis tint"
+    assert abs(sh.strokeAlpha - 0.72) < 1e-9 and sh.haloAlpha == 1 and sh.haloPad == 11, "stroke and halo are the Console's"
+    assert sh.red is not None, "the red low-HP twin is kept"
+    # without a Console look the panel keeps its own
+    rt = runtime(1.0)
+    sh = rt.eval("FS.PetDock._shoulder and FS.PetDock._shoulder()")
+    assert sh is not None and sh.fillTint is None and abs(sh.strokeAlpha - pd.C.STROKE_ALPHA) < 1e-9
+
+
 def check_reclaiming_the_gap_restores_the_pet_gap() -> None:
     for pet in (True, False):
         rt = _owner_world(pet)
@@ -2542,6 +2562,7 @@ def main() -> int:
         ("a shoulder that took the Console gap keeps it (single owner)", check_a_shoulder_that_took_the_gap_keeps_it),
         ("YieldGap and ReclaimGap are single owner and validated", check_yielding_the_gap_is_single_owner_and_validated),
         ("an owner that takes the pet span in keeps the pet patch live", check_an_owner_that_takes_the_pet_span_in_keeps_the_pet_patch_live),
+        ("docked, the panel wears the Console's chassis look", check_docked_the_panel_wears_the_consoles_chassis_look),
         ("reclaiming the gap restores the pet gap", check_reclaiming_the_gap_restores_the_pet_gap),
         ("a reclaim in combat keeps the patch open until regen", check_a_reclaim_in_combat_keeps_the_patch_open_until_regen),
         ("SetEdgeColor refuses a bad alpha before tinting anything", check_set_edge_color_refuses_a_bad_alpha_before_tinting_anything),

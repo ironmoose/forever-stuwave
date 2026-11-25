@@ -665,8 +665,22 @@ end
 
 -- The pet's dock chrome IS a shoulder at the panel's own size (ONE code path with every other shoulder):
 -- the module's public tables are that object's parts.
+-- Docked, the panel wears the Console's own chassis look (its fill tint, stroke alpha and baked halo), the same as
+-- every class shoulder standing beside it (ClassShoulder.lua), so the pet panel and the mana regen or ammo tab read
+-- as one piece of the Console (Parker, 2026-11-24). A Console that exports no look leaves the panel its own.
+local function ChassisLook()
+    local console = FS.Console
+    if type(console) ~= "table" then return nil end
+    local top, stroke, glow = console.FILL_TOP, console.OUTLINE_ALPHA, console.GLOW
+    if not (type(top) == "table" and type(stroke) == "number" and type(glow) == "table") then return nil end
+    return { fill = { top[1], top[2], top[3], top[4] }, strokeAlpha = stroke, haloAlpha = 1, halo = glow }
+end
+PetDock.ChassisLook = ChassisLook
+-- The dock chrome's shoulder object (the harness reads its look).
+function PetDock._shoulder() return dockShoulder end
+
 local function BuildDock()
-    local shoulder, why = PetDock.NewShoulder(container, C.W, C.H, { red = true })
+    local shoulder, why = PetDock.NewShoulder(container, C.W, C.H, { red = true, chassis = ChassisLook() })
     if not shoulder then error(why, 0) end
     dockShoulder = shoulder
     frames.dock = shoulder.art
@@ -1018,6 +1032,12 @@ end
 -- Retint hook for the NORMAL edge (the red twins are never retinted)
 -------------------------------------------------------------------------------
 
+-- The docked chrome's stroke and halo alpha at rest: the shoulder's own (the Console's when it wears the chassis look).
+local function DockAlphas()
+    if dockShoulder then return dockShoulder.strokeAlpha, dockShoulder.haloAlpha end
+    return C.STROKE_ALPHA, C.HALO_ALPHA
+end
+
 local function TintNormal(color, strokeAlpha, haloAlpha, floatColor, floatAlpha)
     if dockShoulder then dockShoulder:SetEdge(color, strokeAlpha, haloAlpha) end
     if parts.float.outline then
@@ -1035,7 +1055,9 @@ function PetDock.SetEdgeColor(r, g, b, strokeAlpha, haloAlpha)
     end
     if not built then return false end
     local color = { r, g, b }
-    TintNormal(color, strokeAlpha or C.STROKE_ALPHA, haloAlpha or C.HALO_ALPHA, color, strokeAlpha or 1)
+    -- the defaults are the dock's own look (the Console's when it wears the chassis look)
+    local ds, dh = DockAlphas()
+    TintNormal(color, strokeAlpha or ds, haloAlpha or dh, color, strokeAlpha or 1)
     return true
 end
 
@@ -1043,7 +1065,8 @@ end
 function PetDock.ResetEdgeColor()
     if not built then return false end
     local power = Theme.COLOR_POWER
-    TintNormal(Theme.COLOR_BORDER, C.STROKE_ALPHA, C.HALO_ALPHA, power, power[4] or 1)
+    local ds, dh = DockAlphas()
+    TintNormal(Theme.COLOR_BORDER, ds, dh, power, power[4] or 1)
     return true
 end
 
