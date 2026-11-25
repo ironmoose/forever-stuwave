@@ -27,6 +27,7 @@ end
 local Theme = FS.Theme
 local Style = FS.FrameStyle
 local IsSecret = FS.IsSecret
+local Extras = FS.FrameExtras
 local DimBlizzardFrame = FS.FrameHelpers.DimBlizzardFrame
 local CreateLaserRail = FS.FrameHelpers.CreateLaserRail
 local SetLaserRailColor = FS.FrameHelpers.SetLaserRailColor
@@ -209,12 +210,26 @@ local function BuildEdges(parts, frame, level)
     dashHost:SetFrameLevel(level)
     dashHost:Hide()
     parts.edge, parts.red, parts.dashHost = edge, red, dashHost
+    -- The aggro ring: pink or amber, one level above the red low health layer; the share of the mob's threat sits in it.
+    if Extras and Extras.BuildGroupAggro then
+        local ring = CreateFrame("Frame", nil, frame)
+        ring:SetAllPoints(frame)
+        ring:SetFrameLevel(level + 2)
+        parts.aggro = Extras.BuildGroupAggro(ring, CHAMFER)
+    end
 end
 
 local function BuildFill(frame, color)
     if not (Theme.AddCutSliceFill and Theme.AddCutSliceFill(frame, color, CHAMFER)) then
         Theme.AddRoundedFill(frame, color, CHAMFER)
     end
+end
+
+-- The fill of a look, kept so Background opacity can draw it again at another opacity (FrameExtras.NewFill).
+local function NewCellFill(frame, color)
+    if Extras and Extras.NewFill then return Extras.NewFill(frame, BuildFill, color) end
+    BuildFill(frame, color)
+    return nil
 end
 
 -- The own cell tick: 2 wide, pink, down the cell's left side just outside it, with a soft halo.
@@ -249,7 +264,7 @@ local function BuildLookA(cell)
     frame:SetAllPoints(cell.visual)
     local base = frame:GetFrameLevel()
     local parts = { look = "A", spec = spec, frame = frame }
-    BuildFill(frame, spec.fill)
+    parts.fill = NewCellFill(frame, spec.fill)
     BuildEdges(parts, frame, base + 1)
 
     local health = CreateLaserRail(frame, RAIL_HEALTH)
@@ -280,6 +295,17 @@ local function BuildLookA(cell)
     pct:SetJustifyH("RIGHT")
     SetColor(pct, COLOR_RED)
     pct:SetAlpha(0)
+    -- the health text of the Text setting when it shows at every health (Percent, Number); the red one above is the
+    -- low health layer and covers it at 35% or less
+    local fmt = NewText(host)
+    Theme.ApplyMono(fmt, 7.5, COLOR_WHITE)
+    fmt:SetPoint("RIGHT", frame, "TOPRIGHT", -5, -7.5)
+    fmt:SetJustifyH("RIGHT")
+    SetColor(fmt, COLOR_WHITE, 0.9)
+    fmt:Hide()
+    parts.fmt = fmt
+    if Extras and Extras.BuildMarkers then parts.markers = Extras.BuildMarkers(frame, base + 9, frame) end
+    if parts.aggro then Extras.SeatGroupAggro(parts.aggro, "raid", "RIGHT", "TOPRIGHT", -26, -7.5) end
 
     BuildTick(parts, frame, spec)
     parts.health, parts.mana = health, mana
@@ -298,7 +324,7 @@ local function BuildLookC(cell)
     frame:SetAllPoints(cell.visual)
     local base = frame:GetFrameLevel()
     local parts = { look = "C", spec = spec, frame = frame }
-    BuildFill(frame, spec.fill)
+    parts.fill = NewCellFill(frame, spec.fill)
 
     local health = CreateFrame("StatusBar", nil, frame)
     health:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -2)
@@ -360,6 +386,14 @@ local function BuildLookC(cell)
     pct:SetPoint("CENTER", frame, "TOP", 0, -25.5)
     SetColor(pct, COLOR_RED)
     pct:SetAlpha(0)
+    local fmt = NewText(host)
+    Theme.ApplyFontGeneric(fmt, Theme.FONT_MONO, 7.5, COLOR_WHITE, "OUTLINE")
+    fmt:SetPoint("CENTER", frame, "TOP", 0, -25.5)
+    SetColor(fmt, COLOR_WHITE, 0.9)
+    fmt:Hide()
+    parts.fmt = fmt
+    if Extras and Extras.BuildMarkers then parts.markers = Extras.BuildMarkers(frame, base + 7, frame) end
+    if parts.aggro then Extras.SeatGroupAggro(parts.aggro, "raid", "BOTTOM", "BOTTOM", 0, 3) end
 
     BuildTick(parts, frame, spec)
     parts.health, parts.gloss, parts.corners, parts.mana = health, gloss, corners, mana
@@ -390,9 +424,19 @@ local function ApplyEdge(cell)
     parts.dashHost:SetShown(down)
     if down then
         glow:Hide()
-        if not parts.dashes then
-            local spec = parts.spec
-            parts.dashes = BuildDashEdge(parts.dashHost, spec.w, spec.h, CHAMFER, DASH_SIZE, DASH_GAP)
+        local spec = parts.eff or parts.spec
+        local sizeKey = spec.w .. "x" .. spec.h
+        if parts.dashKey ~= sizeKey then
+            -- one dash run per cell size: a width or height change draws its own, the old runs stay hidden
+            parts.dashSets = parts.dashSets or {}
+            for _, run in pairs(parts.dashSets) do for _, d in ipairs(run) do d:Hide() end end
+            local run = parts.dashSets[sizeKey]
+            if not run then
+                run = BuildDashEdge(parts.dashHost, spec.w, spec.h, CHAMFER, DASH_SIZE, DASH_GAP)
+                parts.dashSets[sizeKey] = run
+            end
+            for _, d in ipairs(run) do d:Show() end
+            parts.dashes, parts.dashKey = run, sizeKey
         end
         TintDashes(parts.dashes, color[1], color[2], color[3], DASH_ALPHA)
         return
@@ -499,7 +543,26 @@ local function UpdateHealth(cell)
         local max = ReadHealthMax(unit)
         parts.health:SetMinMaxValues(0, max)
         parts.health:SetValue(cur)
-        UpdateHealthPercentText(parts.pct, unit, cur, max)
+        local fmt = Style and Style.Get("raid", "raidFmt") or "low"
+        if fmt == "number" then
+            parts.pct:SetFormattedText("%d", cur)
+            parts.pct:Show()
+        else
+            UpdateHealthPercentText(parts.pct, unit, cur, max)
+        end
+        if fmt == "none" then parts.pct:Hide() end
+        if parts.fmt then
+            if fmt == "percent" then
+                UpdateHealthPercentText(parts.fmt, unit, cur, max)
+            elseif fmt == "number" then
+                parts.fmt:SetFormattedText("%d", cur)
+                parts.fmt:Show()
+            else
+                parts.fmt:Hide()
+            end
+        end
+    elseif parts.fmt then
+        parts.fmt:Hide()
     end
     PaintName(cell)
     UpdateRowLowHealth(cell, down)
@@ -565,13 +628,24 @@ end
 -- a refused read leaks, so the last known edge holds through the fight.
 local function UpdateAuras(cell)
     if not FS.AurasReadable() then return end
-    local cleansable = ScanDebuffs(cell.unit)
+    local cleansable, harmful = ScanDebuffs(cell.unit)
     local color = nil
     if #cleansable > 0 then
         color = GetDispelColor(cleansable[1].dispelType) or Shared.COLOR_CLEANSABLE_UNKNOWN
     end
-    cell.dispelColor = color
+    -- the debuff the player can remove lights the edge (Debuff border); the colour is kept so the switch can follow
+    cell.dispelRaw = color
+    cell.dispelColor = (not Style or Style.Get("raid", "dispelEdge") == true) and color or nil
     ApplyEdge(cell)
+    local parts = cell.parts
+    if parts.markers then
+        local offline, dead = RowDownState(cell.unit)
+        if offline or dead then
+            Extras.PaintMarkers(parts.markers, "raid", parts.markers.list, 0)
+        else
+            Extras.UpdateMarkers(parts.markers, cell.unit, "raid", harmful)
+        end
+    end
 end
 
 local function UpdateAll(cell)
@@ -582,6 +656,7 @@ local function UpdateAll(cell)
     TryStep(cell, "name", UpdateName)
     TryStep(cell, "role", UpdateRole)
     TryStep(cell, "auras", UpdateAuras)
+    if Extras and Extras.UpdateGroupRow then TryStep(cell, "aggro", Extras.UpdateGroupRow) end
 end
 
 local function ShowTick(cell, on)
@@ -654,13 +729,56 @@ end
 -- Layout (out of combat only: the container, the content frame and every cell are protected)
 -------------------------------------------------------------------------------
 
+-- The raid's own style settings (FrameStyle.lua, frame "raid"). A default raid reads LOOKS as it always did; a stored
+-- width gives a copy of the look's spec with that width (look C keeps its ratio to look A).
+local specCache = {}
+local function EffSpec(spec)
+    if spec.eff then return spec end
+    if not (Style and (Style.IsStored("raid", "w") or Style.IsStored("raid", "hpH") or Style.IsStored("raid", "mpH"))) then
+        return spec
+    end
+    local tiles = spec == LOOKS.C
+    local w, h = Style.Number("raid", "w"), Style.FrameHeight("raid")
+    local wantW = tiles and math.floor(w * LOOKS.C.w / LOOKS.A.w + 0.5) or w
+    local wantH = tiles and math.floor(h * LOOKS.C.h / LOOKS.A.h + 0.5) or h
+    local hit = specCache[spec]
+    if hit and hit.w == wantW and hit.h == wantH then return hit end
+    local copy = {}
+    for k, v in pairs(spec) do copy[k] = v end
+    copy.w, copy.h, copy.eff = wantW, wantH, true
+    specCache[spec] = copy
+    return copy
+end
+
 -- What the raid's style settings change on one built cell: its opacity and the name size of both looks. Plain regions
 -- only, so it runs in combat too.
+local function ScaleText(region, want)
+    if not (region and region.GetFont) then return end
+    local font, size, flags = region:GetFont()
+    if font and type(size) == "number" then
+        region.baseSize = region.baseSize or size
+        if want ~= size then region:SetFont(font, want, flags) end
+    end
+end
+
+-- A rail's core thickness: the shell, the bar and both track halves.
+local function SetRailCore(bar, core)
+    bar.shell:SetHeight(core)
+    bar:SetHeight(core)
+    local rail = bar.fsRail
+    if rail then
+        rail.trackLeft:SetHeight(core)
+        rail.trackRight:SetHeight(core)
+    end
+end
+
 local function ApplyCellStyle(cell)
     if not Style then return end
     cell:SetAlpha(Style.Number("raid", "alpha") / 100)
     local ratio = Style.Number("raid", "nameSize") / 8.5
-    for _, parts in pairs(cell.looks or {}) do
+    local hp, mp = Style.Number("raid", "hpH"), Style.Number("raid", "mpH")
+    local bg = Style.Number("raid", "bgAlpha") / Style.Default("raid", "bgAlpha")
+    for id, parts in pairs(cell.looks or {}) do
         local name = parts.name
         if name and name.GetFont then
             local font, size, flags = name:GetFont()
@@ -669,6 +787,52 @@ local function ApplyCellStyle(cell)
                 if parts.nameBase * ratio ~= size then name:SetFont(font, parts.nameBase * ratio, flags) end
             end
         end
+        -- the health text (Text size) follows its own setting, 7.5 today
+        local ts = Style.Number("raid", "hpTs")
+        ScaleText(parts.pct, ts)
+        ScaleText(parts.fmt, ts)
+        -- the bar heights and the cell size they make (the secure size itself is SeatCell's, out of combat)
+        local eff = EffSpec(parts.spec)
+        parts.eff = eff
+        local sig = hp .. ":" .. mp .. ":" .. eff.w .. ":" .. eff.h
+        if parts.geomSig ~= sig then
+            parts.geomSig = sig
+            if id == "A" then
+                SetRailCore(parts.health, hp)
+                parts.mana.shell:ClearAllPoints()
+                parts.mana.shell:SetPoint("TOPLEFT", parts.frame, "TOPLEFT", 4, -(15 + hp + 2))
+                parts.mana.shell:SetPoint("TOPRIGHT", parts.frame, "TOPRIGHT", -4, -(15 + hp + 2))
+                if mp > 0 then SetRailCore(parts.mana, mp) end
+                parts.mana.shell:SetShown(mp > 0)
+            else
+                parts.mana:SetHeight(math.min(4, mp * 0.75))
+                parts.mana:SetShown(mp > 0 and not cell.down)
+                parts.mana:ClearAllPoints()
+                parts.mana:SetPoint("TOPLEFT", parts.frame, "TOPLEFT", 3, -(eff.h - 3))
+                parts.mana:SetPoint("TOPRIGHT", parts.frame, "TOPRIGHT", -3, -(eff.h - 3))
+            end
+            local tickH = eff.h - 2 * eff.tickInset
+            parts.tick:SetSize(TICK_WIDTH, tickH)
+            parts.tickHalo:SetSize(TICK_GLOW_WIDTH, tickH)
+            parts.edgeDown = nil   -- a down cell's dashes are drawn for the new size
+            if cell.parts == parts then ApplyEdge(cell) end
+        end
+        if parts.fill then parts.fill.Set(parts.fill.base * bg) end
+        if parts.markers and Extras then
+            Extras.Rehold(parts.markers, "raid")
+            Extras.PaintMarkers(parts.markers, "raid", parts.markers.list, parts.markers.shown)
+        end
+        if parts.aggro then
+            Extras.SeatGroupAggro(parts.aggro, "raid", id == "A" and "RIGHT" or "BOTTOM", id == "A" and "TOPRIGHT" or "BOTTOM",
+                id == "A" and -26 or 0, id == "A" and -7.5 or 3)
+            if not Style.Get("raid", "threat") then parts.aggro.ring:Hide(); parts.aggro.pct:Hide() end
+        end
+    end
+    -- the Debuff border switch: the colour the last read found shows or goes
+    local want = Style.Get("raid", "dispelEdge") == true and cell.dispelRaw or nil
+    if cell.dispelColor ~= want then
+        cell.dispelColor = want
+        if cell.parts then ApplyEdge(cell) end
     end
 end
 
@@ -681,6 +845,7 @@ local function LookCell(cell, id)
     end
     for other, otherParts in pairs(cell.looks) do otherParts.frame:SetShown(other == id) end
     cell.parts = parts
+    cell.groupAggro, cell.groupKey = parts.aggro, "raid"
     cell.lowHealthTargets, cell.lowHealthBase = parts.lowTargets, parts.lowBase
     ApplyCellStyle(cell)
 end
@@ -689,23 +854,6 @@ local function UseLook(id)
     if state.look == id then return end
     for _, cell in ipairs(cells) do LookCell(cell, id) end
     state.look = id
-end
-
--- The raid's own style settings (FrameStyle.lua, frame "raid"). A default raid reads LOOKS as it always did; a stored
--- width gives a copy of the look's spec with that width (look C keeps its ratio to look A).
-local specCache = {}
-local function EffSpec(spec)
-    if spec.eff then return spec end
-    if not (Style and Style.IsStored("raid", "w")) then return spec end
-    local w = Style.Number("raid", "w")
-    local want = spec == LOOKS.C and math.floor(w * LOOKS.C.w / LOOKS.A.w + 0.5) or w
-    local hit = specCache[spec]
-    if hit and hit.w == want then return hit end
-    local copy = {}
-    for k, v in pairs(spec) do copy[k] = v end
-    copy.w, copy.eff = want, true
-    specCache[spec] = copy
-    return copy
 end
 
 -- The look a roster of n draws: Auto is mini boxes up to SMALL_RAID and tiles above; the setting can force either.
@@ -997,6 +1145,11 @@ local PREVIEW_STATES = {
 }
 local PREVIEW_POWER = { WARRIOR = 1, ROGUE = 3 }   -- rage and energy; every other class has mana
 
+-- Sample debuff types, markers and aggro for the Style tab's raid (member index -> value).
+local PREVIEW_DEBUFFS = { [6] = "Magic", [8] = "Poison" }
+local PREVIEW_MARKS = {}
+local PREVIEW_AGGRO = { [2] = { "pink", "100%" }, [10] = { "amber", "71%" }, [1] = { "amber", "38%" } }
+
 -- Member `i` as plain values. The player's own class and name come from the player; a secret or missing answer is the
 -- first of the list.
 local function PreviewMember(i)
@@ -1028,8 +1181,17 @@ local function PaintPreviewCell(cell, i, ownIndex)
     if not down then
         parts.health:SetMinMaxValues(0, 1000)
         parts.health:SetValue(m.hp * 1000)
-        parts.pct:SetFormattedText("%.0f%%", m.hp * 100)
-        parts.pct:Show()
+        local fmt = Style and Style.Get("raid", "raidFmt") or "low"
+        local amount = math.floor(m.hp * 1427 + 0.5)
+        if fmt == "number" then parts.pct:SetFormattedText("%d", amount) else parts.pct:SetFormattedText("%.0f%%", m.hp * 100) end
+        parts.pct:SetShown(fmt ~= "none")
+        if parts.fmt then
+            if fmt == "percent" then parts.fmt:SetFormattedText("%.0f%%", m.hp * 100); parts.fmt:Show()
+            elseif fmt == "number" then parts.fmt:SetFormattedText("%d", amount); parts.fmt:Show()
+            else parts.fmt:Hide() end
+        end
+    elseif parts.fmt then
+        parts.fmt:Hide()
     end
     -- The plain-number twin of UpdateRowLowHealth: the red layer and the percent at or under the threshold, else the
     -- base edge; a down cell shows neither red nor percent.
@@ -1037,7 +1199,19 @@ local function PaintPreviewCell(cell, i, ownIndex)
     for _, target in ipairs(cell.lowHealthTargets) do target:SetAlpha(low and 1 or 0) end
     for _, target in ipairs(cell.lowHealthBase) do target:SetAlpha(low and 0 or 1) end
     PaintName(cell)
+    -- sample debuffs: the edge takes the colour of one the player can remove (the Debuff border switch)
+    local sampleType = PREVIEW_DEBUFFS[i]
+    cell.dispelRaw = sampleType and GetDispelColor(sampleType) or nil
+    cell.dispelColor = (not Style or Style.Get("raid", "dispelEdge") == true) and cell.dispelRaw or nil
     ApplyEdge(cell)
+    if Extras then
+        if parts.markers then
+            local n = Extras.PreviewList(PREVIEW_MARKS, "raid", i)
+            Extras.PaintMarkers(parts.markers, "raid", PREVIEW_MARKS, n)
+        end
+        local aggro = PREVIEW_AGGRO[i]
+        Extras.PreviewGroupAggro(parts.aggro, "raid", aggro and aggro[1], aggro and aggro[2])
+    end
     PaintPower(cell, m.power * 100, 100, m.powerType)
     PaintNameText(parts, m.name)
     PaintRole(parts, m.role)
@@ -1312,7 +1486,8 @@ end
 -------------------------------------------------------------------------------
 
 local CELL_EVENTS = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_CONNECTION", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER",
-                      "UNIT_DISPLAYPOWER", "UNIT_AURA", "UNIT_NAME_UPDATE" }
+                      "UNIT_DISPLAYPOWER", "UNIT_AURA", "UNIT_NAME_UPDATE", "UNIT_THREAT_SITUATION_UPDATE",
+                      "UNIT_THREAT_LIST_UPDATE" }
 local CELL_STEPS = {
     UNIT_HEALTH = { "health", UpdateHealth },
     UNIT_MAXHEALTH = { "health", UpdateHealth },
@@ -1321,6 +1496,8 @@ local CELL_STEPS = {
     UNIT_MAXPOWER = { "power", UpdatePower },
     UNIT_DISPLAYPOWER = { "power", UpdatePower },
     UNIT_AURA = { "auras", UpdateAuras },
+    UNIT_THREAT_SITUATION_UPDATE = { "aggro", function(cell) if Extras then Extras.UpdateGroupRow(cell) end end },
+    UNIT_THREAT_LIST_UPDATE = { "aggro", function(cell) if Extras then Extras.UpdateGroupRow(cell) end end },
 }
 
 local function OnCellEvent(events, event)
@@ -1386,7 +1563,7 @@ local function Init()
 
     local events = CreateFrame("Frame")
     for _, event in ipairs({ "GROUP_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED",
-                             "PLAYER_REGEN_DISABLED" }) do
+                             "PLAYER_REGEN_DISABLED", "PLAYER_TARGET_CHANGED" }) do
         events:RegisterEvent(event)
     end
     -- Not confirmed on every build; RegisterEvent throws on a name the client does not know.
@@ -1400,6 +1577,14 @@ local function Init()
             if blizz.pending then Sweep() end
             -- Every UNIT_AURA in the fight was held back; the reflow above already scanned.
             if not reflowed then RescanAuras() end
+        elseif event == "PLAYER_TARGET_CHANGED" then
+            -- the Aggro % reads each member's share on the new target
+            if flags.active and Extras and Style and Style.Get("raid", "threatPct") then
+                for i = 1, state.n do
+                    local cell = cells[i]
+                    if cell.parts and UnitExists(cell.unit) then TryStep(cell, "aggro", Extras.UpdateGroupRow) end
+                end
+            end
         elseif event == "PLAYER_ROLES_ASSIGNED" then
             if flags.active then
                 for i = 1, state.n do
@@ -1432,11 +1617,23 @@ local function Init()
     -- re-seat list; this puts it on its pixel again at once out of combat, so it does not show at the unsnapped seat
     -- Layout just wrote, and in step with the roster's size.
     if Style then
-        local function Restyle()
-            for _, cell in ipairs(cells) do ApplyCellStyle(cell) end
+        local function Restyle(suffix)
+            -- the health text format and the aggro ring read the unit again; markers read its auras
+            local readsHealth = suffix == "raidFmt"
+            local readsThreat = type(suffix) == "string" and suffix:sub(1, 6) == "threat"
+            local readsAuras = type(suffix) == "string" and (suffix:sub(1, 2) == "mk" or suffix == "dispelEdge")
+            for _, cell in ipairs(cells) do
+                ApplyCellStyle(cell)
+                if flags.active and cell.parts and UnitExists(cell.unit) then
+                    if readsHealth then TryStep(cell, "health", UpdateHealth) end
+                    if readsThreat and Extras and Extras.UpdateGroupRow then TryStep(cell, "aggro", Extras.UpdateGroupRow) end
+                end
+            end
             for _, cell in ipairs(pv.cells or {}) do ApplyCellStyle(cell) end
             QueueReflow()
             Preview.Reseat()
+            -- markers read auras: only while the client allows it, else the old squares hold until the fight ends
+            if readsAuras and FS.AurasReadable() then RescanAuras() end
         end
         Style.OnChange("raid", Restyle)
         -- the layout settings are raid.* keys, not bars.raid.*

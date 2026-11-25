@@ -282,8 +282,8 @@ local ROW_DEFS = {
 local ALERT_ICON_SIZE  = 22
 local ALERT_GAP        = 3
 local ALERT_TRAY_INSET = 6   -- clear of the panel's border and glow
-local MAX_DEBUFF_ICONS = 2
-local MAX_ALERT_ICONS  = MAX_DEBUFF_ICONS + 1  -- cleansables first, then missing party buffs
+-- The tray's pool: Style.alertMax (1 to 5, 3 today) of these show. Cleansables first (all but one slot), then missing party buffs.
+local MAX_ALERT_ICONS  = 5
 
 -- Mirrors Buffs.lua's MAX_DEBUFF_SLOTS/MAX_BUFF_SLOTS scan bounds.
 local MAX_PARTY_DEBUFF_SLOTS = 16
@@ -1276,7 +1276,13 @@ local function BuildRowBox(f, visual)
     local box = CreateFrame("Frame", nil, visual)
     seat(box)
     box:SetFrameLevel(math.max(visual:GetFrameLevel() - 2, 0))
-    AddRoundedFill(box, BOX_FILL, BOX_CHAMFER)
+    local fx = FS.FrameExtras
+    if fx and fx.NewFill then
+        -- the fill can change opacity (Background opacity): same recipe, kept per opacity
+        f.boxFill = fx.NewFill(box, function(panel, color) AddRoundedFill(panel, color, BOX_CHAMFER) end, BOX_FILL)
+    else
+        AddRoundedFill(box, BOX_FILL, BOX_CHAMFER)
+    end
     local edge = CreateFrame("Frame", nil, visual)
     seat(edge)
     edge:SetFrameLevel(box:GetFrameLevel() + 1)
@@ -1295,6 +1301,14 @@ local function BuildRowBox(f, visual)
     red.fsSkin.border.ring:SetVertexColor(COLOR_RED[1], COLOR_RED[2], COLOR_RED[3], 1)
     red.fsSkin.glow:SetVertexColor(COLOR_RED[1], COLOR_RED[2], COLOR_RED[3], BOX_GLOW_ALPHA)
     red:SetAlpha(0)
+
+    if fx and fx.BuildGroupAggro then
+        local aggro = CreateFrame("Frame", nil, visual)
+        seat(aggro)
+        aggro:SetFrameLevel(visual:GetFrameLevel() + 1)
+        f.boxAggro = fx.BuildGroupAggro(aggro, BOX_CHAMFER)
+        f.groupAggro, f.groupKey = f.boxAggro, "party"
+    end
 
     f.box, f.boxRed = box, red
     -- Everything whose alpha the low-HP curve drives; BuildRowHeader appends the LOW tag.
@@ -1373,7 +1387,7 @@ function FitRowName(frame, force)
     local size = H.NAME_SIZE
     if text then
         local w = PlainTextWidth(name)
-        local room = NAME_ROW_WIDTH + right - NAME_LEFT
+        local room = (frame.rowWidth or NAME_ROW_WIDTH) + right - NAME_LEFT
         if w and frame.nameSize > 0 then
             local atBase = w * H.NAME_SIZE / frame.nameSize
             if atBase > room then
@@ -1544,6 +1558,12 @@ local function BuildPartyRow(unit, frameName, parent, preview)
         alertIcons[i] = icon
     end
     f.alertIcons = alertIcons
+
+    -- Corner markers (my heal over time squares), above the rails, on the box's corner.
+    local fx = FS.FrameExtras
+    if fx and fx.BuildMarkers then
+        f.markers = fx.BuildMarkers(visual, health:GetFrameLevel() + 4, f.box)
+    end
 
     -- The laser rail runs the full width of health.shell, no inset.
     local power = CreateLaserRail(visual, RAIL_POWER_SPEC)
@@ -1963,7 +1983,19 @@ local function UpdateRowAlerts(frame)
     -- The player watched climb. Hold whatever is already on the row instead.
     if not FS.AurasReadable() then return end
 
-    local cleansable = ScanDebuffs(unit)
+    local cleansable, harmful = ScanDebuffs(unit)
+    local style = FS.FrameStyle
+    local function opt(suffix) return style.Get("party", suffix) end   -- only called with a style module
+
+    -- The corner squares (my heal over time) read the same pass; a refused read left the old ones standing above.
+    local offline, deadOrGhost = RowDownState(unit)
+    if frame.markers then
+        if offline or deadOrGhost then
+            FS.FrameExtras.PaintMarkers(frame.markers, "party", frame.markers.list, 0)   -- nothing to read on a down member
+        else
+            FS.FrameExtras.UpdateMarkers(frame.markers, unit, "party", harmful)
+        end
+    end
 
     -- The health rail's dispel halo carries the dispel colour: that is the
     -- at-a-glance signal, and it reads from across the screen where a 22px
@@ -1975,12 +2007,15 @@ local function UpdateRowAlerts(frame)
     end
 
     local alerts = {}
+    local alertsOn = not style or opt("alerts") == true
+    local maxShown = style and style.Number("party", "alertMax") or 3
+    local debuffCap = math.max(1, maxShown - 1)
 
     -- 1. Cleansable debuffs. CLEANSABLE ONLY: this used to fall back to the
     -- first plain HARMFUL debuff when nothing was cleansable, which is worse
     -- than blank because it pulls a healer's eye to something he cannot act
     -- on. General debuff awareness, if wanted, needs its own affordance.
-    for i = 1, math.min(#cleansable, MAX_DEBUFF_ICONS) do
+    for i = 1, (alertsOn and (not style or opt("alertCleanse") == true)) and math.min(#cleansable, debuffCap) or 0 do
         local aura = cleansable[i]
         alerts[#alerts + 1] = {
             texture = aura.icon,
@@ -2001,9 +2036,10 @@ local function UpdateRowAlerts(frame)
     -- that is up is never an alert, whatever time it has left, and a class with no
     -- party buff (or a spell not yet learned) never reaches here. A dead, ghost
     -- or offline member cannot be buffed, so it is skipped before any aura read.
-    local offline, deadOrGhost = RowDownState(unit)
     local buffs, buffCount = nil, 0
-    if not offline and not deadOrGhost then buffs, buffCount = EvaluatePartyBuffs(unit) end
+    if alertsOn and (not style or opt("alertBuffs") == true) and not offline and not deadOrGhost then
+        buffs, buffCount = EvaluatePartyBuffs(unit)
+    end
     for i = 1, buffCount do
         local entry = buffs[i]
         if entry.reason == "missing" then
@@ -2022,7 +2058,7 @@ local function UpdateRowAlerts(frame)
 
     for i = 1, MAX_ALERT_ICONS do
         local icon = frame.alertIcons[i]
-        local alert = alerts[i]
+        local alert = i <= maxShown and alerts[i] or nil
         if alert then
             icon.tex:SetTexture(alert.texture)
             local t = alert.tint
@@ -2064,6 +2100,7 @@ local function UpdateAuras(frame)
     if not UnitExists(frame.unit) then
         for _, icon in ipairs(frame.alertIcons) do icon:Hide() end
         SetRowDispel(frame, nil)
+        if frame.markers then FS.FrameExtras.PaintMarkers(frame.markers, "party", frame.markers.list, 0) end
         return
     end
     UpdateRowAlerts(frame)
@@ -2127,6 +2164,7 @@ local function UpdateAll(frame)
     TryStep(frame, "role", UpdateRowRole)
     TryStep(frame, "pet", UpdateRowPet)
     TryStep(frame, "auras", UpdateAuras)
+    if FS.FrameExtras and FS.FrameExtras.UpdateGroupRow then TryStep(frame, "aggro", FS.FrameExtras.UpdateGroupRow) end
 end
 
 -------------------------------------------------------------------------------
@@ -2161,6 +2199,9 @@ local function WireRowEvents(frame)
     if HAS.TOTAL_ABSORBS then
         SafeRegisterUnitEvent(events, "UNIT_ABSORB_AMOUNT_CHANGED", frame.unit, IgnoreRegisterFailure)
     end
+    -- Aggro (a ring and a share of the mob's threat): feature detected, an event the client lacks is skipped.
+    SafeRegisterUnitEvent(events, "UNIT_THREAT_SITUATION_UPDATE", frame.unit, IgnoreRegisterFailure)
+    SafeRegisterUnitEvent(events, "UNIT_THREAT_LIST_UPDATE", frame.unit, IgnoreRegisterFailure)
     events:RegisterEvent("PLAYER_ENTERING_WORLD")
     -- Same gap as Buffs.lua, same fix: UpdateRowAlerts bails under lockdown, so
     -- every aura change during a fight is dropped. Without a re-scan when
@@ -2168,6 +2209,12 @@ local function WireRowEvents(frame)
     -- and the health rail's dispel halo stale until the next aura change.
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
     events:SetScript("OnEvent", function(_, event)
+        if event == "UNIT_THREAT_SITUATION_UPDATE" or event == "UNIT_THREAT_LIST_UPDATE" then
+            if UnitExists(frame.unit) and FS.FrameExtras and FS.FrameExtras.UpdateGroupRow then
+                TryStep(frame, "aggro", FS.FrameExtras.UpdateGroupRow)
+            end
+            return
+        end
         if event == "UNIT_HEAL_PREDICTION" or event == "UNIT_ABSORB_AMOUNT_CHANGED" then
             if UnitExists(frame.unit) then TryStep(frame, "prediction", UpdateRowPrediction) end
             return
@@ -2410,13 +2457,122 @@ end
 local PartyFrames = {}
 FS.PartyFrames = PartyFrames
 
+-- What the party style settings (FrameStyle frame "party") change on one built row. The non-secure parts (opacity, fill,
+-- bar looks, markers, aggro) follow at once, in combat too; the width and the tray seat are separate (SizeRow, SeatTray).
+function PartyFrames.StyleRow(row)
+    local S = FS.FrameStyle
+    if not S then return end
+    row:SetAlpha(S.Number("party", "alpha") / 100)
+    if row.boxFill then
+        local default = S.Default("party", "bgAlpha")
+        row.boxFill.Set(row.boxFill.base * S.Number("party", "bgAlpha") / (default > 0 and default or 1))
+    end
+    S.ApplyLook("party", row.health, "hpStyle")
+    S.ApplyLook("party", row.power, "mpStyle")
+    local fx = FS.FrameExtras
+    if fx then
+        if row.markers then
+            if fx.Rehold then fx.Rehold(row.markers, "party") end
+            fx.PaintMarkers(row.markers, "party", row.markers.list, row.markers.shown)
+        end
+        if row.groupAggro then
+            fx.SeatGroupAggro(row.groupAggro, "party", "TOPRIGHT", "TOPRIGHT", -4, -2)
+            if not S.Get("party", "threat") then row.groupAggro.ring:Hide(); row.groupAggro.pct:Hide() end
+        end
+    end
+end
+
+-- The alert tray's icon size, side and how many show. Plain frames, so it runs in combat too.
+function PartyFrames.SeatTray(row)
+    local S = FS.FrameStyle
+    local content, rowY = row.trayContent, row.trayY
+    if not (S and content and rowY) then return end
+    local size, side = S.Number("party", "alertSize"), S.Get("party", "alertSide")
+    local iconY = rowY - ((ROW_HEIGHT - size) / 2)
+    local petFrame = row.petFrame
+    for slot, icon in ipairs(row.alertIcons) do
+        icon:SetSize(size, size)
+        icon:ClearAllPoints()
+        if side == "right" and (petFrame or row.preview) then
+            if slot == 1 then
+                icon:SetPoint("TOPLEFT", petFrame or row, "TOPRIGHT", PANEL_PAD + ALERT_TRAY_INSET, -((ROW_HEIGHT - size) / 2))
+            else
+                icon:SetPoint("LEFT", row.alertIcons[slot - 1], "RIGHT", ALERT_GAP, 0)
+            end
+        elseif slot == 1 then
+            icon:SetPoint("TOPRIGHT", content, "TOPLEFT", -ALERT_TRAY_INSET, iconY)
+        else
+            icon:SetPoint("RIGHT", row.alertIcons[slot - 1], "LEFT", -ALERT_GAP, 0)
+        end
+        if S.Get("party", "alerts") ~= true or slot > S.Number("party", "alertMax") then icon:Hide() end
+    end
+end
+
+-- The row's width (a secure size: out of combat, else owed to the regen pass) and what follows it: the pet slot, the box's
+-- dashes and the name's room. Nothing is touched while the width is the default.
+function PartyFrames.SizeRow(row)
+    local S = FS.FrameStyle
+    if not S then return true end
+    local custom = S.IsStored("party", "w")
+    local want = custom and S.Number("party", "w") or MEMBER_WIDTH
+    if row.widthNow == nil and not custom then return true end
+    if row.widthNow == want then return true end
+    if not row.preview and InCombatLockdown() then return false end
+    row.widthNow = want
+    row:SetWidth(want)
+    row.rowWidth = want - 2 * PAD_X
+    local pet, home = row.petFrame, row.petHome
+    if pet and home then
+        pet:ClearAllPoints()
+        if custom then
+            pet:SetPoint("TOPLEFT", row, "TOPRIGHT", ROW_GAP_X, 0)
+        else
+            pet:SetPoint("TOPRIGHT", home[1], "TOPRIGHT", -PANEL_PAD, home[2])
+        end
+    end
+    local box = row.box
+    if box and box.dashHost then
+        box.dashSets = box.dashSets or { [box.dashW or MEMBER_WIDTH] = box.dashes }
+        for _, dashes in pairs(box.dashSets) do for _, d in ipairs(dashes) do d:Hide() end end
+        local set = box.dashSets[want]
+        if not set then
+            set = BuildDashEdge(box.dashHost, want, BOX_HEIGHT, BOX_CHAMFER, BOX_DASH_SIZE, BOX_DASH_GAP)
+            box.dashSets[want] = set
+        end
+        for _, d in ipairs(set) do d:Show() end
+        box.dashes, box.dashW = set, want
+        box.edgeR = nil   -- the dashes' tint is painted again
+        ApplyBoxEdge(row)
+    end
+    if row.nameText and FitRowName then
+        row.nameConfirmed = false
+        FitRowName(row, true)
+    end
+    return true
+end
+
+-- Every row follows the settings: the party's own opacity, fill, looks, markers, aggro, tray and width.
+function PartyFrames.ApplyStyle()
+    for _, row in ipairs(PartyFrames.rows or {}) do
+        PartyFrames.StyleRow(row)
+        PartyFrames.SeatTray(row)
+        if not PartyFrames.SizeRow(row) then PartyFrames.sizeOwed = true end
+        -- tray and markers read auras: only while the client allows it, else the old ones hold until the fight ends
+        if FS.AurasReadable() and row.unit and UnitExists(row.unit) then TryStep(row, "auras", UpdateAuras) end
+    end
+end
+
 -- A plain party row for the config window's Style tab, built by BuildPartyRow and filled with a sample member (no unit,
 -- no secret value). Returns { frame, Restyle }; the settings are read again on every Restyle.
 function PartyFrames.NewStylePreview(parent)
     local row = BuildPartyRow(nil, nil, parent, true)
     local Style = FS.FrameStyle
+    row.trayContent, row.trayY = row, 0
+    row.petFrame = nil
+    local sample = {}
     local function Restyle()
-        row:SetAlpha(Style and Style.Number("party", "alpha") / 100 or 1)
+        PartyFrames.StyleRow(row)
+        PartyFrames.SizeRow(row)
         row.name:SetText("BRENNA")
         row.name:SetTextColor(COLOR_HEALTH[1], COLOR_HEALTH[2], COLOR_HEALTH[3], HEADER.NAME_ALPHA)
         if HAS.CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS.PRIEST then
@@ -2432,6 +2588,38 @@ function PartyFrames.NewStylePreview(parent)
             row.roleLetter:SetText(role[1])
             row.roleLetter:SetTextColor(role[2][1], role[2][2], role[2][3], 1)
             row.roleTag:Show()
+        end
+        local fx = FS.FrameExtras
+        if fx and Style then
+            if row.markers then
+                local n = fx.PreviewList(sample, "party", 1)
+                fx.PaintMarkers(row.markers, "party", sample, n)
+            end
+            fx.PreviewGroupAggro(row.groupAggro, "party", "pink", "100%")
+            -- the tray: a cleansable debuff and a missing buff, through the switches that are on
+            PartyFrames.SeatTray(row)
+            local shown = 0
+            local function Tile(icon, texture, tint, ring, ringAlpha)
+                shown = shown + 1
+                if Style.Get("party", "alerts") ~= true or shown > Style.Number("party", "alertMax") then icon:Hide(); return end
+                icon.tex:SetTexture(texture)
+                if tint then icon.tex:SetVertexColor(tint[1], tint[2], tint[3], tint[4] or 1) else icon.tex:SetVertexColor(1, 1, 1, 1) end
+                local skin = icon.fsSkin
+                if skin and skin.border and skin.border.ring and skin.glow then
+                    skin.border.ring:SetVertexColor(ring[1], ring[2], ring[3], ringAlpha)
+                    skin.glow:SetVertexColor(ring[1], ring[2], ring[3], ringAlpha * 0.4)
+                end
+                icon:Show()
+            end
+            for _, icon in ipairs(row.alertIcons) do icon:Hide() end
+            local slot = 1
+            if Style.Get("party", "alertCleanse") == true then
+                Tile(row.alertIcons[slot], "Interface\\Icons\\Spell_Holy_DispelMagic", nil, GetDispelColor("Magic") or COLOR_RED, ALERT_RING_ALPHA)
+                slot = slot + 1
+            end
+            if Style.Get("party", "alertBuffs") == true then
+                Tile(row.alertIcons[slot], "Interface\\Icons\\Spell_Holy_WordFortitude", MAINT_MISSING_COLOR, COLOR_RED, ALERT_RING_ALPHA_MISSING)
+            end
         end
     end
     row:Show()
@@ -2566,6 +2754,10 @@ PartyFrames.shared = {
     RANGE_ALPHA_IN_RANGE = RANGE_ALPHA_IN_RANGE,
     RANGE_TICK_INTERVAL = RANGE_TICK_INTERVAL,
     MOUSE_SWEEP_DEPTH = MOUSE_SWEEP_DEPTH,
+    EvaluatePartyBuffs = EvaluatePartyBuffs,
+    PARTY_BUFFS = PARTY_BUFFS,
+    BuffEnabled = BuffEnabled,
+    SavedBuffValue = SavedBuffValue,
     SPELL_EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP",
                      "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE" },
 }
@@ -2633,6 +2825,10 @@ local function Init()
     rescaleEvents:SetScript("OnEvent", function()
         if InCombatLockdown() then return end
         SHOWN.FlushOwed()
+        if PartyFrames.sizeOwed then
+            PartyFrames.sizeOwed = false
+            PartyFrames.ApplyStyle()
+        end
         FS.Layout.Apply(container, "party")
         RefreshContentScale() -- re-snaps too
     end)
@@ -2648,14 +2844,12 @@ local function Init()
         local member = BuildPartyRow(def.unit, "ForeverSTUwavePartyRow" .. i, content)
         member:SetPoint("TOPLEFT", content, "TOPLEFT", PANEL_PAD, rowY)
         if FS.FrameStyle then
-            -- the party style settings (opacity so far): a plain alpha, so it applies in combat too
-            member:SetAlpha(FS.FrameStyle.Number("party", "alpha") / 100)
+            -- the party style settings: opacity, fill, looks, markers and aggro are plain regions (they apply in combat
+            -- too); the width and the pet slot are secure and wait for the regen pass
             PartyFrames.rows = PartyFrames.rows or {}
             PartyFrames.rows[#PartyFrames.rows + 1] = member
             if i == 1 then
-                FS.FrameStyle.OnChange("party", function()
-                    for _, row in ipairs(PartyFrames.rows) do row:SetAlpha(FS.FrameStyle.Number("party", "alpha") / 100) end
-                end)
+                FS.FrameStyle.OnChange("party", function() PartyFrames.ApplyStyle() end)
             end
         end
 
@@ -2665,6 +2859,7 @@ local function Init()
 
         -- The scaled content edge matches the outer panel, keeping alerts
         -- outside and aligned with their row without changing the footprint.
+        member.trayContent, member.trayY, member.petHome = content, rowY, { content, rowY }
         local iconY = rowY - ((ROW_HEIGHT - ALERT_ICON_SIZE) / 2)
         for slot, icon in ipairs(member.alertIcons) do
             icon:ClearAllPoints()
@@ -2683,6 +2878,11 @@ local function Init()
         RegisterUnitWatch(pet)
 
         WireRowEvents(member)
+        if FS.FrameStyle and FS.FrameStyle.Number then
+            PartyFrames.StyleRow(member)
+            PartyFrames.SeatTray(member)
+            PartyFrames.SizeRow(member)
+        end
         rows[i] = member
     end
 
@@ -2709,6 +2909,9 @@ local function Init()
             for _, row in ipairs(rows) do
                 TryStep(row, "target", ApplyBoxEdge)
                 TryStep(row, "targetPet", ApplyPetTargetEdge)
+                if FS.FrameExtras and FS.FrameExtras.UpdateGroupRow and UnitExists(row.unit) then
+                    TryStep(row, "aggro", FS.FrameExtras.UpdateGroupRow)   -- the share is read on the target
+                end
             end
             return
         end
@@ -2790,6 +2993,21 @@ local function ReportBuffTable()
             state.known and "known" or "not known",
             BuffEnabled(buff) and "on" or ("off" .. (saved == nil and " (default)" or ""))))
     end
+end
+
+-- The config page's switch for one of the player's party buffs: the value /fsparty buff saves, written without a chat
+-- line (nil clears it back to the default), then every row reads its tray again.
+PartyFrames.shared.SetBuff = function(key, value)
+    for _, buff in ipairs(PLAYER_BUFFS or {}) do
+        if buff.key == key then
+            ForeverSTUwaveDB = ForeverSTUwaveDB or {}
+            ForeverSTUwaveDB.partyBuffs = ForeverSTUwaveDB.partyBuffs or {}
+            ForeverSTUwaveDB.partyBuffs[key] = value
+            PartyFrames.ApplyStyle()
+            return true
+        end
+    end
+    return false
 end
 
 local function SetBuffEnabled(key, value)
