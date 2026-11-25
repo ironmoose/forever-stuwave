@@ -78,9 +78,31 @@ local function BlockSize(cols, rows)
 end
 ClassShoulder.C = C
 
+-- The class tabs of ShapeshiftTab.lua, CallPetTab.lua, PortalsTab.lua, ConjureTab.lua, PoisonsTab.lua and DemonTab.lua: a
+-- block `rows` tall and as wide as the tab's Cols(), standing while its OwnsShoulder() says so, its Sync() told when the
+-- block came, went or moved. `after` seats a second tab of one class right of the first, like the shoulders below.
+local function ClassTab(key, field, rows, after)
+    return {
+        key = key, cols = 1, rows = rows, after = after,
+        colsFn = function()
+            local tab = FS[field]
+            return tab and tab.Cols and tab.Cols() or 1
+        end,
+        wants = function()
+            local tab = FS[field]
+            return tab and tab.OwnsShoulder and tab.OwnsShoulder()
+        end,
+        changed = function()
+            local tab = FS[field]
+            if tab and tab.Sync then tab.Sync() end
+        end,
+    }
+end
+
 -- The classes that own a shoulder, by class token: the block (mockup lsRowW(cols) wide, `rows` tall) and the
 -- question whose answer says the class's bar is up. Append only; a class not listed here never gets one.
 local OWNERS = {
+    DRUID = ClassTab("druid", "ShapeshiftTab", 1),
     PALADIN = {
         key = "paladin", cols = C.COLS, rows = C.ROWS,
         wants = function()
