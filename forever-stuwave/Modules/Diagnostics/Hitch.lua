@@ -1,6 +1,8 @@
 -- /fshitch [seconds]: samples every frame for a while (60 s by default) and saves what the slow frames had in them, so a
--- hitch can be pinned on an addon (or on none) instead of guessed at. Needs the scriptProfile CVar on (a /reload after
--- setting it); without it the client reports zero for every addon and the command says so.
+-- hitch can be pinned on an addon (or on none) instead of guessed at. Needs the scriptProfile CVar on, which only takes at
+-- a /reload: with it off, the command turns it on and asks for a /reload and the command again; a sample that ends turns
+-- it back off (from the next /reload) when this command was what turned it on, since profiling costs a little itself.
+-- /fsbug carries the last sample (BugReport.lua `hitch`), so a tester sends it with the usual report.
 --
 -- Per frame: UpdateAddOnCPUUsage, each loaded addon's CPU since the last frame (GetAddOnCPUUsage is cumulative), the
 -- frame's own time and the Lua heap (a heap that shrank means a garbage collection step ran in that frame). A frame
@@ -55,8 +57,12 @@ local function Finish()
         moving = s.moving,
     }
     local top = list[1]
-    Say(("sample saved: %d frames, %d slow (worst %.0f ms, %d with a heap drop); most CPU in slow frames: %s. /reload to write it.")
+    Say(("sample saved: %d frames, %d slow (worst %.0f ms, %d with a heap drop); most CPU in slow frames: %s. Type /fsbug to send it.")
         :format(s.frames, s.slowCount, s.worstMs, s.slowWithGc, top and top.name or "none"))
+    if ForeverSTUwaveDB.hitchProfileOn and type(SetCVar) == "function" then
+        ForeverSTUwaveDB.hitchProfileOn = nil
+        pcall(SetCVar, "scriptProfile", "0")       -- off again from the next /reload
+    end
 end
 
 local function Step(_, elapsed)
@@ -107,7 +113,13 @@ end
 function H.Start(seconds)
     if H.run then Say("a sample is already running.") return end
     if type(GetCVar) == "function" and GetCVar("scriptProfile") ~= "1" then
-        Say("CPU profiling is off: set the scriptProfile CVar to 1 and /reload first.")
+        if type(SetCVar) == "function" and pcall(SetCVar, "scriptProfile", "1") then
+            ForeverSTUwaveDB = ForeverSTUwaveDB or {}
+            ForeverSTUwaveDB.hitchProfileOn = true
+            Say("CPU profiling is now on. Type /reload, then /fshitch again.")
+        else
+            Say("CPU profiling is off and could not be turned on.")
+        end
         return
     end
     if type(UpdateAddOnCPUUsage) ~= "function" or type(GetAddOnCPUUsage) ~= "function" then

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """/fshitch (Modules/Diagnostics/Hitch.lua) against the real Lua with a scripted clock and CPU counters.
 
-  * it refuses with profiling off and does nothing until typed;
+  * with profiling off it turns it on and asks for a /reload, and turns it off again when the sample ends;
   * per frame CPU is the difference of the cumulative counters, and a slow frame keeps its top addons;
   * a heap that shrank in a slow frame is counted;
   * the sample ends on time, removes its OnUpdate and saves ForeverSTUwaveDB.hitch sorted by CPU in slow frames.
@@ -24,6 +24,7 @@ STUBS = r"""
 __now, __cvar, __cpu, __heap, __said = 100, "0", { A = 0, B = 0 }, 1000, {}
 function GetTime() return __now end
 function GetCVar() return __cvar end
+function SetCVar(_, v) __cvar = v; return true end
 function UpdateAddOnCPUUsage() end
 function GetAddOnCPUUsage(n) return __cpu[n] end
 function GetUnitSpeed() return 7 end
@@ -47,8 +48,7 @@ CHECKS = r"""
 local function check(ok, msg) if not ok then error(msg, 2) end end
 local H = FS.Hitch
 SlashCmdList.FSHITCH("")
-check(H.run == nil and __said[1]:find("profiling is off", 1, true), "refuses with profiling off")
-__cvar = "1"
+check(H.run == nil and __cvar == "1" and __said[1]:find("/reload, then /fshitch", 1, true), "turns profiling on and asks for a reload")
 SlashCmdList.FSHITCH("10")
 check(H.run and #H.run.names == 2, "samples the loaded addons only")
 local f = H.frame.scripts.OnUpdate
@@ -67,7 +67,8 @@ check(H.run == nil and H.frame.scripts.OnUpdate == nil, "ends on time and remove
 local saved = ForeverSTUwaveDB.hitch
 check(saved.addons[1].name == "A" and saved.addons[1].slowMs == 30, "saved, sorted by CPU in slow frames")
 check(saved.worstMs >= 119 and saved.moving == saved.frames, "worst frame and moving frames counted")
-check(__said[#__said]:find("most CPU in slow frames: A", 1, true), "summed up in chat")
+check(__said[#__said]:find("most CPU in slow frames: A", 1, true) and __said[#__said]:find("/fsbug", 1, true), "summed up in chat")
+check(__cvar == "0" and not ForeverSTUwaveDB.hitchProfileOn, "profiling it turned on goes off again")
 return "ok"
 """
 
