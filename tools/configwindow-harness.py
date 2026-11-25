@@ -758,6 +758,46 @@ function T.the_unit_frames_page_has_the_background_grid_toggle()
     eq(FS.Config.Get("professions.shown"), true, "the Professions key is untouched")
 end
 
+-- The Bags page: one switch for the bag bar's right click on a quiver, ammo pouch or soul bag (BagBar.lua registers the
+-- default, on). The page used to be a "No settings yet" note.
+local SPECIAL_KEY = "bagbar.specialRight"
+local SPECIAL_LABEL = "Right click opens only that bag"
+local function bagBarDefault() FS.Config.RegisterDefault(SPECIAL_KEY, true) end
+
+function T.the_bags_page_has_the_special_bag_right_click_row()
+    local W = boot({ preWindow = bagBarDefault })
+    W.Open("bags")
+    local r = row(SPECIAL_LABEL)
+    yes(r, "a Right click opens only that bag row")
+    yes(r.control.fsChecked, "on by default")
+    eq(table.concat(texts(r), "|"), SPECIAL_LABEL .. "|?|ON", "label, the ? icon and state, nothing inline")
+    no(hasText(win(), "No settings yet"), "the note is gone")
+    local tip
+    for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then tip = o.fsTip end end
+    yes(tip, "a ? tip")
+    for _, word in ipairs({ "quivers", "ammo pouches", "soul bags" }) do
+        yes(tip:find(word, 1, true), "the tip names " .. word)
+    end
+    press(SPECIAL_LABEL)
+    eq(FS.Config.Get(SPECIAL_KEY), false, "the switch writes the setting")
+    no(r.control.fsChecked)
+    FS.Config.Set(SPECIAL_KEY, true)
+    yes(r.control.fsChecked, "an external change shows")
+end
+
+function T.the_bags_page_row_is_a_registry_row_that_search_and_reset_can_see()
+    local W = boot({ preWindow = bagBarDefault })
+    W.Open("bags")
+    local entry = W.RowByKey(SPECIAL_KEY, "bags")
+    yes(entry, "the registry has the row")
+    eq(entry.label, SPECIAL_LABEL)
+    eq(entry.page, "bags")
+    no(W.I.EntryChanged(entry), "default on is unchanged")
+    FS.Config.Set(SPECIAL_KEY, false)
+    eq(#W.ChangedKeys("bags"), 1, "off is a change from the default")
+    eq(W.ChangedKeys("bags")[1], SPECIAL_KEY)
+end
+
 function T.the_toggle_states_show_on_and_off()
     local W = boot({ preWindow = unitFramesDefaults })
     openOld(W, "unitframes")
@@ -3633,6 +3673,20 @@ def source_checks() -> list[tuple[str, str | None]]:
     want = ["Modules/Config/HelpModules.lua", "Modules/Config/HelpPicturesArt.lua", "Modules/Config/ConfigWindow.lua"]
     at = [toc.index(w) if w in toc else -1 for w in want]
     out.append(("help_files_load_before_the_window", None if -1 not in at and at == sorted(at) else f"toc order {at}"))
+    # The Bags page row and BagBar.lua must name the same key, and the bar's default (on) is what the row shows first.
+    bar_src = (ADDON / "Modules/Bags/BagBar.lua").read_text(encoding="utf-8")
+    page_src = (ADDON / "Modules/Config/ConfigPageScreen.lua").read_text(encoding="utf-8")
+    key = re.search(r'^local SOLO_SETTING = "([^"]+)"', bar_src, re.M)
+    default_on = re.search(r"RegisterDefault\(SOLO_SETTING, true\)", bar_src)
+    page_key = re.search(r'^local SPECIAL_BAG_KEY = "([^"]+)"', page_src, re.M)
+    if page_key and not re.search(r"key = SPECIAL_BAG_KEY\b", page_src):
+        page_key = None
+    problem = None
+    if not key or not default_on:
+        problem = "BagBar.lua no longer registers its right click setting with a default of true"
+    elif not page_key or page_key.group(1) != key.group(1):
+        problem = f"the Bags page row names {page_key.group(1) if page_key else None}, BagBar.lua names {key.group(1)}"
+    out.append(("bags_page_row_names_the_bag_bar_setting_and_its_default_is_on", problem))
     return out
 
 

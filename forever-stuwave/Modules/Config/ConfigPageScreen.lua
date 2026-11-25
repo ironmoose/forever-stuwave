@@ -1,6 +1,6 @@
 -- Forever STUwave: Config pages, the screen pieces with little to set: Cast bars, Action bars, Buffs and debuffs, Bags.
--- Cast bars, Buffs and debuffs and Bags are note pages (the power button in the page list turns each off). Action bars
--- holds the background grid and the micro menu icon style.
+-- Cast bars and Buffs and debuffs are note pages (the power button in the page list turns each off). Action bars
+-- holds the background grid and the micro menu icon style; Bags holds the bag bar's special bag right click.
 
 local _, FS = ...
 
@@ -20,7 +20,19 @@ end
 
 NotePage("cast", "Cast bars", "FRAMES", 5, "No settings yet. The power button in the list turns cast bars off.")
 NotePage("auras", "Buffs and debuffs", "SCREEN", 3, "No settings yet. The power button in the list turns buffs and debuffs off.")
-NotePage("bags", "Bags", "PANELS", 3, "No settings yet. The power button in the list turns bags off.")
+
+-- The bag bar's right click on a quiver, ammo pouch or soul bag (BagBar.lua registers the key, default on).
+local SPECIAL_BAG_KEY = "bagbar.specialRight"
+local SPECIAL_BAG_TIP = "Covers quivers, ammo pouches and soul bags: a right click on one in the bag bar opens that bag alone, "
+    .. "in a window of its own. Every other bag, and every bag while the game's combined bags option is off, keeps its stock click."
+
+CW.RegisterCategory({
+    key = "bags", label = "Bags", group = "PANELS", order = 3,
+    tabs = { { key = "g", label = "Bags", build = function(content)
+        UI.Section(content, { title = "Bag bar" })
+        UI.Toggle(content, { label = "Right click opens only that bag", key = SPECIAL_BAG_KEY, tip = SPECIAL_BAG_TIP })
+    end } },
+})
 
 -- Gradient or stock icons for the micro menu (MicroBars.lua), repainted live and explained by its ? tip.
 local STYLE_TEXT = { gradient = "Gradient", stock = "Stock" }
