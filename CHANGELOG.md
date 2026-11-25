@@ -57,7 +57,7 @@ A rebuilt /fsconfig with search, tabs and a power button for every module, a pag
 ### Fixes
 - Druid: with the shapeshift tab on, the stance bar no longer draws the same forms a second time.
 - The quest timer drawer under the minimap follows the minimap's scale, and sits under the game's own map when ours is off.
-- With the Minimap module off, the STU key is not lost: a small round STUwave button sits on the rim of the game's own minimap like any addon's button. Click it to open the settings, drag it round the rim to move it (the place is saved in the profile). Other addons' minimap buttons stay where they were.
+- With the Minimap module off, the STU key is not lost: a STUwave button sits on the rim of the game's own minimap, drawn like every other addon's button (the game's gold ring and dark disc around the STUwave logo). Click it to open the settings, drag it round the rim to move it (the place is saved in the profile). Other addons' minimap buttons stay where they were.
 
 ## 1.0.0-beta.5.2 (2026-11-24)
 

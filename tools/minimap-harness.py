@@ -2154,7 +2154,9 @@ def seat_log_checks() -> None:
 
 STOCK_NAME = "ForeverSTUwaveMinimapButton"
 STOCK_KEY = "minimap.buttonAngle"
-STOCK_SIZE, STOCK_RIM, STOCK_DEFAULT = 28, 5, 135
+STOCK_SIZE, STOCK_RIM, STOCK_DEFAULT = 31, 5, 135
+STOCK_ICON = TEXTURES + "addon_icon"   # the toc's IconTexture, the addon's own icon
+STOCK_BORDER, STOCK_BACKGROUND, STOCK_HIGHLIGHT = 136430, 136467, 136477   # MiniMap-TrackingBorder, UI-Minimap-Background, UI-Minimap-ZoomButton-Highlight
 
 # The mock's pieces for StockButton.lua: a saved-settings stub (recording every Set), the module switch stub (`__off` says whether
 # the Minimap module is off), the config window's Toggle, a map whose centre and cursor the checks move, and a tooltip that keeps
@@ -2183,6 +2185,12 @@ __secret = nil
 FS.IsSecret = function(v) return __secret ~= nil and v == __secret end
 __off = true
 FS.ModuleSwitch = { On = function(key) return not (key == "m.mini" and __off) end }
+WOW_PROJECT_MAINLINE, WOW_PROJECT_ID = 1, 1   -- the Forever client shares the retail project id
+do   -- the mock's frames have no highlight lock of their own
+    local R = getmetatable(Minimap)
+    function R:LockHighlight() self.locked = true end
+    function R:UnlockHighlight() self.locked = false end
+end
 __toggles = 0
 FS.ConfigWindow = { Toggle = function() __toggles = __toggles + 1 end }
 __center, __cursor, __mapScale, __mouseDown = { 1000, 700 }, { 1000, 700 }, 1, true
@@ -2199,13 +2207,12 @@ function GameTooltip:AddLine(t) self.lines[#self.lines + 1] = t end
 """
 
 
-def stock_world(factor: float = 1.0, off: bool = True, extra: str = "", login: bool = True) -> "LuaRuntime":
-    """StockButton.lua loaded under the mock with the real Theme.lua and FrameHelpers.lua (PixelUnit = `factor` UI units
-    per pixel); PLAYER_LOGIN fired unless `login` is false."""
+def stock_world(off: bool = True, extra: str = "", login: bool = True) -> "LuaRuntime":
+    """StockButton.lua loaded under the mock; PLAYER_LOGIN fired unless `login` is false. `extra` runs after the setup, before
+    the file loads."""
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.execute("function ___run(...) " + MOCK + " end")
-    setup = ("FH_SRC = [==[" + FRAMEHELPERS_SRC + "]==]\n" + PIXELS % factor + STOCK_SETUP
-             + f"__off = {'true' if off else 'false'}\n" + extra)
+    setup = STOCK_SETUP + f"__off = {'true' if off else 'false'}\n" + extra
     lua.globals().___run(THEME_SRC, STOCK_SRC, "cut", None, LAYOUT_SRC, setup, None)
     if login:
         lua.execute('FireEvent("PLAYER_LOGIN")')
@@ -2231,58 +2238,8 @@ def stock_offset(angle: float, half_w: float, half_h: float, shape: str = "ROUND
     return max(-w, min(x * dw, w)), max(-h, min(y * dh, h))
 
 
-def stock_diameter(px: float) -> int:
-    return max(12, math.floor(STOCK_SIZE / px + 0.5))
-
-
-def stock_canvas(diameter: int) -> int:
-    canvas = min(math.floor(32 * diameter / STOCK_SIZE + 0.5), math.floor(32 * (diameter / 2 - 0.5) / 13))
-    return canvas - 1 if (canvas - diameter) % 2 else canvas
-
-
-def disc_pixels(diameter: int, radius: float) -> set:
-    """Every pixel (x, y) of a diameter-wide square whose centre is inside the circle of `radius` round the square's centre."""
-    c = diameter / 2
-    return {(x, y) for y in range(diameter) for x in range(diameter)
-            if (x + 0.5 - c) ** 2 + (y + 0.5 - c) ** 2 <= radius * radius + 1e-9}
-
-
-def stu_ink_radius() -> float:
-    """The farthest solid texel (alpha >= 128) of icon_stu.tga from the centre of its 32 texel canvas, in texels."""
-    data = (ADDON / "Media/Textures/icon_stu.tga").read_bytes()
-    width, height = struct.unpack_from("<HH", data, 12)
-    assert (width, height) == (32, 32) and data[16] == 32, "icon_stu.tga is a 32 x 32 BGRA canvas"
-    farthest = 0.0
-    for y in range(height):
-        for x in range(width):
-            if data[18 + (y * width + x) * 4 + 3] >= 128:
-                farthest = max(farthest, math.hypot(x + 0.5 - 16, y + 0.5 - 16))
-    return farthest
-
-
-def stock_rows(button, sublevel: int) -> list:
-    """The flat rows of the rim (sublevel 1) or the face (sublevel 2), in the order they were laid."""
-    return [r for r in regions(button) if r.layer == "BACKGROUND" and r.sublevel == sublevel and r.color is not None]
-
-
-def row_pixels(rows, px: float) -> set:
-    """The pixels the visible rows cover, from their seats (whole pixel counts from the button's top left)."""
-    covered = set()
-    for r in rows:
-        if not r.shown:
-            continue
-        x0 = round(r.points.TOPLEFT.x / px)
-        y = round(-r.points.TOPLEFT.y / px)
-        for x in range(x0, x0 + round(r.w / px)):
-            covered.add((x, y))
-    return covered
-
-
 def stock_button_checks() -> None:
     """The STU button on the stock map while the Minimap module is off."""
-    px_worlds = (("1 unit per px", 1.0), ("1.2 px per unit", 1 / 1.2), ("0.5333 units per px", 768 / 1440), ("2 px per unit", 0.5),
-                 ("tiny UI", 3.0))
-
     # --- built only while the module is off
     lua = stock_world(off=False)
     check("[stock] with the Minimap module on nothing is built (the key row has the STU key)", lua.globals()[STOCK_NAME] is None)
@@ -2397,55 +2354,64 @@ def stock_button_checks() -> None:
     check("[stock] a build that throws is logged once and does not reach the client's handler",
           lua.globals()[STOCK_NAME] is None and lua.eval("#__log") == 1)
 
-    # --- the look at every pixel size: whole pixel rows, a round disc, the mark inside the rim
-    ink = stu_ink_radius()
-    check(f"[stock look] the STU mark's solid texels reach {ink:.2f} texels from its centre, within the 13 the canvas is fitted for",
-          ink <= 13)
-    for label, factor in px_worlds:
-        lua = stock_world(factor)
-        button = lua.globals()[STOCK_NAME]
-        px = factor
-        d = stock_diameter(px)
-        rim, face = stock_rows(button, 1), stock_rows(button, 2)
-        check(f"[stock look, {label}] the button is {d} pixels wide and tall ({d * px:.3f} units), at least 12",
-              d >= 12 and near(button.w, d * px, 1e-9) and near(button.h, d * px, 1e-9))
-        want_rim, want_face = disc_pixels(d, d / 2), disc_pixels(d, d / 2 - 1)
-        got_rim, got_face = row_pixels(rim, px), row_pixels(face, px)
-        check(f"[stock look, {label}] the rim is the disc of {d} pixels, row by row ({len(got_rim)} pixels)", got_rim == want_rim)
-        check(f"[stock look, {label}] the face is the disc one pixel smaller, inside the rim ({len(got_face)} pixels)",
-              got_face == want_face and got_face < got_rim)
-        check(f"[stock look, {label}] the disc is symmetric left to right and top to bottom",
-              all((d - 1 - x, y) in got_rim and (x, d - 1 - y) in got_rim for x, y in got_rim))
-        area = len(got_rim)
-        check(f"[stock look, {label}] the rim's area is a circle's (pi r squared = {math.pi * (d / 2) ** 2:.0f}, got {area})",
-              abs(area - math.pi * (d / 2) ** 2) / (math.pi * (d / 2) ** 2) < 0.05)
-        check(f"[stock look, {label}] every row is flat, one pixel tall, whole pixels in x and y, pixel snapped",
-              all(r.h == px or near(r.h, px, 1e-9) for r in rim + face)
-              and all(whole(r.w, px) and whole(r.points.TOPLEFT.x, px) and whole(r.points.TOPLEFT.y, px) for r in rim + face)
-              and all(r.snap and r.bias == 0 for r in rim + face))
-        icon = [r for r in regions(button) if r.texture == STU_TEXTURE]
-        canvas = stock_canvas(d)
-        check(f"[stock look, {label}] the STU mark is one {canvas} pixel canvas, centred on whole pixels",
-              len(icon) == 1 and near(icon[0].w, canvas * px, 1e-9) and near(icon[0].h, canvas * px, 1e-9)
-              and near(icon[0].points.TOPLEFT.x, (d - canvas) / 2 * px, 1e-9)
-              and near(icon[0].points.TOPLEFT.y, -(d - canvas) / 2 * px, 1e-9)
-              and icon[0].layer == "ARTWORK" and (canvas - d) % 2 == 0 and icon[0].snap)
-        reach = ink * canvas / 32
-        check(f"[stock look, {label}] the mark's farthest solid texel ({reach:.2f} px) stays inside the face (radius {d / 2 - 1})",
-              reach <= d / 2 - 1 + 0.5)
-        check(f"[stock look, {label}] the rim is the Theme's cyan at rest, the face the button ink, opaque",
-              all(tint_is(r, lua.eval("FS.Theme.COLOR_POWER"), 0.75) for r in rim)
-              and all(tint_is(r, lua.eval("FS.Theme.COLOR_BUTTON_INK"), 1) for r in face))
+    # --- the look: LibDBIcon's, texture for texture, with the addon's own icon
+    toc = (ADDON / "forever-stuwave.toc").read_text(encoding="utf-8")
+    toc_icon = re.search(r"^## IconTexture:\s*(\S+)\s*$", toc, re.MULTILINE).group(1)
+    icon_file = ADDON / "Media/Textures/addon_icon.tga"
+    icon_head = icon_file.read_bytes()[:18]
+    check("[stock look] the icon is the toc's IconTexture, a 64 x 64 32 bit TGA that is in the addon",
+          toc_icon == STOCK_ICON and icon_file.is_file() and struct.unpack_from("<HH", icon_head, 12) == (64, 64)
+          and icon_head[16] == 32)
+    lua = stock_world()
+    button = lua.globals()[STOCK_NAME]
+    check("[stock look] the button is 31 by 31 UI units, LibDBIcon's size", button.w == STOCK_SIZE and button.h == STOCK_SIZE)
+    parts = regions(button)
+    check("[stock look] it holds three textures and nothing else: the ring, the disc, the icon (no drawn rows or rects)",
+          len(parts) == 3 and all(r.color is None for r in parts))
+    by_layer = {r.layer: r for r in parts}
+    check("[stock look] one texture on each of OVERLAY, BACKGROUND and ARTWORK", sorted(by_layer) == ["ARTWORK", "BACKGROUND", "OVERLAY"])
+    ring, disc, icon = by_layer["OVERLAY"], by_layer["BACKGROUND"], by_layer["ARTWORK"]
+    check("[stock look] the ring is the game's tracking border, 50 across, at the button's top left",
+          ring.texture == STOCK_BORDER and ring.w == 50 and ring.h == 50 and list(ring.points.keys()) == ["TOPLEFT"]
+          and ring.points.TOPLEFT.x == 0 and ring.points.TOPLEFT.y == 0)
+    check("[stock look] the disc is the game's minimap background, 24 across, centred",
+          disc.texture == STOCK_BACKGROUND and disc.w == 24 and disc.h == 24 and list(disc.points.keys()) == ["CENTER"]
+          and disc.points.CENTER.x == 0 and disc.points.CENTER.y == 0)
+    check("[stock look] the icon is the addon's icon, 18 across, centred",
+          icon.texture == STOCK_ICON and icon.w == 18 and icon.h == 18 and list(icon.points.keys()) == ["CENTER"]
+          and icon.points.CENTER.x == 0 and icon.points.CENTER.y == 0)
+    check("[stock look] the layers stack as an addon's button does: the ring over the icon over the disc",
+          LAYER_RANK["OVERLAY"] > LAYER_RANK["ARTWORK"] > LAYER_RANK["BACKGROUND"])
+    check("[stock look] the icon shows the texture inset 5 percent on every side at rest",
+          list(icon.coords.values()) == [0.05, 0.95, 0.05, 0.95])
+    check("[stock look] the hover glow is the zoom button's highlight, added to what is under it",
+          button.highlight is not None and button.highlight.texture == STOCK_HIGHLIGHT and button.highlight.mode == "ADD")
+    check("[stock look] the textures are not ours to tint: no vertex colour, no snapping flags",
+          all(r.tint is None and not r.snap for r in parts))
+    # another client project: the ring is 53 across, the disc and the icon sit in from the top left (LibDBIcon's other branch)
+    lua = stock_world(extra="WOW_PROJECT_ID = 2")
+    parts = regions(lua.globals()[STOCK_NAME])
+    by_layer = {r.layer: r for r in parts}
+    ring, disc, icon = by_layer["OVERLAY"], by_layer["BACKGROUND"], by_layer["ARTWORK"]
+    check("[stock look, other project] the ring is 53 across at the top left",
+          ring.w == 53 and ring.h == 53 and ring.points.TOPLEFT.x == 0 and ring.points.TOPLEFT.y == 0)
+    check("[stock look, other project] the disc is 20 across, 7 right and 5 down from the top left",
+          disc.w == 20 and disc.h == 20 and list(disc.points.keys()) == ["TOPLEFT"]
+          and disc.points.TOPLEFT.x == 7 and disc.points.TOPLEFT.y == -5)
+    check("[stock look, other project] the icon is 17 across, 7 right and 6 down from the top left",
+          icon.w == 17 and icon.h == 17 and list(icon.points.keys()) == ["TOPLEFT"]
+          and icon.points.TOPLEFT.x == 7 and icon.points.TOPLEFT.y == -6)
+    lua = stock_world(extra="WOW_PROJECT_ID, WOW_PROJECT_MAINLINE = nil, nil")
+    check("[stock look] a client with no project globals reads as LibDBIcon reads it (nil equals nil: the retail layout)",
+          [r for r in regions(lua.globals()[STOCK_NAME]) if r.layer == "OVERLAY"][0].w == 50)
 
     # --- hover, press and the tooltip
     lua = stock_world()
     button = lua.globals()[STOCK_NAME]
-    pink, cyan = lua.eval("FS.Theme.COLOR_HEALTH"), lua.eval("FS.Theme.COLOR_POWER")
-    ink_face, dark = lua.eval("FS.Theme.COLOR_BUTTON_INK"), lua.eval("FS.Theme.COLOR_BAR_TRACK")
-    rim, face = stock_rows(button, 1), stock_rows(button, 2)
+    icon = [r for r in regions(button) if r.layer == "ARTWORK"][0]
+    rest, whole_texture = [0.05, 0.95, 0.05, 0.95], [0, 1, 0, 1]
     lua.globals().GameTooltip.shown = False
     button.scripts.OnEnter(button)
-    check("[stock hover] the rim turns pink at full strength", all(tint_is(r, pink, 1) for r in rim))
     tip = lua.globals().GameTooltip
     lines = list(tip.lines.values())
     check("[stock hover] the tooltip shows: neutral words, the name first, then what a click and a drag do",
@@ -2454,22 +2420,20 @@ def stock_button_checks() -> None:
     check("[stock hover] the tooltip carries no word of automation, bots or tooling",
           not re.search(r"bot|auto|macro|script|addon|tool", " ".join([tip.text] + lines), re.IGNORECASE))
     button.scripts.OnMouseDown(button)
-    check("[stock press] a press darkens the face and keeps the pink rim",
-          all(tint_is(r, dark, 1) for r in face) and all(tint_is(r, pink, 1) for r in rim))
+    check("[stock press] a press shows the whole icon texture, a step back from the rest", list(icon.coords.values()) == whole_texture)
     button.scripts.OnMouseUp(button)
-    check("[stock press] a release brings the face back", all(tint_is(r, ink_face, 1) for r in face))
+    check("[stock press] a release brings the inset back", list(icon.coords.values()) == rest)
     button.scripts.OnLeave(button)
-    check("[stock hover] leaving turns the rim cyan at rest and hides the tooltip",
-          all(tint_is(r, cyan, 0.75) for r in rim) and not tip.shown)
+    check("[stock hover] leaving hides the tooltip", not tip.shown)
     button.scripts.OnEnter(button)
     button.scripts.OnMouseDown(button)
     button.scripts.OnLeave(button)
-    check("[stock press] leaving with the button held down puts the face back (no stuck press)",
-          all(tint_is(r, ink_face, 1) for r in face))
+    check("[stock press] leaving with the button held down puts the icon back (no stuck press)", list(icon.coords.values()) == rest)
     button.scripts.OnEnter(button)
+    button.scripts.OnMouseDown(button)
     button.scripts.OnHide(button)
-    check("[stock hover] hiding the button with the mouse on it clears the hover and the tooltip",
-          all(tint_is(r, cyan, 0.75) for r in rim) and not tip.shown)
+    check("[stock hover] hiding the button with the mouse on it clears the press and the tooltip",
+          list(icon.coords.values()) == rest and not tip.shown)
 
     # the tooltip opens on the side of the screen the button is not on
     lua = stock_world(extra="UIParent.w, UIParent.h = 2560, 1440")
@@ -2502,9 +2466,10 @@ def stock_button_checks() -> None:
     sets0 = lua.eval("__sets")
     lua.execute("GameTooltip.shown = true")
     button.scripts.OnDragStart(button)
-    check("[stock drag] a drag start hides the tooltip, runs an update script and lights the rim",
-          not lua.globals().GameTooltip.shown and button.scripts.OnUpdate is not None
-          and all(tint_is(r, pink, 1) for r in stock_rows(button, 1)))
+    drag_icon = [r for r in regions(button) if r.layer == "ARTWORK"][0]
+    check("[stock drag] a drag start hides the tooltip, runs an update script, holds the highlight and shows the whole icon",
+          not lua.globals().GameTooltip.shown and button.scripts.OnUpdate is not None and button.locked
+          and list(drag_icon.coords.values()) == [0, 1, 0, 1])
     lua.execute("__cursor = { 1000, 900 }")   # straight above the map's centre (1000, 700): 90 degrees
     button.scripts.OnUpdate(button, 0.016)
     pt = button.points.CENTER
@@ -2524,8 +2489,9 @@ def stock_button_checks() -> None:
           lua.eval("__sets") == sets0 + 1 and near(saved, 225) and button.scripts.OnUpdate is None)
     pt = button.points.CENTER
     ex, ey = stock_offset(225, 125, 125)
-    check("[stock drag] and the button rests there with the rim back to cyan",
-          near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6) and all(tint_is(r, cyan, 0.75) for r in stock_rows(button, 1)))
+    check("[stock drag] and the button rests there with the highlight released and the icon inset again",
+          near(pt.x, ex, 1e-6) and near(pt.y, ey, 1e-6) and not button.locked
+          and list(drag_icon.coords.values()) == [0.05, 0.95, 0.05, 0.95])
     lua.execute("__cursor = { 1000, 900 }")
     button.scripts.OnDragStop(button)
     check("[stock drag] a stray second release saves nothing more", lua.eval("__sets") == sets0 + 1)
@@ -2593,31 +2559,24 @@ def stock_button_checks() -> None:
     check("[stock profile] another profile's angle moves the button at once",
           near(button.points.CENTER.x, ex, 1e-6) and near(button.points.CENTER.y, ey, 1e-6))
 
-    # --- a new UI scale lays the rows again on the new pixel
-    lua = stock_world(1.0)
+    # --- a new UI scale, display size or map size seats the button again, on the same frames and textures
+    lua = stock_world()
     button = lua.globals()[STOCK_NAME]
-    before = len(row_pixels(stock_rows(button, 1), 1.0))
-    lua.execute("PixelUtil = { GetPixelToUIUnitFactor = function() return 0.5 end }; FireEvent('UI_SCALE_CHANGED')")
-    px = 0.5
-    d = stock_diameter(px)
-    got = row_pixels(stock_rows(button, 1), px)
-    check(f"[stock rescale] a new UI scale lays the disc again on the new pixel ({before} then {len(got)} pixels, {d} wide)",
-          got == disc_pixels(d, d / 2) and near(button.w, d * px, 1e-9))
-    lua.execute("PixelUtil = { GetPixelToUIUnitFactor = function() return 1.0 end }; FireEvent('DISPLAY_SIZE_CHANGED')")
-    got = row_pixels(stock_rows(button, 1), 1.0)
-    check("[stock rescale] and back: the extra rows of the bigger disc are hidden, the small disc is exact",
-          got == disc_pixels(28, 14) and all(not r.shown for r in stock_rows(button, 1)[28:]))
+    textures = len(regions(button))
+    lua.execute("FireEvent('UI_SCALE_CHANGED'); FireEvent('DISPLAY_SIZE_CHANGED')")
+    check("[stock rescale] a scale event builds no second button and no new texture",
+          lua.eval(f"__count('{STOCK_NAME}')") == 1 and len(regions(button)) == textures)
     n_timers = lua.eval("#__timers")
     lua.execute("RunTimers()")
     check(f"[stock rescale] each scale event also seats once more a frame later ({n_timers} timers) without error",
           n_timers >= 1 and lua.eval("#__log") == 0)
     lua.execute("Minimap.w, Minimap.h = 300, 300; FireEvent('EDIT_MODE_LAYOUTS_UPDATED')")
     ex, ey = stock_offset(STOCK_DEFAULT, 150, 150)
-    check("[stock rescale] a new map size moves the button to the new rim",
-          near(button.points.CENTER.x, ex, 1e-6) and near(button.points.CENTER.y, ey, 1e-6))
+    check("[stock rescale] a new map size moves the button to the new rim, still 31 across",
+          near(button.points.CENTER.x, ex, 1e-6) and near(button.points.CENTER.y, ey, 1e-6) and button.w == STOCK_SIZE)
     lua.execute("button = " + STOCK_NAME + "; button.scripts.OnShow(button)")
-    check("[stock rescale] showing the button again seats it without rebuilding its rows",
-          lua.eval(f"__count('{STOCK_NAME}')") == 1)
+    check("[stock rescale] showing the button again seats it without rebuilding it",
+          lua.eval(f"__count('{STOCK_NAME}')") == 1 and len(regions(button)) == textures)
     # Blizzard frames are only read: the stock map and the cluster gain no script, no hook, no child and no point
     lua = stock_world()
     check("[stock] the stock map is left alone: no script and no hook of ours on it",

@@ -1,16 +1,16 @@
 -- Forever STUwave: the STU button on the game's own minimap
 -- With the Minimap module switched off (Core/ModuleSwitch.lua, m.mini) the key row of Minimap.lua is never built, and the STU key
--- that opens the config window lives in that row. This file gives the key a place on the stock round minimap instead: a small
--- round STUwave button on the map's rim, placed the way LibDBIcon places an addon's minimap button (an angle round the map, the
--- button's centre half the map's width plus 5 out from its centre), dragged round the rim with the left button, the angle saved in
--- the profile (minimap.buttonAngle). A left click opens the config window, the action of the STU key.
+-- that opens the config window lives in that row. This file gives the key a place on the stock round minimap instead: a button
+-- built the way LibDBIcon-1.0 builds an addon's minimap button, so it reads as every other addon's button on the map. It is placed
+-- the way LibDBIcon places one too (an angle round the map, the button's centre half the map's width plus 5 out from its centre),
+-- dragged round the rim with the left button, the angle saved in the profile (minimap.buttonAngle). A left click opens the config
+-- window, the action of the STU key.
 --
 -- With the module on this file builds nothing: the key row has the STU key, and the addon tray collects the addons' buttons. With
 -- the module off the tray is not built either, so every other addon's button stays where its addon put it, on the stock map.
 --
 -- Nothing of Blizzard's is moved, hidden, hooked or masked here. The button is our own frame, a child of Minimap (so it hides,
--- fades and scales with the map like every addon's button); Minimap is only read (its size, its centre, its scale). The
--- ring is a stack of flat rows, one run of whole physical pixels per row, so the circle has hard pixel edges at any scale.
+-- fades and scales with the map like every addon's button); Minimap is only read (its size, its centre, its scale).
 
 local _, FS = ...
 
@@ -26,29 +26,20 @@ B.KEY = "minimap.buttonAngle"
 B.DEFAULT_ANGLE = 135
 -- How far the button's centre sits outside the map's edge (LibDBIcon's default radius), in UI units.
 B.RIM = 5
--- The button's width, in UI units: a little under the 31 an addon button takes, whole physical pixels from PixelUnit.
-B.SIZE = 28
--- The STU mark's canvas is 32 texels with the art 22 of them (generate_icon_stu.py); the texels are laid 1 : 1 at SIZE. Its solid
--- texels reach 12.9 texels from the canvas centre (the harness measures it), so 13 is what the face has to hold.
-local STU_TEXELS = 32
-local STU_INK_RADIUS = 13
-local STU_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_stu.tga"
+-- LibDBIcon's button size, in UI units.
+B.SIZE = 31
 
--- The rim is one pixel; the face is the Theme's button ink, so the mark reads as on the key row. Hot (mouse over, dragging) turns
--- the rim pink and full strength, as the STU key's outline does; pressed darkens the face.
-local THEME = FS.Theme or {}
-local RING_COLOR = THEME.COLOR_POWER or { 0.133, 0.878, 1, 1 }
-local RING_HOT = THEME.COLOR_HEALTH or { 1, 0.180, 0.592, 1 }
-local FACE_COLOR = THEME.COLOR_BUTTON_INK or { 0.090, 0.047, 0.165, 1 }
-local FACE_DOWN = THEME.COLOR_BAR_TRACK or { 0.039, 0.016, 0.086, 1 }
-local RING_REST_ALPHA = 0.75
+-- The look is LibDBIcon-1.0's (minor 56), texture for texture, so the button matches every other addon's: the tracking ring over
+-- everything, the map's dark disc behind, the icon between them, and the zoom button's glow on hover. The icon is the addon's own
+-- (the same file the toc's IconTexture names), a little inside its edge so the ring does not cover it.
+B.BORDER = 136430      -- Interface\Minimap\MiniMap-TrackingBorder
+B.BACKGROUND = 136467  -- Interface\Minimap\UI-Minimap-Background
+B.HIGHLIGHT = 136477   -- Interface\Minimap\UI-Minimap-ZoomButton-Highlight
+B.ICON = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\addon_icon"
+-- The icon's texcoord inset at rest; pressed shows the whole texture, which is the little step back LibDBIcon gives a press.
+B.ICON_INSET = 0.05
 
-local Stock = {
-    ring = {},      -- the rim's rows (a flat texture each), the outer disc
-    face = {},      -- the face's rows, the inner disc on top of the rim
-    pixels = nil,   -- UI units per physical pixel the rows were laid for
-    diameter = nil, -- the disc's width in physical pixels
-}
+local Stock = {}
 B.state = Stock
 
 -------------------------------------------------------------------------------
@@ -70,24 +61,28 @@ local function Num(v)
     return v == v and v > -math.huge and v < math.huge
 end
 
-local function Crisp(texture)
-    if texture.SetSnapToPixelGrid then pcall(texture.SetSnapToPixelGrid, texture, true) end
-    if texture.SetTexelSnappingBias then pcall(texture.SetTexelSnappingBias, texture, 0) end
-    return texture
-end
-
--- UI units per physical pixel at `frame`; 1 when the client will not say (every edge then sits on a whole UI unit).
-local function PixelUnit(frame)
-    local helpers = FS.FrameHelpers
-    local px = helpers and helpers.PixelUnit and helpers.PixelUnit(frame)
-    if not Num(px) or px <= 0 then return 1 end
-    return px
-end
-
 -- True when the Minimap module is off for this session (the switch store is there and says so). Read when it is asked, never at
 -- file scope: the saved switches are not in before ADDON_LOADED. No store at all counts as on, as everywhere else.
 function B.Applies()
     return MS ~= nil and MS.On("m.mini") == false
+end
+
+-- Where the three textures sit, by the client's project, as LibDBIcon lays them out: { size, point, x, y } each. The retail
+-- project's (the Forever client shares it) has the ring 50 across and the disc and the icon centred; the other projects' ring is
+-- 53 across with the disc and the icon set in from the top left to meet the ring's hole.
+function B.Geometry()
+    if _G.WOW_PROJECT_ID == _G.WOW_PROJECT_MAINLINE then
+        return {
+            border = { 50, "TOPLEFT", 0, 0 },
+            background = { 24, "CENTER", 0, 0 },
+            icon = { 18, "CENTER", 0, 0 },
+        }
+    end
+    return {
+        border = { 53, "TOPLEFT", 0, 0 },
+        background = { 20, "TOPLEFT", 7, -5 },
+        icon = { 17, "TOPLEFT", 7, -6 },
+    }
 end
 
 -------------------------------------------------------------------------------
@@ -152,90 +147,6 @@ end
 
 if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(B.KEY, B.DEFAULT_ANGLE) end
 
--------------------------------------------------------------------------------
--- The disc: flat rows of whole pixels
--------------------------------------------------------------------------------
-
--- One run per row of a disc of `diameter` pixels and `radius` pixels: the pixels whose centres lie inside the circle. Returns
--- { { y = row, x0 = first pixel, x1 = last pixel }, ... } with rows and columns counted from the top left from 0, empty rows left out.
-function B.DiscRuns(diameter, radius)
-    local runs = {}
-    local centre, limit = diameter / 2, radius * radius + 1e-9
-    for y = 0, diameter - 1 do
-        local dy = y + 0.5 - centre
-        local first, last
-        for x = 0, diameter - 1 do
-            local dx = x + 0.5 - centre
-            if dx * dx + dy * dy <= limit then
-                first = first or x
-                last = x
-            end
-        end
-        if first then runs[#runs + 1] = { y = y, x0 = first, x1 = last } end
-    end
-    return runs
-end
-
--- The disc's width in physical pixels for the pixel size at the button: B.SIZE UI units, never fewer than 12 pixels.
-function B.Diameter(px)
-    return math.max(12, math.floor(B.SIZE / px + 0.5))
-end
-
--- The mark's canvas in pixels: the texels scaled with the disc, never so large that the ink reaches past the face (a very small
--- disc), and of the disc's parity so the canvas centres on whole pixels.
-function B.Canvas(diameter)
-    local canvas = math.floor(STU_TEXELS * diameter / B.SIZE + 0.5)
-    canvas = math.min(canvas, math.floor(STU_TEXELS * (diameter / 2 - 0.5) / STU_INK_RADIUS))
-    if (canvas - diameter) % 2 ~= 0 then canvas = canvas - 1 end
-    return canvas
-end
-
--- Lays rows `runs` out on `list` (flat textures made as needed, on `sublevel` of BACKGROUND); rows past the last run hide.
-local function SeatRows(button, list, runs, sublevel, px)
-    for i, run in ipairs(runs) do
-        local row = list[i]
-        if not row then
-            row = Crisp(button:CreateTexture(nil, "BACKGROUND", nil, sublevel))
-            list[i] = row
-        end
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", button, "TOPLEFT", run.x0 * px, -run.y * px)
-        row:SetSize((run.x1 - run.x0 + 1) * px, px)
-        row:Show()
-    end
-    for i = #runs + 1, #list do list[i]:Hide() end
-end
-
-local function Paint()
-    local button = Stock.button
-    if not button then return end
-    local hot = Stock.over or Stock.dragging
-    local ring = hot and RING_HOT or RING_COLOR
-    local alpha = hot and 1 or RING_REST_ALPHA
-    for _, row in ipairs(Stock.ring) do row:SetColorTexture(ring[1], ring[2], ring[3], alpha) end
-    local face = Stock.down and FACE_DOWN or FACE_COLOR
-    for _, row in ipairs(Stock.face) do row:SetColorTexture(face[1], face[2], face[3], 1) end
-end
-
--- The rows, the face's size and the mark for the pixel size at the button now. Cheap when nothing changed.
-local function SeatLook()
-    local button = Stock.button
-    local px = PixelUnit(button)
-    if Stock.pixels == px and Stock.diameter then return end
-    local diameter = B.Diameter(px)
-    local radius = diameter / 2
-    button:SetSize(diameter * px, diameter * px)
-    SeatRows(button, Stock.ring, B.DiscRuns(diameter, radius), 1, px)
-    SeatRows(button, Stock.face, radius > 1 and B.DiscRuns(diameter, radius - 1) or {}, 2, px)
-    local canvas = B.Canvas(diameter)
-    local inset = (diameter - canvas) / 2
-    Stock.icon:ClearAllPoints()
-    Stock.icon:SetPoint("TOPLEFT", button, "TOPLEFT", inset * px, -inset * px)
-    Stock.icon:SetSize(canvas * px, canvas * px)
-    Stock.pixels, Stock.diameter = px, diameter
-    Paint()
-end
-
 -- The centre on the map's rim for the angle now (the drag's while it runs, else the saved one).
 local function Place()
     local button, map = Stock.button, _G.Minimap
@@ -247,14 +158,18 @@ local function Place()
     button:SetPoint("CENTER", map, "CENTER", x, y)
 end
 
--- Both, for a new angle, a new map size or a new pixel size. A throw is logged once and never reaches the client's handler.
+-- Seats the button on the rim. A throw is logged once and never reaches the client's handler.
 function B.Seat()
     if not Stock.button then return end
-    local ok, err = pcall(function()
-        SeatLook()
-        Place()
-    end)
+    local ok, err = pcall(Place)
     if not ok then Log("seat", err) end
+end
+
+-- The icon's texcoords: inset at rest, the whole texture while pressed or dragged (LibDBIcon's UpdateCoord).
+local function SeatIcon()
+    if not Stock.icon then return end
+    local d = (Stock.down or Stock.dragging) and 0 or B.ICON_INSET
+    Stock.icon:SetTexCoord(d, 1 - d, d, 1 - d)
 end
 
 -------------------------------------------------------------------------------
@@ -307,8 +222,9 @@ end
 local function EndDrag()
     local button = Stock.button
     if not (button and Stock.dragging) then return end
-    Stock.dragging = false
+    Stock.dragging, Stock.down = false, false
     button:SetScript("OnUpdate", nil)
+    button:UnlockHighlight()
     local angle = Stock.dragAngle
     Stock.dragAngle = nil
     if angle then
@@ -319,7 +235,7 @@ local function EndDrag()
         if not saved then Stock.held = angle end
     end
     B.Seat()
-    Paint()
+    SeatIcon()
 end
 
 local function DragUpdate()
@@ -337,8 +253,10 @@ end
 local function StartDrag()
     Stock.dragging = true
     HideTip()
-    Stock.button:SetScript("OnUpdate", DragUpdate)
-    Paint()
+    local button = Stock.button
+    button:LockHighlight()
+    button:SetScript("OnUpdate", DragUpdate)
+    SeatIcon()
 end
 
 local function OnClick()
@@ -349,6 +267,12 @@ end
 -------------------------------------------------------------------------------
 -- Build
 -------------------------------------------------------------------------------
+
+local function Lay(region, spec)
+    region:ClearAllPoints()
+    region:SetSize(spec[1], spec[1])
+    region:SetPoint(spec[2], spec[3], spec[4])
+end
 
 local function Build()
     if Stock.button then return end
@@ -365,36 +289,46 @@ local function Build()
     if button.SetFixedFrameLevel then pcall(button.SetFixedFrameLevel, button, true) end
     button:RegisterForClicks("LeftButtonUp")
     button:RegisterForDrag("LeftButton")
+    button:SetHighlightTexture(B.HIGHLIGHT, "ADD")
+    button:SetSize(B.SIZE, B.SIZE)
 
-    Stock.icon = Crisp(button:CreateTexture(nil, "ARTWORK", nil, 1))
-    Stock.icon:SetTexture(STU_TEXTURE)
+    local geometry = B.Geometry()
+    local border = button:CreateTexture(nil, "OVERLAY")
+    border:SetTexture(B.BORDER)
+    Lay(border, geometry.border)
+    local background = button:CreateTexture(nil, "BACKGROUND")
+    background:SetTexture(B.BACKGROUND)
+    Lay(background, geometry.background)
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetTexture(B.ICON)
+    Lay(icon, geometry.icon)
+    Stock.border, Stock.background, Stock.icon = border, background, icon
+    SeatIcon()
 
     button:SetScript("OnEnter", function()
-        Stock.over = true
-        Paint()
         if not Stock.dragging then ShowTip(button) end
     end)
     button:SetScript("OnLeave", function()
-        Stock.over, Stock.down = false, false
-        Paint()
+        Stock.down = false
+        SeatIcon()
         HideTip()
     end)
     button:SetScript("OnMouseDown", function()
         Stock.down = true
-        Paint()
+        SeatIcon()
     end)
     button:SetScript("OnMouseUp", function()
         Stock.down = false
-        Paint()
+        SeatIcon()
     end)
     button:SetScript("OnDragStart", StartDrag)
     button:SetScript("OnDragStop", EndDrag)
     button:SetScript("OnClick", OnClick)
-    -- A button hidden with the mouse on it gets no OnLeave; a map shown again may have another pixel size.
+    -- A button hidden with the mouse on it gets no OnLeave; a map shown again may have another size.
     button:SetScript("OnHide", function()
-        Stock.over, Stock.down = false, false
+        Stock.down = false
         EndDrag()
-        Paint()
+        SeatIcon()
         HideTip()
     end)
     button:SetScript("OnShow", function() B.Seat() end)
@@ -403,8 +337,8 @@ local function Build()
     B.Seat()
 end
 
--- Builds the button once, when the module is off, then keeps it seated: a new UI scale or display size changes the pixel and
--- the map's size, so the rows and the rim position are laid again (and once more a frame later, when the map's own size is final).
+-- Builds the button once, when the module is off, then keeps it seated: a new UI scale, display size or Edit Mode layout can change
+-- the map's size, so the rim position is laid again (and once more a frame later, when the map's own size is final).
 local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("PLAYER_LOGIN")
 watcher:SetScript("OnEvent", function(self, event)
