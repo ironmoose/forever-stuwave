@@ -176,6 +176,7 @@ function(src, opts)
     if opts.noStyle ~= true then assert(load(src.style, "@FrameStyle.lua"))("forever-stuwave", FS) end
     if opts.noStyle ~= true then assert(load(src.extras, "@FrameExtras.lua"))("forever-stuwave", FS) end
     if opts.noUnit ~= true then assert(load(src.unit, "@UnitFrames.lua"))("forever-stuwave", FS) end
+    if opts.beforeWindow then opts.beforeWindow() end
     for _, chunk in ipairs(src.window) do
         assert(load(chunk[2], "@" .. chunk[1]))("forever-stuwave", FS)
     end
@@ -469,6 +470,74 @@ function T.rows_a_frame_does_not_apply_yet_say_so_and_the_raid_rows_it_does_appl
     local S, C, CW = boot()
     yes(FS.ConfigBars.IsWired("player", "hpH") and FS.ConfigBars.IsWired("raid", "w") and FS.ConfigBars.IsWired("party", "alpha"))
     yes(not FS.ConfigBars.IsWired("raid", "hpFmt") and not FS.ConfigBars.IsWired("party", "hpH"))
+end
+
+local function groupShared()
+    local saved = {}
+    local buffs = { PRIEST = { { key = "fortitude", spell = "Power Word: Fortitude", default = true },
+                               { key = "shadowprot", spell = "Shadow Protection", default = false } },
+                    MAGE = { { key = "intellect", spell = "Arcane Intellect", default = true } } }
+    FS.PartyFrames = { shared = {
+        PARTY_BUFFS = buffs,
+        BuffEnabled = function(b) if saved[b.key] ~= nil then return saved[b.key] end return b.default end,
+        SavedBuffValue = function(b) return saved[b.key] end,
+        SetBuff = function(key, value) saved[key] = value; return true end,
+    } }
+    FS.__saved = saved
+end
+
+function T.the_party_tab_has_the_markers_and_the_cleanse_rows_and_the_raid_tab_its_markers()
+    local S, C, CW = boot({ beforeWindow = groupShared })
+    local mk = { "bars.mkHot", "bars.mkSize", "bars.mkPos" }
+    CW.Open("party", "style")
+    for _, key in ipairs(mk) do yes(CW.RowByKey(key, "party"), key) end
+    for _, key in ipairs({ "bars.alerts", "bars.alertSide", "bars.alertSize", "bars.alertMax", "bars.alertCleanse", "bars.alertBuffs" }) do
+        local row = CW.RowByKey(key, "party")
+        yes(row and row.row:IsShown() and not row.row.fsRowOff, key .. " is a live row on the party tab")
+    end
+    for _, key in ipairs({ "bars.dispelEdge", "bars.mkDebuff", "bars.mkBuff", "bars.mkMagic" }) do
+        yes(not CW.RowByKey(key, "party").row:IsShown(), key .. " is raid only")
+    end
+    local pv = { KEY = "raid.previewSize", SIZES = { 5, 10, 15, 20, 25, 40 } }
+    C.RegisterDefault(pv.KEY, 10)
+    function pv.Size() return C.Get(pv.KEY) end
+    FS.RaidFrames = { Preview = pv, NewStylePreview = function(stage)
+        local f = CreateFrame("Frame", nil, stage); f:SetSize(100, 60); return { frame = f, Restyle = function() end }
+    end }
+    CW.Open("raid", "style")
+    for _, key in ipairs({ "bars.mkHot", "bars.dispelEdge", "bars.mkDebuff", "bars.mkDebuffWho", "bars.mkBuff", "bars.mkSize", "bars.mkPos" }) do
+        local row = CW.RowByKey(key, "raid")
+        yes(row, key .. " has no row on the raid tab")
+        yes(row.row:IsShown(), key .. " is hidden on the raid tab")
+        yes(not row.row.fsRowOff, key .. " is greyed on the raid tab")
+    end
+    yes(not CW.RowByKey("bars.alerts", "raid").row:IsShown(), "the tray is party only")
+    -- the type switches wait for Debuff markers
+    yes(CW.RowByKey("bars.mkMagic", "raid").row.fsRowOff == nil or CW.RowByKey("bars.mkMagic", "raid").row.fsRowOff == false)
+    C.Set("bars.raid.mkDebuff", false); CW.RefreshAll()
+    yes(CW.RowByKey("bars.mkMagic", "raid").row.fsRowOff, "Magic waits for Debuff markers")
+    -- the raid's text format and bar heights are applied now; the party's heights are not yet
+    yes(not CW.RowByKey("bars.raidFmt", "raid").row.fsRowOff and not CW.RowByKey("bars.hpH", "raid").row.fsRowOff)
+    yes(not CW.RowByKey("bars.fh", "raid").row.fsRowOff, "raid height")
+    CW.Open("party", "style")
+    yes(CW.RowByKey("bars.fh", "party").row.fsRowOff, "party height is not applied, so it is greyed")
+    yes(not CW.RowByKey("bars.w", "party").row.fsRowOff and not CW.RowByKey("bars.hpStyle", "party").row.fsRowOff)
+end
+
+function T.the_class_buff_switches_show_for_the_players_class_and_write_where_the_slash_command_writes()
+    local S, C, CW = boot({ beforeWindow = function() groupShared(); function UnitClass() return "Priest", "PRIEST" end end })
+    CW.Open("party", "style")
+    local fort = CW.RowByKey("pbuff.fortitude", "party")
+    yes(fort and fort.row:IsShown(), "the Priest's Fortitude switch shows to a Priest")
+    yes(CW.RowByKey("pbuff.shadowprot", "party").row:IsShown())
+    yes(not CW.RowByKey("pbuff.intellect", "party").row:IsShown(), "a Mage buff does not show to a Priest")
+    yes(not fort.row.fsRowOff, "Missing buffs is on, so the class switches are live")
+    C.Set("bars.party.alertBuffs", false); CW.RefreshAll()
+    yes(fort.row.fsRowOff, "the class switches wait for Missing buffs")
+    C.Set("bars.party.alertBuffs", true); CW.RefreshAll()
+    local ctl = fort.row.control
+    ctl.scripts.OnClick(ctl, "LeftButton")
+    eq(FS.__saved.fortitude, false, "pressing the switch saves the value the slash command saves")
 end
 
 function T.the_pet_page_has_its_cast_bar_rows_the_hunter_dot_and_greyed_rows_for_what_is_not_applied()

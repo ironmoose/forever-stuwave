@@ -1146,7 +1146,7 @@ local PREVIEW_STATES = {
 local PREVIEW_POWER = { WARRIOR = 1, ROGUE = 3 }   -- rage and energy; every other class has mana
 
 -- Sample debuff types, markers and aggro for the Style tab's raid (member index -> value).
-local PREVIEW_DEBUFFS = { [3] = "Magic", [5] = "Poison" }
+local PREVIEW_DEBUFFS = { [6] = "Magic", [8] = "Poison" }
 local PREVIEW_MARKS = {}
 local PREVIEW_AGGRO = { [2] = { "pink", "100%" }, [10] = { "amber", "71%" }, [1] = { "amber", "38%" } }
 

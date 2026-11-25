@@ -457,14 +457,14 @@ function Extras.PreviewList(out, key, i)
     local shared = Shared()
     if On(key, "mkHot") then
         local hots = Extras.HOTS[PlayerClassToken() or ""] or Extras.HOTS.PRIEST
-        if i == 2 or i == 8 or key == "party" then n = Push(out, n, hots[1][2], hots[1][3], hots[1][4], 1, "hot") end
+        if i == 2 or i == 9 or key == "party" then n = Push(out, n, hots[1][2], hots[1][3], hots[1][4], 1, "hot") end
         if i == 2 or key == "party" then
             local h2 = hots[2] or { "", 0.133, 0.878, 1 }
             n = Push(out, n, h2[2], h2[3], h2[4], 1, "hot")
         end
     end
     if key == "raid" and On(key, "mkDebuff") then
-        local sample = { [3] = "Magic", [6] = "Curse", [5] = "Poison", [7] = "Disease" }
+        local sample = { [6] = "Magic", [7] = "Curse", [8] = "Poison", [10] = "Disease" }
         local kind = sample[i]
         if kind and On(key, "mk" .. kind) then
             local set = shared and shared.DISPELS and shared.DISPELS.Set() or {}
@@ -474,7 +474,7 @@ function Extras.PreviewList(out, key, i)
             end
         end
     end
-    if key == "raid" and On(key, "mkBuff") and (i == 4 or i == 7) then
+    if key == "raid" and On(key, "mkBuff") and (i == 5 or i == 7) then
         n = Push(out, n, MISSING_BUFF[1], MISSING_BUFF[2], MISSING_BUFF[3], MISSING_BUFF[4], "buff")
     end
     for k = n + 1, #out do out[k] = nil end
