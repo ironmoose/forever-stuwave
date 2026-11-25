@@ -2847,17 +2847,72 @@ function T.chat_on_the_console_key_and_the_layout_editor_see_the_chat()
     yes(shown, "the chat key is drawn")
 end
 
--- The saved store is read when the files load (as before the gate), so a real client, which hands it over after, restores
--- nothing at login; a store present at load is restored before the first paint.
-function T.chat_on_the_saved_window_state_is_read_when_the_files_load_as_before()
+-- The client hands the saved store over after the files load, so the window state is read when the chat starts, at
+-- ADDON_LOADED, and a state saved last session is restored before the first paint.
+function T.chat_on_the_saved_window_state_is_restored_at_login()
     b5dWorld({}, { db = { chatWindowState = "min" }, noPoke = true })
-    eq(FS.Chat.windowState, "normal", "a state saved after the files loaded is not applied at login")
+    eq(FS.Chat.windowState, "min", "a state saved last session is applied at login")
 end
 
 function T.chat_on_a_window_state_present_when_the_files_load_is_restored_at_the_first_paint()
     b5dWorld({}, { preDb = { chatWindowState = "min" }, noPoke = true })
     eq(FS.Chat.windowState, "min")
     yes(TouchesOn("ChatFrame1"):find("Hide", 1, true), "the minimised window is hidden")
+end
+
+-- The console quick keys are remembered across a reload: a login, a press on every key but the tracker's own (the game keeps
+-- that one), the saved store written out and read back as the client does, a second login that finds every key still off.
+local function serialize(v)
+    if type(v) == "table" then
+        local out = {}
+        for k, x in pairs(v) do out[#out + 1] = "[" .. string.format("%q", k) .. "]=" .. serialize(x) end
+        return "{" .. table.concat(out, ",") .. "}"
+    elseif type(v) == "string" then
+        return string.format("%q", v)
+    end
+    return tostring(v)
+end
+local function pressKey(key)
+    for _, k in ipairs(FS.ConsoleKeys.keys) do
+        if k.key == key then
+            local click = k.btn._scripts and k.btn._scripts.OnClick
+            yes(click, key .. " key has no click")
+            click(k.btn, "LeftButton")
+            return
+        end
+    end
+    error("no key " .. key)
+end
+local function keyIsOn(key)
+    for _, k in ipairs(FS.ConsoleKeys.keys) do
+        if k.key == key then return k.on end
+    end
+end
+
+function T.console_keys_stay_off_across_a_reload()
+    b5dWorld({}, { noPoke = true })
+    local PRESS = { "you", "next", "shard", "buff", "tgt", "dot", "prc", "party", "chat" }
+    for _, key in ipairs(PRESS) do pressKey(key) end
+    for _, key in ipairs(PRESS) do
+        no(FS.ConsoleKeys.keys and FS.Gunsight.IsPieceOn(key) or false, key .. " is off after its press")
+    end
+    eq(FS.Chat.windowState, "min", "the chat key minimised the chat")
+    local oldChat = FS.Chat
+    local saved = load("return " .. serialize(ForeverSTUwaveDB))()   -- what the client writes at /reload and reads back
+
+    -- the next login: a fresh client, the saved store handed over after the files load
+    FS = {}
+    __evFrames = {}
+    __errors = {}
+    ForeverSTUwaveDB = nil   -- the client hands the store over after the files load, not before
+    b5dWorld({}, { db = saved, noPoke = true })
+    yes(FS.Chat ~= oldChat, "the second login is a fresh client")
+    eq(ForeverSTUwaveDB.profiles.Default.settings["gunsight.pieces.you"], false, "the saved store reached the second login")
+    for _, key in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc" }) do
+        no(FS.Gunsight.IsPieceOn(key), key .. " piece came back on after the reload")
+    end
+    no(FS.PartyFrames.IsShown(), "the party frames came back on after the reload")
+    eq(FS.Chat.windowState, "min", "the chat window came back out of the minimised state after the reload")
 end
 
 function T.chat_on_in_a_fight_waits_for_the_fight_to_end()

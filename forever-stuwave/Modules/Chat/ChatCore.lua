@@ -195,10 +195,9 @@ Chat.pendingSelectedTab = ForeverSTUwaveDB and ForeverSTUwaveDB.chatSelectedTab
 -- discipline as Chat.pendingSelectedTab above.
 Chat.pendingDefaultComms = not (ForeverSTUwaveDB and ForeverSTUwaveDB.chatSelectedTab)
 
--- The window state saved last session ("normal", "min" or "max"), read here for the same reason and with the same result as
--- the tab above: ChatSlashCommands' Apply() restores it before the first paint. Apply() now runs at this addon's ADDON_LOADED
--- (the Chat switch is only known then), where the saved variables ARE readable; it reads this capture and not the saved
--- table, so the login behaves exactly as it did when Apply() ran at file scope.
+-- The window state saved last session ("normal", "min" or "max"), as the saved table held it while the files loaded. In the
+-- client that is nothing (the table arrives at ADDON_LOADED), so ChatSlashCommands' Apply() reads the saved table itself
+-- when it runs there and uses this capture only when the table has no state.
 Chat.pendingWindowState = ForeverSTUwaveDB and ForeverSTUwaveDB.chatWindowState
 
 -------------------------------------------------------------------------------

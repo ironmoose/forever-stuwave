@@ -689,7 +689,11 @@ local function Apply()
     -- minimised chat does not flash full size on every reload. Validated
     -- against the three known values rather than trusted: this is saved
     -- variables, which anything can have written.
-    local saved = Chat.pendingWindowState
+    -- Read the saved table NOW. Apply runs at this addon's ADDON_LOADED, where the client has handed it over; the capture
+    -- ChatCore.lua took while the files loaded is nil in the client (the table does not exist yet), so it is only the
+    -- fallback for a store that was already there at load.
+    local saved = ForeverSTUwaveDB and ForeverSTUwaveDB.chatWindowState
+    if saved == nil then saved = Chat.pendingWindowState end
     Chat.pendingWindowState = nil
     if saved == "min" or saved == "max" or saved == "normal" then
         Chat.windowState = saved
