@@ -853,7 +853,10 @@ local function OnState(state)
     end
     D.inCombat = state.inCombat == true
     D.reduced = ReducedMotion()
-    if subscribed then SafePaint(GetTime()) end
+    if not subscribed then return end
+    -- the 30 Hz ticker runs whenever this is shown: its next frame paints the new state, no second paint this frame
+    if ticking then acc = C.TICK return end
+    SafePaint(GetTime())
 end
 Seals.OnState = OnState
 

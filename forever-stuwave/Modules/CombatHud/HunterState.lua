@@ -137,9 +137,11 @@ local function SpellNameOf(id)
 end
 
 -- true / false / nil (cannot tell) for "does the player know this spell id"
+local KNOWN_FNS = {}
 local function IsKnownId(id)
     local sawFalse, unreadable = false, false
-    local fns = { IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown }
+    local fns = KNOWN_FNS
+    fns[1], fns[2], fns[3] = IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown
     for i = 1, 3 do
         local fn = fns[i]
         if fn then
@@ -472,6 +474,13 @@ end
 
 -- Always ends with a "change": a refresh comes from an event that may move what the module shows (a new target, combat, a
 -- learned spell) even when nothing else changed.
+-- a new target moves the range and what the module shows, not the spellbook or the weapon
+function State.Retarget()
+    rangeCache.at = -1
+    ReadAuto()
+    Notify("change")
+end
+
 function State.Refresh()
     local learned = Learn()
     rangeCache.at = -1
@@ -515,7 +524,10 @@ local function OnCast(spellID)
     if known[key] ~= true then known[key] = true end
     if key == "autoshot" then
         OnShot(now)
-        if C_Timer and C_Timer.After then C_Timer.After(0.2, State.RefreshAmmo) else State.RefreshAmmo() end
+        -- with a count known the read above is already queued
+        if ammo.count == nil then
+            if C_Timer and C_Timer.After then C_Timer.After(0.2, State.RefreshAmmo) else State.RefreshAmmo() end
+        end
         Notify("shot")
     elseif FAMILY[key] then
         local fam = traps[FAMILY[key]]
@@ -570,6 +582,11 @@ function State.Start()
             if event == "PLAYER_REGEN_ENABLED" then Guard("refresh", State.Refresh) end
         elseif event == "UNIT_ATTACK_SPEED" or event == "UNIT_RANGEDDAMAGE" then
             Guard("speed", OnSpeed)
+        elseif event == "UNIT_INVENTORY_CHANGED" or event == "BAG_UPDATE_DELAYED" then
+            -- every shot spends ammo and fires these: only the count can have moved, not the spellbook
+            Guard("ammo", State.RefreshAmmo)
+        elseif event == "PLAYER_TARGET_CHANGED" then
+            Guard("retarget", State.Retarget)
         else
             Guard("refresh", State.Refresh)
         end

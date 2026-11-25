@@ -114,10 +114,12 @@ local function SpellNameOf(id)
     return name
 end
 
+local KNOWN_FNS = {}       -- reused per call: a table per spell check is garbage
 -- true / false / nil (cannot tell) for "does the player know this spell id"
 local function IsKnownId(id)
     local sawFalse, unreadable = false, false
-    local fns = { IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown }
+    local fns = KNOWN_FNS
+    fns[1], fns[2], fns[3] = IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown
     for i = 1, 3 do
         local fn = fns[i]
         if fn then
@@ -381,7 +383,8 @@ function State.Start()
         if event == "UNIT_SPELLCAST_SUCCEEDED" then
             Guard("cast", OnCast, a3)
         elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_POWER_FREQUENT" then
-            Guard("points", NotePoints)
+            -- energy ticks fire this too; only a combo point change moves the count
+            if a2 == nil or a2 == "COMBO_POINTS" then Guard("points", NotePoints) end
         elseif event == "UPDATE_STEALTH" then
             Guard("stealth", ReadStealth)
         elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then

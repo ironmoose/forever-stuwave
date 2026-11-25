@@ -167,7 +167,8 @@ end
 function Fire(event, ...) local f = WinFrame(); f.scripts.OnEvent(f, event, ...) end
 function Glow(id, shown) Fire(shown and "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" or "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", id) end
 function CastEv(id) Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", id) end
-function UsableEv() Fire("SPELL_UPDATE_USABLE") end
+-- the poll lands on the next frame, so run the queued timer as that frame
+function UsableEv() __after = nil; Fire("SPELL_UPDATE_USABLE"); local f = __after; __after = nil; if f then f() end end
 function Open(k) return Win.Get(k).open end
 function Shown(list) for _, t in ipairs(list) do if t.shown then return true end end return false end
 function AllShown(list) for _, t in ipairs(list) do if not t.shown then return false end end return true end

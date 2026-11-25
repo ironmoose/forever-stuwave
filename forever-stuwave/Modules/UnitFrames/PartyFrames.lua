@@ -799,11 +799,13 @@ local function ResolveSpell(name)
     return nil
 end
 
+local KNOWN_FNS = {}       -- reused per call: a table per spell check is garbage
 -- true / false / nil (cannot tell) for "does the player know this spell id", asking every
 -- spellbook API the client has (the approach HudLogic.lua's IsKnownId takes). With none of
 -- them present the id already resolved by name, which in this spellbook API means known.
 local function IsKnownSpellId(id)
-    local fns = { IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown }
+    local fns = KNOWN_FNS
+    fns[1], fns[2], fns[3] = IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown
     local asked, sawFalse, unreadable = false, false, false
     for i = 1, 3 do
         local fn = fns[i]

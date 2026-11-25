@@ -232,7 +232,8 @@ function Cast(key) fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", CAST[key])
 function Power(pts, energy)
     if pts ~= nil then __pts = pts end
     if energy ~= nil then __energy = energy end
-    fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
+    -- the client fires both for one change
+    fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS"); fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
 end
 function NoLog()
     for k, v in pairs(__logged) do error("logged " .. k .. ": " .. tostring(v), 2) end
@@ -500,10 +501,10 @@ case("a_cast_made_while_hidden_does_not_throw_the_fan_when_it_shows", """
 
 case("onhide_stops_the_ticker_and_the_events_but_the_ledger_keeps_listening", """
     Fight()
-    check(Ticking() and R.frame.events["UNIT_POWER_UPDATE"] ~= nil, "running")
+    check(Ticking() and R.frame.events["UNIT_POWER_FREQUENT"] ~= nil, "running")
     SPEC.onHide("lower")
     check(not Ticking(), "no OnUpdate")
-    check(R.frame.events["UNIT_POWER_UPDATE"] == nil and R.frame.events["PLAYER_TARGET_CHANGED"] == nil and R.frame.scripts.OnEvent == nil, "no module events")
+    check(R.frame.events["UNIT_POWER_FREQUENT"] == nil and R.frame.events["PLAYER_TARGET_CHANGED"] == nil and R.frame.scripts.OnEvent == nil, "no module events")
     Cast("snd")                              -- a cast with no target is still recorded
     check(D.Snd(__now) == true, "the ledger heard it")
     SPEC.onShow("lower")

@@ -257,6 +257,7 @@ local function Request()
 end
 
 Shaman.OnSeat(Request)
-Areas.OnAreaChanged(Request)
+-- a gate edge (the target came or went) moves no assignment, and the holder's unit watch already shows and hides the catchers
+Areas.OnAreaChanged(function(reason) if reason ~= "gate" then Request() end end)
 Gunsight.OnActiveChanged(Request)
 TotemBar.OnAttributes(Request)

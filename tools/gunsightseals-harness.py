@@ -102,7 +102,15 @@ FS = {
     },
     LogDegradeOnce = function(k, m) __logged = __logged or {}; __logged[k] = m end,
 }
-function push(state) STATE = state; for i = 1, #SUBS do SUBS[i](state) end end
+-- the module paints a push on its ticker's next frame, so run that frame
+function push(state)
+    STATE = state; for i = 1, #SUBS do SUBS[i](state) end
+    for i = 1, #__frames do
+        local fr = __frames[i]
+        local f = fr.scripts and fr.scripts.OnUpdate
+        if f then f(fr, 0) end
+    end
+end
 assert(loadstring(ARTLUA_SRC, "@PaladinArt.lua"))("forever-stuwave", FS)
 assert(loadstring(MODULE_SRC, "@GunsightSeals.lua"))("forever-stuwave", FS)
 M, Art = FS.GunsightSeals, FS.PaladinArt

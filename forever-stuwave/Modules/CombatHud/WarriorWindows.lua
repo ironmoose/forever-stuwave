@@ -370,6 +370,11 @@ end
 
 local EVENTS = { "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP" }
 
+Windows.pollFn = function()
+    Windows.pollQueued = false
+    Guard("usable", PollAll, Now())
+end
+
 function Windows.Start()
     if started then return end
     started = true
@@ -382,7 +387,11 @@ function Windows.Start()
         elseif event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
             Guard("glow", OnGlow, a1, false)
         elseif event == "SPELL_UPDATE_USABLE" or event == "SPELL_UPDATE_COOLDOWN" then
-            Guard("usable", PollAll, Now())
+            -- these come in bursts several times per GCD: one poll on the next frame covers the burst
+            if Windows.pollQueued then return end
+            if not (C_Timer and C_Timer.After) then Guard("usable", PollAll, Now()) return end
+            Windows.pollQueued = true
+            C_Timer.After(0, Windows.pollFn)
         else
             Guard("refresh", Windows.Refresh)
         end

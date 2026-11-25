@@ -81,10 +81,12 @@ local function SpellNameOf(id)
     return name
 end
 
+local KNOWN_FNS = {}       -- reused per call: a table per spell check is garbage
 -- true / false / nil (cannot tell) for "does the player know this spell id"
 local function IsKnownId(id)
     local sawFalse, unreadable = false, false
-    local fns = { IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown }
+    local fns = KNOWN_FNS
+    fns[1], fns[2], fns[3] = IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown
     for i = 1, 3 do
         local fn = fns[i]
         if fn then

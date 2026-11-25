@@ -110,7 +110,8 @@ local ATLAS, SCALE = Art.ATLAS, Art.SCALE
 local ANGLES = Art.ANGLES
 local COMBO_POWER = (Enum and Enum.PowerType and Enum.PowerType.ComboPoints) or 4
 local ENERGY_POWER = (Enum and Enum.PowerType and Enum.PowerType.Energy) or 3
-local POWER_EVENTS = { "UNIT_POWER_UPDATE", "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER" }
+-- FREQUENT covers every change UPDATE does, so UPDATE would only read the same power twice
+local POWER_EVENTS = { "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER" }
 
 -- texts, built once
 local SEC, SEC_EST = {}, {}

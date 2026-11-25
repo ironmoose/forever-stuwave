@@ -147,9 +147,11 @@ local function SpellNameOf(id)
 end
 
 -- true / false / nil (cannot tell) for "does the player know this spell id"
+local KNOWN_FNS = {}
 local function IsKnownId(id)
     local sawFalse, unreadable = false, false
-    local fns = { IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown }
+    local fns = KNOWN_FNS
+    fns[1], fns[2], fns[3] = IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown
     for i = 1, 3 do
         local fn = fns[i]
         if fn then
@@ -487,6 +489,12 @@ end
 
 -- Always ends with a "change": a refresh comes from an event that may move what the module shows (a new target, combat, a spec
 -- change) even when no aura changed.
+function State.Retarget()
+    local _, broke = ReadAll()
+    if broke then Notify("break") end
+    Notify("change")
+end
+
 function State.Refresh()
     local learned = Learn()
     local _, broke = ReadAll()
@@ -686,7 +694,8 @@ function State.Start()
         elseif event == "PLAYER_REGEN_DISABLED" then
             Notify("combat")                         -- the empty looks start to nudge; nothing to read
         elseif event == "PLAYER_TARGET_CHANGED" then
-            Guard("refresh", State.Refresh)
+            -- a new target changes no spellbook: read the auras again, not every spell (2026-11-24 class module audit)
+            Guard("retarget", State.Retarget)
         else
             Guard("refresh", State.Refresh)
         end

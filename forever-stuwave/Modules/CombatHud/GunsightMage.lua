@@ -1469,7 +1469,10 @@ local function OnChange(reason)
         if reason == "absorb" then hitAt = nil end
     end
     P.absorbDirty = true
-    if subscribed then PaintAll(now) end
+    if not subscribed then return end
+    -- cooldown events come in bursts every GCD: while the ticker runs, its next frame paints them all once
+    if reason == "cooldown" and ticking then acc = C.TICK return end
+    PaintAll(now)
 end
 
 -------------------------------------------------------------------------------
