@@ -9,8 +9,9 @@ Runs the real Nameplates.lua, Core/Role.lua and PlateThreat.lua together on the 
     close amber (scaled threat at or over the Warn at value), safe cyan; a mob that is not on your threat list, a missing API
     or an unreadable (secret) answer keeps the plate's own colour; the colour tables are stable (the plate skips a fill it
     already wears);
-  * the tank's threat text: Aggro % and Lead, plain values rounded, a secret value goes through a scratch font string and
-    is never compared; nothing for the other roles;
+  * the tank's threat text: Aggro % and Lead, plain values rounded, a secret value goes to the plate's own text field through
+    SetFormattedText (the call the health text makes) and is never compared; nothing on a mob the game does not list the
+    player on (Lead answers 0 there); nothing for the other roles;
   * alerts, each with an off switch: the tank's lost aggro (flash, sound), the healer's "a mob turns to me" (flash, sound),
     the DPS warn near the tank (flash); they fire on a change from a known state only, once per second at most per mob, and
     the settings of another role do nothing;
@@ -131,6 +132,8 @@ function __newFrame(kind, name, parent)
             if __getTextNil then return nil end
             return self._text
         end)
+        local baseSetText = f.SetText
+        rawset(f, "SetText", function(self, text) self._text = text; return baseSetText(self, text) end)
     end
     return f
 end
@@ -191,7 +194,7 @@ function tick(dt, n)
     end
 end
 function barAlpha(unit) local a = rootOf(unit).healthBar._args.SetAlpha return a and a[1] end
-function textOf(unit) local t = rootOf(unit).threatText return t:IsShown() and t._args.SetText[1] or nil end
+function textOf(unit) local t = rootOf(unit).threatText return t:IsShown() and t._text or nil end
 function fillOf(unit) return rootOf(unit).fillColor end
 function target(unit) __target = unit; emit("PLAYER_TARGET_CHANGED") end
 function noErrors() check(#__forwarded == 0, "an error was forwarded: " .. tostring(__forwarded[1])) end
@@ -407,7 +410,7 @@ check(Role.Current() == "healer" and Plates.colorProvider == nil, "the group hea
 noErrors()
 """),
 
-    ("tank threat text: Aggro % rounds a plain value, Lead adds a plus, Off hides it", r"""
+    ("tank threat text: Aggro % and Lead round a plain value to a percent (the game's own number, no sign), Off hides it", r"""
 go({ pick = "tank" })
 plate("nameplate1")
 FS.Config.Set("tank.threat", "pct")
@@ -418,7 +421,7 @@ check(textOf("nameplate1") == "100%", "99.6 rounds to 100%, got " .. tostring(te
 FS.Config.Set("tank.threat", "lead")
 check(textOf("nameplate1") == "0%", "Lead of 0 shows " .. tostring(textOf("nameplate1")))
 setThreat("nameplate1", { tanking = true, status = 3, scaled = 100, lead = 34.2 })
-check(textOf("nameplate1") == "+34%", "Lead shows " .. tostring(textOf("nameplate1")))
+check(textOf("nameplate1") == "34%", "Lead shows " .. tostring(textOf("nameplate1")))
 FS.Config.Set("tank.threat", "off")
 check(textOf("nameplate1") == nil, "Off hides the text")
 noErrors()
@@ -441,25 +444,67 @@ check(textOf("nameplate1") == nil, "Lead without the API shows nothing")
 noErrors()
 """),
 
-    ("tank threat text: a secret value goes through a scratch font string, never compared", r"""
+    ("tank threat text: a secret value goes to the plate's own text field through SetFormattedText, never compared", r"""
 go({ pick = "tank" })
 plate("nameplate1")
+local field = rootOf("nameplate1").threatText
 FS.Config.Set("tank.threat", "pct")
 setThreat("nameplate1", { tanking = true, status = 3, scaled = 100, secret = { scaled = true, tanking = true, status = true } })
-local text = textOf("nameplate1")
-check(rawequal(text, SECRETSTR), "the secret string did not reach SetText: " .. tostring(text))
+check(rawequal(textOf("nameplate1"), SECRETSTR), "the secret percent did not reach the text field: " .. tostring(textOf("nameplate1")))
 local last = __formatted[#__formatted]
-check(last and last[2] == "%d%%" and rawequal(last[3], SECRET), "the scratch font string was not given the secret through SetFormattedText")
+check(last and last[1] == field, "the secret was not written to the plate's own text field")
+check(last[2] == "%.0f%%" and rawequal(last[3], SECRET), "the field was not given the secret through SetFormattedText: " .. tostring(last[2]))
+local scratchWrites = 0
+for _, w in ipairs(__formatted) do if w[1] ~= field then scratchWrites = scratchWrites + 1 end end
+check(scratchWrites == 0, "a second font string was used to format the secret")
 FS.Config.Set("tank.threat", "lead")
 setThreat("nameplate1", { tanking = true, status = 3, scaled = 100, lead = 20, secret = { lead = true } })
 check(rawequal(textOf("nameplate1"), SECRETSTR), "a secret lead")
-__getTextNil = true
-threat("nameplate1")
-check(textOf("nameplate1") == nil, "a scratch font string that gives nothing back must hide the text")
-__getTextNil = false
+last = __formatted[#__formatted]
+check(last[1] == field and last[2] == "%.0f%%" and rawequal(last[3], SECRET), "a secret lead was not formatted by the field")
+-- the state is plain on a plate, so the secret lead is shown for a mob the game lists the player on, and only for those
+setThreat("nameplate1", { status = nil, lead = 0, secret = { lead = true }, noDetailed = true })
+check(textOf("nameplate1") == nil, "a secret lead showed on a mob that does not list the player")
+setThreat("nameplate1", { tanking = true, status = 3, scaled = 100, lead = 20, secret = { lead = true } })
+check(rawequal(textOf("nameplate1"), SECRETSTR), "setup: the secret lead is back")
 __formatFails = true
 threat("nameplate1")
 check(textOf("nameplate1") == nil, "a failing SetFormattedText must hide the text")
+__formatFails = false
+threat("nameplate1")
+check(rawequal(textOf("nameplate1"), SECRETSTR), "the text did not come back")
+noErrors()
+"""),
+
+    ("threat text: nothing on a mob the game does not list the player on (Lead answers 0 there), shown when that cannot be told", r"""
+go({ pick = "tank" })
+plate("nameplate1")
+FS.Config.Set("tank.threat", "lead")
+-- the game's answer for a mob that is not fighting the player: no state, no detailed rows, Lead 0
+setThreat("nameplate1", { status = nil, lead = 0, noDetailed = true })
+check(textOf("nameplate1") == nil, "Lead 0 showed on an idle mob: " .. tostring(textOf("nameplate1")))
+setThreat("nameplate1", { tanking = true, status = 3, scaled = 100, lead = 100 })
+check(textOf("nameplate1") == "100%", "a mob on the list shows its lead, got " .. tostring(textOf("nameplate1")))
+setThreat("nameplate1", { tanking = false, status = 0, scaled = 40, lead = 0 })
+check(textOf("nameplate1") == "0%", "a mob the player lost is still listed, 0% is a real answer, got " .. tostring(textOf("nameplate1")))
+setThreat("nameplate1", { status = nil, lead = 0, noDetailed = true })
+check(textOf("nameplate1") == nil, "the text stayed after the mob dropped the player")
+-- a state that cannot be read (secret) or an API that is missing is not an answer of "not listed"
+setThreat("nameplate1", { status = 3, lead = 55, secret = { status = true }, noDetailed = true })
+check(textOf("nameplate1") == "55%", "an unreadable state hid the lead: " .. tostring(textOf("nameplate1")))
+-- the plates read the state themselves, so the provider is called directly for an absent or throwing state API
+local plainState = UnitThreatSituation
+T.nameplate1 = { status = nil, lead = 55, noDetailed = true }
+UnitThreatSituation = false -- the mock answers a missing Unit* global with a stub, so a non-function stands for "absent"
+check(Plates.textProvider("nameplate1") == "55%", "a missing state API hid the lead")
+UnitThreatSituation = function() error("boom: UnitThreatSituation") end
+check(Plates.textProvider("nameplate1") == "55%", "a throwing state read hid the lead")
+UnitThreatSituation = plainState
+check(Plates.textProvider("nameplate1") == nil, "setup: the plain nil state is the game saying not listed")
+-- Aggro % has no number to show for a mob that is not listed
+FS.Config.Set("tank.threat", "pct")
+setThreat("nameplate1", { status = nil, lead = 0, noDetailed = true })
+check(textOf("nameplate1") == nil, "Aggro % showed on an idle mob")
 noErrors()
 """),
 

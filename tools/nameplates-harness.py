@@ -687,6 +687,35 @@ FS.Nameplates.SetTextProvider(nil)
 check(not root.threatText:IsShown(), "removing the provider left the text up")
 """),
 
+    ("text provider: a number with a format goes to the field through SetFormattedText (a secret one untouched), a bad format or a failing call hides", "true", r"""
+enter()
+local root = plate("nameplate1")
+local answer, fmt = 87.4, "%.0f%%"
+FS.Nameplates.SetTextProvider(function() return answer, nil, fmt end)
+local a = root.threatText._args.SetFormattedText
+check(root.threatText:IsShown() and a and a[1] == "%.0f%%" and a[2] == 87.4, "a plain number was not formatted by the field")
+answer = SECRET
+fire("UNIT_THREAT_LIST_UPDATE", "nameplate1")
+a = root.threatText._args.SetFormattedText
+check(root.threatText:IsShown() and rawequal(a[2], SECRET), "a secret number was not handed to the field untouched")
+fmt = nil
+fire("UNIT_THREAT_LIST_UPDATE", "nameplate1")
+check(not root.threatText:IsShown(), "a number with no format was shown")
+fmt = 12
+fire("UNIT_THREAT_LIST_UPDATE", "nameplate1")
+check(not root.threatText:IsShown(), "a format that is not a string was used")
+fmt, answer = "%.0f%%", 5
+fire("UNIT_THREAT_LIST_UPDATE", "nameplate1")
+check(root.threatText:IsShown(), "setup: the number shows again")
+root.threatText._throws = { SetFormattedText = true }
+fire("UNIT_THREAT_LIST_UPDATE", "nameplate1")
+check(not root.threatText:IsShown(), "a failing format left the old text up")
+root.threatText._throws = nil
+fire("UNIT_THREAT_LIST_UPDATE", "nameplate1")
+check(root.threatText:IsShown(), "the text did not come back")
+check(degraded("plate_text_provider") == 0, "a number answer counted as a failing provider")
+"""),
+
     ("the threat events still refresh the fill and the name with no provider set", "true", r"""
 enter()
 local root = plate("nameplate1")

@@ -2836,7 +2836,8 @@ end
 -- Hooks for the threat view (Roles page). Both providers are off until set. SetColorProvider(fn): fn(unit) answers a colour
 -- table, or nil to keep the plate's own fill; it is asked whenever a plate's fill is worked out and again on every threat
 -- event. SetTextProvider(fn): fn(unit) answers a string, and optionally a colour table, for the small threat text field
--- inside the health bar; anything else hides the field. Each setter applies at once to the plates that are up, and nil
+-- inside the health bar; or a number (a secret one is fine) with a colour or nil and a format string such as "%.0f%%", which
+-- the field formats itself; anything else hides the field. Each setter applies at once to the plates that are up, and nil
 -- takes the provider away. A provider that throws is ignored (logged once) and the plate keeps its own look. Return the
 -- same colour table each time, the plate skips a fill it already wears.
 function Plates.ProvidedColor(unit)
@@ -2855,21 +2856,29 @@ function Plates.UpdateThreatText(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
     local text, provider = root.threatText, Plates.textProvider
-    local value, color
+    local value, color, fmt
     if provider then
         local ok
-        ok, value, color = pcall(provider, unit)
+        ok, value, color, fmt = pcall(provider, unit)
         if not ok then
             Plates.Warn("plate_text_provider", "a nameplate text provider failed, the threat text stays hidden")
             value = nil
         end
     end
-    -- type() is legal on a secret; a secret string goes to SetText as it is.
-    if type(value) ~= "string" then
+    -- type() is legal on a secret. A string (a secret one too) goes to SetText as it is. A number, secret or plain, with a
+    -- format string as the provider's third answer goes to SetFormattedText on the field itself, the call the health text
+    -- makes with a secret percent; anything else, or a call that throws, hides the field.
+    local written = false
+    if type(value) == "string" then
+        text:SetText(value)
+        written = true
+    elseif type(value) == "number" and type(fmt) == "string" then
+        written = pcall(text.SetFormattedText, text, fmt, value)
+    end
+    if not written then
         if text:IsShown() then text:Hide() end
         return
     end
-    text:SetText(value)
     if Plates.ValidColor(color) then
         text:SetTextColor(color[1], color[2], color[3], 1)
     else

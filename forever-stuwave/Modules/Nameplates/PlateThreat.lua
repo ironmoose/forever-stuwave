@@ -11,9 +11,10 @@
 --
 -- Every threat read is feature detected, wrapped in pcall and checked with FS.IsSecret before it is compared. A read that
 -- cannot be trusted answers nil, and nil leaves the plate with its own colour. Nothing here compares a secret value: a
--- secret percent goes to the plate as text through a scratch font string, a secret range answer goes to
--- SetAlphaFromBoolean. The threat APIs are unprobed on this client (what is secret in a group, in combat), so each read
--- has a plain fallback.
+-- secret percent is handed to the plate with a format and the plate's own text field formats it (SetFormattedText), a
+-- secret range answer goes to SetAlphaFromBoolean. On this client the threat VALUES (UnitDetailedThreatSituation's
+-- percents, UnitThreatPercentageOfLead) are secret when asked of a nameplate token and plain for "target", while the
+-- threat STATE (UnitThreatSituation) is plain for both; every read has a plain fallback.
 local _, FS = ...
 
 local PT = {}
@@ -95,22 +96,33 @@ local function Setting(key)
 end
 
 -- What the player's threat on `unit` says: tanking (plain boolean or nil), status (0 to 3 or nil), pct (the scaled percent as
--- a plain number or nil) and raw (that percent as the client gave it, possibly secret, for the text). A piece that is secret
--- or missing is nil. tanking is worked out from the status, else from a percent of 100, when the client does not say.
+-- a plain number or nil), raw (that percent as the client gave it, possibly secret, for the text) and listed (whether the
+-- game has the player on the mob's threat table: true, false, or nil when that cannot be told). A piece that is secret or
+-- missing is nil. tanking is worked out from the status, else from a percent of 100, when the client does not say. A mob
+-- that does not list the player answers nothing from the detailed read and nil from the plain state (nil, never 0); any
+-- answer at all, a secret one too, means it does.
 local function ReadThreat(unit)
-    local tanking, status, pct, raw
+    local tanking, status, pct, raw, listed
     local detailed = _G.UnitDetailedThreatSituation
     if type(detailed) == "function" then
         local ok, isTanking, st, scaled = pcall(detailed, "player", unit)
         if ok then
             tanking, status, pct, raw = PlainBool(isTanking), PlainNumber(st), PlainNumber(scaled), scaled
+            if type(isTanking) ~= "nil" then listed = true end
         end
     end
     if status == nil then
         local plain = _G.UnitThreatSituation
         if type(plain) == "function" then
             local ok, st = pcall(plain, "player", unit)
-            if ok then status = PlainNumber(st) end
+            if ok then
+                status = PlainNumber(st)
+                if status ~= nil then
+                    listed = true
+                elseif type(st) == "nil" and listed == nil then
+                    listed = false
+                end
+            end
         end
     end
     if tanking == nil then
@@ -120,10 +132,10 @@ local function ReadThreat(unit)
             tanking = pct >= 100
         end
     end
-    return tanking, status, pct, raw
+    return tanking, status, pct, raw, listed
 end
 
--- The lead over the next player as the client gives it (possibly secret), or nil.
+-- The game's own lead number for the player on `unit` (UnitThreatPercentageOfLead), possibly secret, or nil.
 local function ReadLead(unit)
     local fn = _G.UnitThreatPercentageOfLead
     if type(fn) ~= "function" then return nil end
@@ -166,45 +178,29 @@ local function ColorProvider(unit)
     return nil
 end
 
--- A secret number has no text of its own: a scratch font string formats it and gives the string back, which goes to the
--- plate's own text through SetText. Nil when the client will not (the text stays hidden).
-local scratch
-local function SecretText(value)
-    if not scratch then
-        local parent = _G.UIParent
-        if not parent then return nil end
-        local ok, made = pcall(parent.CreateFontString, parent, nil, "OVERLAY", "GameFontNormal")
-        if not ok or not made then return nil end
-        pcall(made.Hide, made)
-        scratch = made
-    end
-    if not pcall(scratch.SetFormattedText, scratch, "%d%%", value) then return nil end
-    local ok, text = pcall(scratch.GetText, scratch)
-    if not ok then return nil end
-    if FS.IsSecret(text) or type(text) == "string" then return text end
-    return nil
-end
-
-local function PercentText(value, signed)
-    if FS.IsSecret(value) then return SecretText(value) end
+-- What the plate's text field is given for a percent. A plain number comes back as the finished string, rounded. A secret
+-- one has no text Lua can make, so it comes back as itself with the format the field applies to it: the plate calls
+-- SetFormattedText on its own field, the call the health text makes with a secret percent. Nil when there is no number.
+local PERCENT_FORMAT = "%.0f%%"
+local function PercentAnswer(value)
+    if FS.IsSecret(value) then return value, nil, PERCENT_FORMAT end
     local n = PlainNumber(value)
     if n == nil then return nil end
-    n = math.floor(n + 0.5)
-    local text = string.format("%d%%", n)
-    if signed and n > 0 then return "+" .. text end
-    return text
+    return string.format("%d%%", math.floor(n + 0.5))
 end
 
+-- Aggro % is the player's share of the mob's threat, Lead the game's own lead number (UnitThreatPercentageOfLead). The game
+-- answers Lead 0 for a mob that does not list the player at all, so a mob it says is not fighting the player gets no text
+-- (a state that cannot be read does not count as "not listed"). The sign is not added: the number is the game's, shown the
+-- way its own target frame shows it, and a secret one cannot be signed anyway.
 local function TextProvider(unit)
     if RoleNow() ~= "tank" then return nil end
     local mode = Setting("tank.threat")
-    if mode == "pct" then
-        local _, _, _, raw = ReadThreat(unit)
-        return PercentText(raw, false)
-    elseif mode == "lead" then
-        return PercentText(ReadLead(unit), true)
-    end
-    return nil
+    if mode ~= "pct" and mode ~= "lead" then return nil end
+    local _, _, _, raw, listed = ReadThreat(unit)
+    if listed == false then return nil end
+    if mode == "pct" then return PercentAnswer(raw) end
+    return PercentAnswer(ReadLead(unit))
 end
 
 -------------------------------------------------------------------------------
