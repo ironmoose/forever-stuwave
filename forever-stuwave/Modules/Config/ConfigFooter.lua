@@ -1,6 +1,7 @@
 -- Forever STUwave: the footer of the /fsconfig window (ticket B2)
 -- Left: RELOAD UI (a count chip, a pink edge and glow while anything waits on a reload) and RESET PAGE (a count chip of
--- the changed settings on the page, dimmed at 0, asks first). Right: the muted "changes apply instantly" and CLOSE. The
+-- the changed settings on the page, dimmed at 0, asks first) and EDIT LAYOUT (closes the window and opens the layout editor;
+-- DONE comes back to the page you were on). Right: the muted "changes apply instantly" and CLOSE. The
 -- window position is remembered account wide. Everything is built into CW.FooterSlot the first time the window shows, and
 -- repaints with every RefreshAll (a global refresh function, so the shown page and the counts always agree).
 --
@@ -31,7 +32,7 @@ local PULSE_PERIOD = 1.6     -- the Reload glow breathes this slowly while a rel
 local KEYS_KEEP = { ESCAPE = true, ENTER = true, NUMPADENTER = true }
 local POS_X, POS_Y = "winX", "winY"   -- account wide, next to winW and winH in ForeverSTUwaveDB.ui
 
-local reloadBtn, resetBtn, closeBtn, message
+local reloadBtn, resetBtn, editBtn, closeBtn, message
 local dialog                 -- { overlay, panel, title, message, keep, reset, row, keys, page }
 local sources = {}           -- extra pending reload lists (see CW.AddReloadSource)
 
@@ -397,6 +398,7 @@ function Footer.Update()
     I.SetLook(resetBtn, #keys > 0 and not Config.IsReadOnly())
     Look(reloadBtn)
     Look(resetBtn)
+    Look(editBtn)
 end
 
 -- The footer buttons, once. The Reload button is covered by the secure reload button while the pointer is on it.
@@ -437,6 +439,16 @@ function Footer.Build()
     end)
     SetCount(resetBtn, 0)
 
+    editBtn = NewButton(left, "EDIT LAYOUT", { tip = function()
+        return { "Edit layout", "Move and resize frames on screen (/fsedit). Done brings you back here." }
+    end })
+    editBtn:SetPoint("LEFT", resetBtn, "RIGHT", BTN_GAP, 0)
+    editBtn:SetScript("OnClick", function()
+        local LE = FS.LayoutEdit
+        if LE and LE.EnterFromConfig then LE.EnterFromConfig(CW.Current()) end
+    end)
+    SetCount(editBtn, 0)
+
     closeBtn = NewButton(right, "CLOSE")
     closeBtn:SetPoint("RIGHT", right, "RIGHT", 0, 0)
     closeBtn:SetScript("OnClick", function() CW.Close() end)
@@ -446,7 +458,7 @@ function Footer.Build()
     message:SetPoint("RIGHT", closeBtn, "LEFT", -BTN_GAP, 0)
     message:SetJustifyH("RIGHT")
 
-    Footer.reload, Footer.reset, Footer.close, Footer.message = reloadBtn, resetBtn, closeBtn, message
+    Footer.reload, Footer.reset, Footer.edit, Footer.close, Footer.message = reloadBtn, resetBtn, editBtn, closeBtn, message
     I.ui.frame:HookScript("OnDragStop", function() Footer.SavePosition() end)
     table.insert(I.controls, Footer.Update)
     Footer.RestorePosition()

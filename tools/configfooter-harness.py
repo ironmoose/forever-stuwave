@@ -126,7 +126,7 @@ function T.every_button_is_btn_h_tall_and_a_multiple_of_text_snap_wide()
     local st = fixture(W)
     W.Open("fa")
     local S = W.Spec
-    for _, name in ipairs({ "reload", "reset", "close" }) do
+    for _, name in ipairs({ "reload", "reset", "edit", "close" }) do
         local b = W.Footer[name]
         eq(b.h, S.BTN_H, name .. " height"); eq(b.w % S.TEXT_SNAP, 0, name .. " width snaps to " .. S.TEXT_SNAP)
         yes(b.w >= b.fsLabel:GetStringWidth() + 2 * S.BTN_PAD_X, name .. " keeps BTN_PAD_X each side of its text")
@@ -151,19 +151,37 @@ function T.the_footer_fits_at_the_smallest_default_and_largest_window()
         W.SetSize(size[1], size[2], false)
         local rect = solveAll()
         local win, D, S, F = rect(winFrame()), W.D, W.Spec, W.Footer
-        for _, name in ipairs({ "reload", "reset", "close" }) do
+        for _, name in ipairs({ "reload", "reset", "edit", "close" }) do
             local r = rect(F[name])
             yes(r.l >= win.l + S.PAD - 0.01 and r.r <= win.r - S.PAD + 0.01, name .. " inside the window pad at " .. size[1])
             eq(win.t - r.t, D.BTN_Y, name .. " top is BTN_Y at " .. size[1])
             eq(r.t - r.b, S.BTN_H)
         end
-        local a, b, c = rect(F.reload), rect(F.reset), rect(F.close)
-        eq(b.l - a.r, 8, "the footer buttons sit 8 apart")
+        local a, r, b, c = rect(F.reload), rect(F.reset), rect(F.edit), rect(F.close)
+        eq(r.l - a.r, 8, "the footer buttons sit 8 apart")
+        eq(b.l - r.r, 8, "EDIT LAYOUT sits 8 after RESET PAGE")
         eq(win.r - S.PAD, c.r, "CLOSE sits at the right padding")
-        yes(b.r < (win.l + win.r) / 2, "the left buttons stay in the left half")
+        yes(b.r < (win.l + win.r) / 2, "the left buttons stay in the left half at " .. size[1] .. ": " .. b.r)
         local msgW = #F.message:GetText() * 6
-        yes(c.l - 8 - msgW >= b.r, "the message fits between RESET PAGE and CLOSE at " .. size[1] .. ": " .. (c.l - 8 - msgW) .. " vs " .. b.r)
+        yes(c.l - 8 - msgW >= b.r, "the message fits between EDIT LAYOUT and CLOSE at " .. size[1] .. ": " .. (c.l - 8 - msgW) .. " vs " .. b.r)
     end
+end
+
+-- ---- edit layout -----------------------------------------------------------------------------------------------------
+
+function T.edit_layout_opens_the_layout_editor_and_comes_back_to_this_page()
+    local W = boot()
+    local asked = {}
+    FS.LayoutEdit = { EnterFromConfig = function(page) asked[#asked + 1] = page; return true end }
+    W.Open()
+    local b = W.Footer.edit
+    yes(b, "the button exists"); eq(b.fsLabel:GetText(), "EDIT LAYOUT")
+    b.scripts.OnClick(b, "LeftButton")
+    eq(#asked, 1, "one click opens the editor once")
+    eq(asked[1], W.Current(), "DONE comes back to the page the click came from")
+    FS.LayoutEdit = nil
+    b.scripts.OnClick(b, "LeftButton")
+    eq(#asked, 1, "no editor loaded: the click does nothing and throws nothing")
 end
 
 -- ---- reload ----------------------------------------------------------------------------------------------------------
