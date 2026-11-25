@@ -1328,10 +1328,117 @@ end
 -- (QuestObjectiveTracker etc.) exist at file-load time regardless of whether
 -- they have ever displayed content, so StyleModuleHeaders needs no
 -- ADDON_LOADED/load-on-demand watch the way e.g. AuctionHouse.lua's panels do.
+-------------------------------------------------------------------------------
+-- Size settings (the Quest tracker page: Scale, Opacity, Background opacity)
+-------------------------------------------------------------------------------
+
+-- Opacity is the alpha of the whole container (the text too), Background opacity the alpha of our panel's fill alone (the stock
+-- NineSlice stays held at 0), Scale the container's scale. All three leave the defaults (100, 100 and 80, which is COLOR_BG's own
+-- alpha) untouched: nothing is written until a value moves off its default, and a value moved back is written once more. The
+-- scale goes through the Base calls an Edit Mode system frame keeps (the override would run Blizzard's frame manager under our
+-- taint) and re-pins every anchor the way that override does, so the corner the player placed stays put; Blizzard's own anchor
+-- pass divides its offsets by the frame's scale, so a later re-seat agrees. A write to the scale waits for the end of combat.
+--
+-- Width and Height are on the page but nothing applies them: the container's width is fixed by its modules and its height is
+-- Edit Mode's own (400 to 1000, only off the default seat), and neither may be written without the taint path the file header
+-- rules out. Their keys, ranges and defaults are kept so the rows exist; the page says why they are locked.
+FS.Tracker = FS.Tracker or {}
+local SIZE = {
+    w = { key = "tracker.w", min = 180, max = 500, step = 1, default = FS.Layout and FS.Layout.tracker and FS.Layout.tracker.w or 270 },
+    h = { key = "tracker.h", min = 120, max = 800, step = 1, default = FS.Layout and FS.Layout.tracker and FS.Layout.tracker.h or 320 },
+    scale = { key = "tracker.scale", min = 50, max = 200, step = 5, default = 100 },
+    alpha = { key = "tracker.alpha", min = 10, max = 100, step = 5, default = 100 },
+    bgAlpha = { key = "tracker.bgAlpha", min = 0, max = 100, step = 1, default = 80 }, -- COLOR_BG's alpha, in percent
+}
+FS.Tracker.SIZE = SIZE
+FS.Tracker.SIZE_LOCKED = "The tracker's width and height are set by the game's own tracker, which this addon may not resize."
+
+-- The setting held to its range; the default for anything that is not a plain number.
+local function SizeValue(spec)
+    local value
+    if FS.Config and FS.Config.Get then
+        local ok, stored = pcall(FS.Config.Get, spec.key)
+        if ok then value = stored end
+    end
+    value = Number(value)
+    if not value or value - value ~= 0 then return spec.default end
+    return math.max(spec.min, math.min(spec.max, value))
+end
+
+local function ApplyBackground()
+    local fill = chrome.fill
+    if not (fill and fill.SetVertexColor) then return end
+    local c = Theme.COLOR_BG
+    local percent = SizeValue(SIZE.bgAlpha)
+    fill:SetVertexColor(c[1], c[2], c[3], percent == SIZE.bgAlpha.default and c[4] or percent / 100)
+end
+
+local alphaWritten = false
+local function ApplyOpacity()
+    local frame = _G.ObjectiveTrackerFrame
+    if not (frame and frame.SetAlpha) then return end
+    local percent = SizeValue(SIZE.alpha)
+    if percent == SIZE.alpha.default and not alphaWritten then return end
+    alphaWritten = percent ~= SIZE.alpha.default
+    frame:SetAlpha(percent / 100)
+end
+
+local scaleWritten, scalePending = false, false
+local function ApplyScale()
+    local frame = _G.ObjectiveTrackerFrame
+    if not (frame and frame.GetScale) then return end
+    local percent = SizeValue(SIZE.scale)
+    if percent == SIZE.scale.default and not scaleWritten then return end
+    if InCombatLockdown and InCombatLockdown() then
+        scalePending = true
+        return
+    end
+    scalePending = false
+    local want = percent == SIZE.scale.default and 1 or percent / 100
+    local old = Read(frame, "GetScale") or 1
+    if old <= 0 or math.abs(old - want) < 1e-6 then return end
+    local setScale = frame.SetScaleBase or frame.SetScale
+    local setPoint = frame.SetPointBase or frame.SetPoint
+    if type(setScale) ~= "function" or type(setPoint) ~= "function" or type(frame.GetPoint) ~= "function" then return end
+    local anchors = {}
+    for i = 1, Read(frame, "GetNumPoints") or 0 do
+        local ok, point, rel, relPoint, x, y = pcall(frame.GetPoint, frame, i)
+        x, y = Number(x), Number(y)
+        if ok and point and x and y then anchors[#anchors + 1] = { point, rel, relPoint, x * old / want, y * old / want } end
+    end
+    setScale(frame, want)
+    for _, a in ipairs(anchors) do setPoint(frame, a[1], a[2], a[3], a[4], a[5]) end
+    scaleWritten = want ~= 1
+    Relayout() -- the panel's whole-pixel pieces sit on the pixel scale the tracker has now
+end
+
+local function ApplySizeSettings()
+    ApplyBackground()
+    ApplyOpacity()
+    ApplyScale()
+end
+
+if FS.Config and FS.Config.RegisterDefault then
+    for _, spec in pairs(SIZE) do FS.Config.RegisterDefault(spec.key, spec.default) end
+    FS.Config.OnChange(SIZE.bgAlpha.key, Guard(ApplyBackground))
+    FS.Config.OnChange(SIZE.alpha.key, Guard(ApplyOpacity))
+    FS.Config.OnChange(SIZE.scale.key, Guard(ApplyScale))
+end
+
+-- The profile loads after the files run: apply what it holds at login, and a scale held back in combat when it ends.
+local sizeWatcher = CreateFrame("Frame")
+sizeWatcher:RegisterEvent("PLAYER_LOGIN")
+sizeWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+sizeWatcher:SetScript("OnEvent", Guard(function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" and not scalePending then return end
+    ApplySizeSettings()
+end))
+
 local function Apply()
     StyleHeaderFont()
     StyleLineFont()
     BuildContainerChrome()
+    ApplySizeSettings()
     StyleModuleHeaders()
     WatchMarkers()
     SkinQuestTimer()

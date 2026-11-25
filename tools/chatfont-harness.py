@@ -163,6 +163,7 @@ SETUP = r"""
 local Chat = setmetatable({}, { __index = function() return function() end end })
 Chat.MAX_CHAT_FRAMES = 3
 Chat.LEVEL_BACKDROP = 1
+Chat.COLOR_TERM_BG = { 0.027, 0.012, 0.102, 0.85 } -- ChatCore's export; ChatFrameSkin's background opacity default reads it
 Chat.windowState = "normal"
 Chat.skinnedChatFrames = {}
 Chat.termPanel = CreateFrame()

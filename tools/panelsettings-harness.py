@@ -80,11 +80,22 @@ FS.Chat = setmetatable({
     AnchorBackdrop = noop,
 }, { __index = function() return noop end })
 
+__frames = {}
 function CreateFrame()
-    local f = { regions = {} }
+    local f = { regions = {}, events = {} }
     function f:SetFrameLevel() end
+    function f:RegisterEvent(e) self.events[e] = true end
+    function f:SetScript(name, fn) self[name] = fn end
+    __frames[#__frames + 1] = f
     return f
 end
+function __fire(event)
+    for _, f in ipairs(__frames) do
+        if f.events[event] and f.OnEvent then f.OnEvent(f, event) end
+    end
+end
+-- The profile loading after the files ran: a stored value with no callback, as the loader does it.
+function __stored(k, v) DB[k].value = v end
 function ___frame()
     local f = { GetHeight = function() return 373 end, GetChildren = function() end }
     return f
@@ -141,6 +152,14 @@ function T.chat_background_reaches_a_window_skinned_later()
     near(backdrop.chrome[1].tint[4], 0.55, "a window skinned after the setting was changed")
 end
 
+function T.chat_background_saved_value_is_painted_at_login()
+    local _, backdrop = skin()
+    __stored("chat.bgAlpha", 25)
+    eq(backdrop.chrome[1].tint[4], FS.Chat.COLOR_TERM_BG[4], "nothing repaints before PLAYER_LOGIN")
+    __fire("PLAYER_LOGIN")
+    near(backdrop.chrome[1].tint[4], 0.25, "the saved opacity at PLAYER_LOGIN")
+end
+
 function T.chat_background_clamps_and_ignores_junk()
     local _, backdrop = skin()
     FS.Config.Set("chat.bgAlpha", 250)
@@ -172,18 +191,26 @@ def chat_boot() -> "LuaRuntime":
 # Minimap: size and scale
 # ---------------------------------------------------------------------------------------------------------------------
 
-def load_minimap_harness():
-    """The minimap harness's worlds (the real Theme, FrameHelpers, Layout and Minimap on a mock client)."""
+def load_module(filename: str, name: str):
+    """A sibling harness imported by file name (they have hyphens), for its worlds and mocks."""
     import importlib.util
-    spec = importlib.util.spec_from_file_location("minimap_harness", Path(__file__).resolve().parent / "minimap-harness.py")
+    here = Path(__file__).resolve().parent
+    if str(here) not in sys.path:
+        sys.path.insert(0, str(here))
+    spec = importlib.util.spec_from_file_location(name, here / filename)
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["minimap_harness"] = mod
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
+def load_minimap_harness():
+    """The minimap harness's worlds (the real Theme, FrameHelpers, Layout and Minimap on a mock client)."""
+    return load_module("minimap-harness.py", "minimap_harness")
+
+
 CONFIG_STUB = r"""
-__cfg, __cfgDefault, __cfgWatch = {}, {}, {}
+__cfg, __cfgDefault, __cfgWatch = __cfg or {}, {}, {}
 FS.Config = {
     RegisterDefault = function(k, v) __cfgDefault[k] = v end,
     Get = function(k) if __cfg[k] ~= nil then return __cfg[k] end; return __cfgDefault[k] end,
@@ -391,6 +418,151 @@ def minimap_cases(mh) -> list[tuple[str, "callable"]]:
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Quest tracker: opacity, background opacity, scale (the real Tracker.lua on the tracker skin harness's mock container)
+# ---------------------------------------------------------------------------------------------------------------------
+
+TRACKER_EXTRA = r"""
+-- What the engine lacks: a frame scale and the anchors read back. ObjectiveTrackerFrame is an Edit Mode system frame, so
+-- (as OnSystemLoad does) its SetScale / SetPoint / ClearAllPoints are overrides that keep the originals as *Base: a
+-- call to an override is counted, because addon code must go through the Base ones.
+function Obj:SetScale(s) self.scale = s end
+function Obj:GetScale() return self.scale or 1 end
+function Obj:GetPoint(i)
+    local p = self.points[i or 1]
+    if p then return p.point, p.rel, p.relPoint, p.x, p.y end
+end
+local buildWithoutEditMode = BuildBlizzard
+function BuildBlizzard()
+    buildWithoutEditMode()
+    local f = ObjectiveTrackerFrame
+    OVERRIDES, ALPHA_WRITES = 0, 0
+    f.SetAlpha = function(self, a) ALPHA_WRITES = ALPHA_WRITES + 1; Obj.SetAlpha(self, a) end
+    f.SetScaleBase, f.SetPointBase, f.ClearAllPointsBase = Obj.SetScale, Obj.SetPoint, Obj.ClearAllPoints
+    f.SetScale = function() OVERRIDES = OVERRIDES + 1 end
+    f.SetPoint = function() OVERRIDES = OVERRIDES + 1 end
+    f.ClearAllPoints = function() OVERRIDES = OVERRIDES + 1 end
+end
+"""
+
+TRACKER_PRE = r"""
+    local S = FS.Tracker.state
+    local C = S.chrome
+    local T = ObjectiveTrackerFrame
+    local COLOR_BG = FS.Theme.COLOR_BG
+    local function setting(k, v) FS.Config.Set(k, v) end
+    local function fillAlpha() return C.fill.vertex[4] end
+    local function near(a, b) assert(a and math.abs(a - b) < 1e-9, tostring(a) .. ' want ' .. tostring(b)) end
+"""
+
+
+def tracker_cases() -> list[tuple[str, "callable"]]:
+    tsk = load_module("trackerskin-harness.py", "trackerskin_harness")
+    from charskin_support import Harness
+
+    h = Harness({"Tracker": "Modules/Tracker/Tracker.lua"}, tsk.BLIZZARD + TRACKER_EXTRA)
+    h.sources["PanelConfig"] = "local _, FS = ...\n" + CONFIG_STUB
+    h.extra_names.insert(0, "PanelConfig")
+    cases: list[tuple[str, "callable"]] = []
+
+    def case(name: str, body: str) -> None:
+        def run() -> None:
+            err = h.run_case(TRACKER_PRE + body + "\n    Clean()")
+            if err is not None:
+                raise AssertionError(err)
+
+        cases.append((name, run))
+
+    case("tracker_keys_register_with_the_prototype_defaults", r"""
+    local want = { ['tracker.w'] = 270, ['tracker.h'] = 320, ['tracker.scale'] = 100, ['tracker.alpha'] = 100, ['tracker.bgAlpha'] = 80 }
+    for key, default in pairs(want) do assert(FS.Config.Get(key) == default, key .. ' default ' .. tostring(FS.Config.Get(key))) end
+    local z = FS.Tracker.SIZE
+    assert(z.w.min == 180 and z.w.max == 500 and z.h.min == 120 and z.h.max == 800, 'width and height range')
+    assert(z.scale.min == 50 and z.scale.max == 200 and z.scale.step == 5, 'scale range')
+    assert(z.alpha.min == 10 and z.alpha.max == 100 and z.alpha.step == 5, 'opacity range')
+    assert(z.bgAlpha.min == 0 and z.bgAlpha.max == 100, 'background range')
+""")
+
+    case("tracker_defaults_write_nothing_to_the_container", r"""
+    assert(T.scale == nil, 'a default profile wrote a scale ' .. tostring(T.scale))
+    assert(ALPHA_WRITES == 0, 'a default profile wrote the container alpha ' .. ALPHA_WRITES .. ' times')
+    assert(OVERRIDES == 0, 'an Edit Mode override ran')
+    assert(C.fill.vertex[4] == COLOR_BG[4], 'the fill alpha is not today\'s ' .. tostring(C.fill.vertex[4]))
+""")
+
+    case("tracker_background_opacity_retints_only_the_panel_fill", r"""
+    local glow, border = C.glow.vertex[4], C.border.vertex[4]
+    setting('tracker.bgAlpha', 40)
+    near(fillAlpha(), 0.40)
+    assert(C.glow.vertex[4] == glow and C.border.vertex[4] == border, 'glow or border retinted')
+    assert(T.NineSlice.alpha == 0, 'the stock art was woken')
+    setting('tracker.bgAlpha', 100)
+    near(fillAlpha(), 1)
+    setting('tracker.bgAlpha', 0)
+    near(fillAlpha(), 0)
+    setting('tracker.bgAlpha', 80)
+    assert(fillAlpha() == COLOR_BG[4], 'back at the default the fill is today\'s alpha exactly')
+    setting('tracker.bgAlpha', 'x')
+    assert(fillAlpha() == COLOR_BG[4], 'junk reads as the default')
+""")
+
+    case("tracker_opacity_fades_the_whole_container", r"""
+    setting('tracker.alpha', 60)
+    near(T.alpha, 0.6)
+    setting('tracker.alpha', 5)
+    near(T.alpha, 0.1)
+    setting('tracker.alpha', 100)
+    assert(T.alpha == 1, 'back to the default leaves the container solid')
+    assert(OVERRIDES == 0, 'an override ran')
+""")
+
+    case("tracker_scale_goes_through_the_base_call_and_keeps_the_corner", r"""
+    local point, rel, relPoint, x, y = T:GetPoint(1)
+    assert(point == 'TOPRIGHT', 'the mock seat is TOPRIGHT, got ' .. tostring(point))
+    setting('tracker.scale', 125)
+    near(T.scale, 1.25)
+    assert(OVERRIDES == 0, 'an Edit Mode override ran: addon code must use the Base calls')
+    local p2, rel2, rp2, x2, y2 = T:GetPoint(1)
+    assert(p2 == point and rel2 == rel and rp2 == relPoint, 'the anchor moved to another point')
+    near(x2, x / 1.25); near(y2, y / 1.25)
+    setting('tracker.scale', 100)
+    near(T.scale, 1)
+    local _, _, _, x3, y3 = T:GetPoint(1)
+    near(x3, x); near(y3, y)
+    assert(#T.points == 1, 'points ' .. #T.points)
+""")
+
+    case("tracker_scale_waits_for_combat_to_end", r"""
+    __combat = true
+    setting('tracker.scale', 150)
+    assert(T.scale == nil, 'the container was scaled in combat')
+    __combat = false
+    Fire('PLAYER_REGEN_ENABLED')
+    near(T.scale, 1.5)
+""")
+
+    case("tracker_scale_clamps_and_ignores_junk", r"""
+    setting('tracker.scale', 999)
+    near(T.scale, 2)
+    setting('tracker.scale', 1)
+    near(T.scale, 0.5)
+    setting('tracker.scale', 'big')
+    assert(T.scale == 1, 'junk reads as the default scale ' .. tostring(T.scale))
+""")
+
+    case("tracker_saved_values_are_applied_at_login", r"""
+    -- The skin is built while the files run (defaults), the profile loads after them, PLAYER_LOGIN comes last.
+    Reset()
+    local FS2 = Load({ 'PanelConfig', 'Theme', 'Layout', 'HeldArt', 'PanelSkins', 'ControlKit', 'ItemSlotSkins', 'TabSkins', 'Tracker' })
+    local T2, fill = ObjectiveTrackerFrame, FS2.Tracker.state.chrome.fill
+    assert(T2.scale == nil and ALPHA_WRITES == 0, 'written before the profile was readable')
+    __cfg['tracker.alpha'], __cfg['tracker.bgAlpha'], __cfg['tracker.scale'] = 70, 30, 120
+    Fire('PLAYER_LOGIN')
+    near(T2.alpha, 0.7); near(fill.vertex[4], 0.3); near(T2.scale, 1.2)
+""")
+    return cases
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -403,6 +575,7 @@ def main() -> int:
     cases = run_lua_group(chat_boot)
     mh = load_minimap_harness()
     cases += minimap_cases(mh)
+    cases += tracker_cases()
     failed = 0
     for name, fn in cases:
         try:
