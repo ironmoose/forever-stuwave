@@ -1254,8 +1254,8 @@ local function RefreshWatchedNames()
     end
 end
 
+-- The event itself is registered by Init, so a Unit frames switch that is off listens to nothing.
 local nameWatcher = CreateFrame("Frame")
-nameWatcher:RegisterEvent("UNIT_NAME_UPDATE")
 nameWatcher:SetScript("OnEvent", RefreshWatchedNames)
 
 -------------------------------------------------------------------------------
@@ -1388,12 +1388,8 @@ local function ApplyVisibility()
     for _, frame in ipairs(FS.boss or {}) do Seat(frame, FS.Config.Get(SHOW_KEYS.boss) == false) end
 end
 
-visibilityEvents:RegisterEvent("PLAYER_LOGIN")
+-- Init hooks these up (the login apply and the four setting hooks), so a Unit frames switch that is off listens to nothing.
 visibilityEvents:SetScript("OnEvent", ApplyVisibility)
-FS.Config.OnChange(HIDE_KEYS.player, ApplyVisibility)
-FS.Config.OnChange(HIDE_KEYS.target, ApplyVisibility)
-FS.Config.OnChange(SHOW_KEYS.focus, ApplyVisibility)
-FS.Config.OnChange(SHOW_KEYS.boss, ApplyVisibility)
 
 local function FramesStateLine()
     local parts = {}
@@ -1424,6 +1420,15 @@ end
 -------------------------------------------------------------------------------
 
 local function Init()
+    -- The listeners that belong to the frames built below: the unfiltered name event, the login apply of the hide and show
+    -- settings and the four setting hooks (a profile switch or a setting change applies at once).
+    nameWatcher:RegisterEvent("UNIT_NAME_UPDATE")
+    visibilityEvents:RegisterEvent("PLAYER_LOGIN")
+    FS.Config.OnChange(HIDE_KEYS.player, ApplyVisibility)
+    FS.Config.OnChange(HIDE_KEYS.target, ApplyVisibility)
+    FS.Config.OnChange(SHOW_KEYS.focus, ApplyVisibility)
+    FS.Config.OnChange(SHOW_KEYS.boss, ApplyVisibility)
+
     -- Dim, not hide: Player/Target/Focus/boss are all Edit Mode
     -- UnitFrame system members (retail's Enum.EditModeUnitFrameSystemIndices)
     -- and Hide()+OnShow-hook taints their secure Update path, the same class

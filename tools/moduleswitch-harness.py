@@ -2347,6 +2347,27 @@ function T.with_party_and_raid_off_the_group_aura_engine_builds_nothing_and_no_c
     end
 end
 
+-- the events the frames made by a file listen to ("" when none)
+local function b5cListening(file)
+    local out = {}
+    for _, f in ipairs(__evFrames) do
+        if f._madeBy and f._madeBy[file] then
+            for event in pairs(f._events) do out[#out + 1] = event end
+        end
+    end
+    table.sort(out)
+    return table.concat(out, ",")
+end
+
+function T.every_module_that_is_off_listens_for_nothing()
+    b5cWorld({ "m.uf", "m.party", "m.raid", "m.np" })
+    eq(b5cListening(UF_FILE), "", "Unit frames off: UnitFrames.lua listens to")
+    eq(b5cListening(AURAS_FILE), "", "Unit frames off: TargetAuras.lua listens to")
+    eq(b5cListening(PARTY_FILE), "", "Party frames off: PartyFrames.lua listens to")
+    eq(b5cListening(RAID_FILE), "", "Raid frames off: RaidFrames.lua listens to")
+    eq(b5cListening(NP_FILE), "", "Nameplates off: Nameplates.lua listens to")
+end
+
 -- ---- nameplates (the live module) ----
 
 function T.nameplates_on_listens_for_the_plate_events_and_builds_a_root_per_plate_as_before()
