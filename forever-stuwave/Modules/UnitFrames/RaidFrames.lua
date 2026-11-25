@@ -28,7 +28,12 @@ local Theme = FS.Theme
 local Style = FS.FrameStyle
 local IsSecret = FS.IsSecret
 local Extras = FS.FrameExtras
-local DimBlizzardFrame = FS.FrameHelpers.DimBlizzardFrame
+-- In borrow mode (FrameExtras.Borrow) a compact frame that carries aura icons keeps its events; everything else is swept as ever.
+local DimBlizzardFrame = function(frame)
+    local borrow = Extras and Extras.Borrow
+    if borrow and borrow.Dim(frame) then return end
+    return FS.FrameHelpers.DimBlizzardFrame(frame)
+end
 local CreateLaserRail = FS.FrameHelpers.CreateLaserRail
 local SetLaserRailColor = FS.FrameHelpers.SetLaserRailColor
 local SetLaserRailDesaturated = FS.FrameHelpers.SetLaserRailDesaturated

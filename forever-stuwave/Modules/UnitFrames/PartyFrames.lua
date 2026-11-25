@@ -38,7 +38,12 @@ local IsSecret = FS.IsSecret
 -- hide: party member/pet frames are Edit Mode UnitFrame system members too
 -- (Enum.EditModeUnitFrameSystemIndices.Party), so Hide()+HookScript would
 -- taint them the same way it did BuffFrame/DebuffFrame (see Buffs.lua).
-local DimBlizzardFrame = FS.FrameHelpers.DimBlizzardFrame
+-- In borrow mode (FrameExtras.Borrow) a compact frame that carries aura icons keeps its events; everything else is swept as ever.
+local DimBlizzardFrame = function(frame)
+    local borrow = FS.FrameExtras and FS.FrameExtras.Borrow
+    if borrow and borrow.Dim(frame) then return end
+    return FS.FrameHelpers.DimBlizzardFrame(frame)
+end
 local SetTipSpell = FS.FrameHelpers.SetTipSpell
 
 -- The laser rail builder and its retint/desaturate/gradient helpers live in
