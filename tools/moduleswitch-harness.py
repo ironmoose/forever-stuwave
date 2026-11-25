@@ -1486,6 +1486,11 @@ local B5B = {
         blizzard = { "MainActionBar", "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft", "MultiBar5",
             "MultiBar6", "MultiBar7", "OverrideActionBar", "MultiCastActionBarFrame", "StanceBar", "MicroMenu", "MicroMenuContainer" },
     },
+    ["m.pet"] = {
+        files = { "Modules/Pet/PetFrame.lua", "Modules/Pet/PetActionBar.lua", "Modules/Pet/PetCastBar.lua" },
+        named = { "FSPetContainer" },
+        blizzard = { "PetActionBar" },
+    },
 }
 local B5B_HOOKED = { "ActionButtonDown", "ActionButtonUp", "MultiActionButtonDown", "MultiActionButtonUp", "MicroButtonPulse",
     "MicroButtonPulseStop" }
@@ -1495,7 +1500,8 @@ local B5B_EVENTS = {
     { "PET_BAR_UPDATE" }, { "UNIT_PET", "player" }, { "UNIT_AURA", "player" }, { "PLAYER_TOTEM_UPDATE", 1 }, { "SPELLS_CHANGED" },
     { "PLAYER_TARGET_CHANGED" }, { "UNIT_HEALTH", "pet" }, { "UNIT_POWER_UPDATE", "player" }, { "PLAYER_ENTERING_WORLD", false, false },
 }
-local B5B_SLASH = { { "FSBARS", "blizz" }, { "FSBARS", "fs" }, { "FSTAINT", "stash" }, { "FSCONSOLE", "off" }, { "FSCONSOLE", "on" } }
+local B5B_SLASH = { { "FSBARS", "blizz" }, { "FSBARS", "fs" }, { "FSTAINT", "stash" }, { "FSCONSOLE", "off" }, { "FSCONSOLE", "on" },
+    { "FSPET", "unlock" }, { "FSPET", "reset" }, { "FSPET", "lock" } }
 
 local function b5bStubs()
     date = os.date
@@ -1601,6 +1607,55 @@ function T.action_bars_on_builds_the_stack_dims_the_stock_bars_and_marks_itself_
     for _, name in ipairs({ "MainActionBar", "MultiBarBottomLeft", "StanceBar", "MicroMenu" }) do
         yes(TouchesOn(name) ~= "", name .. " dimmed")
     end
+end
+
+function T.pet_bar_off_builds_nothing_and_leaves_the_stock_pet_bar_alone()
+    b5bWorld({ "m.pet" })
+    b5bClean("m.pet")
+    b5bNotBuilt("m.pet")
+    eq(BuiltBy("Modules/Pet/PetDock.lua", "Modules/ActionBars/ClassShoulder.lua"), 0, "no dock chrome")
+    eq(FS.PetFrame.container, nil)
+    eq(FS.PetFrame.barSlot, nil)
+end
+
+function T.pet_bar_off_keeps_its_api_defined_and_the_pet_commands_say_so()
+    b5bWorld({ "m.pet" })
+    eq(type(FS.PetFrame), "table"); eq(type(FS.PetCastBar), "table"); eq(type(FS.PetDock), "table")
+    eq(FS.PetFrame.SeatDocked(UIParent, 0), false, "nothing to dock")
+    eq(FS.PetFrame.SeatFloat(), false)
+    eq(FS.PetFrame.IsDocked(), false)
+    eq(type(SlashCmdList["FSPET"]), "function")
+    __printed = {}
+    SlashCmdList["FSPET"]("reset")
+    yes(#__printed > 0, "the command answers")
+    eq(ErrorsFrom("Modules/Pet/PetFrame.lua"), "")
+end
+
+function T.pet_bar_on_builds_the_panel_dims_the_stock_pet_bar_and_marks_itself_built()
+    b5bWorld({})
+    b5bClean("m.pet")
+    eq(FS.ModuleSwitch.Built("m.pet"), true)
+    yes(MadeNamed("FSPetContainer"), "the pet panel")
+    yes(FS.PetFrame.container and FS.PetFrame.barSlot and FS.PetFrame.castSlot, "exported")
+    yes(TouchesOn("PetActionBar", "Modules/Pet/PetFrame.lua") ~= "", "the stock pet bar is hidden")
+end
+
+-- a Warlock's class tabs stand right of the pet panel's span; with the pet bar off there is no panel to clear
+local function standingFrom(off)
+    b5bWorld(off, function() UnitClass = function() return "Warlock", "WARLOCK", 9 end end)
+    local least
+    if FS.ClassShoulder and FS.ClassShoulder.EachStanding then
+        FS.ClassShoulder.EachStanding(function(dx) if least == nil or dx < least then least = dx end end)
+    end
+    return least
+end
+
+function T.the_class_tabs_stand_close_to_the_console_edge_when_there_is_no_pet_bar_to_clear()
+    local with = standingFrom({})
+    local without = standingFrom({ "m.pet" })
+    yes(with ~= nil, "a tab stands in this world")
+    yes(without ~= nil, "a tab stands with the pet bar off")
+    yes(without < with, "the tabs moved left by the pet span: " .. tostring(without) .. " against " .. tostring(with))
 end
 
 return T

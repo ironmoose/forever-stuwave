@@ -1027,6 +1027,9 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+    -- Module power (m.pet): the pet buttons build into the pet panel's slot, so with the switch off there is nothing to do.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.pet") then return end
     if InCombatLockdown() then
         self:RegisterEvent("PLAYER_REGEN_ENABLED")
         self:SetScript("OnEvent", function(inner)

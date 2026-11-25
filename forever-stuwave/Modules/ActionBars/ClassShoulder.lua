@@ -256,8 +256,12 @@ end
 local PET_CLASSES = { WARLOCK = true, HUNTER = true }
 local PET_AFTER = 16
 
+-- With the Pet bar module off there is no pet panel on the Console, so nothing is reserved for it. The switch is read, not
+-- the built flag: the first draw comes with the stack's geometry, before the pet panel's own login build has run.
 local function PetReserved()
     local dock = FS.PetDock
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.pet") then return false end
     return PET_CLASSES[PlayerClass()] == true and type(dock) == "table" and type(dock.DockRight) == "function"
         and type(dock.GapSpan) == "function"
 end
