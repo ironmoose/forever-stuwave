@@ -258,10 +258,10 @@ end
 Bars.LookLabel = LookName
 
 -- The looks a frame's bar offers: every look whose builder exists (FrameHelpers.CreateBarLook, ticket C1d).
-function Bars.LookItems(_, _)
+function Bars.LookItems(frame, _)
     local out = {}
     for _, item in ipairs(Style.BAR_STYLES) do
-        if Style.LookAvailable(item[1]) then out[#out + 1] = { value = item[1], text = item[2] } end
+        if Style.LookAvailable(item[1], frame) then out[#out + 1] = { value = item[1], text = item[2] } end
     end
     return out
 end

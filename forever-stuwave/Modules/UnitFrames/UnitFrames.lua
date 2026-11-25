@@ -450,6 +450,8 @@ local function SeatBars(f)
     end
     if powerHeight > 0 and power.fsPillHeight ~= powerHeight then power:SetPillHeight(powerHeight) end
 
+    Style.ApplyLook(key, health, "hpStyle")
+    Style.ApplyLook(key, power, "mpStyle")
     Style.SeatBarText(health.text, health, Style.Number(key, "hpTs"), Style.Get(key, "hpTa"), Style.Number(key, "hpTx"))
     Style.SeatBarText(power.text, power, Style.Number(key, "mpTs"), Style.Get(key, "mpTa"), Style.Number(key, "mpTx"))
 end
@@ -793,7 +795,7 @@ local function UpdateHealthBar(frame)
     -- free), this file's health bar color is fixed at construction and never
     -- reassigned elsewhere, so it has to be explicitly restored here.
     SetBarDesaturated(bar, false)
-    if bar.cornerMask then bar.cornerMask:Show() end
+    if bar.cornerMask and (bar.fsLook == nil or bar.fsLook == "cut") then bar.cornerMask:Show() end
     bar:SetStatusBarColor(COLOR_HEALTH[1], COLOR_HEALTH[2], COLOR_HEALTH[3], COLOR_HEALTH[4] or 1)
     frame.name:SetAlpha(1)
     bar.shell:SetAlpha(1)

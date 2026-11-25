@@ -567,6 +567,11 @@ function Helpers.CreatePillBar(parent, opts)
                 self.fsChromeHost, self.fsBorderHost = BuildPillChrome(shell, self.fsPillOpts, height)
                 chromes[height] = { self.fsChromeHost, self.fsBorderHost }
             end
+            if self.fsLook and self.fsLook ~= "cut" then
+                -- another look wears flat chrome: the cut shell stays out of sight at every height
+                self.fsChromeHost:Hide()
+                if self.fsBorderHost then self.fsBorderHost:Hide() end
+            end
         end
         local newRadius = MaskRadius(height, pillInset)
         SeatBar(self, shell, pillInset)
@@ -585,6 +590,107 @@ function Helpers.CreatePillBar(parent, opts)
     end
 
     return bar
+end
+
+-------------------------------------------------------------------------------
+-- Bar looks: one bar, six drawings of it (health and power bars of every frame page)
+-------------------------------------------------------------------------------
+
+-- A look is the chrome around the fill and the texture of the fill, nothing more. Health and power are secret, so a
+-- segmented look is a tile the StatusBar's own fill texture repeats (SetHorizTile): the engine crops the pattern at the
+-- value, and no cell is ever counted in Lua.
+--   cut      today's pill bar (CreatePillBar): cut corner shell, flat fill
+--   laser    today's party and pet rail (CreateLaserRail): thin beam with bloom and spark
+--   flat     a square track with a thin border, flat fill
+--   led      flat chrome, the fill is bar_led_tile (a lit segment and its gap)
+--   slant    flat chrome, the fill is bar_slant_tile (leaning cells)
+--   chevron  flat chrome, the fill is the cast bar's chevron strip
+--   stock    flat chrome, the fill is the game's own status bar texture
+local MEDIA_TEXTURES = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
+Helpers.BAR_LOOK_TILES = {
+    led = MEDIA_TEXTURES .. "bar_led_tile.tga",
+    slant = MEDIA_TEXTURES .. "bar_slant_tile.tga",
+    chevron = Theme.CAST_CHEVRON_STRIP_TEXTURE,
+}
+Helpers.BAR_LOOK_STOCK = "Interface\\TargetingFrame\\UI-StatusBar"
+
+-- The square track and 1 unit border of the looks that are not the cut pill or the laser rail, built once per bar on a
+-- frame under the fill.
+local function FlatChrome(bar)
+    local chrome = bar.fsFlatChrome
+    if chrome then return chrome end
+    local shell = bar.shell
+    chrome = CreateFrame("Frame", nil, shell)
+    chrome:SetAllPoints(shell)
+    chrome:SetFrameLevel(shell:GetFrameLevel())
+    local track = Theme.COLOR_BAR_TRACK
+    local fill = chrome:CreateTexture(nil, "BACKGROUND")
+    fill:SetColorTexture(track[1], track[2], track[3], track[4] or 1)
+    fill:SetAllPoints(chrome)
+    local edge = Theme.COLOR_BAR_BORDER
+    local function line(a, b, w, h)
+        local t = chrome:CreateTexture(nil, "BORDER")
+        t:SetColorTexture(edge[1], edge[2], edge[3], edge[4] or 1)
+        t:SetPoint(a, chrome, a, 0, 0)
+        t:SetPoint(b, chrome, b, 0, 0)
+        if w then t:SetHeight(w) else t:SetWidth(h) end
+    end
+    line("TOPLEFT", "TOPRIGHT", 1)
+    line("BOTTOMLEFT", "BOTTOMRIGHT", 1)
+    line("TOPLEFT", "BOTTOMLEFT", nil, 1)
+    line("TOPRIGHT", "BOTTOMRIGHT", nil, 1)
+    bar.fsFlatChrome = chrome
+    return chrome
+end
+
+function Helpers.BarLookDefault(bar)
+    return bar.fsRail and "laser" or "cut"
+end
+
+-- Draws `bar` (a CreatePillBar or CreateLaserRail bar) in `look`. A look the bar cannot wear (cut on a rail, laser on a
+-- pill) is read as the bar's own. Only frames of its own are touched, so it runs in combat too.
+function Helpers.SetBarLook(bar, look)
+    local mine = Helpers.BarLookDefault(bar)
+    if look == "cut" and bar.fsRail then look = mine end
+    if look == "laser" and not bar.fsRail then look = mine end
+    if bar.fsLook == look then return false end
+    local first = bar.fsLook == nil
+    bar.fsLook = look
+    local own = look == mine
+    if first and own then return false end   -- the bar is built in its own look: nothing to change
+    if bar.fsPillOpts then
+        -- the cut chrome: shell glow, track, border and the corner quads over the fill
+        if bar.fsChromeHost then bar.fsChromeHost:SetShown(own) end
+        if bar.fsBorderHost then bar.fsBorderHost:SetShown(own) end
+        if bar.cornerMask then bar.cornerMask:SetShown(own) end
+    end
+    local rail = bar.fsRail
+    if rail then
+        rail.look = look
+        rail.host:SetShown(own)
+        rail.trackLeft:SetShown(own)
+        rail.trackRight:SetShown(own)
+    end
+    FlatChrome(bar):SetShown(not own)
+    local tex = bar:GetStatusBarTexture()
+    if tex then
+        local tile = Helpers.BAR_LOOK_TILES[look]
+        if tile then
+            tex:SetTexture(tile)
+        elseif look == "stock" then
+            tex:SetTexture(Helpers.BAR_LOOK_STOCK)
+        else
+            tex:SetTexture(Theme.FLAT_TEXTURE)
+        end
+        if tex.SetHorizTile then tex:SetHorizTile(tile ~= nil) end
+    end
+    if rail and rail.r then
+        -- the rail's gradient is for the laser look only: any other look takes the plain tint
+        local r, g, b = rail.r, rail.g, rail.b
+        rail.r = nil
+        Helpers.SetLaserRailColor(bar, r, g, b)
+    end
+    return true
 end
 
 -------------------------------------------------------------------------------
@@ -883,7 +989,7 @@ function Helpers.SetLaserRailColor(bar, r, g, b)
     if rail.r == r and rail.g == g and rail.b == b then return end
     rail.r, rail.g, rail.b = r, g, b
 
-    if not SetRailGradient(bar:GetStatusBarTexture(), r, g, b, rail.tailAlpha, 1) then
+    if (rail.look and rail.look ~= "laser") or not SetRailGradient(bar:GetStatusBarTexture(), r, g, b, rail.tailAlpha, 1) then
         bar:SetStatusBarColor(r, g, b, 1)
     end
     -- Each half fades from 0 at its outer end to the track alpha at the center.

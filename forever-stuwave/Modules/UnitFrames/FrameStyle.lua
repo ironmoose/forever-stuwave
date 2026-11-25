@@ -129,10 +129,23 @@ function Style.Get(frame, suffix)
     return Config.Get(Style.Key(frame, suffix))
 end
 
--- The bar looks that can be drawn now. FrameHelpers adds each look when its builder exists (ticket C1d).
-Style.LOOKS = { cut = true, laser = true }
-function Style.LookAvailable(value)
-    return Style.LOOKS[value] == true
+-- The bar looks a frame can wear. The pill bars of the unit frames are cut (today) or one of the others; the party and pet
+-- bars are laser rails (today) or one of the others. FrameHelpers.SetBarLook draws them all.
+Style.RAIL_FRAMES = { party = true, pet = true }
+function Style.LookAvailable(value, frame)
+    local rail = Style.RAIL_FRAMES[frame] == true
+    if value == "cut" then return not rail end
+    if value == "laser" then return rail end
+    local helpers = FS.FrameHelpers
+    return type(helpers) == "table" and type(helpers.SetBarLook) == "function"
+end
+
+-- The bar look a frame's setting names, applied to `bar` (nothing happens when the helper is missing).
+function Style.ApplyLook(frame, bar, suffix)
+    local helpers = FS.FrameHelpers
+    if bar and type(helpers) == "table" and type(helpers.SetBarLook) == "function" then
+        helpers.SetBarLook(bar, Style.Get(frame, suffix))
+    end
 end
 
 function Style.Set(frame, suffix, value)

@@ -125,6 +125,7 @@ function(src, opts)
         local b = CreateFrame("Button", nil, parent); b:SetScript("OnClick", onClick); return b
     end
     local function any() return CreateFrame("Frame") end
+    __looks = {}
     FS.FrameHelpers = {
         DimBlizzardFrame = function() end,
         NewStepRunner = function() return function(frame, label, fn) fn(frame) end, function() end end,
@@ -135,6 +136,7 @@ function(src, opts)
             chip.text = chip:CreateFontString(nil, "OVERLAY"); chip.text.hasFont = true
             return chip
         end,
+        SetBarLook = function(bar, look) __looks[#__looks + 1] = { bar, look } end,
         CreatePillBar = function(parent, o)
             local bar = CreateFrame("StatusBar", nil, parent)
             bar.shell = CreateFrame("Frame", nil, parent)
@@ -391,6 +393,23 @@ function T.the_preview_is_the_real_frame_and_redraws_with_the_settings()
     eq(p.health.text:GetText(), "2481 / 3000")
     S.Set("target", "hpFmt", "percent")
     eq(p.health.text:GetText(), "83%")
+end
+
+function T.bar_looks_reach_the_bars_and_the_dropdown_offers_only_what_a_frame_can_wear()
+    local S = boot()
+    yes(S.LookAvailable("cut", "player")); yes(not S.LookAvailable("laser", "player"))
+    yes(S.LookAvailable("laser", "party")); yes(not S.LookAvailable("cut", "party"))
+    for _, v in ipairs({ "flat", "led", "slant", "chevron", "stock" }) do
+        yes(S.LookAvailable(v, "player") and S.LookAvailable(v, "pet"), v)
+    end
+    __looks = {}
+    local frame = FS.UnitFrames.NewPreview(CreateFrame("Frame"), "player")
+    yes(#__looks >= 2, "the build applies a look to both bars")
+    for _, l in ipairs(__looks) do eq(l[2], "cut", "default look is the stock cut") end
+    S.Set("player", "hpStyle", "led")
+    local sawLed = false
+    for _, l in ipairs(__looks) do if l[2] == "led" then sawLed = true end end
+    yes(sawLed, "a changed hpStyle restyles the bar")
 end
 
 function T.pointing_at_a_switch_turns_the_feature_on_in_the_preview_for_the_moment()
