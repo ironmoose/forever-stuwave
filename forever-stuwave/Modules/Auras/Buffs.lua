@@ -138,6 +138,10 @@ local state = {
 -- The out-of-combat snapshot (plain values only, see RefreshSnapshot).
 local snapshot = { buffs = {}, debuffs = {} }
 local readFailed = false
+-- True from the combat-start instant until a read after combat replaces the lists: what the snapshot holds is older than the
+-- fight. The client can say "readable" a moment before the post combat read has run (the retry chain in Theme.lua waits half a
+-- second per attempt), and a reader that went by readability alone took the pre fight lists for the current ones.
+local snapshotAged = false
 
 -------------------------------------------------------------------------------
 -- Small helpers
@@ -286,6 +290,7 @@ local function RefreshSnapshot()
     local buffs = ScanAuras(FILTER_BUFFS, MAX_BUFF_SLOTS)
     if buffs then
         snapshot.buffs = buffs
+        snapshotAged = false
         changed = true
     end
     local debuffs = ScanAuras(FILTER_DEBUFFS, MAX_DEBUFF_SLOTS)
@@ -310,9 +315,9 @@ FS.PlayerAuras = {
     -- { buffs = { {name, icon, count, dispelType, duration, expirationTime, sourceUnit}, ... }, debuffs = ... }
     -- Plain values only, in aura slot order. Read-only by convention; replaced, never mutated.
     Get = function() return snapshot end,
-    -- True while the snapshot cannot refresh (auras are secret): what it holds is as of
-    -- the last readable moment.
-    IsFrozen = function() return not Alive() or not FS.AurasReadable() end,
+    -- True while the snapshot cannot refresh (auras are secret) or has not been read again since a fight began: what it holds
+    -- is as of the last readable moment.
+    IsFrozen = function() return not Alive() or snapshotAged or not FS.AurasReadable() end,
     -- True when the engine containers draw the row (false: the legacy row is drawn).
     IsEngineDrawn = function() return state.engine end,
 }
@@ -886,6 +891,8 @@ local function RefreshAurasEvent(event)
     if event == "UNIT_AURA" and state.engine and InCombatNow() then return false end
 
     local changed = RefreshSnapshot()
+    -- the read at the combat-start instant is the last one: from here the lists age until a read after combat
+    if event == "PLAYER_REGEN_DISABLED" then snapshotAged = true end
     if not state.engine and changed then
         DrawLegacyRows()
     end

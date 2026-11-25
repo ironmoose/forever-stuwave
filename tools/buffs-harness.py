@@ -50,6 +50,7 @@ ADDON = HERE.parent / "forever-stuwave"
 SOURCE = Path(os.environ.get("BUFFS_LUA", ADDON / "Modules/Auras/Buffs.lua"))
 THEME = Path(os.environ.get("THEME_LUA", ADDON / "Core/Theme.lua"))
 HELPERS = ADDON / "Core/FrameHelpers.lua"
+SHAMANBUFFS = ADDON / "Modules/ActionBars/ShamanBuffs.lua"
 
 
 def theme_readiness_lua() -> str:
@@ -781,6 +782,78 @@ for _, bad in ipairs({ "throws", "secret", "number", "nil" }) do
     check(readable(true, bad) == false, bad .. " answer in lockdown must fail closed")
 end
 """),
+    ("the snapshot stays frozen from the combat-start read until a read after combat replaces it, even once the client says readable", "", r"""
+boot()
+local PA = FS.PlayerAuras
+__auras.HELPFUL = { aura("Lightning Shield", { count = 3, spellId = 324 }) }
+fire("UNIT_AURA")
+check(PA.IsFrozen() == false, "frozen out of combat")
+fire("PLAYER_REGEN_DISABLED")
+__combat = true
+__auras.HELPFUL = {}
+check(PA.IsFrozen() == true, "not frozen in lockdown")
+-- lockdown lifts, the client still says secret: the read at regen is refused and a retry is scheduled
+__combat = false
+__apiSecret = true
+fire("PLAYER_REGEN_ENABLED")
+check(PA.IsFrozen() == true, "not frozen while the client says secret")
+-- the client now says readable, but the retry has not run: the list is still the one from before the fight
+__apiSecret = false
+check(#PA.Get().buffs == 1, "the test expects the stale list here")
+check(PA.IsFrozen() == true, "readable but the snapshot was not read since the fight: a reader would take the old list for the current one")
+table.remove(__timers, 1)[2]()
+check(#PA.Get().buffs == 0, "the retry did not refresh the snapshot")
+check(PA.IsFrozen() == false, "still frozen after the snapshot was read again")
+-- a fight with no refusal at regen: the regen read replaces it at once
+fire("PLAYER_REGEN_DISABLED")
+__combat = true
+check(PA.IsFrozen() == true, "second fight: not frozen")
+__combat = false
+fire("PLAYER_REGEN_ENABLED")
+check(PA.IsFrozen() == false, "readable at regen and read: frozen")
+"""),
+    ("Shaman shield tile: a shield that dropped or lost orbs in a fight is never shown as it was, before or after the first read after combat", "", r"""
+boot()
+local SPELLS = { [324] = "Lightning Shield", [24398] = "Water Shield" }
+local FH = FS.FrameHelpers
+FH.SpellById = function(id) return SPELLS[id] end
+FH.ResolveSpell = function(name) for id, n in pairs(SPELLS) do if n == name then return id end end end
+FH.IsKnownSpellId = function(id) return SPELLS[id] ~= nil end
+FH.RegisterEvent = function(frame, event) frame:RegisterEvent(event) return true end
+assert(loadstring(__SHAMAN_SRC, "@ShamanBuffs.lua"))("forever-stuwave", FS)
+local S = FS.ShamanBuffs
+S.Start()
+local function shield() local v = S.Update(__now).shield; return v.mode, v.text, v.estimate end
+local function fight(orbsAfter)
+    __now = __now + 20
+    __auras.HELPFUL = { aura("Lightning Shield", { count = 3, duration = 600, expires = __now + 500, spellId = 324 }) }
+    fire("UNIT_AURA", "player")
+    local mode, text = shield()
+    check(mode == "on" and text == "3", "before the fight: " .. tostring(mode) .. " " .. tostring(text))
+    fire("PLAYER_REGEN_DISABLED")
+    __combat = true
+    __now = __now + 8
+    __auras.HELPFUL = orbsAfter and { aura("Lightning Shield", { count = orbsAfter, duration = 600, expires = __now + 500, spellId = 324 }) } or {}
+    fire("UNIT_AURA", "player")
+    mode, text = shield()
+    check(mode == "on" and text == "~3", "in the fight the last answer is an estimate: " .. tostring(mode) .. " " .. tostring(text))
+    -- the fight ends and the client takes a moment to say its auras are readable
+    __combat = false
+    __apiSecret = true
+    fire("PLAYER_REGEN_ENABLED")
+    __now = __now + 0.6                 -- past the hold the tile keeps after regen
+    __apiSecret = false                 -- readable now; the retry that reads the snapshot again has not run
+    mode, text = shield()
+    check(text ~= nil and text:sub(1, 1) == "~", "readable but not yet read again: the tile shows the old " .. tostring(text) .. " as fact")
+    table.remove(__timers, 1)[2]()      -- the retry reads the snapshot again
+    __now = __now + 1
+    return shield()
+end
+local mode, text = fight(nil)
+check(mode == "warn" and text == "SHIELD", "the shield fell off in the fight: " .. tostring(mode) .. " " .. tostring(text))
+mode, text = fight(1)
+check(mode == "on" and text == "1", "one orb left after the fight: " .. tostring(mode) .. " " .. tostring(text))
+"""),
     ("after combat the snapshot is retried a few times while the client still says secret", "", r"""
 boot()
 local PA = FS.PlayerAuras
@@ -966,6 +1039,7 @@ check(#visibleTiles(FS.buffsContainer) == 2, "both enchants should be polled")
 def run_case(name: str, setup: str, body: str, source: str, readable: str) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.globals().__HELPERS_SRC = HELPERS.read_text(encoding="utf-8")
+    lua.globals().__SHAMAN_SRC = SHAMANBUFFS.read_text(encoding="utf-8")
     lua.execute(MOCK)
     lua.globals().__SRC = source
     lua.globals().__READABLE_SRC = readable
