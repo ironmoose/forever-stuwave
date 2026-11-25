@@ -80,6 +80,7 @@ __unitEventThrows = false
 __registerThrows = false    -- plain RegisterEvent raises too (the fallback path fails as well)
 __cleuAttempts = 0          -- RegisterEvent calls naming COMBAT_LOG_EVENT_UNFILTERED (protected on Forever: must stay 0)
 __hasTotemSpell = false     -- the dump lists C_Secrets.ShouldTotemSpellBeSecret; the mock omits it
+__NS = {}                   -- the addon table the file is loaded with (FS): tests may hang CharBackdrop and TalentBgArt on it
 
 -- Secret sentinels. type() still reports the pretended type, but every operation raises
 -- SECRET_OP, so a forbidden touch either throws (and a pcall records the text) or fails.
@@ -850,6 +851,206 @@ function callsMoved(a, b)
     for k, v in pairs(b) do if a[k] ~= v then moved[#moved + 1] = k end end
     table.sort(moved)
     return table.concat(moved, ",")
+end
+
+-- `/fscheck reads` and `/fscheck panels` -----------------------------------------------------------------------------
+-- __units[token] = true: the unit exists (UnitExists stays plain in every mode, so the units are found; the reads
+-- themselves answer with sentinels in secret mode and raise in throw mode). KNOWN[594] makes Shadow Word: Pain the
+-- range spell. __casting / __channeling[token] = true: that unit is casting.
+function rframe()
+    if __rframe then return __rframe end
+    for _, f in ipairs(__frames) do
+        if f._scripts.OnEvent and f._events.UNIT_SPELLCAST_CHANNEL_START == true then
+            __rframe = f   -- kept: a stopped run drops the events but the frame stays the one to fire at
+            return f
+        end
+    end
+end
+function rfire(event, ...)
+    local f = rframe()
+    check(f, "no reads event frame")
+    local ok, err = pcall(f._scripts.OnEvent, f, event, ...)
+    check(ok, "reads handler threw on " .. event .. ": " .. tostring(err))
+end
+function rpull(dt)
+    __combat = true
+    rfire("PLAYER_REGEN_DISABLED")
+    advance(dt or 0)
+end
+function rcalm()
+    __combat = false
+    rfire("PLAYER_REGEN_ENABLED")
+end
+function reads() return ForeverSTUwaveDB.fscheck.reads end
+
+function readsMock()
+    __units = { player = true, target = true, party1 = true, party2 = true, pet = true, nameplate1 = true, nameplate2 = true }
+    __group = "party"
+    __casting, __channeling = {}, {}
+    KNOWN[594] = true
+    def("UnitExists", function(u) return __units[u] == true end)
+    def("IsInGroup", function() return __group ~= nil end)
+    def("IsInRaid", function() return __group == "raid" end)
+    def("GetNumGroupMembers", function() return 3 end)
+    def("UnitDetailedThreatSituation", function(who)
+        if who == "party1" then return false, 0, 35, 70, 12 end
+        return true, 3, 100, 255, 167
+    end, function() return SB, SN, SN, SN, SN end)
+    def("UnitThreatSituation", function() return 3 end, function() return SN end)
+    def("UnitThreatPercentageOfLead", function() return 100 end, function() return SN end)
+    def("UnitInRange", function() return true, true end, function() return SB, SB end)
+    def("UnitCastingInfo", function(u)
+        if __casting[u] then return "Frostbolt", "", 1, 1000, 3000, false, "cid", false, 116 end
+    end, function() return SS, SS, SN, SN, SN, SB, SS, SB, SN end)
+    def("UnitChannelInfo", function(u)
+        if __channeling[u] then return "Drain Life", "", 1, 1000, 6000, false, false, 689 end
+    end, function() return SS, SS, SN, SN, SN, SB, SB, SN end)
+    def("UnitCastingDuration", function(u) if __casting[u] then return durObj(2) end end, function() return ST end)
+    def("UnitChannelDuration", function(u) if __channeling[u] then return durObj(5) end end, function() return ST end)
+    -- bags: bag 2 is a soul bag (family 4), bag 3 is empty
+    NUM_BAG_SLOTS, NUM_TOTAL_EQUIPPED_BAG_SLOTS = 4, 5
+    Enum = Enum or {}
+    Enum.BagIndex = { Backpack = 0, ReagentBag = 5 }
+    Enum.CompressionMethod = { Deflate = 0, Zlib = 1, Gzip = 2 }
+    def("C_Container.GetContainerNumFreeSlots", function(bag) return 10 - bag, bag == 2 and 4 or 0 end, function() return SN, SN end)
+    def("C_Container.GetContainerNumSlots", function(bag) return 16 end, function() return SN end)
+    def("C_Container.GetBagName", function(bag) if bag ~= 3 then return "Bag" .. bag end end, function() return SS end)
+    def("C_Container.ContainerIDToInventoryID", function(bag) return 19 + bag end, function() return SN end)
+    def("GetInventoryItemID", function(_, slot) if slot ~= 22 then return 4000 + slot end end, function() return SN end)
+    def("C_Item.GetItemFamily", function(id) return id == 4021 and 4 or 0 end, function() return SN end)
+    -- pets
+    def("HasPetUI", function() return true, false end, function() return SB, SB end)
+    def("C_PetInfo.GetPetHappiness", function() return 3, 1, 1 end, function() return SN, SN, SN end)
+    def("C_PetInfo.GetPetLoyalty", function() return 2 end, function() return SN end)
+    def("UnitCreatureFamily", function() return "Cat" end, function() return SS end)
+    def("C_StableInfo.IsAtStableMaster", function() return false end, function() return SB end)
+    def("C_StableInfo.GetNumActivePets", function() return 2 end, function() return SN end)
+    def("C_StableInfo.GetNumStablePets", function() return 0 end, function() return SN end)
+    def("C_StableInfo.GetNumStableSlots", function() return 2 end, function() return SN end)
+    def("C_StableInfo.GetActivePetList", function() return { { name = "Rex", petNumber = 1 }, { name = "Fang", petNumber = 2 } } end,
+        function() return ST end)
+    def("C_StableInfo.GetStabledPetList", function() return {} end, function() return ST end)
+    def("C_StableInfo.GetStablePetInfo", function(slot)
+        if slot == 1 then return { name = "Rex", petNumber = 1 } end
+        if slot == 2 then return { name = "Fang", petNumber = 2 } end
+    end, function() return ST end)
+    def("GetCallPetSpellInfo", function(id) return id == 883, id end, function() return SB, SN end)
+    -- weapon enchants
+    def("GetWeaponEnchantInfo", function() return true, 1200000, 0, 7, false, 0, 0, 0 end,
+        function() return SB, SN, SN, SN, SB, SN, SN, SN end)
+    def("C_Item.GetWeaponEnchantInfo", function() return true, 1200000, 0, 7, false, 0, 0, 0 end,
+        function() return SB, SN, SN, SN, SB, SN, SN, SN end)
+    AuraContainerItemEnchantmentSlot = { MainHand = 1, OffHand = 2 }
+    CustomAuraContainerItemEnchantmentPlacement = { Before = 0, After = 1 }
+    -- roles: three trees (columns 0, 100, 200), a talent window with three headers
+    def("C_ClassTalents.GetActiveConfigID", function() return 11 end, function() return SN end)
+    def("C_Traits.GetConfigInfo", function() return { treeIDs = { 100 } } end, function() return ST end)
+    def("C_Traits.GetTreeInfo", function() return { ID = 100, name = "Shaman", hideSingleRankNumbers = true } end, function() return ST end)
+    def("C_Traits.GetTreeNodes", function() return { 1, 2, 3, 4, 5, 6, 7, 8, 9 } end, function() return ST end)
+    def("C_Traits.GetNodeInfo", function(_, id)
+        return { posX = ((id - 1) % 3) * 100, posY = id, activeRank = id % 2 == 0 and 1 or 0, subTreeID = ((id - 1) % 3) + 1 }
+    end, function() return ST end)
+    def("C_Traits.GetSubTreeInfo", function(_, id) return { ID = id, name = "Sub" .. id } end, function() return ST end)
+    def("GetNumSpecializations", function() return 3 end, function() return SN end)
+    def("C_SpecializationInfo.GetSpecialization", function() return 1 end, function() return SN end)
+    def("C_SpecializationInfo.GetSpecializationInfo", function(i)
+        if i <= 3 then return 500 + i, "Shaman", "A description that runs on and on and on and on and on and on and on", 1, "DAMAGER" end
+    end, function() return SN, SS, SS, SN, SS end)
+    def("GetSpecializationRole", function(i) if i <= 3 then return "DAMAGER" end end, function() return SS end)
+    def("GetSpecializationInfoForClassID", function(classId, i)
+        if i <= 3 then return classId * 10 + i, "Spec" .. i, "d", 1, i == 3 and "TANK" or "DAMAGER" end
+    end, function() return SN, SS, SS, SN, SS end)
+    def("GetClassInfo", function(id) return "Class" .. id, "TOKEN" .. id, id end, function() return SS, SS, SN end)
+    __NS.CharBackdrop = { TreePoints = function() return { 2, 5, 0 } end }
+    __NS.TalentBgArt = { sheets = { PRIEST = { "talentbg_priest_discipline", "talentbg_priest_holy", "talentbg_priest_shadow" } } }
+    -- encoding: a text serializer and reversible fakes for the rest
+    __encBreak = nil
+    local function ser(v)
+        if realType(v) == "table" then
+            local keys = {}
+            for k in pairs(v) do keys[#keys + 1] = k end
+            table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+            local out = {}
+            for _, k in ipairs(keys) do
+                out[#out + 1] = (realType(k) == "number" and "[" .. k .. "]" or "[" .. string.format("%q", k) .. "]") .. "=" .. ser(v[k])
+            end
+            return "{" .. table.concat(out, ",") .. "}"
+        elseif realType(v) == "string" then
+            return string.format("%q", v)
+        end
+        return tostring(v)
+    end
+    local function des(s) return loadstring("return " .. s)() end
+    local function encDef(name, plain, secret) def("C_EncodingUtil." .. name, plain, secret) end
+    for _, kind in ipairs({ "CBOR", "JSON" }) do
+        encDef("Serialize" .. kind, function(t) return ser(t) end, function() return SS end)
+        encDef("Deserialize" .. kind, function(s)
+            local t = des(s)
+            if __encBreak == "corrupt" then t.rows[3].name = "changed" end
+            return t
+        end)
+    end
+    encDef("CompressString", function(s, method) return "Z" .. string.sub(s, 1, math.floor(#s / 3)) .. "|" .. s end)
+    encDef("DecompressString", function(s, method)
+        local body = string.match(s, "^Z[^|]*|(.*)$")
+        if not body then error("not compressed") end
+        return body
+    end)
+    encDef("EncodeBase64", function(s) return (string.gsub(s, ".", function(c) return string.format("%02x", string.byte(c)) end)) end)
+    encDef("DecodeBase64", function(s) return (string.gsub(s, "%x%x", function(h) return string.char(tonumber(h, 16)) end)) end)
+end
+
+-- Aura container side of the reads check: AddAuraGroup builds two buttons per group through initializeFrame (as the
+-- engine does); a filter containing __rejectFilter raises the engine's own "Unknown aura filter component".
+function filterMock()
+    __groups, __rejectFilter = {}, nil
+    AuraUtil = { IsValidFilterString = function(f)
+        if __rejectFilter and string.find(f, __rejectFilter, 1, true) then return false, "Unknown aura filter component" end
+        return true
+    end }
+    __ACM.AddAuraGroup = function(self, key, filter, opts)
+        self._calls.AddAuraGroup = (self._calls.AddAuraGroup or 0) + 1
+        if __rejectFilter and string.find(filter, __rejectFilter, 1, true) then error("Unknown aura filter component: " .. filter) end
+        __groups[key] = filter
+        self._kids = self._kids or {}
+        for _ = 1, 2 do
+            local b = __newFrame("Button")
+            b._shown = true
+            self._kids[#self._kids + 1] = b
+            opts.initializeFrame(b)
+        end
+    end
+    __ACM.SetAuraGroupFilterString = function(self, key, filter)
+        self._calls.SetAuraGroupFilterString = (self._calls.SetAuraGroupFilterString or 0) + 1
+        __groups[key] = filter
+    end
+    __ACM.GetAuraGroupFrameCount = function() return 2 end
+    __ACM.GetChildren = function(self) return unpack(self._kids or {}) end
+end
+function aframe()
+    for _, f in ipairs(__frames) do if f._kind == "AuraContainer" then return f end end
+end
+
+-- Panels: each toggle flips its frames. __stubborn = the call opens the panel but a second call does not close it;
+-- __blockInCombat = the call raises in combat (as a protected panel does); __opens = how many times a toggle ran.
+function panelsMock()
+    __stubborn, __blockInCombat, __opens, __open = {}, false, {}, {}
+    for _, name in ipairs({ "CharacterFrame", "ReputationFrame", "PaperDollFrame", "ProfessionsFrame", "PlayerSpellsFrame", "CalendarFrame" }) do
+        __newFrame("Frame", name)
+    end
+    local function flip(key, names)
+        __opens[key] = (__opens[key] or 0) + 1
+        if __mode == "throw" then error("boom: toggle " .. key) end
+        if __blockInCombat and __combat then error("Interface action failed because of an AddOn: " .. key) end
+        local opening = not _G[names[1]]._shown
+        if not opening and __stubborn[key] then return end
+        for _, n in ipairs(names) do _G[n]._shown = opening end
+    end
+    ToggleCharacter = function(tab) flip("character:" .. tostring(tab), { "CharacterFrame", tab }) end
+    ToggleProfessionsBook = function() flip("professions", { "ProfessionsFrame" }) end
+    TogglePlayerSpellsFrame = function() flip("playerSpells", { "PlayerSpellsFrame" }) end
+    ToggleCalendar = function() flip("calendar", { "CalendarFrame" }) end
+    HideUIPanel = function(f) __hidden = (__hidden or 0) + 1; f._shown = false end
 end
 
 -- Walks the saved tree. Only plain strings, numbers and booleans may be stored; no
@@ -4102,13 +4303,611 @@ check(bottom >= __tcastTop + 30, "strip bottom " .. bottom .. " must clear the t
 )
 
 
+# --- /fscheck reads and /fscheck panels -------------------------------------------------------------------------------
+
+case("reads_usage_lists_both_commands_and_help_arms_nothing")(r"""
+runCmd("help")
+check(said("/fscheck reads"), "reads usage missing")
+check(said("/fscheck panels"), "panels usage missing")
+check(__apiCalls == 0 and #__frames == 0 and #__timers == 0, "help armed something")
+check(ForeverSTUwaveDB == nil, "help touched the SavedVariable")
+""")
+
+case("reads_solo_run_saves_every_out_of_combat_part_with_plain_values")(r"""
+readsMock(); filterMock()
+__group = nil
+__units = { player = true, target = true, nameplate1 = true, pet = true }
+__casting.target = true
+runCmd("reads")
+local run = reads().solo
+check(run, "no solo record")
+check(reads().lastMode == "solo", "lastMode")
+check(run.meta.mode == "solo" and run.meta.status == "armed" and run.meta.startedInCombat == false, "meta")
+check(run.meta.class == "PRIEST" and run.meta.buildNumber == "65000" and run.meta.canTestSecret == true, "class and build")
+local f = rframe()
+check(f, "no reads event frame")
+for _, e in ipairs({ "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START" }) do
+    check(f._events[e] == true, e .. " not registered")
+end
+check(said("saved the out of combat part (solo)"), "start line missing")
+local ooc = run.ooc
+
+-- 3. encoding round trip
+local enc = ooc.encoding
+check(enc.cbor.equal == true and enc.cbor.firstDifference == "none", "cbor round trip")
+check(enc.json.equal == true, "json round trip")
+local sz = enc.cbor.sizes
+check(sz.serialize > 1500 and sz.serialize < 4000, "payload is about 2 KB: " .. tostring(sz.serialize))
+check(sz.compress and sz.encode and sz.decode and sz.decompress == sz.serialize, "a size for every step")
+check(string.find(enc.apis, "SerializeCBOR=function", 1, true) and string.find(enc.apis, "EncodeHex=nil", 1, true), "apis: " .. enc.apis)
+check(enc.compressionMethod == "0", "method " .. enc.compressionMethod)
+
+-- 4. bags
+local bags = ooc.bags
+check(bags.numBagSlots == "4" and bags.numTotalEquippedBagSlots == "5" and bags.reagentBagIndex == "5", "bag counts")
+check(bags.bags.b0.free == "10,0" and bags.bags.b0.name == "Bag0" and bags.bags.b0.inventorySlot == nil, "backpack")
+check(bags.bags.b2.free == "8,4" and bags.bags.b2.family == "4" and bags.bags.b2.itemId == 4021, "soul bag family")
+check(bags.bags.b1.family == "0" and bags.bags.b5.free == "5,0", "other bags")
+check(bags.bags.b3.name == "none" and bags.bags.b3.itemId == "none" and bags.bags.b3.family == nil, "empty bag")
+
+-- 6. roles
+local roles = ooc.roles
+check(roles.class == "PRIEST" and roles.classId == 5, "class")
+local t = roles.trees
+check(t.configId == 11 and t.treeIds == "100" and t.nodeCount == 9 and t.columns == 3, "tree walk")
+check(t.split == "0,100" and t.points == "1,2,1" and t.top == 2, "points per tree " .. tostring(t.points))
+check(t.charBackdropPoints == "2,5,0", "the CharBackdrop path: " .. tostring(t.charBackdropPoints))
+check(t.treeInfo.name == "Shaman" and t.subTrees.s1.name == "Sub1" and string.find(t.nodeKeys, "posX", 1, true), "tree and sub tree fields")
+check(roles.talentArtSheets == "talentbg_priest_discipline,talentbg_priest_holy,talentbg_priest_shadow", "sheets")
+check(roles.headerNames == "absent: PlayerSpellsFrame", "headers: " .. tostring(roles.headerNames))
+check(roles.specs.count == "3" and roles.specs.role1 == "DAMAGER" and roles.specs.info4 == "none", "spec api")
+check(string.find(roles.specs.info1, "^501,Shaman,A description"), "spec info " .. roles.specs.info1)
+check(roles.byClass.c1.class == "Class1,TOKEN1,1" and roles.byClass.c1.s3 == "13,Spec3,d,1,TANK" and roles.byClass.c1.s4 == "none", "all classes")
+
+-- 2. range
+local r = ooc.range
+check(r.spell == "Shadow Word: Pain" and r.spellId == 594, "range spell " .. tostring(r.spell))
+check(r.byId == "true" and r.byName == "true" and r.globalIsSpellInRange == "nil", "range reads")
+check(r.unitInRangeTarget == "true,true" and r.unitInRangeParty1 == nil and r.inCombat == false, "unit range")
+
+-- 7. cast info of other units
+local c = ooc.casts
+check(c.target.exists == true and c.target.casting == "Frostbolt,,1,1000,3000,false,cid,false,116", "target cast " .. tostring(c.target.casting))
+check(c.target.castDuration == "table remaining=2" and c.target.channeling == "none" and c.target.channelDuration == "nil", "durations")
+check(c.focus.exists == false and c.focus.casting == "none" and c.nameplate1.exists == true, "focus and nameplate")
+
+-- 1. threat (solo: control reads only)
+local th = ooc.threat
+check(th.mobs.target == "D:true,3,100,255,167|S:3|L:100" and th.mobs.nameplate1 == th.mobs.target, "mob threat")
+check(th.members.player == th.mobs.target and th.members.party1 == nil and th.members.pet == th.mobs.target, "member threat")
+check(th.group.partyUnits == 0 and th.group.raidUnits == 0 and th.group.nameplateUnits == 1 and th.group.inGroup == "false", "group")
+check(th.mobsTally == "2 units, plain 14, secret 0, nil 0, failed calls 0", th.mobsTally)
+check(th.membersTally == "2 units, plain 14, secret 0, nil 0, failed calls 0", th.membersTally)
+check(th.predicates["ShouldUnitThreatStateBeSecret(player)"] == "false" and th.predicates["ShouldUnitThreatValuesBeSecret(player,target)"] == "false", "predicates")
+check(th.predicates["ShouldUnitThreatStateBeSecret(party1)"] == nil, "no party predicate solo")
+
+-- 8. pet
+local pet = ooc.pet
+check(pet.petExists == true and pet.infoHappiness == "3,1,1" and pet.globalHappiness == "absent" and pet.hasPetUI == "true,false", "pet reads")
+check(pet.stable.active.call == "table" and pet.stable.active.count == 2 and pet.stable.active.names == "Rex,Fang" and pet.stable.active.keys == "name,petNumber", "owned pets")
+check(pet.stable.stabled.count == 0 and pet.stable.slots.slot1 == "Rex" and pet.stable.slots.slot3 == "nil", "stable slots")
+check(pet.callPet.s883 == "true,883" and pet.callPet.s83242 == "false,83242", "call pet")
+
+-- 9. weapon enchants
+local w = ooc.weapon
+check(w.global == "true,1200000,0,7,false,0,0,0" and w.itemApi == w.global, "weapon enchant " .. tostring(w.global))
+check(w.engineSlots == "MainHand=1,OffHand=2" and w.enginePlacement == "After=1,Before=0" and w.engineSortMethod == "absent", "engine enchant enums")
+
+-- 10. aura container filters (out of combat, pointed at the player when solo)
+local af = ooc.auraFilters
+check(af.unit == "player" and af.grouped == false and af.setUnit == "ok" and af.setEnabled == "ok", "filter unit")
+check(af.dispellable.filter == "HARMFUL|RAID_PLAYER_DISPELLABLE" and af.dispellable.accepted == "ok" and af.dispellable.valid == "true", "dispellable filter")
+check(af.mine.filter == "HELPFUL|PLAYER" and af.mine.accepted == "ok" and af.mine.extra == false and af.raidInCombat.extra == true, "mine and extras")
+local ac = aframe()
+check(ac._shown == true and ac._args.SetUnit[1] == "player" and ac._args.SetAlpha[1] == 0, "container pointed at the player, faded, shown for the sample")
+advance(0.5)
+check(af.dispellable.frames == "2" and af.children.children == 10 and af.children.shown == 10 and af.inits == 10, "counts after the sample")
+check(ac._shown == false and ac._args.SetEnabled[1] == false, "container torn down out of combat")
+check(__groups.dispellable == "HARMFUL|RAID_PLAYER_DISPELLABLE" and __groups.raidInCombat == "HELPFUL|PLAYER|RAID_IN_COMBAT", "groups added")
+check(run.casts and #run.casts == 0 and next(run.combat) == nil, "no casts or samples yet")
+noOnUpdate()
+allHidden()
+""")
+
+case("reads_party_run_reads_every_member_and_mob_both_ways")(r"""
+readsMock(); filterMock()
+__units = { player = true, target = true, focus = true, party1 = true, party2 = true, pet = true,
+    nameplate1 = true, nameplate2 = true, nameplate3 = true }
+runCmd("reads")
+local run = reads().party
+check(run and run.meta.mode == "party", "party record")
+local th = run.ooc.threat
+check(th.members.party1 == "D:false,0,35,70,12|S:3|L:100", "party1 " .. tostring(th.members.party1))
+check(th.members.party2 == "D:true,3,100,255,167|S:3|L:100" and th.members.player and th.members.pet, "party2, player, pet")
+check(th.members.raid1 == nil and th.mobs.focus and th.mobs.nameplate3, "focus and nameplates")
+check(th.group.partyUnits == 2 and th.group.nameplateUnits == 3 and th.group.nameplatesStored == 3 and th.group.inGroup == "true", "group counts")
+check(th.group.numMembers == "3" and th.group.inRaid == "false", "group api")
+check(th.predicates["ShouldUnitThreatValuesBeSecret(party1,target)"] == "false" and th.predicates["ShouldUnitThreatStateBeSecret(party1)"] == "false", "party predicates")
+check(th.predicates["ShouldUnitThreatStateBeSecret(raid1)"] == nil, "no raid predicate in a party")
+check(th.mobsTally == "5 units, plain 35, secret 0, nil 0, failed calls 0", th.mobsTally)
+check(th.membersTally == "4 units, plain 28, secret 0, nil 0, failed calls 0", th.membersTally)
+check(run.ooc.range.unitInRangeParty1 == "true,true" and run.ooc.range.focusById == "true", "party range reads")
+local af = run.ooc.auraFilters
+check(af.unit == "party1" and af.grouped == true and aframe()._args.SetUnit[1] == "party1", "filters on a party unit")
+""")
+
+case("reads_raid_run_stores_all_members_and_caps_nameplates")(r"""
+readsMock(); filterMock()
+__group = "raid"
+__units = { player = true, target = true }
+for i = 1, 40 do __units["raid" .. i] = true; __units["nameplate" .. i] = true end
+runCmd("reads")
+local run = reads().raid
+check(run and run.meta.mode == "raid", "raid record")
+local th = run.ooc.threat
+local members, plates = 0, 0
+for _ in pairs(th.members) do members = members + 1 end
+for k in pairs(th.mobs) do if string.find(k, "^nameplate") then plates = plates + 1 end end
+check(members == 41, "player and 40 raid members: " .. members)
+check(plates == 12 and th.group.nameplateUnits == 40 and th.group.nameplatesStored == 12 and th.group.raidUnits == 40, "nameplates capped at 12 of 40")
+check(th.predicates["ShouldUnitThreatValuesBeSecret(raid1,target)"] == "false" and th.group.inRaid == "true", "raid predicate")
+check(run.ooc.auraFilters.unit == "player", "no party1 in a raid mock: the player")
+""")
+
+case("reads_secret_values_are_never_stored", "secret")(r"""
+readsMock(); filterMock()
+__units = { player = true, target = true, focus = true, party1 = true, pet = true, nameplate1 = true }
+__casting.target = true
+runCmd("reads")
+local run = reads().party
+local th = run.ooc.threat
+check(th.mobs.target == "D:secret,secret,secret,secret,secret|S:secret|L:secret", "secret mob threat " .. tostring(th.mobs.target))
+check(th.members.party1 == th.mobs.target, "secret member threat")
+check(th.mobsTally == "3 units, plain 0, secret 21, nil 0, failed calls 0", th.mobsTally)
+check(th.predicates["ShouldUnitThreatStateBeSecret(player)"] == "secret", "secret predicate")
+check(run.ooc.range.byId == "no known spell" and run.ooc.range.apiOnly == "secret" and run.ooc.range.unitInRangeTarget == "secret,secret", "secret range")
+check(run.ooc.casts.target.casting == "secret,secret,secret,secret,secret,secret,secret,secret,secret" and run.ooc.casts.target.castDuration == "secret", "secret cast info")
+check(run.ooc.bags.bags.b2.free == "secret,secret" and run.ooc.bags.bags.b2.inventorySlot == "none", "secret bags")
+check(run.ooc.pet.stable.active.call == "secret" and run.ooc.pet.infoHappiness == "secret,secret,secret" and run.ooc.pet.stable.slots.slot1 == "secret", "secret pet")
+check(run.ooc.weapon.global == "secret,secret,secret,secret,secret,secret,secret,secret", "secret weapon")
+check(run.ooc.roles.trees.configId == "none" and run.ooc.roles.byClass.c1.s1 == "secret,secret,secret,secret,secret", "secret roles")
+check(run.ooc.encoding.cbor.failedAt == "serialize" and run.ooc.encoding.cbor.error == "secret", "secret encoding")
+check(run.ooc.auraFilters.dispellable.accepted == "ok", "filters do not depend on a secret read")
+scan(ForeverSTUwaveDB.fscheck)
+rpull(4)
+check(run.combat.s1 and run.combat.s1.threat.mobs.target == th.mobs.target, "secret combat sample")
+rfire("UNIT_SPELLCAST_START", SS, "cid", 116)
+rfire("UNIT_SPELLCAST_START", SS, "cid", 116)
+rfire("UNIT_SPELLCAST_START", SS, "cid", 116)
+check(#run.casts == 2 and run.casts[1].unitSecret == true and run.casts[1].kind == "secret", "a secret unit is recorded twice at most")
+rfire("UNIT_SPELLCAST_START", "target", SS, SN)
+check(run.casts[3].casting == "secret,secret,secret,secret,secret,secret,secret,secret,secret" and run.casts[3].duration == "secret", "secret cast capture")
+check(run.casts[3].bar.durationSecret == true and run.casts[3].bar.setTimerDuration == "ok", "a secret duration object still goes to the bar")
+advance(1)
+scan(ForeverSTUwaveDB.fscheck)
+""")
+
+case("reads_every_api_throws", "throw")(r"""
+readsMock(); filterMock(); panelsMock()
+runCmd("reads")
+local run = reads().solo
+check(run and run.meta.status == "armed", "armed with every API throwing")
+check(run.ooc.encoding.cbor.failedAt == "serialize" and run.ooc.threat.mobsTally == "0 units, plain 0, secret 0, nil 0, failed calls 0", "errors are data")
+check(run.ooc.pet.stable.active.call == "error: error value was secret or unreadable", "pet list error kept as text")
+check(run.ooc.auraFilters.status and run.ooc.auraFilters.status ~= "", "filters part answered")
+check(run.ooc.bags.numBagSlots == "secret" and run.ooc.threat.group.nameplateUnits == 0, "plain counters survive")
+rpull(30)
+check(run.combat.s1 and run.combat.s1.at, "a sample is still taken: C_Timer.After throws, so one is taken at once")
+check(string.find(run.meta.timerError, "C_Timer.After unavailable", 1, true), "timer error kept")
+rfire("UNIT_SPELLCAST_START", "target", "cid", 1)
+rcalm()
+runCmd("reads off")
+check(run.meta.status == "stopped", "stopped")
+runCmd("panels")
+check(ForeverSTUwaveDB.fscheck.panels.ooc, "panels recorded")
+scan(ForeverSTUwaveDB.fscheck)
+""")
+
+case("reads_every_api_throws_but_issecretvalue_works", "throw")(r"""
+__issecretThrows = false
+readsMock(); filterMock(); panelsMock()
+runCmd("reads")
+local run = reads().solo
+check(string.find(run.ooc.encoding.cbor.error, "boom", 1, true), "error text kept: " .. tostring(run.ooc.encoding.cbor.error))
+check(string.find(run.ooc.bags.bags.b1.free, "boom", 1, true), "bag error kept")
+runCmd("panels")
+scan(ForeverSTUwaveDB.fscheck)
+""")
+
+case("reads_even_createframe_throws", "throw")(r"""
+__frameThrows = true
+readsMock()
+runCmd("reads")
+local run = reads().solo
+check(run.meta.frameError and run.meta.status == "done (no events)", "no event frame is recorded")
+check(string.find(run.ooc.auraFilters.status, "^skipped"), "unreadable combat state: nothing built: " .. tostring(run.ooc.auraFilters.status))
+check(__created == 0 or aframe() == nil, "no container made")
+""")
+
+case("reads_createframe_throws_in_plain_mode_still_records_the_filter_part")(r"""
+__frameThrows = true
+readsMock()
+runCmd("reads")
+local run = reads().party
+check(run.meta.frameError and run.meta.status == "done (no events)", "no event frame is recorded")
+check(run.ooc.auraFilters.status == "AuraContainer frame type refused", "filters part: " .. tostring(run.ooc.auraFilters.status))
+check(string.find(run.ooc.auraFilters.createFrame, "boom: CreateFrame", 1, true), "the refused build is recorded")
+check(run.ooc.threat and run.ooc.bags and run.ooc.encoding.cbor.equal == true, "the other parts ran")
+runCmd("reads off")
+check(said("nothing is running"), "nothing to stop")
+""")
+
+case("reads_container_is_not_built_when_the_combat_check_cannot_be_read")(r"""
+readsMock(); filterMock()
+__lockThrows = true
+runCmd("reads")
+local run = reads().party
+check(string.find(run.ooc.auraFilters.status, "^skipped"), "skipped: " .. tostring(run.ooc.auraFilters.status))
+check(aframe() == nil, "no container built, enabled or shown")
+check(run.ooc.threat and run.ooc.bags.numBagSlots == "4", "the other parts ran")
+""")
+
+case("reads_combat_samples_follow_the_pull_and_the_run_ends_with_it")(r"""
+readsMock(); filterMock()
+runCmd("reads")
+local run = reads().party
+local f = rframe()
+check(next(run.combat) == nil, "no combat sample yet")
+rpull(3.5)
+check(run.combat.s1 == nil, "sample before 4 s")
+advance(0.5)
+check(run.combat.s1 and run.combat.s1.at == 4, "s1 at 4 s: " .. tostring(run.combat.s1 and run.combat.s1.at))
+check(run.combat.s1.threat.inCombat == true and run.combat.s1.threat.mobs.target and run.combat.s1.range.byId == "true", "combat parts")
+check(run.combat.s1.pet and run.combat.s1.weapon and run.combat.s1.casts, "all five time sensitive parts")
+check(run.combat.s1.encoding == nil and run.combat.s1.bags == nil and run.combat.s1.roles == nil and run.combat.s1.auraFilters == nil, "static parts are not repeated")
+check(said("combat sample 1/3 saved"), "sample line")
+advance(8)
+check(run.combat.s2 and run.combat.s2.at == 12 and run.combat.s3 == nil, "s2 at 12 s")
+advance(12)
+check(run.combat.s3 and run.combat.s3.at == 24, "s3 at 24 s")
+check(run.meta.combatDone == true and f._events.PLAYER_REGEN_DISABLED == nil, "no more pulls watched")
+check(run.meta.status == "armed" and f._events.UNIT_SPELLCAST_START == true, "still listening until the fight ends")
+rcalm()
+check(run.meta.status == "done" and nevents(f) == 0, "done, every event dropped")
+check(said("done, /reload or log out to save"), "done line")
+local lines = #__printed
+advance(2000)
+check(run.meta.status == "done" and #__printed == lines, "late timers do nothing")
+noOnUpdate()
+allHidden()
+""")
+
+case("reads_a_pull_that_ends_before_the_sample_skips_it")(r"""
+readsMock(); filterMock()
+runCmd("reads")
+local run = reads().party
+rpull(2)
+rcalm()
+advance(30)
+check(run.combat.s1 == nil and run.meta.combatSkips == nil, "pull ended with the event: nothing recorded")
+-- a pull whose end event never arrives: the due timer sees the lockdown gone
+rpull(1)
+__combat = false
+advance(3)
+check(run.combat.s1 == nil and run.meta.combatSkips == 1, "skip counted: " .. tostring(run.meta.combatSkips))
+-- the next pull starts over; the older pull's timers do not count
+rpull(4)
+check(run.combat.s1 and run.combat.s1.at == 4, "next pull samples again")
+advance(8)
+check(run.combat.s2 and run.combat.s3 == nil, "one sample per due time, not one per pull")
+""")
+
+case("reads_started_in_combat_samples_from_the_command")(r"""
+readsMock(); filterMock()
+__combat = true
+runCmd("reads")
+local run = reads().party
+check(run.meta.startedInCombat == true and next(run.ooc) == nil and run.meta.oocSkipped, "out of combat part skipped in combat")
+check(aframe() == nil, "no container built in combat")
+check(said("armed in combat"), "armed line")
+advance(4)
+check(run.combat.s1 and run.combat.s1.at == 4, "s1 measured from the command")
+""")
+
+case("reads_cast_events_are_recorded_for_watched_units_and_capped")(r"""
+readsMock(); filterMock()
+__casting.target = true
+__channeling.nameplate2 = true
+runCmd("reads")
+local run = reads().party
+rfire("UNIT_SPELLCAST_START", "party1", "cid", 1)
+rfire("UNIT_SPELLCAST_START", "player", "cid", 1)
+rfire("UNIT_SPELLCAST_START", "mouseover", "cid", 1)
+rfire("UNIT_SPELLCAST_START", "partypet1", "cid", 1)
+check(#run.casts == 0, "other units are not recorded")
+rfire("UNIT_SPELLCAST_START", "target", "cid", 116)
+local c1 = run.casts[1]
+check(#run.casts == 1 and c1.kind == "target" and c1.event == "UNIT_SPELLCAST_START" and c1.inCombat == false, "target cast")
+check(c1.casting == "Frostbolt,,1,1000,3000,false,cid,false,116" and c1.duration == "table remaining=2", "cast reads")
+check(c1.bar and c1.bar.setTimerDuration == "ok" and c1.bar.durationType == "table" and c1.bar.durationSecret == false, "bar fed")
+rfire("UNIT_SPELLCAST_CHANNEL_START", "nameplate2", "cid", 689)
+local c2 = run.casts[2]
+check(c2.kind == "nameplate" and c2.channeling == "Drain Life,,1,1000,6000,false,false,689" and c2.duration == "table remaining=5", "channel capture")
+rfire("UNIT_SPELLCAST_START", "boss1", "cid", 1)
+rfire("UNIT_SPELLCAST_START", "focus", "cid", 1)
+check(run.casts[3].kind == "boss" and run.casts[4].kind == "focus", "boss and focus")
+advance(1)
+check(c1.bar.moved == "unreadable", "second bar sample taken: " .. tostring(c1.bar.moved))
+for _ = 1, 10 do rfire("UNIT_SPELLCAST_START", "target", "cid", 1) end
+check(#run.casts == 8 and said("cast 8/8 saved"), "capped at 8")
+local bars = 0
+for _, rec in ipairs(run.casts) do if rec.bar then bars = bars + 1 end end
+check(bars == 3, "only the first three captures feed a bar: " .. bars)
+advance(1)
+allHidden()
+""")
+
+case("reads_off_stops_every_timer_and_event")(r"""
+readsMock(); filterMock()
+runCmd("reads")
+local run = reads().party
+local f = rframe()
+rpull(1)
+__combat = false   -- the fight ends without its event: the stop must still leave nothing pending
+runCmd("reads")
+check(said("armed (party)"), "status line while armed")
+runCmd("reads off")
+check(run.meta.status == "stopped" and nevents(f) == 0, "stopped, no events")
+advance(100)
+check(run.combat.s1 == nil, "pending samples do nothing after a stop")
+check(aframe()._shown == false and aframe()._args.SetEnabled[1] == false, "container torn down by the stop")
+runCmd("reads off")
+check(said("reads: nothing is running"), "second stop")
+""")
+
+case("reads_timeout_ends_an_idle_run")(r"""
+readsMock(); filterMock()
+runCmd("reads")
+local run = reads().party
+local f = rframe()
+advance(1799)
+check(run.meta.status == "armed", "still armed")
+advance(2)
+check(run.meta.status == "timeout" and nevents(f) == 0, "timed out")
+""")
+
+case("reads_records_per_group_state_do_not_replace_each_other")(r"""
+readsMock(); filterMock()
+__group = nil
+runCmd("reads")
+reads().solo.marker = true
+runCmd("reads off")
+__group = "party"
+runCmd("reads")
+check(reads().solo.marker == true and reads().party and reads().lastMode == "party", "party run keeps the solo record")
+runCmd("reads off")
+__group = nil
+runCmd("reads")
+check(reads().solo.marker == nil and reads().party, "a second solo run replaces only the solo record")
+""")
+
+case("reads_results_survive_a_main_run_rearm_and_reset_clears_them")(r"""
+readsMock(); filterMock()
+runCmd("reads")
+local f = rframe()
+reads().party.marker = true
+runCmd("")
+check(ForeverSTUwaveDB.fscheck.reads.party.marker == true, "main run kept the reads")
+check(f._events.UNIT_SPELLCAST_START == true, "the reads events survive a main re-arm")
+runCmd("reset")
+check(ForeverSTUwaveDB.fscheck == nil, "reset clears every result")
+check(nevents(f) == 0 and aframe()._shown == false, "reset stops the reads run")
+""")
+
+case("reads_filter_rejected_by_the_engine_is_recorded")(r"""
+readsMock(); filterMock()
+__rejectFilter = "RAID_PLAYER_DISPELLABLE"
+runCmd("reads")
+local af = reads().party.ooc.auraFilters
+check(string.find(af.dispellable.valid, "^false,Unknown aura filter component"), "valid " .. af.dispellable.valid)
+check(string.find(af.dispellable.accepted, "Unknown aura filter component", 1, true), "rejected add " .. af.dispellable.accepted)
+check(af.mine.accepted == "ok" and af.raidInCombat.accepted == "ok", "the other filters still go in")
+advance(0.5)
+check(af.dispellable.frames == nil and af.mine.frames == "2", "only added groups are counted")
+""")
+
+case("reads_filters_without_the_template_or_the_frame_type_are_recorded")(r"""
+readsMock(); filterMock()
+__template = false
+runCmd("reads")
+check(reads().party.ooc.auraFilters.status == "template absent: CustomAuraContainerTemplate" and aframe() == nil, "template absent")
+runCmd("reads off")
+__template = true
+__acCreateThrows = true
+runCmd("reads")
+check(reads().party.ooc.auraFilters.status == "AuraContainer frame type refused" and aframe() == nil, "frame type refused")
+""")
+
+case("reads_rerun_reuses_the_container_and_its_groups")(r"""
+readsMock(); filterMock()
+runCmd("reads")
+advance(1)
+local ac = aframe()
+check(ac._calls.AddAuraGroup == 5, "five groups added")
+runCmd("reads off")
+runCmd("reads")
+advance(1)
+local count = 0
+for _, f in ipairs(__frames) do if f._kind == "AuraContainer" then count = count + 1 end end
+check(count == 1 and ac._calls.AddAuraGroup == 5 and ac._calls.SetAuraGroupFilterString == 5, "reused: no new frame, no second add")
+check(reads().party.ooc.auraFilters.dispellable.accepted == "ok", "second run accepted")
+""")
+
+case("reads_container_teardown_waits_for_the_end_of_combat")(r"""
+readsMock(); filterMock()
+runCmd("reads")
+local ac = aframe()
+__combat = true
+advance(0.5)
+check(ac._shown == true and ac._args.SetEnabled[1] == true and ac._args.SetAlpha[1] == 0, "combat: faded only")
+check(rframe()._events.PLAYER_REGEN_ENABLED == true, "waiting for the end of combat")
+rcalm()
+check(ac._shown == false and ac._args.SetEnabled[1] == false, "torn down when combat ended")
+""")
+
+case("reads_stop_in_combat_fades_the_container_and_regen_finishes_it")(r"""
+readsMock(); filterMock()
+runCmd("reads")
+local ac = aframe()
+local f = rframe()
+__combat = true
+runCmd("reads off")
+check(ac._shown == true and ac._args.SetEnabled[1] == true and ac._args.SetAlpha[1] == 0, "stop in combat only fades")
+check(f._events.PLAYER_REGEN_ENABLED == true, "the stop waits for the end of combat")
+rcalm()
+check(ac._shown == false and ac._args.SetEnabled[1] == false and nevents(f) == 0, "torn down, events dropped")
+""")
+
+case("reads_encoding_failures_are_recorded_step_by_step")(r"""
+readsMock(); filterMock()
+__encBreak = "corrupt"
+runCmd("reads")
+local enc = reads().party.ooc.encoding
+check(enc.cbor.equal == false and enc.cbor.firstDifference == "payload.rows.3.name: row3 vs changed", "mismatch " .. tostring(enc.cbor.firstDifference))
+runCmd("reads off")
+__encBreak = nil
+C_EncodingUtil.SerializeCBOR = nil
+C_EncodingUtil.DecodeBase64 = function() error("bad base64") end
+runCmd("reads")
+enc = reads().party.ooc.encoding
+check(enc.cbor.failedAt == "serialize" and enc.cbor.error == "absent", "absent serializer")
+check(enc.json.failedAt == "decode" and string.find(enc.json.error, "bad base64", 1, true), "failing decoder")
+check(enc.json.sizes.serialize and enc.json.sizes.encode and enc.json.sizes.decode == nil, "sizes up to the failure")
+""")
+
+case("reads_missing_pet_and_stable_apis_are_recorded_as_absent")(r"""
+readsMock(); filterMock()
+C_StableInfo = nil
+C_PetInfo = nil
+GetPetHappiness = function() return 2, 1, 1 end
+runCmd("reads")
+local pet = reads().party.ooc.pet
+check(pet.infoHappiness == "absent" and pet.globalHappiness == "2,1,1", "happiness reads")
+check(pet.stable.active.call == "absent" and pet.stable.slots.slot1 == "absent" and pet.stable.numActive == "absent", "stable absent")
+""")
+
+case("reads_roles_read_the_talent_window_headers_when_it_is_loaded")(r"""
+readsMock(); filterMock()
+local win = __newFrame("Frame", "PlayerSpellsFrame")
+local talents = __newFrame("Frame", "TalentsFrameMock")
+win.TalentsFrame = talents
+local function head(left, name)
+    local h = __newFrame("Frame")
+    h.MainRing, h.TextBackground = {}, {}
+    h.Name = { GetText = function() return name end }
+    h.GetLeft = function() return left end
+    return h
+end
+talents.GetChildren = function() return head(300, "Restoration"), head(100, "Elemental"), head(200, "Enhancement"), {} end
+runCmd("reads")
+check(reads().party.ooc.roles.headerNames == "Elemental,Enhancement,Restoration", "headers: " .. tostring(reads().party.ooc.roles.headerNames))
+""")
+
+case("reads_register_failures_are_kept")(r"""
+readsMock(); filterMock()
+__registerThrows = true
+runCmd("reads")
+local run = reads().party
+check(string.find(run.meta.registerError, "RegisterEvent", 1, true) and run.meta.status == "armed", "register errors kept: " .. tostring(run.meta.registerError))
+""")
+
+case("reads_never_open_a_panel")(r"""
+readsMock(); filterMock(); panelsMock()
+runCmd("reads")
+rpull(30)
+rcalm()
+check(next(__opens) == nil and __hidden == nil, "reads opened or hid a panel")
+check(ForeverSTUwaveDB.fscheck.panels == nil, "reads wrote a panels record")
+""")
+
+case("panels_open_each_panel_once_and_close_it_again")(r"""
+readsMock(); panelsMock()
+runCmd("panels")
+local p = ForeverSTUwaveDB.fscheck.panels.ooc
+check(p and p.inCombat == false and ForeverSTUwaveDB.fscheck.panels.combat == nil, "ooc record only")
+local rep = p.reputation
+check(rep.open == "ok" and rep.shown == "true" and rep.close == "ok" and rep.closed == "true" and rep.status == "tried", "reputation")
+check(p.paperDoll.status == "tried" and p.professions.status == "tried" and p.calendar.status == "tried" and p.playerSpells.status == "tried", "the others")
+check(p.spellBook.status == "absent: ToggleSpellBook", "absent call")
+check(__opens["character:ReputationFrame"] == 2 and __opens["character:PaperDollFrame"] == 2 and __opens.calendar == 2, "one open and one close each")
+check(p.leftOpen == "none", "nothing left open")
+for _, name in ipairs({ "CharacterFrame", "ReputationFrame", "PaperDollFrame", "ProfessionsFrame", "PlayerSpellsFrame", "CalendarFrame" }) do
+    check(_G[name]._shown == false, name .. " is still shown")
+end
+check(said("panels (ooc):") and said("run it again in combat"), "chat line")
+check(p.playerSpells.headerNames == "absent: TalentsFrame", "header read while the window is open: " .. tostring(p.playerSpells.headerNames))
+""")
+
+case("panels_a_stubborn_panel_is_hidden_by_the_fallback")(r"""
+readsMock(); panelsMock()
+__stubborn.professions = true
+runCmd("panels")
+local p = ForeverSTUwaveDB.fscheck.panels.ooc.professions
+check(p.close == "ok" and string.find(p.fallbackHide, "ProfessionsFrame:ok", 1, true) and p.closed == "true", "fallback " .. tostring(p.fallbackHide))
+check(ProfessionsFrame._shown == false and __hidden == 1, "hidden by HideUIPanel")
+check(ForeverSTUwaveDB.fscheck.panels.ooc.leftOpen == "none", "nothing left open")
+""")
+
+case("panels_leave_a_panel_that_was_already_open_alone")(r"""
+readsMock(); panelsMock()
+CharacterFrame._shown = true
+runCmd("panels")
+local p = ForeverSTUwaveDB.fscheck.panels.ooc
+check(p.reputation.status == "skipped: already open or unreadable" and p.paperDoll.status == "skipped: already open or unreadable", "skipped")
+check(__opens["character:ReputationFrame"] == nil and CharacterFrame._shown == true, "the open window was not touched")
+check(p.leftOpen == "none" and p.calendar.status == "tried", "the rest still ran")
+""")
+
+case("panels_in_combat_are_recorded_apart_and_blocked_calls_are_data")(r"""
+readsMock(); panelsMock()
+__combat = true
+__blockInCombat = true
+runCmd("panels")
+local panels = ForeverSTUwaveDB.fscheck.panels
+check(panels.combat and panels.combat.inCombat == true and panels.ooc == nil, "combat record")
+local rep = panels.combat.reputation
+check(string.find(rep.open, "Interface action failed", 1, true) and rep.shown == "false" and rep.closed == "true" and rep.close == nil, "blocked open " .. tostring(rep.open))
+check(panels.combat.leftOpen == "none" and said("panels (combat):"), "left open none")
+__combat = false
+__blockInCombat = false
+runCmd("panels")
+check(panels.ooc.reputation.open == "ok" and panels.combat.reputation.open, "the ooc run is kept beside the combat run")
+""")
+
+case("panels_unreadable_frames_are_left_alone", "secret")(r"""
+readsMock(); panelsMock()
+__FrameM.IsShown = function() return SB end
+runCmd("panels")
+local p = ForeverSTUwaveDB.fscheck.panels.ooc
+check(next(__opens) == nil and p.reputation.status == "skipped: already open or unreadable", "nothing toggled when IsShown is secret")
+scan(ForeverSTUwaveDB.fscheck)
+""")
+
+case("panels_survive_a_main_run_rearm")(r"""
+readsMock(); panelsMock()
+runCmd("panels")
+runCmd("")
+check(ForeverSTUwaveDB.fscheck.panels.ooc, "main run kept the panels record")
+""")
+
+
 def run_case(name: str, mode: str, body: str, source: str) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
     lua.execute(f'__mode = "{mode}"')
     lua.execute(f"__tcastTop = {TCAST_TOP}")
     try:
-        lua.eval("function(src) local fn = assert(loadstring(src, '@FSCheck.lua')); return fn('forever-stuwave', {}) end")(source)
+        lua.eval("function(src) local fn = assert(loadstring(src, '@FSCheck.lua')); return fn('forever-stuwave', __NS) end")(source)
     except LuaError as err:
         return f"FSCheck.lua failed to load: {err}"
     try:
@@ -4551,6 +5350,110 @@ def shaman_static_checks(source: str) -> int:
     return failures
 
 
+# `/fscheck reads` and `/fscheck panels` ------------------------------------------------------------------------------
+# The reads section (from its header to the class check machinery) is pinned by text, comments stripped:
+# no OnUpdate, no combat log, no aura read by index; only the four documented events; the engine aura container is
+# enabled, shown, pointed or fed groups only in the one part that refuses combat (RD.PartFilters) and un-shown only in
+# RD.TearDown; a panel opener or closer is named only by the panel table and the panel functions; and only the two
+# slash branches start a run or open a panel.
+READS_START = "-- /fscheck reads and /fscheck panels: what a group"
+READS_EVENTS = {"PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START"}
+READS_FORBIDDEN = PRIEST_FORBIDDEN + ("COMBAT_LOG", "C_UnitAuras", "UnitAuraSlots")
+READS_PANEL_HOMES = {"RD.AnyShown", "RD.HideFrame", "RD.TryPanel", "RD.Panels", "RD.HeaderNames"}
+READS_PROTECTED_HOMES = {"RD.PartFilters", "RD.TearDown"}
+READS_PROTECTED_STEP = re.compile(
+    r'GS\.Step\([^)]*"(?:SetEnabled|Show|Hide|SetUnit|AddAuraGroup|SetAuraGroupFilterString|UpdateAllAuras)"')
+
+
+def reads_section(source: str) -> str:
+    start = source.index(READS_START)
+    end = source.index(CLASS_CHECK_START)
+    return strip_lua_comments(source[start:end])
+
+
+def reads_violations(text: str) -> list[str]:
+    """Things the reads section must not do (text is comment-free Lua of the section)."""
+    bad = [f"{n} named" for n in READS_FORBIDDEN if n in text]
+    events = set(re.findall(r'"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)"', text))
+    bad += [f"unexpected event {e}" for e in sorted(events - READS_EVENTS)]
+    funcs, _outside = lua_functions(text)
+    for name, body in funcs.items():
+        if re.search(r"\bToggle[A-Z]\w*|\bShowUIPanel\b", body):
+            bad.append(f"a panel opener named in {name}")
+        if re.search(r"\bHideUIPanel\b", body) and name != "RD.HideFrame":
+            bad.append(f"HideUIPanel named in {name}")
+        if READS_PROTECTED_STEP.search(body) and name not in READS_PROTECTED_HOMES:
+            bad.append(f"a protected container call in {name}")
+        if re.search(r"\bRD\.(?:PANELS|Panels|TryPanel|HideFrame)\b", body) and name not in READS_PANEL_HOMES:
+            bad.append(f"the panel code reached from {name}")
+        if re.search(r"(?<!function )\bRD\.Start\b", body):
+            bad.append(f"RD.Start called from {name}")
+    return bad
+
+
+READS_MUST_CATCH = {
+    "a panel opener in a reader": "function RD.PartBags(sec)\n    ToggleCharacter()\nend",
+    "ShowUIPanel in a reader": "function RD.PartPet(sec)\n    ShowUIPanel(CharacterFrame)\nend",
+    "HideUIPanel outside HideFrame": "function RD.Stop(reason)\n    HideUIPanel(CharacterFrame)\nend",
+    "container enable in a reader": 'function RD.PartPet(sec)\n    GS.Step(RD.ac.frame, "SetEnabled", true)\nend',
+    "container show in the cast capture": 'function RD.OnCast(event)\n    GS.Step(RD.ac.frame, "Show")\nend',
+    "the panel table read by a part": "function RD.PartRoles(sec)\n    RD.TryPanel(RD.PANELS[1], sec)\nend",
+    "a panel run started by a handler": "function RD.Handle(event)\n    RD.Panels()\nend",
+    "a run started by a timer": "function RD.Due(id)\n    RD.Start()\nend",
+    "an OnUpdate poll": 'RD.frame:SetScript("OnUpdate", RD.Poll)',
+    "the combat log": 'RD.frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")',
+    "an extra event": 'RD.frame:RegisterEvent("UNIT_AURA")',
+    "an aura read by index": "local a = C_UnitAuras.GetAuraDataByIndex(unit, 1)",
+}
+READS_MUST_PASS = {
+    "the teardown": 'function RD.TearDown()\n    GS.Step(ac.frame, "SetEnabled", false)\n    GS.Step(ac.frame, "Hide")\nend',
+    "the filter part": 'function RD.PartFilters(sec)\n    GS.Step(frame, "SetUnit", who)\n    GS.Step(frame, "Show")\nend',
+    "the panel closer": "function RD.HideFrame(name)\n    pcall(HideUIPanel, panel)\nend",
+    "the panel runner": "function RD.Panels()\n    RD.TryPanel(RD.PANELS[1], rec)\nend",
+}
+
+
+def reads_static_checks(source: str) -> int:
+    failures = 0
+    text = reads_section(source)
+    bad = reads_violations(text)
+    missed = [k for k, v in READS_MUST_CATCH.items() if len(reads_violations(text + "\n" + v)) <= len(bad)]
+    noisy = [k for k, v in READS_MUST_PASS.items() if reads_violations(v)]
+    if bad or missed or noisy:
+        failures += 1
+        print(f"FAIL  static: reads section: {bad}; forms NOT caught {missed}; legal forms wrongly flagged {noisy}")
+    else:
+        print(f"ok    static: the reads section registers only its four events, reads no aura by index, touches the aura container "
+              f"only in the filter part and its teardown, and names a panel opener only in the panel functions "
+              f"({len(READS_MUST_CATCH)} forms caught, {len(READS_MUST_PASS)} legal forms pass)")
+    raw = raw_arg_violations(text)
+    missed = [inj for inj in RAW_INJECTIONS if len(raw_arg_violations(text + "\n    " + inj)) != 1]
+    if raw or missed:
+        failures += 1
+        print(f"FAIL  static: raw values in the reads section: compared or truth-tested {raw}; injections NOT caught {missed}")
+    else:
+        print("ok    static: no raw event argument or API return is compared or truth-tested in the reads section")
+    starts = re.findall(r"(?<!function )\bRD\.Start\(\)", source)
+    opens = re.findall(r"(?<!function )\bRD\.Panels\(\)", source)
+    branch_start = re.search(r'elseif arg == "reads" then\s+if RD\.live then\s+Say\([^\n]*\)\s+else\s+RD\.Start\(\)\s+end', source)
+    branch_panels = re.search(r'elseif arg == "panels" then\s+RD\.Panels\(\)', source)
+    if len(starts) == 1 and len(opens) == 1 and branch_start and branch_panels:
+        print("ok    static: RD.Start and RD.Panels are each called from exactly one place, their own slash branch")
+    else:
+        failures += 1
+        print(f"FAIL  static: RD.Start calls {len(starts)}, RD.Panels calls {len(opens)}, "
+              f"reads branch {bool(branch_start)}, panels branch {bool(branch_panels)}")
+    reset = source[source.index("local function Reset(keepGunsight)"):source.index("local function SavedResults()")]
+    kept = re.search(r"local KEPT_RESULTS = \{([^}]*)\}", source)
+    kept_names = re.findall(r'"(\w+)"', kept.group(1)) if kept else []
+    if 0 <= reset.find('RD.Stop("reset", true)') < reset.find("GS.Disarm()") and {"reads", "panels"} <= set(kept_names):
+        print("ok    static: /fscheck reset stops the reads run before the gunsight teardown, and a main re-arm keeps reads and panels")
+    else:
+        failures += 1
+        print(f"FAIL  static: Reset must call RD.Stop before GS.Disarm and keep reads and panels (kept {kept_names})")
+    return failures
+
+
 def static_checks(source: str) -> int:
     failures = 0
     priest = priest_section(source)
@@ -4572,6 +5475,7 @@ def static_checks(source: str) -> int:
         print("ok    static: the class check sections read no aura by index or slot")
     failures += cleu_register_check(CLEU_SOURCE_DIR)
     failures += shaman_static_checks(source)
+    failures += reads_static_checks(source)
     hot = hot_section(source)
     leaked = [n for n in HOT_FORBIDDEN if n in hot]
     if leaked:
