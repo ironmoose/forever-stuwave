@@ -1038,6 +1038,58 @@ function T.cast_bars_on_builds_both_bars_and_dims_the_stock_ones_as_before()
     for _, name in ipairs(CAST_BLIZZARD) do yes(TouchesOn(name) ~= "", name .. " dimmed") end
 end
 
+local AURAS_FILE = "Modules/Auras/Buffs.lua"
+local AURAS_BLIZZARD = { "BuffFrame", "DebuffFrame", "TemporaryEnchantFrame" }
+
+function T.buffs_off_builds_none_of_its_frames_and_leaves_the_stock_frames_alone()
+    Boot({ off = { "m.auras" }, watch = AURAS_BLIZZARD })
+    loaded(AURAS_FILE)
+    eq(FS.ModuleSwitch.Built("m.auras"), false)
+    eq(BuiltBy(AURAS_FILE), 0, "no frame made after the files loaded")
+    no(MadeNamed("ForeverSTUwaveBuffsContainer"))
+    no(MadeNamed("ForeverSTUwaveDebuffsContainer"))
+    eq(FS.buffsContainer, nil)
+    eq(FS.debuffsContainer, nil)
+    for _, name in ipairs(AURAS_BLIZZARD) do eq(TouchesOn(name), "", name .. " untouched") end
+end
+
+function T.buffs_off_keeps_the_snapshot_api_and_says_it_is_frozen_so_a_reader_never_sees_a_missing_buff()
+    Boot({ off = { "m.auras" }, watch = AURAS_BLIZZARD })
+    local A = FS.PlayerAuras
+    eq(type(A), "table", "FS.PlayerAuras stays defined")
+    local snap = A.Get()
+    eq(type(snap), "table"); eq(#snap.buffs, 0); eq(#snap.debuffs, 0)
+    eq(A.IsFrozen(), true, "never refreshed, so a reader must treat it as unknown")
+    eq(A.IsEngineDrawn(), false)
+    loaded(AURAS_FILE)
+end
+
+function T.buffs_on_builds_both_containers_and_dims_the_stock_frames_as_before()
+    Boot({ watch = AURAS_BLIZZARD })
+    loaded(AURAS_FILE)
+    eq(FS.ModuleSwitch.Built("m.auras"), true)
+    yes(MadeNamed("ForeverSTUwaveBuffsContainer"))
+    yes(MadeNamed("ForeverSTUwaveDebuffsContainer"))
+    yes(FS.buffsContainer and FS.debuffsContainer)
+    for _, name in ipairs({ "BuffFrame", "DebuffFrame" }) do yes(TouchesOn(name) ~= "", name .. " dimmed") end
+    eq(FS.PlayerAuras.IsFrozen(), false, "a built module is as frozen as the client says (readable here)")
+end
+
+function T.the_shaman_shield_tile_shows_unknown_not_missing_while_buffs_are_off()
+    Boot({ off = { "m.auras" }, watch = AURAS_BLIZZARD })
+    yes(type(FS.ShamanBuffs) == "table" and type(FS.ShamanBuffs.Update) == "function", "the reader is loaded")
+    local view = FS.ShamanBuffs.Update(200)
+    yes(view and view.shield, "a view")
+    eq(view.shield.mode, "hollow", "a hollow ? while the snapshot is not kept")
+    eq(view.shield.text, "?")
+end
+
+function T.the_shaman_shield_tile_still_says_missing_while_buffs_are_on()
+    Boot({})
+    local view = FS.ShamanBuffs.Update(200)
+    eq(view.shield.mode, "warn", "unchanged with the module on")
+end
+
 return T
 """
 
