@@ -25,6 +25,48 @@ local SLIDER_BAR_H = 2          -- the rail and fill of a slider are two units t
 local MENU_ITEM_H = S.MENU_ROW_H
 
 -------------------------------------------------------------------------------
+-- Pixel arrows
+-------------------------------------------------------------------------------
+
+-- The arrows of this window are drawn, not typed. The bundled fonts (the window's Mononoki included) carry neither U+25B8 nor
+-- U+25BE, the prototype's small triangles, and the ASCII stand-ins read as what they are: ">" is a greater-than sign and "v" a
+-- letter. So an arrow is a few rects ({ x, y, w, h } from the glyph's top left, one run per column or row), centred on a host
+-- frame so every edge lands on a whole unit: left and right are 4 by 8, up and down 8 by 4. Used by the Order arrows, the tab
+-- mark, the section chevrons and the Dropdown caret.
+local ARROW_W, ARROW_H = 4, 8   -- the horizontal arrows' size; the tab mark frame takes it
+local ARROW_RUNS = {
+    left = { { 0, 3, 1, 2 }, { 1, 2, 1, 4 }, { 2, 1, 1, 6 }, { 3, 0, 1, 8 } },
+    right = { { 0, 0, 1, 8 }, { 1, 1, 1, 6 }, { 2, 2, 1, 4 }, { 3, 3, 1, 2 } },
+    up = { { 3, 0, 2, 1 }, { 2, 1, 4, 1 }, { 1, 2, 6, 1 }, { 0, 3, 8, 1 } },
+    down = { { 0, 0, 8, 1 }, { 1, 1, 6, 1 }, { 2, 2, 4, 1 }, { 3, 3, 2, 1 } },
+}
+local ARROW_SIZE = { left = { 4, 8 }, right = { 4, 8 }, up = { 8, 4 }, down = { 8, 4 } }
+local ARROW_DIS = { 0.361, 0.329, 0.502, 1 }   -- the window's dim violet (--dis)
+
+local function NewArrowGlyph(host, direction)
+    local runs, size = ARROW_RUNS[direction], ARROW_SIZE[direction]
+    if not runs then error("arrow direction '" .. tostring(direction) .. "' is not left, right, up or down", 2) end
+    local w, h = size[1], size[2]
+    local glyph = { textures = {}, direction = direction, width = w, height = h }
+    for _, r in ipairs(runs) do
+        local t = host:CreateTexture(nil, "OVERLAY", nil, 1)
+        t:SetSize(r[3], r[4])
+        t:SetPoint("TOPLEFT", host, "CENTER", -w / 2 + r[1], h / 2 - r[2])
+        glyph.textures[#glyph.textures + 1] = t
+    end
+    function glyph.SetColor(color)
+        for _, t in ipairs(glyph.textures) do t:SetColorTexture(color[1], color[2], color[3], color[4] or 1) end
+    end
+    function glyph.SetShown(shown)
+        for _, t in ipairs(glyph.textures) do t:SetShown(shown) end
+    end
+    return glyph
+end
+I.NewArrowGlyph, I.ARROW_W, I.ARROW_H = NewArrowGlyph, ARROW_W, ARROW_H
+
+local CHEV_CELL = 8   -- the square a chevron or caret is centred in; the chevron's is the gutter the page leaves left of the content
+
+-------------------------------------------------------------------------------
 -- Rows
 -------------------------------------------------------------------------------
 
@@ -300,15 +342,31 @@ function UI.Section(content, o)
     sec.header, sec.meta, sec.text = header, meta, text
     header.fsSection = sec
     if sec.foldable then
-        local chevron = Label(header, sec.folded and ">" or "v", S.SMALL, C.cyan)
-        chevron:SetPoint("LEFT", header, "LEFT", -12, 0)
-        sec.chevron = chevron
-        header:SetScript("OnEnter", function() Theme.ApplyMono(text, S.TEXT, C.cyan) end)
-        header:SetScript("OnLeave", function() Theme.ApplyMono(text, S.TEXT, C.violet) end)
+        -- The fold chevron (the prototype's .chev): a pixel triangle in the 8 unit gutter the page's clip leaves left of the
+        -- content, pointing right while folded and down while open. Dim violet while folded, cyan while the header is hovered,
+        -- and nothing while it is open and idle. The player's own click flips it; a search jump that opens the section calls
+        -- sec.PaintChevron().
+        local cell = CreateFrame("Frame", nil, header)
+        cell:SetSize(CHEV_CELL, CHEV_CELL)
+        cell:SetPoint("LEFT", header, "LEFT", -CHEV_CELL, 0)
+        cell.fsGlyphs = { right = NewArrowGlyph(cell, "right"), down = NewArrowGlyph(cell, "down") }
+        sec.chevron = cell
+        local lit = false
+        function sec.PaintChevron()
+            local folded = sec.folded == true
+            cell.fsGlyphs.right.SetShown(folded)
+            cell.fsGlyphs.down.SetShown(not folded)
+            cell.fsGlyph = folded and cell.fsGlyphs.right or cell.fsGlyphs.down
+            cell.fsGlyph.SetColor(lit and C.cyan or ARROW_DIS)
+            cell:SetShown(folded or lit)
+        end
+        sec.PaintChevron()
+        header:SetScript("OnEnter", function() lit = true; Theme.ApplyMono(text, S.TEXT, C.cyan); sec.PaintChevron() end)
+        header:SetScript("OnLeave", function() lit = false; Theme.ApplyMono(text, S.TEXT, C.violet); sec.PaintChevron() end)
         header:SetScript("OnClick", function()
             sec.folded = not sec.folded
             CW.SetFolded(id, sec.folded)
-            chevron:SetText(sec.folded and ">" or "v")
+            sec.PaintChevron()
             CW.RefreshScroll()
         end)
     end
@@ -995,8 +1053,13 @@ function UI.Dropdown(content, o)
     b:SetPoint("RIGHT", row, "RIGHT", 0, 0)
     b.fsLabel:ClearAllPoints()
     b.fsLabel:SetPoint("LEFT", b, "LEFT", 10, 0)
-    local chevron = Label(b, "v", S.SMALL, C.cyan)
-    chevron:SetPoint("RIGHT", b, "RIGHT", -8, 0)
+    -- The caret is the prototype's small down triangle, drawn (see Pixel arrows). Its cell is a child of the button, so the
+    -- button's own dimming while it is disabled takes the caret with it.
+    local caretCell = CreateFrame("Frame", nil, b)
+    caretCell:SetSize(CHEV_CELL, CHEV_CELL)
+    caretCell:SetPoint("RIGHT", b, "RIGHT", -8, 0)
+    b.fsCaret = NewArrowGlyph(caretCell, "down")
+    b.fsCaret.SetColor(C.cyan)
     HoverStyle(b, C.violet)
     b:SetScript("OnClick", function(self)
         if not self:IsEnabled() then return end
@@ -1117,36 +1180,8 @@ function UI.Text(content, fn)
     return block
 end
 
--- The arrows on an Order row are drawn, not typed: the client fonts have no triangles, so "^" and "v" read as letters. Each is
--- a 4 by 8 unit triangle pointing along the bar, one unit wide rect per column ({ x, y, w, h }, y from the top), centred on its
--- button so every edge lands on a whole unit.
-local ARROW_W, ARROW_H = 4, 8
-local ARROW_RUNS = {
-    left = { { 0, 3, 1, 2 }, { 1, 2, 1, 4 }, { 2, 1, 1, 6 }, { 3, 0, 1, 8 } },
-    right = { { 0, 0, 1, 8 }, { 1, 1, 1, 6 }, { 2, 2, 1, 4 }, { 3, 3, 1, 2 } },
-}
-
-local function NewArrowGlyph(button, direction)
-    local glyph = { textures = {}, direction = direction }
-    for _, r in ipairs(ARROW_RUNS[direction]) do
-        local t = button:CreateTexture(nil, "OVERLAY", nil, 1)
-        t:SetSize(r[3], r[4])
-        t:SetPoint("TOPLEFT", button, "CENTER", -ARROW_W / 2 + r[1], ARROW_H / 2 - r[2])
-        glyph.textures[#glyph.textures + 1] = t
-    end
-    function glyph.SetColor(color)
-        for _, t in ipairs(glyph.textures) do t:SetColorTexture(color[1], color[2], color[3], color[4] or 1) end
-    end
-    function glyph.SetShown(shown)
-        for _, t in ipairs(glyph.textures) do t:SetShown(shown) end
-    end
-    return glyph
-end
-I.NewArrowGlyph, I.ARROW_W, I.ARROW_H = NewArrowGlyph, ARROW_W, ARROW_H
-
 -- The prototype's .mv: a plain arrow is cyan on the ink fill, hover lights the ring and lifts the fill, pressed darkens the
 -- fill, disabled takes the dim violet glyph on the darkest fill and ring (--dis, --disfill, --disedge) and answers nothing.
-local ARROW_DIS = { 0.361, 0.329, 0.502, 1 }
 local ARROW_DIS_FILL = { 0.039, 0.024, 0.078, 1 }
 local ARROW_DIS_EDGE = { 0.165, 0.094, 0.275, 1 }
 local ARROW_PRESSED = { 0.024, 0.133, 0.165, 1 }
