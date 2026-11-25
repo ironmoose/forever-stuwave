@@ -11,7 +11,14 @@ These checks pin that:
     FULLSCREEN_DIALOG frame on UIParent that is never anchored to the frame it covers;
   * a drop converts back to layout x/y for scaled CENTER entries and unscaled TOPLEFT
     entries at two UI scales and lands the frame on the same screen point;
-  * snap, grid size, arrow and Shift+arrow nudges, Esc, right-click reset and reset all;
+  * snap, grid size, arrow and Shift+arrow nudges, Esc, the right click menu's Reset position and reset all;
+  * the snap grid: lines on the places Snap rounds to (per picked piece), one whole pixel thick, a brighter centre cross, a
+    step change, snap off and Show grid off, strata below the handles, gone on every way out;
+  * the position panel: fields that follow nudges and drags, typed X / Y in px or grid units committed through the drop's
+    path, refused input, clamping, Esc and Tab, the origin tip, provider pieces (tracker, raid, pet);
+  * the right click menu: at the cursor, closes on a click elsewhere or Esc, Settings calls Open(page, tab, row) from the
+    map (every handle id has an entry, rows exist in the window's registry when it has one), greyed for pieces with none,
+    Set position focuses X, the editor drops under the config window while it is up;
   * pet, chat and minimap special cases;
   * the Layout page registers when FS.ConfigWindow exists and is skipped cleanly when not;
   * a DONE panel shows only while editing, and DONE or Esc reopens the page that started the editor
