@@ -178,6 +178,7 @@ def _threat_stub(rt, status="3", scaled="100"):
 
 def _check_party_aggro():
     rt = _party()
+    rt.execute("FS.Config.Set('bars.party.threat', true)")   # off by default: the ring is a new look in fights
     row = P._party1(rt)
     ring = row.boxAggro.ring
     _threat_stub(rt)
@@ -246,6 +247,7 @@ def _check_party_preview():
     rt.execute("""
         local stage = CreateFrame('Frame', nil, UIParent)
         __pv = FS.PartyFrames.NewStylePreview(stage)
+        FS.Config.Set('bars.party.threat', true)
         FS.Config.Set('bars.party.threatPct', true)
         __pv.Restyle()
     """)
@@ -265,7 +267,7 @@ def _check_party_preview():
 def _raid(n=10, cls="PRIEST"):
     rt = R._client(player_class=cls)
     R._roster(rt, n)
-    rt.execute("FS.Config.Set('bars.raid.threat', true)")   # the default
+    rt.execute("FS.Config.Set('bars.raid.threat', true)")   # off by default; these checks need the ring
     return rt
 
 
@@ -431,6 +433,7 @@ def _check_raid_bar_heights():
 
 def _check_raid_fill_and_aggro():
     rt = _raid_rt()
+    rt.execute("FS.Config.Set('bars.raid.threat', true)")
     parts = R._parts(rt, 3)
     rt.execute("FS.Config.Set('bars.raid.bgAlpha', 40)")
     assert close(parts.fill.shown / 1000, 0.40, 1e-3), parts.fill.shown
@@ -452,7 +455,7 @@ def _check_raid_preview():
     """The Style tab's raid is the real cell code on sample members: markers, the debuff edge, the ring and the share show
     through the same switches."""
     rt = _raid_rt()
-    rt.execute("FS.Config.Set('bars.raid.mkBuff', true); FS.Config.Set('bars.raid.threatPct', true)")
+    rt.execute("FS.Config.Set('bars.raid.mkBuff', true); FS.Config.Set('bars.raid.threat', true); FS.Config.Set('bars.raid.threatPct', true)")
     assert rt.eval("FS.RaidFrames.Preview.Show()") is True
     R._pv_size(rt, 10)
     marks = sum(len(_marks(R._pv_parts(rt, i))) for i in range(1, 11))

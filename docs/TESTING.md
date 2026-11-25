@@ -430,7 +430,7 @@ Setup: a group of two or more (a raid for the Raid frames lines), a Priest or an
 4. A healer who touched nothing still sees the percent. Pick Missing on Roles, Healer, Health text: the missing amount (a style like "-880") shows on a damaged member, gone at full health, with "Dead" still shown on a downed member. Roles, Healer, Health text and Style, Text change it; setting the Style Text greys the Roles row with its reason.
 5. Markers: My heal over time (a square in the corner after your heal over time lands, held through a fight), Debuff border, Debuff markers (Ones I can remove or All, Magic, Curse, Poison, Disease) and Missing buff markers, with Marker size and Corner. Look at the markers over the health text.
 6. Cleanse and missing buffs: Alert icons, Side, Icon size, Most icons per row, Debuffs you can cleanse and one switch per buff of your class. Try the right side and 32 px.
-7. Aggro: the ring and the share, as in Unit Frames 6.
+7. Aggro: off for a party that never touched it (no ring in a fight, as today). Turn Aggro status on: the ring and the share, as in Unit Frames 6.
 8. Compare the preview with a real row.
 
 ### 4. Frames: Raid frames (in a raid)

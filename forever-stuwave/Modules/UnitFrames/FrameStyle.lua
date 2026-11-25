@@ -67,11 +67,11 @@ local PER_FRAME = {
     boss = { w = 210 },
     party = {
         w = 187, hpH = 9, mpH = 9, hpStyle = "laser", mpStyle = "laser", hpFmt = "percent", mpFmt = "none",
-        hpTs = 14, mpTs = 14, nameSize = 10.5, iconSize = 16, levelSize = 8.5, threat = true,
+        hpTs = 14, mpTs = 14, nameSize = 10.5, iconSize = 16, levelSize = 8.5,
     },
     raid = {
         w = 84, hpH = 6, mpH = 2, bgAlpha = 85, hpFmt = "none", raidFmt = "low", mpFmt = "none", hpTs = 7.5, mpTs = 7.5,
-        nameSize = 8.5, threat = true,
+        nameSize = 8.5,
     },
     pet = {
         w = 134, hpH = 7, mpH = 7, bgAlpha = 47, hpStyle = "laser", mpStyle = "laser", hpTs = 7.5, mpTs = 7.5,
