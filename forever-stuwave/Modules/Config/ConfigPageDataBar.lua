@@ -5,11 +5,10 @@
 -- leaves only the value), with sample values. Its measures are the ones DataBar.lua keeps to itself, copied here under the
 -- same names (tools/databarpage-harness.py reads them back out of DataBar.lua, so a change there fails the check).
 --
--- Each row is UI.Order (the switch, a title box, the two arrows) with what the segment ticket adds on top: the live rename
--- while typing, the box letting go of the keyboard (Enter, Esc, Tab, a click elsewhere, the window or tab hiding), the
--- ON / OFF word, the changed dot and reset, a disabled switch with its reason in the ? tip, and the rows re-seating in the
--- bar's order after a move. Every change goes through FS.DataBarSegments, so the bar re-lays out live and the band follows
--- the same refresh. Everything drawn here is pending owner review.
+-- Each row is UI.Order (the switch, a title box, the two arrows), which carries the live rename, the lock on the last switch
+-- and the focus release itself; this page supplies the data and the one thing the builder cannot know, how a move re-seats
+-- the rows. Every change goes through FS.DataBarSegments, so the bar re-lays out live and the band follows the same refresh.
+-- Everything drawn here is pending owner review.
 
 local _, FS = ...
 
@@ -253,78 +252,6 @@ end
 -- The rows
 -------------------------------------------------------------------------------
 
--- A tooltip for a small control: the text, at the right of it. A disabled control says nothing.
-local function Hint(button, text)
-    button:HookScript("OnEnter", function(self)
-        if not self:IsEnabled() then return end
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(text, 1, 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    button:HookScript("OnLeave", function() GameTooltip:Hide() end)
-end
-
--- What UI.Order does not do on its own. `edit` is the title box.
---   * typing renames the title on the bar at once (userInput only: the refresh that puts text back is not a keystroke)
---   * focus: the box shows a cyan edge, selects its text, and is the one box with the keyboard (I.SliderFocused: a click
---     anywhere else, a click on the window and hiding the window let go of it); Enter and Esc are UI.Order's, Tab leaves too,
---     and so does the box hiding (another page, another tab)
---   * letting go refreshes, so the box shows the title as stored (cut to ten, bars and control characters gone)
---   * the ON / OFF word, the changed dot and reset, hints on the arrows
---   * the switch is disabled while the model says `lock` (the last one on, or a segment this client cannot show) and the
---     title box follows the row's state
-local function Dress(row, rec, key)
-    local Seg = rec.Seg
-    local edit, up, down, toggle = row.fsTitleBox, row.fsUp, row.fsDown, row.control
-    local holder = edit:GetParent()
-
-    local state = I.Label(row, "OFF", S.SMALL, C.line)
-    state:SetWidth(S.STATE_W)
-    state:SetJustifyH("RIGHT")
-    state:SetPoint("RIGHT", toggle, "LEFT", -S.CTL_GAP, 0)
-    down:ClearAllPoints()
-    down:SetPoint("RIGHT", state, "LEFT", -S.CTL_GAP, 0)
-
-    local edges = I.Outline(holder, C.cyan, 1)
-    for _, edge in ipairs(edges) do edge:Hide() end
-    edit:HookScript("OnTextChanged", function(self, userInput)
-        if userInput then Seg.SetTitle(key, self:GetText()) end
-    end)
-    edit:HookScript("OnEditFocusGained", function(self)
-        for _, edge in ipairs(edges) do edge:Show() end
-        self:HighlightText()
-        I.SliderFocused(self)
-    end)
-    edit:HookScript("OnEditFocusLost", function(self)
-        for _, edge in ipairs(edges) do edge:Hide() end
-        self:HighlightText(0, 0)
-        I.SliderFocused(nil, self)
-        CW.RefreshAll()
-    end)
-    edit:HookScript("OnHide", function(self) self:ClearFocus() end)
-    edit:SetScript("OnTabPressed", function(self) self:ClearFocus() end)
-
-    Hint(up, "Move left")
-    Hint(down, "Move right")
-
-    I.AttachChanged(row, holder)
-
-    I.Track(function()
-        local r = rec.byKey[key]
-        local on = r ~= nil and r.on == true
-        state:SetText(on and "ON" or "OFF")
-        Theme.ApplyMono(state, S.SMALL, on and C.cyan or C.line)
-        if r and r.lock then
-            toggle:Disable()
-            toggle:SetAlpha(0.4)
-        end
-        local usable = I.Writable() and not I.RowOff(edit)
-        edit:SetEnabled(usable)
-        if not usable then edit:ClearFocus() end
-        holder:SetAlpha(usable and 1 or 0.4)
-    end)
-end
-
 local function SegmentRow(content, rec, m)
     local Seg, Config = rec.Seg, FS.Config
     local key = m.key
@@ -343,6 +270,7 @@ local function SegmentRow(content, rec, m)
             return r and r.title or ""
         end,
         setTitle = function(text) Seg.SetTitle(key, text) end,
+        onType = function(text) Seg.SetTitle(key, text) end,
         canUp = function()
             local r = now()
             return r ~= nil and r.canUp == true
@@ -353,6 +281,11 @@ local function SegmentRow(content, rec, m)
         end,
         onUp = function() Seg.Move(key, -1) end,
         onDown = function() Seg.Move(key, 1) end,
+        -- The last segment left on keeps its switch (the module says why in `lock`).
+        lock = function()
+            local r = now()
+            return r ~= nil and r.lock ~= nil and r.lock ~= false
+        end,
         -- The row is off while this client cannot show the segment; its reason (and, for the last switch on, the lock
         -- sentence) go into the ? tip. UI.Order reads `reason` and `tip` right after this runs, so they are set here.
         enabled = function()
@@ -368,9 +301,7 @@ local function SegmentRow(content, rec, m)
             Config.Set(titleKey, nil)
         end,
     }
-    local row = UI.Order(content, o)
-    Dress(row, rec, key)
-    return row
+    return UI.Order(content, o)
 end
 
 -- The order is one setting for the whole list, so it gets one registry entry of its own, on the section header: the changed

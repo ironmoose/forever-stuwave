@@ -14,10 +14,15 @@ tools/configwindow-harness.py; the bar frame itself is not built) and pins:
     arrows and title box disabled, its reason first in the tip
   * the arrows swap a segment with its neighbour and the rows stand in the bar's order again; the first row's up and the
     last row's down are disabled; the arrows have hints
+  * the arrows are drawn, not typed: 4 by 8 pixel triangles (one unit rect per column) centred on their buttons, pointing
+    left and right, with a plain, hover, pressed and disabled look
   * typing in the title box renames the segment on the bar and in the band at once; the box takes ten characters and what
     the module cleans away is not in the box after it lets go; typing the default back stores nothing
   * the title box lets go of the keyboard on Enter, Esc, Tab, a click elsewhere, a click on the window, the window hiding
-    and the box hiding; one box has it at a time; it never rewrites its text while it has focus
+    and the box hiding; one box has it at a time; it never rewrites its text while it has focus; Enter, Tab and a click
+    elsewhere keep what was typed, Esc puts back the title the box had when it was clicked into
+  * UI.Order itself (a fixture page, no data bar module) carries the live rename, the lock on the switch, the ON / OFF
+    word, the changed marker, the hints and the click away release, so a page needs none of it
   * the changed marker (dot and reset on a row with a stored switch or title, one entry for the order), the page reset, a
     profile switch, and read-only settings
   * every row's text, default and tip is the prototype's (mockups/config-window-2026-11-25.html)
@@ -70,6 +75,7 @@ CHECKS = r"""
 local Obj = getmetatable(UIParent)
 function Obj:SetEnabled(v) self.enabled = v and true or false end
 function Obj:SetMaxLetters(n) self.maxLetters = n end
+function Obj:HighlightText(from, to) self.highlight = (from == 0 and to == 0) and "none" or "all" end
 
 local DEFAULT_ORDER = { "fps", "mem", "cpu", "latency", "rested", "durability", "bags", "time", "gold", "rep", "prof" }
 local DEFAULT_ON = { fps = true, latency = true, rested = true, durability = true, bags = true, time = true, gold = true }
@@ -519,12 +525,126 @@ function T.the_row_keeps_its_own_frame_key_and_entry_when_it_moves()
     eq(entry.tab, "g")
 end
 
+function T.a_disabled_arrow_moves_nothing_even_when_the_click_script_runs()
+    local W = bootBar()
+    W.Open("data")
+    local first, last = rowOf("fps").fsUp, rowOf("prof").fsDown
+    no(first.enabled); no(last.enabled)
+    first.scripts.OnClick(first, "LeftButton")
+    last.scripts.OnClick(last, "LeftButton")
+    eq(joined(modelKeys()), joined(DEFAULT_ORDER), "nothing moved")
+end
+
 function T.the_arrows_have_hints_and_a_disabled_one_says_nothing()
     local W = bootBar()
     W.Open("data")
     eq(hover(rowOf("time").fsUp), "Move left")
     eq(hover(rowOf("time").fsDown), "Move right")
     eq(hover(rowOf("fps").fsUp), "", "the first row's up is disabled")
+end
+
+-- The pixel triangles on the order arrows: the client fonts have no triangle glyphs, so "^" and "v" read as letters.
+local function glyphBox(button)
+    local g = button.fsGlyph
+    yes(g and g.textures and #g.textures > 0, "the arrow has a glyph made of rects")
+    local l, r, t, b = math.huge, -math.huge, -math.huge, math.huge
+    local cols = {}
+    for _, tex in ipairs(g.textures) do
+        local p = tex.points[1]
+        eq(p.point, "TOPLEFT"); eq(p.rel, button, "anchored to its button"); eq(p.relPoint, "CENTER")
+        eq(p.x, math.floor(p.x), "whole unit x"); eq(p.y, math.floor(p.y), "whole unit y")
+        eq(tex.w, 1, "one unit wide"); eq(tex.h, math.floor(tex.h), "whole unit tall")
+        l, r = math.min(l, p.x), math.max(r, p.x + tex.w)
+        t, b = math.max(t, p.y), math.min(b, p.y - tex.h)
+        cols[#cols + 1] = { x = p.x, h = tex.h }
+    end
+    table.sort(cols, function(a, c) return a.x < c.x end)
+    return l, r, t, b, cols
+end
+
+function T.the_arrows_are_pixel_glyphs_centred_on_their_buttons_not_typed_characters()
+    local W = bootBar()
+    W.Open("data")
+    for _, k in ipairs(DEFAULT_ORDER) do
+        local row = rowOf(k)
+        for _, side in ipairs({ "fsUp", "fsDown" }) do
+            local b = row[side]
+            eq(b.fsLabel:GetText(), "", k .. " " .. side .. " has no text on it")
+            eq(b.w, 24); eq(b.h, 24)
+            local l, r, t, bt = glyphBox(b)
+            eq(r - l, 4, k .. " " .. side .. " is 4 wide")
+            eq(t - bt, 8, k .. " " .. side .. " is 8 tall")
+            eq(l + r, 0, k .. " " .. side .. " is centred across")
+            eq(t + bt, 0, k .. " " .. side .. " is centred up and down")
+        end
+    end
+end
+
+function T.the_up_arrow_points_left_and_the_down_arrow_points_right()
+    local W = bootBar()
+    W.Open("data")
+    local row = rowOf("time")
+    local _, _, _, _, left = glyphBox(row.fsUp)
+    local _, _, _, _, right = glyphBox(row.fsDown)
+    eq(#left, 4); eq(#right, 4)
+    for i = 1, 4 do
+        eq(left[i].h, 2 * i, "left: the columns grow toward the base on the right")
+        eq(right[i].h, 10 - 2 * i, "right: the columns shrink toward the point on the right")
+    end
+end
+
+function T.an_arrow_has_a_plain_hover_pressed_and_disabled_look()
+    local W = bootBar()
+    W.Open("data")
+    local b = rowOf("time").fsUp
+    local function glyph() local c = b.fsGlyph.textures[1].color; return c end
+    local function ring() return b.fsSkin.border.ring.color end
+    local function fill() return b.fsFill.color end
+    local function same(a, c) for i = 1, 3 do if math.abs(a[i] - c[i]) > 0.002 then return false end end return true end
+    -- every rect of the glyph wears the same colour
+    for _, tex in ipairs(b.fsGlyph.textures) do eqc(tex.color, glyph(), "one colour across the glyph") end
+    eqc(glyph(), W.C.cyan, "plain: a cyan glyph")
+    eqc(ring(), W.C.line, "plain: the line coloured ring")
+    eqc(fill(), W.C.ink, "plain: the ink fill")
+    local plainFill = { fill()[1], fill()[2], fill()[3] }
+    b.scripts.OnEnter(b)
+    eqc(ring(), W.C.cyan, "hover: a cyan ring")
+    eqc(glyph(), W.C.cyan)
+    no(same(fill(), plainFill), "hover: the fill lifts")
+    local hoverFill = { fill()[1], fill()[2], fill()[3] }
+    b.scripts.OnMouseDown(b)
+    eqc(ring(), W.C.cyan, "pressed: the ring stays cyan")
+    no(same(fill(), hoverFill), "pressed: a darker fill than hover")
+    yes(fill()[1] < hoverFill[1] or fill()[3] < hoverFill[3] or fill()[2] < hoverFill[2], "pressed is darker")
+    b.scripts.OnMouseUp(b)
+    eqc(fill(), hoverFill, "released: the hover fill again")
+    b.scripts.OnLeave(b)
+    eqc(ring(), W.C.line, "left: plain again")
+    eqc(fill(), W.C.ink)
+    -- disabled (the first row cannot move up): dim violet glyph, no lift
+    local first = rowOf("fps").fsUp
+    no(first.enabled)
+    local dim = first.fsGlyph.textures[1].color
+    no(same(dim, W.C.cyan), "disabled: not cyan")
+    yes(dim[1] > 0.3 and dim[1] < 0.45 and dim[3] > 0.45 and dim[3] < 0.55, "disabled: the window's dim violet")
+    no(same(first.fsSkin.border.ring.color, W.C.cyan), "disabled: not a cyan ring")
+    no(same(first.fsFill.color, W.C.ink), "disabled: its own darker fill")
+    first.scripts.OnEnter(first)
+    no(same(first.fsSkin.border.ring.color, W.C.cyan), "hovering a disabled arrow does not light it")
+    no(same(first.fsGlyph.textures[1].color, W.C.cyan))
+    first.scripts.OnMouseDown(first)
+    no(same(first.fsGlyph.textures[1].color, W.C.cyan), "nor does pressing it")
+    first.scripts.OnLeave(first)
+    -- a move turns it live and the look follows at once
+    press(rowOf("fps").fsDown)
+    yes(rowOf("fps").fsUp.enabled)
+    eqc(rowOf("fps").fsUp.fsGlyph.textures[1].color, W.C.cyan, "enabled after a move: cyan")
+    -- read only: all dim
+    local W2 = bootBar(nil, { db = "junk" })
+    W2.Open("data")
+    for _, k in ipairs(DEFAULT_ORDER) do
+        no(same(rowOf(k).fsDown.fsGlyph.textures[1].color, W2.C.cyan), k .. " read only: a dim glyph")
+    end
 end
 
 -- ---- the title box ---------------------------------------------------------------------------------------------------
@@ -615,36 +735,94 @@ function T.the_title_box_has_a_cyan_edge_and_selects_its_text_while_it_has_focus
     W.Open("data")
     local e = rowOf("time").fsTitleBox
     local holder = e:GetParent()
-    local cyan = {}
+    local edges = {}
     for _, o in ipairs(ALL) do
-        if o.kind == "Texture" and o.parent == holder and o.color and o.color[1] == W.C.cyan[1] and o.color[3] == W.C.cyan[3] then
-            cyan[#cyan + 1] = o
-        end
+        if o.kind == "Texture" and o.parent == holder and o.layer == "BORDER" then edges[#edges + 1] = o end
     end
-    eq(#cyan, 4, "four cyan edges")
-    for _, t in ipairs(cyan) do no(t:IsShown()) end
+    eq(#edges, 4, "four edges")
+    for _, t in ipairs(edges) do eqc(t.color, W.C.line, "grey edge while it has no focus") end
     e:SetFocus()
-    for _, t in ipairs(cyan) do yes(t:IsShown()) end
+    for _, t in ipairs(edges) do eqc(t.color, W.C.cyan, "cyan edge while it has focus") end
+    eq(e.highlight, "all", "the text is selected on focus")
     e:ClearFocus()
-    for _, t in ipairs(cyan) do no(t:IsShown()) end
+    for _, t in ipairs(edges) do eqc(t.color, W.C.line, "grey again") end
+    eq(e.highlight, "none", "and not selected after")
 end
 
-function T.enter_esc_and_tab_let_go_and_keep_what_was_typed()
+function T.enter_and_tab_let_go_and_keep_what_was_typed()
     local W = bootBar()
     W.Open("data")
     local e = typeTitle("time", "CLOCK")
     e.scripts.OnEnterPressed(e)
     no(e:HasFocus(), "Enter")
     eq(FS.Config.Get("databar.title.time"), "CLOCK")
-    e = typeTitle("fps", "FRAMES")
-    e.scripts.OnEscapePressed(e)
-    no(e:HasFocus(), "Esc")
-    eq(FS.Config.Get("databar.title.fps"), "FRAMES", "what was typed is already on the bar")
+    eq(e:GetText(), "CLOCK")
     e = typeTitle("gold", "COINS")
     e.scripts.OnTabPressed(e)
     no(e:HasFocus(), "Tab")
     eq(FS.Config.Get("databar.title.gold"), "COINS")
     eq(W.I.sliderFocus, nil, "nothing holds the keyboard")
+end
+
+function T.esc_puts_back_the_title_the_box_had_when_it_was_clicked_into()
+    local W = bootBar()
+    W.Open("data")
+    -- from the default
+    local e = typeTitle("fps", "FRAMES")
+    eq(FS.Config.Get("databar.title.fps"), "FRAMES", "live while typing")
+    eq(joined(titles()), "FRAMES,MS,REST,DUR,BAGS,TIME,GOLD")
+    e.scripts.OnEscapePressed(e)
+    no(e:HasFocus(), "Esc lets go")
+    eq(e:GetText(), "FPS", "the box shows the old title")
+    eq(FS.Config.Get("databar.title.fps"), "FPS", "and so does the bar")
+    no(stored("databar.title.fps"), "the default is stored as nothing again")
+    eq(joined(titles()), "FPS,MS,REST,DUR,BAGS,TIME,GOLD")
+    eq(W.I.sliderFocus, nil, "nothing holds the keyboard")
+    -- from a title already stored: a first edit stands, the second is the one Esc undoes
+    e = typeTitle("time", "CLOCK")
+    e.scripts.OnEnterPressed(e)
+    e = typeTitle("time", "NOON")
+    e:SetText("NOON2")
+    e.scripts.OnTextChanged(e, true)
+    eq(FS.Config.Get("databar.title.time"), "NOON2")
+    e.scripts.OnEscapePressed(e)
+    eq(e:GetText(), "CLOCK")
+    eq(FS.Config.Get("databar.title.time"), "CLOCK", "back to the title stored before this edit")
+    yes(stored("databar.title.time"))
+    -- from an emptied title
+    e = typeTitle("gold", "")
+    e.scripts.OnEnterPressed(e)
+    eq(FS.Config.Get("databar.title.gold"), "")
+    e = typeTitle("gold", "PURSE")
+    e.scripts.OnEscapePressed(e)
+    eq(e:GetText(), "", "an empty title comes back empty")
+    eq(FS.Config.Get("databar.title.gold"), "")
+    -- no typing at all: Esc changes nothing
+    e = rowOf("latency").fsTitleBox
+    e:SetFocus()
+    e.scripts.OnEscapePressed(e)
+    eq(FS.Config.Get("databar.title.latency"), "MS")
+    no(stored("databar.title.latency"))
+end
+
+function T.after_esc_a_later_click_away_keeps_the_restored_title_not_the_typed_one()
+    local W = bootBar()
+    W.Open("data")
+    local e = typeTitle("time", "CLOCK")
+    e.scripts.OnEscapePressed(e)
+    eq(FS.Config.Get("databar.title.time"), "TIME")
+    -- the next time the box is clicked into it remembers the title it has now, not the one Esc threw away
+    e:SetFocus()
+    e:SetText("LATER")
+    e.scripts.OnTextChanged(e, true)
+    local catcher = W.I.focusCatcher
+    catcher.scripts.OnClick(catcher)
+    eq(FS.Config.Get("databar.title.time"), "LATER", "a click away keeps what was typed")
+    e:SetFocus()
+    e:SetText("LATEST")
+    e.scripts.OnTextChanged(e, true)
+    e.scripts.OnEscapePressed(e)
+    eq(FS.Config.Get("databar.title.time"), "LATER", "Esc goes back one edit, not to the default")
 end
 
 function T.a_click_elsewhere_the_window_and_the_window_hiding_let_go()
@@ -800,6 +978,165 @@ function T.read_only_settings_disable_every_control()
         no(row.fsTitleBox.enabled, k .. " title box")
     end
     eq(joined(titles()), "FPS,MS,REST,DUR,BAGS,TIME,GOLD", "the band still draws the defaults")
+end
+
+-- ---- UI.Order on its own ---------------------------------------------------------------------------------------------
+
+-- One row of the builder with no data bar module: the store is a plain table, so everything under test is the builder's.
+local function orderFixture(opts)
+    opts = opts or {}
+    local W = boot()
+    local store = { on = opts.on ~= false, title = opts.title or "ALPHA", typed = {}, moved = {}, sets = {}, locked = opts.locked or false,
+        changed = false }
+    local row
+    W.RegisterCategory({ key = "ox", label = "Ox", group = "GENERAL", order = 70, build = function(c)
+        row = W.UI.Order(c, {
+            label = "Alpha", tip = "The first one.", regKey = "ox.alpha", maxLetters = 6,
+            get = function() return store.on end,
+            set = function(v) store.on = v; return true end,
+            getTitle = function() return store.title end,
+            setTitle = function(t) store.sets[#store.sets + 1] = t; store.title = t end,
+            onType = (not opts.noType) and function(t) store.typed[#store.typed + 1] = t; store.title = t end or nil,
+            canUp = function() return store.canUp ~= false end,
+            canDown = function() return store.canDown ~= false end,
+            onUp = function() store.moved[#store.moved + 1] = "up" end,
+            onDown = function() store.moved[#store.moved + 1] = "down" end,
+            upHint = opts.upHint, downHint = opts.downHint,
+            lock = opts.lock and function() return store.locked end or nil,
+            isChanged = function() return store.changed end,
+            reset = function() store.changed = false; store.title = "ALPHA" end,
+        })
+    end })
+    W.Open("ox")
+    return W, store, row
+end
+
+function T.the_builder_arrows_are_glyphs_that_say_move_left_and_move_right_by_default()
+    local W, store, row = orderFixture()
+    eq(row.fsUp.fsLabel:GetText(), "")
+    eq(row.fsDown.fsLabel:GetText(), "")
+    eq(#row.fsUp.fsGlyph.textures, 4)
+    eq(hover(row.fsUp), "Move left")
+    eq(hover(row.fsDown), "Move right")
+    yes(press(row.fsUp)); yes(press(row.fsDown))
+    eq(table.concat(store.moved, ","), "up,down")
+end
+
+function T.the_builder_hints_can_be_worded_by_the_page()
+    local W, store, row = orderFixture({ upHint = "Earlier", downHint = "Later" })
+    eq(hover(row.fsUp), "Earlier")
+    eq(hover(row.fsDown), "Later")
+end
+
+function T.the_builder_renames_live_while_typing_and_not_on_a_programmatic_set()
+    local W, store, row = orderFixture()
+    local e = row.fsTitleBox
+    eq(e.maxLetters, 6)
+    e:SetFocus()
+    e:SetText("BETA")
+    e.scripts.OnTextChanged(e, true)
+    eq(table.concat(store.typed, ","), "BETA")
+    e:SetText("SET")
+    e.scripts.OnTextChanged(e, false)
+    eq(table.concat(store.typed, ","), "BETA", "SetText is not a keystroke")
+    e:ClearFocus()
+    eq(store.sets[#store.sets], "SET", "letting go commits what the box holds")
+end
+
+function T.the_builder_without_a_live_hook_only_commits_when_it_lets_go()
+    local W, store, row = orderFixture({ noType = true })
+    local e = row.fsTitleBox
+    e:SetFocus()
+    e:SetText("BETA")
+    e.scripts.OnTextChanged(e, true)
+    eq(#store.typed, 0); eq(#store.sets, 0)
+    e.scripts.OnEnterPressed(e)
+    eq(store.sets[#store.sets], "BETA")
+    no(e:HasFocus())
+end
+
+function T.the_builder_esc_restores_the_title_from_focus_and_a_click_away_commits()
+    local W, store, row = orderFixture()
+    local e = row.fsTitleBox
+    e:SetFocus()
+    e:SetText("BETA")
+    e.scripts.OnTextChanged(e, true)
+    e.scripts.OnEscapePressed(e)
+    no(e:HasFocus())
+    eq(e:GetText(), "ALPHA")
+    eq(store.title, "ALPHA")
+    e:SetFocus()
+    e:SetText("GAMMA")
+    e.scripts.OnTextChanged(e, true)
+    local catcher = assert(W.I.focusCatcher, "a click catcher exists")
+    yes(catcher:IsShown())
+    catcher.scripts.OnClick(catcher)
+    no(e:HasFocus(), "a click elsewhere lets go")
+    eq(store.title, "GAMMA")
+    local w = _G.ForeverSTUwaveConfig
+    e:SetFocus()
+    w.scripts.OnMouseDown(w, "LeftButton")
+    no(e:HasFocus(), "a click on the window")
+    e:SetFocus()
+    e:Hide()
+    no(e:HasFocus(), "hiding the box")
+end
+
+function T.the_builder_lock_disables_only_the_switch()
+    local W, store, row = orderFixture({ lock = true, locked = true })
+    no(row.control.enabled, "the switch is locked")
+    eq(row.control.alpha, 0.4)
+    yes(row.fsUp.enabled and row.fsDown.enabled, "the arrows stay live")
+    yes(row.fsTitleBox.enabled, "so does the title box")
+    no(row.fsRowOff, "it is not a dimmed row")
+    no(press(row.control), "a press does nothing")
+    eq(store.on, true)
+    store.locked = false
+    W.RefreshAll()
+    yes(row.control.enabled)
+    eq(row.control.alpha, 1)
+    yes(press(row.control))
+    eq(store.on, false)
+end
+
+function T.the_builder_shows_on_or_off_beside_the_switch_in_colour()
+    local W, store, row = orderFixture({ on = false })
+    local function word()
+        for _, o in ipairs(ALL) do
+            if o.kind == "FontString" and o.parent == row and (o:GetText() == "ON" or o:GetText() == "OFF") then return o end
+        end
+    end
+    eq(word():GetText(), "OFF")
+    eqc(word().themeColor, W.C.line)
+    press(row.control)
+    eq(word():GetText(), "ON")
+    eqc(word().themeColor, W.C.cyan)
+end
+
+function T.the_builder_marks_a_changed_row_and_resets_it()
+    local W, store, row = orderFixture()
+    no(row.fsReset:IsShown())
+    store.changed = true
+    W.RefreshAll()
+    yes(row.fsDot:IsShown()); yes(row.fsReset:IsShown())
+    row.fsReset.scripts.OnClick(row.fsReset)
+    no(row.fsReset:IsShown())
+    eq(store.title, "ALPHA")
+end
+
+function T.the_builder_gives_up_the_keyboard_when_the_row_goes_off()
+    local W, store, row = orderFixture()
+    local e = row.fsTitleBox
+    e:SetFocus()
+    row.fsRowOff = true
+    W.RefreshAll()
+    no(e:HasFocus(), "an off row does not keep the keyboard")
+    no(e.enabled)
+    eq(e:GetParent().alpha, 0.4)
+    row.fsRowOff = nil
+    W.RefreshAll()
+    yes(e.enabled)
+    eq(e:GetParent().alpha, 1)
 end
 
 -- ---- without the module, and a module that fails -------------------------------------------------------------------------

@@ -1117,18 +1117,92 @@ function UI.Text(content, fn)
     return block
 end
 
--- {label, key, titleKey, tip, onUp, onDown, canUp, canDown, maxLetters}: a data bar segment row: the switch, the title
--- box (an edit box, ten characters), and up and down arrows. The segment ticket supplies the content.
+-- The arrows on an Order row are drawn, not typed: the client fonts have no triangles, so "^" and "v" read as letters. Each is
+-- a 4 by 8 unit triangle pointing along the bar, one unit wide rect per column ({ x, y, w, h }, y from the top), centred on its
+-- button so every edge lands on a whole unit.
+local ARROW_W, ARROW_H = 4, 8
+local ARROW_RUNS = {
+    left = { { 0, 3, 1, 2 }, { 1, 2, 1, 4 }, { 2, 1, 1, 6 }, { 3, 0, 1, 8 } },
+    right = { { 0, 0, 1, 8 }, { 1, 1, 1, 6 }, { 2, 2, 1, 4 }, { 3, 3, 1, 2 } },
+}
+
+local function NewArrowGlyph(button, direction)
+    local glyph = { textures = {}, direction = direction }
+    for _, r in ipairs(ARROW_RUNS[direction]) do
+        local t = button:CreateTexture(nil, "OVERLAY", nil, 1)
+        t:SetSize(r[3], r[4])
+        t:SetPoint("TOPLEFT", button, "CENTER", -ARROW_W / 2 + r[1], ARROW_H / 2 - r[2])
+        glyph.textures[#glyph.textures + 1] = t
+    end
+    function glyph.SetColor(color)
+        for _, t in ipairs(glyph.textures) do t:SetColorTexture(color[1], color[2], color[3], color[4] or 1) end
+    end
+    return glyph
+end
+I.NewArrowGlyph = NewArrowGlyph
+
+-- The prototype's .mv: a plain arrow is cyan on the ink fill, hover lights the ring and lifts the fill, pressed darkens the
+-- fill, disabled takes the dim violet glyph on the darkest fill and ring (--dis, --disfill, --disedge) and answers nothing.
+local ARROW_DIS = { 0.361, 0.329, 0.502, 1 }
+local ARROW_DIS_FILL = { 0.039, 0.024, 0.078, 1 }
+local ARROW_DIS_EDGE = { 0.165, 0.094, 0.275, 1 }
+local ARROW_PRESSED = { 0.024, 0.133, 0.165, 1 }
+
+local function PaintArrow(b)
+    local ring, fill, glyph = C.line, C.ink, C.cyan
+    if not b:IsEnabled() then
+        ring, fill, glyph = ARROW_DIS_EDGE, ARROW_DIS_FILL, ARROW_DIS
+    elseif b.fsPressed then
+        ring, fill = C.cyan, ARROW_PRESSED
+    elseif b.fsHover then
+        ring, fill = C.cyan, Mix(C.ink, C.cyan, 0.16)
+    end
+    Restyle(b, ring, glyph, fill, 0)
+    b.fsGlyph.SetColor(glyph)
+end
+
+-- A tooltip for a small control: the text, at the right of it. A disabled control says nothing.
+local function Hint(button, text)
+    button:HookScript("OnEnter", function(self)
+        if not self:IsEnabled() then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(text, 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    button:HookScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+-- {label, key | get + set, tip, getTitle, setTitle, onType, maxLetters, canUp, canDown, onUp, onDown, upHint, downHint, lock,
+--  isChanged, reset, enabled, reason}: a data bar segment row. Left to right: the label, the title box (an edit box, ten
+-- characters), the two arrows (up points left and moves a segment along the bar, down points right), the ON / OFF word and
+-- the switch. Fixed fields only, so the page supplies the data and none of the behaviour:
+--   * `onType(text)` hears every keystroke (not a SetText), so the title can change on screen while it is typed
+--   * the box shows a cyan edge and selects its text on focus and is the one box with the keyboard (I.SliderFocused: a click
+--     elsewhere, a click on the window, Tab and the window or the box hiding let go of it)
+--   * Enter, Tab and a click elsewhere keep what was typed (`setTitle(text)` runs as the box lets go); Esc puts back the
+--     title the box had when it was clicked into
+--   * `lock()` is a function: while it answers true (or a reason) the switch alone is disabled (the last one on stays on); the row, its
+--     arrows and its box stay live. `enabled` / `reason` dim the whole row, as on every other builder
+--   * the changed dot and reset follow `isChanged` / `reset`; the hints read `upHint` ("Move left") and `downHint` ("Move right")
 function UI.Order(content, o)
     local row = NewRow(content, o, "order")
-    local function Arrow(glyph, anchor, onClick, enabled)
-        local b = MakeButton(row, { width = S.RESET, height = S.RESET, ring = C.line, textColor = C.cyan, chamfer = 3, text = glyph, glow = 0 })
+    local function Arrow(direction, anchor, onClick, enabled, hint)
+        local b = MakeButton(row, { width = S.RESET, height = S.RESET, ring = C.line, textColor = C.cyan, chamfer = 3, text = "", glow = 0 })
         b:SetPoint("RIGHT", anchor, "LEFT", -S.CTL_GAP, 0)
-        HoverStyle(b, C.cyan)
+        b.fsGlyph = NewArrowGlyph(b, direction)
+        b:HookScript("OnEnter", function(self) self.fsHover = true; PaintArrow(self) end)
+        b:HookScript("OnLeave", function(self) self.fsHover, self.fsPressed = false, false; PaintArrow(self) end)
+        b:HookScript("OnMouseDown", function(self) self.fsPressed = true; PaintArrow(self) end)
+        b:HookScript("OnMouseUp", function(self) self.fsPressed = false; PaintArrow(self) end)
         b:SetScript("OnClick", function(self)
             if self:IsEnabled() and onClick then onClick() CW.RefreshAll() end
         end)
-        Track(function() SetLook(b, Writable() and (enabled == nil or enabled() == true)) end)
+        Hint(b, hint)
+        Track(function()
+            local on = Writable() and not I.RowOff(b) and (enabled == nil or enabled() == true)
+            if on then b:Enable() else b:Disable() end
+            PaintArrow(b)
+        end)
         return b
     end
     local toggle = MakeToggle(row)
@@ -1138,15 +1212,19 @@ function UI.Order(content, o)
         WriteValue(o, not (ReadValue(o) == true))
         CW.RefreshAll()
     end)
-    local down = Arrow("v", toggle, o.onDown, o.canDown)
-    local up = Arrow("^", down, o.onUp, o.canUp)
+    local state = Label(row, "OFF", S.SMALL, C.line)
+    state:SetWidth(S.STATE_W)
+    state:SetJustifyH("RIGHT")
+    state:SetPoint("RIGHT", toggle, "LEFT", -S.CTL_GAP, 0)
+    local down = Arrow("right", state, o.onDown, o.canDown, o.downHint or "Move right")
+    local up = Arrow("left", down, o.onUp, o.canUp, o.upHint or "Move left")
     local holder = CreateFrame("Frame", nil, row)
     holder:SetSize(S.VALUE_W + 20, S.VALUE_H)
     holder:SetPoint("RIGHT", up, "LEFT", -S.CTL_GAP, 0)
     local well = holder:CreateTexture(nil, "BACKGROUND")
     well:SetColorTexture(C.track[1], C.track[2], C.track[3], 1)
     well:SetAllPoints(holder)
-    Outline(holder, C.line, 1)
+    local edges = Outline(holder, C.line, 1)
     local edit = CreateFrame("EditBox", nil, holder)
     edit:SetPoint("TOPLEFT", holder, "TOPLEFT", 6, -2)
     edit:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -6, 2)
@@ -1154,20 +1232,50 @@ function UI.Order(content, o)
     edit:SetTextColor(C.cyan[1], C.cyan[2], C.cyan[3], 1)
     edit:SetAutoFocus(false)
     edit:SetMaxLetters(o.maxLetters or 10)
-    local function Commit(self)
-        if o.setTitle then o.setTitle(self:GetText()) end
-        self:ClearFocus()
-    end
-    edit:SetScript("OnEnterPressed", Commit)
-    edit:SetScript("OnEditFocusLost", function(self) if o.setTitle then o.setTitle(self:GetText()) end end)
-    edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    row.fsTitleBox, row.fsUp, row.fsDown = edit, up, down
-    Track(function()
-        PaintToggle(toggle, ReadValue(o) == true)
-        SetLook(toggle, Writable())
-        if not edit:HasFocus() and o.getTitle then edit:SetText(o.getTitle() or "") end
-        edit:SetEnabled(Writable())
+    edit:SetScript("OnTextChanged", function(self, userInput)
+        if userInput and o.onType then o.onType(self:GetText()) end
     end)
+    edit:SetScript("OnEditFocusGained", function(self)
+        self.fsBefore = o.getTitle and o.getTitle() or self:GetText()
+        for _, t in ipairs(edges) do Tint(t, C.cyan) end
+        self:HighlightText()
+        I.SliderFocused(self)
+    end)
+    edit:SetScript("OnEditFocusLost", function(self)
+        for _, t in ipairs(edges) do Tint(t, C.line) end
+        self:HighlightText(0, 0)
+        I.SliderFocused(nil, self)
+        if o.setTitle then o.setTitle(self:GetText()) end
+        CW.RefreshAll()
+    end)
+    edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    edit:SetScript("OnTabPressed", function(self) self:ClearFocus() end)
+    -- The title is live on screen while typing, so Esc puts the old one back in the box first; the box letting go then
+    -- commits that, not what was typed.
+    edit:SetScript("OnEscapePressed", function(self)
+        if self.fsBefore ~= nil then self:SetText(self.fsBefore) end
+        self:ClearFocus()
+    end)
+    edit:SetScript("OnHide", function(self) self:ClearFocus() end)
+    row.fsTitleBox, row.fsUp, row.fsDown, row.fsState = edit, up, down, state
+    Track(function()
+        local on = ReadValue(o) == true
+        PaintToggle(toggle, on)
+        local locked = false
+        if o.lock then
+            local ok, value = pcall(o.lock)
+            if ok then locked = value and true or false else Forward(value) end
+        end
+        SetLook(toggle, Writable() and not locked)
+        state:SetText(on and "ON" or "OFF")
+        Theme.ApplyMono(state, S.SMALL, on and C.cyan or C.line)
+        if not edit:HasFocus() and o.getTitle then edit:SetText(o.getTitle() or "") end
+        local usable = Writable() and not I.RowOff(edit)
+        edit:SetEnabled(usable)
+        if not usable then edit:ClearFocus() end
+        holder:SetAlpha(usable and 1 or 0.4)
+    end)
+    I.AttachChanged(row, holder)
     row.control = toggle
     return row
 end
