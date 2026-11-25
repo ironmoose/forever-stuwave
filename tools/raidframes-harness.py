@@ -1577,9 +1577,11 @@ EDITOR_MOCK = r"""
 do
     local R=getmetatable(UIParent).__index
     for _,m in ipairs({'SetMovable','SetClampedToScreen','RegisterForDrag','StartMoving',
-        'StopMovingOrSizing','SetNormalFontObject','SetHighlightFontObject','SetDisabledFontObject'}) do
+        'StopMovingOrSizing','SetNormalFontObject','SetHighlightFontObject','SetDisabledFontObject',
+        'SetAutoFocus','SetMaxLetters','SetJustifyH','HighlightText','SetFocus','ClearFocus','SetSnapToPixelGrid'}) do
         R[m]=R[m] or function() end
     end
+    R.HasFocus=R.HasFocus or function() return false end
     function R:EnableKeyboard(v) self.keyboard=v and true or false end
     function R:SetPropagateKeyboardInput(v) self.propagate=v end
 end
@@ -1726,9 +1728,11 @@ def _check_editor_moves_and_resets_one_raid_layout() -> None:
     assert saved10 is not None and _close(saved10.y, shipped[10][1] - 1), "the arrow went to another layout"
     assert _close(rt.eval(f"{key}.raid25").x, -400), "the arrow moved the layout that was left"
     _assert_seat(rt, preview, 10, "preview of the 10 layout", (shipped[10][0], shipped[10][1] - 1))
-    # Right-click resets the one under it.
+    # Right-click opens the piece's menu; Reset position resets the one under it.
     handle = edit.GetHandle("raid10")
     handle.scripts.OnMouseUp(handle, "RightButton")
+    reset = edit.GetMenu()["items"]["reset"]
+    reset.scripts.OnClick(reset)
     assert rt.eval(f"{key}.raid10") is None and rt.eval(f"{key}.raid25") is not None
     _assert_seat(rt, preview, 10, "preview after a right-click", shipped[10])
     _pv_size(rt, 25)
@@ -1786,7 +1790,7 @@ def _check_editor_panel_switches_the_raid_size() -> None:
     rt.execute(f"FS.Config.Set('{PV_KEY}', 15)")
     assert picked() == [False, False, True, False, False, False], "the panel missed a config change"
     assert _raid_handles(rt, edit) == [15]
-    assert edit.GetDonePanel().title.text == "LAYOUT EDIT"
+    assert edit.GetDonePanel().title.text == "EDIT MODE"
     edit.Exit()
     assert edit.GetDonePanel() is None
     # Opened again it shows the saved size.

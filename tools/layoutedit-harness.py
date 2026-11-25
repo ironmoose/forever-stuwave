@@ -11,7 +11,14 @@ These checks pin that:
     FULLSCREEN_DIALOG frame on UIParent that is never anchored to the frame it covers;
   * a drop converts back to layout x/y for scaled CENTER entries and unscaled TOPLEFT
     entries at two UI scales and lands the frame on the same screen point;
-  * snap, grid size, arrow and Shift+arrow nudges, Esc, right-click reset and reset all;
+  * snap, grid size, arrow and Shift+arrow nudges, Esc, the right click menu's Reset position and reset all;
+  * the snap grid: lines on the places Snap rounds to (per picked piece), one whole pixel thick, a brighter centre cross, a
+    step change, snap off and Show grid off, strata below the handles, gone on every way out;
+  * the position panel: fields that follow nudges and drags, typed X / Y in px or grid units committed through the drop's
+    path, refused input, clamping, Esc and Tab, the origin tip, provider pieces (tracker, raid, pet);
+  * the right click menu: at the cursor, closes on a click elsewhere or Esc, Settings calls Open(page, tab, row) from the
+    map (every handle id has an entry, rows exist in the window's registry when it has one), greyed for pieces with none,
+    Set position focuses X, the editor drops under the config window while it is up;
   * pet, chat and minimap special cases;
   * the Layout page registers when FS.ConfigWindow exists and is skipped cleanly when not;
   * a DONE panel shows only while editing, and DONE or Esc reopens the page that started the editor
@@ -84,6 +91,11 @@ function Region:SetPoint(point, rel, relPoint, x, y)
 end
 function Region:SetWidth(w) self._w = w end
 function Region:SetHeight(h) self._h = h end
+function Region:SetSize(w, h) self._w, self._h = w, h end
+function Region:Show() self._hidden = false end
+function Region:Hide() self._hidden = true end
+function Region:IsShown() return not self._hidden end
+function Region:SetSnapToPixelGrid(v) self._snapPixel = v end
 function Region:SetColorTexture(r, g, b, a) self._color = { r, g, b, a } end
 function Region:SetVertexColor(r, g, b, a) self._color = { r, g, b, a } end
 local function newRegion() return setmetatable({}, Region) end
@@ -131,6 +143,21 @@ function Frame:CreateFontString() local r = newRegion(); r._isFontString = true;
 function Frame:SetText(t) self._text = t end
 function Frame:GetText() return self._text end
 function Frame:GetEffectiveScale() return 1 end
+-- An edit box: focus fires the box's own focus scripts, as the client does.
+function Frame:SetFocus()
+    self._focused = true
+    local f = self._scripts.OnEditFocusGained
+    if f then f(self) end
+end
+function Frame:ClearFocus()
+    if not self._focused then return end
+    self._focused = false
+    local f = self._scripts.OnEditFocusLost
+    if f then f(self) end
+end
+function Frame:HasFocus() return self._focused or false end
+__cursor = { 0, 0 }
+function GetCursorPosition() return __cursor[1], __cursor[2] end
 -- Anchor solver: UIParent is the only anchor target a checked frame uses.
 function Frame:_rect()
     if self == UIParent then return 0, 0, self._w, self._h end
@@ -205,6 +232,7 @@ EditModeManagerFrame = {
 __themed = { panels = {}, buttons = {}, fills = {}, text = {} }
 FS_THEME_STUB = {
     COLOR_POWER = { 0.133, 0.878, 1, 1 },
+    COLOR_HEALTH = { 1, 0.18, 0.592, 1 },
     COLOR_BORDER = { 0.545, 0.361, 0.965, 1 },
     COLOR_STEEL = { 0.62, 0.66, 0.74, 1 },
     COLOR_BUTTON_INK = { 0.051, 0.024, 0.125, 1 },
@@ -277,6 +305,18 @@ local function dragTo(id, point, relPoint, x, y)
     h:SetPoint(point, UIParent, relPoint, x, y)
     h._scripts.OnDragStop(h)
     return h
+end
+-- A right click opens the piece's menu; a row's OnClick is a pick (settings, position or reset).
+local function rightClick(h)
+    h._scripts.OnMouseUp(h, "RightButton")
+    return FS.LayoutEdit.GetMenu()
+end
+local function menuPick(h, which)
+    local menu = rightClick(h)
+    if not menu then error("the right click opened no menu", 2) end
+    local item = menu.items[which]
+    item._scripts.OnClick(item)
+    return item
 end
 local function setSnap(on, grid)
     FS.Config.Set("layout.snap", on)
@@ -424,8 +464,8 @@ function T.the_tooltip_anchor_gets_a_handle_labelled_tooltip_and_resets_with_the
     eq(override("tooltip").y, 120)
     near(f:GetRight(), UIParent._w - 100, 1e-6, "the frame landed on the dropped point")
     near(f:GetBottom(), 120, 1e-6)
-    h._scripts.OnMouseUp(h, "RightButton")
-    eq(override("tooltip"), nil, "right-click resets it")
+    menuPick(h, "reset")
+    eq(override("tooltip"), nil, "Reset position resets it")
     eq(FS.Layout.tooltip.x, startX); eq(FS.Layout.tooltip.y, startY)
     near(f:GetRight(), UIParent._w - 9, 1e-6, "back on the corner")
     dragTo("tooltip", "BOTTOMRIGHT", "BOTTOMRIGHT", -100, 120)
@@ -762,7 +802,11 @@ function T.right_click_resets_that_frame_only()
     local h = FS.LayoutEdit.GetHandle("stance")
     h._scripts.OnMouseUp(h, "LeftButton")
     eq(override("stance") ~= nil, true, "left click does not reset")
-    h._scripts.OnMouseUp(h, "RightButton")
+    rightClick(h)
+    eq(override("stance") ~= nil, true, "a right click alone only opens the menu")
+    local menu = FS.LayoutEdit.GetMenu()
+    menu.items.reset._scripts.OnClick(menu.items.reset)
+    eq(FS.LayoutEdit.GetMenu(), nil, "the pick closes the menu")
     eq(override("stance"), nil)
     eq(override("action") ~= nil, true, "another frame keeps its override")
     near(a:GetCenter(), UIParent._w / 2 + 0, 1e-6, "back on the default seat")
@@ -971,7 +1015,7 @@ function T.resetting_the_pet_also_drops_the_old_pet_drag_position()
     FS.Layout.SetOverride("petcontainer", 5, 5)
     FS.LayoutEdit.Enter()
     local h = FS.LayoutEdit.GetHandle("petcontainer")
-    h._scripts.OnMouseUp(h, "RightButton")
+    menuPick(h, "reset")
     eq(ForeverSTUwaveDB.petFrame.pos, nil)
     eq(override("petcontainer"), nil)
 end
@@ -996,7 +1040,7 @@ function T.the_chat_reseats_through_the_chat_modules_own_seat_function()
     eq(#reseated, 0, "not the generic reseat")
     near(frame:GetCenter(), UIParent._w / 2 - 300, 0.25 * FS.Layout.Scale() + 1e-6)
     local h = FS.LayoutEdit.GetHandle("chat")
-    h._scripts.OnMouseUp(h, "RightButton")
+    menuPick(h, "reset")
     eq(seen, 2, "a reset goes through it too")
 end
 
@@ -1050,10 +1094,16 @@ end
 -------------------------------------------------------------------------------
 
 local function fakeWindow()
-    local W = { categories = {}, closed = 0, calls = {}, opened = {} }
+    local W = { categories = {}, closed = 0, calls = {}, opened = {}, openCalls = {}, shown = false }
     function W.RegisterCategory(def) W.categories[#W.categories + 1] = def end
-    function W.Close() W.closed = W.closed + 1 end
-    function W.Open(key) W.opened[#W.opened + 1] = key end
+    function W.Close() W.closed = W.closed + 1; W.shown = false end
+    -- Open(page, tab, row): `opened` keeps the pages, `openCalls` the whole call.
+    function W.Open(page, tab, row)
+        W.opened[#W.opened + 1] = page
+        W.openCalls[#W.openCalls + 1] = { page = page, tab = tab, row = row }
+        W.shown = true
+    end
+    function W.IsShown() return W.shown end
     W.UI = {}
     for _, name in ipairs({ "Header", "Button", "Toggle", "Segmented" }) do
         W.UI[name] = function(content, spec, tip)
@@ -1476,7 +1526,7 @@ function T.right_click_and_reset_all_reset_the_objectives_seat()
     local seat = fakeSeat()
     edit(); FS.LayoutEdit.Enter()
     local h = FS.LayoutEdit.GetHandle("objectives")
-    h._scripts.OnMouseUp(h, "RightButton")
+    menuPick(h, "reset")
     eq(seat.resets, 1)
     near(h:GetRight(), UIParent:GetRight() - 10, 1e-6, "handle follows the reset")
     FS.LayoutEdit.ResetAll()
@@ -1598,7 +1648,7 @@ function T.there_is_no_raid_handle_where_the_raid_frames_did_not_load()
     FS.LayoutEdit.Enter()
     for _, n in ipairs({ 5, 10, 15, 20, 25, 40 }) do eq(FS.LayoutEdit.GetHandle("raid" .. n), nil) end
     eq(rawget(FS.LayoutEdit.GetDonePanel(), "sizeButtons"), nil, "and no size row on the panel")
-    eq(FS.LayoutEdit.GetDonePanel()._h, 44, "the panel keeps its one row")
+    eq(FS.LayoutEdit.GetDonePanel()._h, 36, "the panel keeps its one row (ROW_H + 4)")
     FS.LayoutEdit.Exit()
     eq(#__errors, 0)
 end
@@ -1639,8 +1689,8 @@ function T.a_raid_drop_saves_the_snapped_seat_and_right_click_resets_it()
     local h = FS.LayoutEdit.GetHandle("raid10")
     near(h:GetLeft(), left, 1e-6, "the handle follows the seat the preview took")
     near(h:GetTop(), top, 1e-6)
-    h._scripts.OnMouseUp(h, "RightButton")
-    eq(override("raid10"), nil, "right-click resets it")
+    menuPick(h, "reset")
+    eq(override("raid10"), nil, "Reset position resets it")
     eq(FS.Layout.raid10.x, -696.5, "to the shipped entry")
     eq(__printedHas("could not"), false)
 end
@@ -1757,7 +1807,7 @@ function T.the_panel_has_a_size_chip_per_raid_size_and_a_click_asks_for_it()
     FS.LayoutEdit.Enter()
     local panel = FS.LayoutEdit.GetDonePanel()
     eq(#panel.sizeButtons, 6)
-    eq(panel._h > 44, true, "a second row")
+    eq(panel._h > 36, true, "a second row")
     local labels = {}
     for i, b in ipairs(panel.sizeButtons) do labels[i] = b.label._text end
     eq(table.concat(labels, ","), "5,10,15,20,25,40")
@@ -1869,6 +1919,838 @@ function T.the_layout_page_has_no_raid_section_without_the_raid_frames()
         if c.name == "Header" and c.spec == "Raid frames" then error("a raid section with nothing to preview") end
         if c.name == "Button" and c.spec.text == "MOVE RAID FRAMES" then error("a raid button with nothing to preview") end
     end
+end
+
+-------------------------------------------------------------------------------
+-- Snap grid overlay
+-------------------------------------------------------------------------------
+
+local function gridNow() return FS.LayoutEdit.GetGrid() end
+local function litLines(list)
+    local out = {}
+    for _, line in ipairs(list) do if not line._hidden then out[#out + 1] = line end end
+    return out
+end
+-- Where the shown lines sit, in UIParent units from the left edge (verticals) or the bottom edge (horizontals).
+local function lineXs(grid)
+    local out = {}
+    for _, line in ipairs(litLines(grid.v)) do out[#out + 1] = line._points[1].x end
+    return out
+end
+local function lineYs(grid)
+    local out = {}
+    for _, line in ipairs(litLines(grid.h)) do out[#out + 1] = line._points[1].y end
+    return out
+end
+local function hasLine(values, v, tol)
+    for _, o in ipairs(values) do if math.abs(o - v) <= tol then return true end end
+    return false
+end
+-- A UIParent anchor point on the screen, in UIParent units.
+local function screenPoint(relPoint)
+    local px = relPoint:find("LEFT") and 0 or relPoint:find("RIGHT") and 1 or 0.5
+    local py = relPoint:find("BOTTOM") and 0 or relPoint:find("TOP") and 1 or 0.5
+    return UIParent._w * px, UIParent._h * py
+end
+-- A drop of `id` at layout (x, y) of its own entry, whatever the entry's anchor.
+local function dropAt(id, x, y)
+    local L = FS.Layout[id]
+    local unit = FS.Layout.IsUnscaled(id) and 1 or FS.Layout.Scale()
+    return dragTo(id, L.point, L.relPoint, x * unit, y * unit)
+end
+
+function T.the_grid_shows_on_enter_at_the_current_step_and_every_line_hides_on_leave()
+    screen(1440)
+    __session(__layoutSrc, __configSrc, __editSrc)
+    edit(); seat("stance")
+    eq(gridNow(), nil, "no grid before the editor")
+    FS.LayoutEdit.Enter()
+    local grid = gridNow()
+    eq(grid ~= nil, true, "a grid on enter")
+    eq(#lineXs(grid), 321, "2560 wide at step 8: a line every 8 from the left edge to the right edge")
+    eq(#lineYs(grid), 181, "1440 high at step 8")
+    FS.LayoutEdit.Exit()
+    eq(gridNow(), nil, "no grid once out")
+    eq(grid._shown, false, "the grid frame is hidden")
+    for _, list in ipairs({ grid.v, grid.h, grid.cross }) do
+        for _, line in ipairs(list) do eq(line._hidden, true, "a line is still showing") end
+    end
+    FS.LayoutEdit.Enter()
+    eq(#lineXs(gridNow()), 321, "back on re-entry")
+    __combat = true
+    __fire("PLAYER_REGEN_DISABLED")
+    eq(gridNow(), nil, "combat takes the grid away with the editor")
+    for _, line in ipairs(grid.v) do eq(line._hidden, true) end
+    eq(#__errors, 0)
+end
+
+function T.the_grid_lines_are_the_places_snap_puts_a_piece()
+    for _, height in ipairs({ 1440, 1200, 1080 }) do
+        screen(height)
+        __session(__layoutSrc, __configSrc, __editSrc)
+        edit()
+        local tracker = fakeSeat()
+        local ids = { "stance", "player", "target", "tcast", "minimap", "tooltip" }
+        for _, id in ipairs(ids) do seat(id) end
+        ids[#ids + 1] = "objectives"
+        FS.LayoutEdit.Enter()
+        -- A line is on a whole pixel, so it is within half a pixel of the exact place (exact where the scale is 1).
+        local tol = height == 1440 and 1e-6 or 0.5 + 1e-6
+        for _, step in ipairs({ 4, 8, 16, 32 }) do
+            FS.Config.Set("layout.grid", step)
+            for _, id in ipairs(ids) do
+                local where = id .. " at step " .. step .. " on a " .. height .. " screen"
+                local px, py
+                if id == "objectives" then
+                    dragTo(id, "TOPRIGHT", "TOPRIGHT", -45.3, -301.7)
+                    px, py = UIParent._w + tracker.right, UIParent._h + tracker.top
+                    eq(tracker.right % step, 0, where .. ": the tracker seat is a whole step")
+                else
+                    local L = FS.Layout[id]
+                    local x = L.relPoint:find("RIGHT") and -113.3 or (L.relPoint:find("LEFT") and 113.3 or 13.3)
+                    local y = L.relPoint:find("TOP") and -141.7 or (L.relPoint:find("BOTTOM") and 141.7 or -41.7)
+                    dropAt(id, x, y)
+                    local saved = FS.Layout[id]
+                    eq(saved.x % step, 0, where .. ": x is a whole step"); eq(saved.y % step, 0, where .. ": y is a whole step")
+                    local ox, oy = screenPoint(saved.relPoint)
+                    local unit = FS.Layout.IsUnscaled(id) and 1 or FS.Layout.Scale()
+                    px, py = ox + saved.x * unit, oy + saved.y * unit
+                end
+                local grid = gridNow()
+                eq(grid ~= nil, true, where .. ": a grid")
+                eq(hasLine(lineXs(grid), px, tol), true, where .. ": no vertical line at " .. px)
+                eq(hasLine(lineYs(grid), py, tol), true, where .. ": no horizontal line at " .. py)
+            end
+        end
+        -- The spacing is the step in the piece's own unit, read off two neighbouring lines.
+        FS.Config.Set("layout.grid", 8)
+        FS.LayoutEdit.Select("stance")
+        local xs = lineXs(gridNow())
+        near(xs[3] - xs[2], 8 * FS.Layout.Scale(), 1.0, "spacing on a " .. height .. " screen")
+        -- With nothing picked it is the screen centre lattice in design pixels.
+        FS.LayoutEdit.Select(nil)
+        eq(hasLine(lineXs(gridNow()), UIParent._w / 2, tol), true, "centre line, nothing picked")
+        eq(hasLine(lineYs(gridNow()), UIParent._h / 2, tol), true)
+    end
+end
+
+function T.grid_lines_are_one_physical_pixel_and_sit_on_whole_pixels()
+    screen(1440)
+    __session(__layoutSrc, __configSrc, __editSrc)
+    edit(); seat("stance")
+    for _, ppu in ipairs({ 1, 1.2, 0.75 }) do
+        FS.FrameHelpers = { PixelsPerUnit = function() return ppu end }
+        FS.LayoutEdit.Exit()
+        FS.LayoutEdit.Enter()
+        local grid = gridNow()
+        local n = 0
+        for _, list in ipairs({ grid.v, grid.cross }) do
+            for _, line in ipairs(litLines(list)) do
+                if line._points[1].point == "TOPLEFT" then
+                    near(line._w * ppu, 1, 1e-9, "a vertical line is one pixel wide at " .. ppu)
+                    near(line._points[1].x * ppu, math.floor(line._points[1].x * ppu + 0.5), 1e-6, "on a whole pixel")
+                    n = n + 1
+                end
+            end
+        end
+        for _, list in ipairs({ grid.h, grid.cross }) do
+            for _, line in ipairs(litLines(list)) do
+                if line._points[1].point == "BOTTOMLEFT" then
+                    near(line._h * ppu, 1, 1e-9, "a horizontal line is one pixel tall at " .. ppu)
+                    near(line._points[1].y * ppu, math.floor(line._points[1].y * ppu + 0.5), 1e-6)
+                    n = n + 1
+                end
+            end
+        end
+        eq(n > 400, true, "every kind of line was checked")
+        for _, list in ipairs({ grid.v, grid.h, grid.cross }) do
+            for _, line in ipairs(litLines(list)) do eq(line._snapPixel, true, "snapped to the pixel grid") end
+        end
+    end
+end
+
+function T.the_centre_cross_is_brighter_than_the_grid_on_both_axes()
+    screen(1440)
+    __session(__layoutSrc, __configSrc, __editSrc)
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    local grid = gridNow()
+    local plain = grid.v[1]._color
+    local down, across = grid.cross[1], grid.cross[2]
+    eq(down._hidden, false); eq(across._hidden, false)
+    near(down._points[1].x, UIParent._w / 2, 1e-6, "the vertical arm is on the screen centre")
+    near(across._points[1].y, UIParent._h / 2, 1e-6, "the horizontal arm is on the screen centre")
+    for _, arm in ipairs({ down, across }) do
+        eq(arm._color[4] > plain[4] * 4, true, "much brighter than a grid line")
+        near(arm._color[1], 1); near(arm._color[2], 0.18, 1e-6)   -- the health pink
+    end
+    -- It stays on the screen centre when a piece with another lattice is picked.
+    FS.LayoutEdit.Select("stance")
+    near(grid.cross[1]._points[1].x, UIParent._w / 2, 1e-6)
+end
+
+function T.a_step_change_redraws_the_grid_at_once_and_hides_the_lines_it_no_longer_needs()
+    screen(1440)
+    __session(__layoutSrc, __configSrc, __editSrc)
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    local grid = gridNow()
+    local pool = #grid.v
+    eq(#lineXs(grid), 321)
+    FS.Config.Set("layout.grid", 16)
+    eq(#lineXs(grid), 161, "step 16"); eq(#lineYs(grid), 91)
+    eq(#grid.v, pool, "the pool is kept")
+    for i = 162, #grid.v do eq(grid.v[i]._hidden, true, "a spare line is hidden") end
+    FS.Config.Set("layout.grid", 4)
+    eq(#lineXs(grid), 641, "step 4"); eq(#lineYs(grid), 361)
+    -- The Done panel's chips do the same through Config.
+    local panel = FS.LayoutEdit.GetDonePanel()
+    local chip = panel.stepChips[4]
+    eq(chip.fsStep, 32)
+    chip._scripts.OnClick(chip)
+    eq(FS.Config.Get("layout.grid"), 32)
+    eq(#lineXs(grid), 81, "step 32 from the chip"); eq(#lineYs(grid), 45)
+    eq(chip.fsSelected, true, "the chip shows it is on")
+    eq(#__errors, 0)
+end
+
+function T.snap_off_or_show_grid_off_takes_the_grid_away()
+    screen(1440)
+    __session(__layoutSrc, __configSrc, __editSrc)
+    edit(); seat("stance")
+    eq(FS.Config.Get("layout.showGrid"), true, "Show grid is on by default")
+    FS.LayoutEdit.Enter()
+    local grid = gridNow()
+    FS.Config.Set("layout.snap", false)
+    eq(gridNow(), nil, "snap off hides the grid")
+    for _, line in ipairs(grid.v) do eq(line._hidden, true) end
+    FS.Config.Set("layout.snap", true)
+    eq(#lineXs(gridNow()), 321, "snap on brings it back")
+    -- The Done panel's switch writes layout.showGrid.
+    local switch = FS.LayoutEdit.GetDonePanel().gridSwitch
+    eq(switch.fsOn, true)
+    switch._scripts.OnClick(switch)
+    eq(FS.Config.Get("layout.showGrid"), false, "the switch is saved as layout.showGrid")
+    eq(gridNow(), nil, "Show grid off hides it")
+    eq(switch.fsOn, false, "and the switch says so")
+    FS.LayoutEdit.Select("stance")
+    eq(gridNow(), nil, "a pick does not bring it back")
+    switch._scripts.OnClick(switch)
+    eq(FS.Config.Get("layout.showGrid"), true)
+    eq(#lineXs(gridNow()) > 100, true)
+    -- Snapping itself does not depend on the lines.
+    FS.Config.Set("layout.showGrid", false)
+    dropAt("stance", 13, -40)
+    eq(override("stance").x, 16, "snap still rounds with the lines hidden")
+    FS.LayoutEdit.Exit()
+    FS.Config.Set("layout.showGrid", true)
+    eq(gridNow(), nil, "a setting changed outside edit mode shows nothing")
+end
+
+function T.the_grid_sits_below_the_handles_above_the_world_and_takes_no_mouse()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    local grid = gridNow()
+    local order = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5, FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
+    local h = FS.LayoutEdit.GetHandle("stance")
+    eq(order[grid._strata] > order.HIGH, true, "above the world's frames")
+    eq(order[grid._strata] < order[h._strata], true, "below the handles")
+    eq(grid._mouse, false, "mouse disabled")
+    eq(grid._parent, UIParent); eq(grid._protected, nil, "an insecure frame")
+    for _, line in ipairs(litLines(grid.v)) do eq(line._mouse, nil) end
+end
+
+function T.a_screen_size_change_redraws_the_grid()
+    screen(1440)
+    __session(__layoutSrc, __configSrc, __editSrc)
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    local before = lineXs(gridNow())[2]
+    __setScreen(1000)
+    __fire("DISPLAY_SIZE_CHANGED")
+    local xs, ys = lineXs(gridNow()), lineYs(gridNow())
+    eq(xs[2] ~= before, true, "the lines moved")
+    -- A line rounds to a whole pixel, so the last one may sit up to half a pixel past the edge.
+    eq(xs[#xs] <= UIParent._w + 0.5 + 1e-6 and xs[1] >= -1e-6, true, "inside the new width")
+    eq(ys[#ys] <= UIParent._h + 0.5 + 1e-6 and ys[1] >= -1e-6, true, "inside the new height")
+    eq(#xs >= 319 and #xs <= 323, true, "about 321 lines at step 8")
+    near(gridNow().cross[1]._points[1].x, UIParent._w / 2, 0.5 + 1e-6)
+    eq(#__errors, 0)
+end
+
+-------------------------------------------------------------------------------
+-- Position panel
+-------------------------------------------------------------------------------
+
+local function posNow() return FS.LayoutEdit.GetPositionPanel() end
+-- Types into both boxes and presses Enter in the X box.
+local function typed(panel, x, y)
+    panel.xBox.edit:SetText(x)
+    panel.yBox.edit:SetText(y)
+    panel.xBox.edit._scripts.OnEnterPressed(panel.xBox.edit)
+end
+
+function T.picking_a_piece_shows_the_position_panel_over_it_and_dropping_the_pick_hides_it()
+    edit(); seat("stance"); seat("player")
+    FS.LayoutEdit.Enter()
+    eq(posNow(), nil, "nothing picked, no panel")
+    FS.LayoutEdit.Select("stance")
+    local panel = posNow()
+    eq(panel ~= nil, true, "a panel for the pick")
+    eq(panel._parent, UIParent); eq(panel._protected, nil, "an insecure frame")
+    eq(panel._strata, "FULLSCREEN_DIALOG")
+    local h = FS.LayoutEdit.GetHandle("stance")
+    eq(panel._points[1].rel, h, "anchored to the handle, never to the covered frame")
+    eq(panel:GetBottom() > h:GetTop(), true, "clear above the handle's ring")
+    eq(panel.xBox.edit._kind, "EditBox"); eq(panel.yBox.edit._kind, "EditBox")
+    eq(panel._w > 100, true, "seated and sized")
+    -- Another pick moves it; a pick at the top of the screen puts it below.
+    FS.LayoutEdit.Select("player")
+    local top = FS.LayoutEdit.GetHandle("player")
+    eq(panel._points[1].rel, top, "it follows the pick")
+    eq(panel:GetTop() <= top:GetBottom(), true, "below a piece near the top of the screen")
+    eq(panel:GetTop() <= UIParent._h and panel:GetBottom() >= 0, true, "on the screen")
+    FS.LayoutEdit.Select(nil)
+    eq(posNow(), nil, "dropping the pick hides it")
+    FS.LayoutEdit.Select("stance")
+    eq(posNow() ~= nil, true)
+    FS.LayoutEdit.Exit()
+    eq(posNow(), nil, "leaving hides it")
+    eq(panel:IsShown(), false)
+end
+
+function T.the_fields_show_the_position_and_follow_nudges_and_drags_live()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("stance")
+    local panel = posNow()
+    eq(panel.xBox.edit:GetText(), "0"); eq(panel.yBox.edit:GetText(), "-427", "the layout's own numbers")
+    key("RIGHT")
+    eq(panel.xBox.edit:GetText(), "1", "an arrow nudge")
+    __shift = true
+    key("UP")
+    eq(panel.yBox.edit:GetText(), "-419", "Shift nudges by the grid step")
+    __shift = false
+    local h = FS.LayoutEdit.GetHandle("stance")
+    h._scripts.OnDragStart(h)
+    local s = FS.Layout.Scale()
+    h:ClearAllPoints()
+    h:SetPoint("CENTER", UIParent, "CENTER", 13 * s, -203 * s)
+    panel._scripts.OnUpdate(panel, 0.1)
+    eq(panel.xBox.edit:GetText(), "16", "live: where it would land, snapped")
+    eq(panel.yBox.edit:GetText(), "-200")
+    h._scripts.OnDragStop(h)
+    eq(panel._scripts.OnUpdate, nil, "the live read stops with the drag")
+    eq(panel.xBox.edit:GetText(), "16"); eq(panel.yBox.edit:GetText(), "-200")
+    eq(override("stance").x, 16)
+    -- A box that is being typed in keeps its text while the piece moves.
+    panel.xBox.edit:SetFocus()
+    panel.xBox.edit:SetText("55")
+    FS.LayoutEdit.Nudge(0, 1)
+    eq(panel.xBox.edit:GetText(), "55", "the focused box is left alone")
+    eq(panel.yBox.edit:GetText(), "-199")
+end
+
+function T.enter_commits_a_typed_position_through_the_drag_path_and_it_reads_back_equal()
+    edit(); seat("stance")
+    local seen = {}
+    local setO, reseat = FS.Layout.SetOverride, FS.Layout.Reseat
+    FS.Layout.SetOverride = function(id, x, y) seen[#seen + 1] = { id, x, y }; return setO(id, x, y) end
+    FS.Layout.Reseat = function(id) seen[#seen + 1] = { "reseat", id }; return reseat(id) end
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("stance")
+    local panel = posNow()
+    typed(panel, "13", "-401.5")
+    eq(#seen, 2, "set then reseat, as a drop does")
+    eq(seen[1][1], "stance"); eq(seen[1][2], 13, "exact: not rounded to the grid step"); eq(seen[1][3], -401.5)
+    eq(seen[2][1], "reseat")
+    eq(override("stance").x, 13); eq(override("stance").y, -401.5)
+    eq(panel.xBox.edit:GetText(), "13", "reads back equal"); eq(panel.yBox.edit:GetText(), "-401.5")
+    eq(panel.xBox.edit:HasFocus(), false, "Enter lets go of the keyboard")
+    eq(panel.yBox.edit:HasFocus(), false)
+    local h = FS.LayoutEdit.GetHandle("stance")
+    local s = FS.Layout.Scale()
+    local cx, cy = h:GetCenter()
+    near(cx, UIParent._w / 2 + 13 * s, 1e-6, "the handle follows"); near(cy, UIParent._h / 2 - 401.5 * s, 1e-6)
+    -- The same place by a drag (snap off) goes through the same call with the same numbers.
+    FS.LayoutEdit.ResetOne("stance")
+    seen = {}
+    setSnap(false)
+    dropAt("stance", 13, -401.5)
+    eq(seen[1][1], "stance"); near(seen[1][2], 13, 1e-9); near(seen[1][3], -401.5, 1e-9)
+    -- A typed value that is the position it already has writes nothing.
+    seen = {}
+    typed(panel, "13", "-401.5")
+    eq(#seen, 0, "no change, no write")
+    eq(__printedHas("could not"), false)
+    -- A position with a plus sign, a bare point or spaces around it is still a number.
+    typed(panel, "+5", ".5")
+    eq(override("stance").x, 5); eq(override("stance").y, 0.5)
+    typed(panel, "  12  ", "5.")
+    eq(override("stance").x, 12); eq(override("stance").y, 5)
+end
+
+function T.grid_units_are_the_position_over_the_grid_step_and_both_modes_read_back_equal()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("stance")
+    local panel = posNow()
+    eq(FS.Config.Get("layout.posUnit"), "px", "px is the default")
+    eq(panel.pxChip.fsSelected, true); eq(panel.gridChip.fsSelected, false)
+    eq(panel.xBox.unit._text, "px")
+    panel.gridChip._scripts.OnClick(panel.gridChip)
+    eq(FS.Config.Get("layout.posUnit"), "grid", "the unit is a saved choice")
+    eq(panel.gridChip.fsSelected, true); eq(panel.pxChip.fsSelected, false)
+    eq(panel.xBox.unit._text, "grid"); eq(panel.yBox.unit._text, "grid")
+    typed(panel, "3", "-50")
+    eq(override("stance").x, 24, "3 at step 8 is 24 px"); eq(override("stance").y, -400)
+    eq(panel.xBox.edit:GetText(), "3", "reads back as typed"); eq(panel.yBox.edit:GetText(), "-50")
+    FS.Config.Set("layout.grid", 16)
+    eq(panel.xBox.edit:GetText(), "1.5", "24 px is 1.5 steps of 16"); eq(panel.yBox.edit:GetText(), "-25")
+    typed(panel, "3", "2.5")
+    eq(override("stance").x, 48, "3 at step 16"); eq(override("stance").y, 40)
+    eq(panel.xBox.edit:GetText(), "3"); eq(panel.yBox.edit:GetText(), "2.5")
+    panel.pxChip._scripts.OnClick(panel.pxChip)
+    eq(FS.Config.Get("layout.posUnit"), "px")
+    eq(panel.xBox.edit:GetText(), "48", "the same piece in px"); eq(panel.yBox.edit:GetText(), "40")
+    typed(panel, "7", "-9")
+    eq(override("stance").x, 7); eq(override("stance").y, -9)
+    eq(panel.xBox.edit:GetText(), "7"); eq(panel.yBox.edit:GetText(), "-9")
+end
+
+function T.input_that_is_not_a_number_is_refused_with_a_pink_flash_and_writes_nothing()
+    edit(); seat("stance")
+    local writes = 0
+    local setO = FS.Layout.SetOverride
+    FS.Layout.SetOverride = function(...) writes = writes + 1; return setO(...) end
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("stance")
+    local panel = posNow()
+    local function refused(x, y, badX, badY, what)
+        panel.xBox.edit:SetText(x); panel.yBox.edit:SetText(y)
+        panel.xBox.edit._scripts.OnEnterPressed(panel.xBox.edit)
+        eq(writes, 0, what .. " wrote")
+        eq(next(frames()), nil, what .. " saved")
+        eq(panel.xBox.fsBad, badX, what .. ": X flash"); eq(panel.yBox.fsBad, badY, what .. ": Y flash")
+        local bad = badX and panel.xBox or panel.yBox
+        near(bad.edges[1]._color[1], 1); near(bad.edges[1]._color[2], 0.18, 1e-6)   -- the pink ring
+        for _, fn in ipairs(__timers) do fn() end
+        __timers = {}
+        eq(panel.xBox.fsBad, false, what .. ": the flash ends"); eq(panel.yBox.fsBad, false)
+    end
+    for _, text in ipairs({ "abc", "", "  ", "1e3", "0x10", "1,5", "--3", "12abc", "nan", "inf", "1.2.3", "-", ".", "5 5" }) do
+        refused(text, "5", true, false, "X '" .. text .. "'")
+        refused("5", text, false, true, "Y '" .. text .. "'")
+    end
+    refused("x", "y", true, true, "both")
+    eq(#__errors, 0)
+end
+
+function T.a_typed_position_is_clamped_so_the_piece_stays_on_screen()
+    edit(); seat("stance"); seat("player"); fakeSeat()
+    FS.LayoutEdit.Enter()
+    for _, id in ipairs({ "stance", "player", "objectives" }) do
+        FS.LayoutEdit.Select(id)
+        local panel = posNow()
+        for _, pair in ipairs({ { "99999", "99999" }, { "-99999", "-99999" }, { "99999", "-99999" }, { "-99999", "99999" } }) do
+            typed(panel, pair[1], pair[2])
+            local h = FS.LayoutEdit.GetHandle(id)
+            local where = id .. " at " .. pair[1] .. "," .. pair[2]
+            eq(h:GetLeft() >= -1e-6, true, where .. " left"); eq(h:GetRight() <= UIParent._w + 1e-6, true, where .. " right")
+            eq(h:GetBottom() >= -1e-6, true, where .. " bottom"); eq(h:GetTop() <= UIParent._h + 1e-6, true, where .. " top")
+        end
+    end
+    -- It lands on the edge, not short of it.
+    FS.LayoutEdit.Select("stance")
+    typed(posNow(), "99999", "0")
+    near(FS.LayoutEdit.GetHandle("stance"):GetRight(), UIParent._w, 1e-6, "on the right edge")
+    eq(#__errors, 0)
+end
+
+function T.esc_puts_the_numbers_back_and_lets_go_of_the_keyboard_and_tab_goes_to_the_other_box()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("stance")
+    local panel = posNow()
+    local x, y = panel.xBox.edit, panel.yBox.edit
+    x:SetFocus()
+    eq(x:HasFocus(), true)
+    x:SetText("999")
+    x._scripts.OnEscapePressed(x)
+    eq(x:GetText(), "0", "the number is back"); eq(x:HasFocus(), false, "focus released")
+    eq(next(frames()), nil, "Esc writes nothing")
+    eq(FS.LayoutEdit.IsEditing(), true, "and does not leave edit mode")
+    x:SetFocus()
+    x._scripts.OnTabPressed(x)
+    eq(y:HasFocus(), true, "Tab moves X to Y")
+    y._scripts.OnTabPressed(y)
+    eq(x:HasFocus(), true, "and back")
+    -- Picking another piece takes the keys back from the box.
+    seat("player")
+    FS.LayoutEdit.Exit(); FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("stance")
+    posNow().xBox.edit:SetFocus()
+    FS.LayoutEdit.Select("player")
+    eq(posNow().xBox.edit:HasFocus(), false, "a new pick releases the boxes")
+end
+
+function T.the_position_tip_says_what_the_numbers_count_from()
+    edit(); seat("stance"); seat("player"); fakeSeat()
+    FS.LayoutEdit.Enter()
+    local function tipOf(id)
+        FS.LayoutEdit.Select(id)
+        local panel = posNow()
+        eq(panel.help.fsTip ~= nil, true)
+        panel.help._scripts.OnEnter(panel.help)
+        eq(GameTooltip._text, panel.help.fsTip, "the ? shows it")
+        panel.help._scripts.OnLeave(panel.help)
+        return panel.help.fsTip
+    end
+    local function has(text, part, what) eq(text:find(part, 1, true) ~= nil, true, what .. ": '" .. part .. "' in " .. text) end
+    local tip = tipOf("stance")
+    has(tip, "centre of the screen to the centre of the piece", "stance")
+    has(tip, "X grows to the right", "stance"); has(tip, "Y grows up", "stance"); has(tip, "2560 x 1440 design", "stance")
+    tip = tipOf("player")
+    has(tip, "top left corner of the screen to the top left corner of the piece", "player")
+    has(tip, "UI unit", "player")
+    tip = tipOf("objectives")
+    has(tip, "top right corner of the screen to the top right corner of the piece", "objectives")
+    has(tip, "step (now 8)", "objectives")
+end
+
+function T.provider_pieces_type_a_position_the_same_way()
+    -- The objectives tracker: offsets from the screen's top right, written through its seat.
+    local tracker = fakeSeat()
+    edit(); FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("objectives")
+    local panel = posNow()
+    eq(panel.xBox.edit:GetText(), "-29"); eq(panel.yBox.edit:GetText(), "-286")
+    typed(panel, "-100", "-401")
+    eq(#tracker.moves, 1); eq(tracker.moves[1][1], -100, "exact, not snapped"); eq(tracker.moves[1][2], -401)
+    eq(panel.xBox.edit:GetText(), "-100", "reads back")
+    near(FS.LayoutEdit.GetHandle("objectives"):GetRight(), UIParent:GetRight() - 100, 1e-6, "the handle follows the seat")
+    panel.gridChip._scripts.OnClick(panel.gridChip)
+    typed(panel, "-5", "-30")
+    eq(tracker.moves[2][1], -40, "-5 steps of 8"); eq(tracker.moves[2][2], -240)
+    eq(next(frames()), nil, "nothing written to the STUwave layout")
+    FS.LayoutEdit.Exit()
+    -- A raid layout, through the preview.
+    __session(__layoutSrc, __configSrc, __editSrc)
+    local pv = fakePreview()
+    edit(); FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("raid10")
+    panel = posNow()
+    eq(panel ~= nil, true, "a panel for the raid handle")
+    eq(panel.xBox.edit:GetText(), "-696.5"); eq(panel.yBox.edit:GetText(), "140")
+    typed(panel, "-600", "100")
+    eq(override("raid10").x, -600); eq(override("raid10").y, 100)
+    local left, top = pv.Rect()
+    near(FS.LayoutEdit.GetHandle("raid10"):GetLeft(), left, 1e-6, "the handle follows the seat")
+    FS.LayoutEdit.Exit()
+    -- A floating pet.
+    __session(__layoutSrc, __configSrc, __editSrc)
+    edit(); seat("petcontainer")
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("petcontainer")
+    panel = posNow()
+    typed(panel, "-300", "-420")
+    eq(override("petcontainer").x, -300); eq(override("petcontainer").y, -420)
+    eq(#__errors, 0)
+end
+
+-------------------------------------------------------------------------------
+-- Right click menu
+-------------------------------------------------------------------------------
+
+local function menuNow() return FS.LayoutEdit.GetMenu() end
+
+function T.right_click_opens_a_menu_at_the_cursor_named_for_the_piece()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    local h = FS.LayoutEdit.GetHandle("stance")
+    eq(menuNow(), nil, "no menu before a right click")
+    h._scripts.OnMouseUp(h, "LeftButton")
+    eq(menuNow(), nil, "a left click opens none")
+    __cursor = { 300, 400 }
+    local m = rightClick(h)
+    eq(m ~= nil, true)
+    eq(m.header._text, "STANCE BAR", "the piece's name, as the muted header")
+    eq(m.items.settings.label._text, "Settings"); eq(m.items.position.label._text, "Set position")
+    eq(m.items.reset.label._text, "Reset position")
+    local p = m.frame._points[1]
+    eq(p.point, "TOPLEFT"); eq(p.rel, UIParent); eq(p.relPoint, "BOTTOMLEFT")
+    eq(p.x, 304, "just right of the cursor"); eq(p.y, 396, "and just under it")
+    -- Near the bottom right corner it opens up and to the left of the cursor.
+    __cursor = { UIParent._w - 10, 20 }
+    m = rightClick(h)
+    eq(m.frame._points[1].x, math.floor(UIParent._w - 10 - 4 - 184 + 0.5))
+    eq(m.frame._points[1].y, 20 + 4 + m.height)
+    -- A plain insecure frame in the STUwave look: no Blizzard template, above the handles and the panels.
+    for _, f in ipairs({ m.catcher, m.frame, m.items.settings, m.items.position, m.items.reset }) do
+        eq(f._protected, nil, "insecure"); eq(f._template, nil, "no Blizzard dropdown template")
+    end
+    eq(m.catcher._parent, UIParent); eq(m.frame._parent, m.catcher)
+    eq(m.catcher._level > FS.LayoutEdit.GetDonePanel()._level, true, "above the Done panel")
+    eq(m.frame._level > h._level, true, "above the handle")
+    local skinned = false
+    for _, f in ipairs(__themed.panels) do if f == m.frame then skinned = true end end
+    eq(skinned, true, "skinned by Theme.SkinPanel")
+    eq(#__errors, 0)
+end
+
+function T.a_click_elsewhere_or_esc_closes_the_menu_and_edit_mode_keeps_running()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    local h = FS.LayoutEdit.GetHandle("stance")
+    local m = rightClick(h)
+    m.catcher._scripts.OnClick(m.catcher, "LeftButton")
+    eq(FS.LayoutEdit.IsMenuOpen(), false, "a click elsewhere closes it")
+    eq(FS.LayoutEdit.IsEditing(), true)
+    rightClick(h)
+    local o = key("ESCAPE")
+    eq(FS.LayoutEdit.IsMenuOpen(), false, "Esc closes it")
+    eq(FS.LayoutEdit.IsEditing(), true, "and does not leave edit mode")
+    eq(o._propagate, false, "Esc is taken by the menu")
+    key("ESCAPE")
+    eq(FS.LayoutEdit.IsEditing(), false, "the next Esc leaves")
+    -- Leaving closes it too; so does the start of a drag; arrows do not nudge a piece behind an open menu.
+    FS.LayoutEdit.Enter()
+    h = FS.LayoutEdit.GetHandle("stance")
+    rightClick(h)
+    FS.LayoutEdit.Exit()
+    eq(FS.LayoutEdit.IsMenuOpen(), false)
+    FS.LayoutEdit.Enter()
+    h = FS.LayoutEdit.GetHandle("stance")
+    rightClick(h)
+    h._scripts.OnDragStart(h)
+    eq(FS.LayoutEdit.IsMenuOpen(), false, "a drag closes it")
+    h._scripts.OnDragStop(h)
+    FS.LayoutEdit.Select("stance")
+    rightClick(h)
+    local before = override("stance").x
+    key("RIGHT")
+    eq(override("stance").x, before, "an arrow behind an open menu moves nothing")
+    -- An open menu does not need a left click to stay put when the piece is picked.
+    eq(FS.LayoutEdit.IsMenuOpen(), true)
+end
+
+function T.menu_rows_have_hover_pressed_and_greyed_looks()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance"); seat("tooltip")
+    FS.LayoutEdit.Enter()
+    local m = rightClick(FS.LayoutEdit.GetHandle("stance"))
+    local reset = m.items.reset
+    near(reset.wash._color[4], 0, 1e-9, "idle")
+    reset._scripts.OnEnter(reset);     near(reset.wash._color[4], 0.12, 1e-9, "hover")
+    near(reset.label._mono.color[1], 0.133, 1e-6, "the label goes cyan on hover")
+    reset._scripts.OnMouseDown(reset); near(reset.wash._color[4], 0.2, 1e-9, "pressed")
+    reset._scripts.OnMouseUp(reset);   near(reset.wash._color[4], 0.12, 1e-9)
+    reset._scripts.OnLeave(reset);     near(reset.wash._color[4], 0, 1e-9, "idle again")
+    -- A row with nothing to open is greyed: no hover wash, dim text, a ? that carries the reason.
+    m = rightClick(FS.LayoutEdit.GetHandle("tooltip"))
+    local settings = m.items.settings
+    eq(settings.fsDisabled, true)
+    eq(settings.hint._hidden, false, "the ? shows"); eq(settings.hint._text, "?")
+    settings._scripts.OnEnter(settings)
+    near(settings.wash._color[4], 0, 1e-9, "a greyed row takes no hover wash")
+    near(settings.label._mono.color[1], 0.361, 1e-6, "dim text")
+end
+
+function T.settings_opens_the_config_window_on_the_pieces_page_tab_and_row_and_edit_mode_keeps_running()
+    local win = fakeWindow()
+    FS.ConfigWindow = win
+    edit(); seat("stance"); seat("player"); fakeSeat()
+    FS.LayoutEdit.Enter()
+    local cases = {
+        { "stance", "ab", "g", nil },
+        { "player", "unit", "bars", "bars.w" },
+        { "objectives", "track", "g", "tracker.w" },
+    }
+    for _, want in ipairs(cases) do
+        win.openCalls, win.shown = {}, false
+        menuPick(FS.LayoutEdit.GetHandle(want[1]), "settings")
+        eq(#win.openCalls, 1, want[1] .. ": one call")
+        eq(win.openCalls[1].page, want[2], want[1] .. " page"); eq(win.openCalls[1].tab, want[3], want[1] .. " tab")
+        eq(win.openCalls[1].row, want[4], want[1] .. " row")
+        eq(FS.LayoutEdit.IsEditing(), true, "edit mode keeps running")
+        eq(FS.LayoutEdit.IsMenuOpen(), false, "the menu closes on a pick")
+    end
+    -- Every id in the map goes where the map says; a piece with none opens nothing.
+    local pieces = FS.LayoutEdit.GetPieces()
+    for id, entry in pairs(pieces) do
+        win.openCalls = {}
+        local ok = FS.LayoutEdit.OpenSettings(id)
+        if entry.none then
+            eq(ok, false, id .. " has none"); eq(#win.openCalls, 0)
+        else
+            eq(ok, true, id); eq(win.openCalls[1].page, entry.page); eq(win.openCalls[1].tab, entry.tab)
+            eq(win.openCalls[1].row, entry.row)
+        end
+    end
+end
+
+function T.settings_works_with_a_window_that_only_takes_a_page_and_one_that_throws()
+    local win = fakeWindow()
+    FS.ConfigWindow = win
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    -- The older window: Open(page) only; extra arguments are ignored.
+    function win.Open(page) win.opened[#win.opened + 1] = page; win.shown = true end
+    eq(FS.LayoutEdit.OpenSettings("player"), true)
+    eq(win.opened[#win.opened], "unit")
+    -- A window that throws is reported and does not leave the editor.
+    function win.Open() error("boom") end
+    eq(FS.LayoutEdit.OpenSettings("player"), false)
+    eq(FS.LayoutEdit.IsEditing(), true)
+    eq(#__errors >= 1, true, "the error is forwarded")
+end
+
+function T.the_editor_drops_under_the_config_window_while_it_is_up_and_comes_back_after()
+    local win = fakeWindow()
+    FS.ConfigWindow = win
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("stance")
+    local h = FS.LayoutEdit.GetHandle("stance")
+    local done, pos, grid = FS.LayoutEdit.GetDonePanel(), posNow(), gridNow()
+    local order = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5, FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
+    eq(h._strata, "FULLSCREEN_DIALOG"); eq(grid._strata, "FULLSCREEN")
+    menuPick(h, "settings")
+    -- The config window is a DIALOG strata frame: the editor's frames must sit below it.
+    for name, f in pairs({ handle = h, done = done, position = pos, grid = grid }) do
+        eq(order[f._strata] < order.DIALOG, true, name .. " is under the config window")
+    end
+    eq(FS.LayoutEdit.IsEditing(), true)
+    -- Keys belong to the window while it is up (Esc closes it); they reach the game.
+    local o = key("ESCAPE")
+    eq(o._propagate, true, "Esc goes to the window")
+    eq(FS.LayoutEdit.IsEditing(), true, "and does not leave edit mode")
+    -- A handle that appears while the window is up is made under it too.
+    eq(order[FS.LayoutEdit.GetHandle("stance")._strata] < order.DIALOG, true)
+    win.Close()
+    done._scripts.OnUpdate(done, 0.3)
+    eq(h._strata, "FULLSCREEN_DIALOG", "the handles are back above the world"); eq(done._strata, "FULLSCREEN_DIALOG")
+    eq(pos._strata, "FULLSCREEN_DIALOG"); eq(grid._strata, "FULLSCREEN")
+    key("ESCAPE")
+    eq(FS.LayoutEdit.IsEditing(), false, "Esc is the editor's again")
+end
+
+function T.settings_is_greyed_with_a_tip_for_a_piece_with_no_settings()
+    local win = fakeWindow()
+    FS.ConfigWindow = win
+    edit(); seat("tooltip"); seat("stance"); seat("tcast")
+    FS.LayoutEdit.Enter()
+    for _, id in ipairs({ "tooltip", "tcast" }) do
+        local m = rightClick(FS.LayoutEdit.GetHandle(id))
+        local item = m.items.settings
+        eq(item.fsDisabled, true, id .. " has no settings")
+        item._scripts.OnClick(item)
+        eq(#win.openCalls, 0, "a greyed row opens nothing")
+        eq(FS.LayoutEdit.IsMenuOpen(), true, "and leaves the menu up")
+        item._scripts.OnEnter(item)
+        eq(GameTooltip._text, "This piece has no settings.")
+        eq(GameTooltip._owner, item)
+        item._scripts.OnLeave(item)
+        eq(GameTooltip._shown, false)
+        eq(m.items.position.fsDisabled, false, "Set position stays on"); eq(m.items.reset.fsDisabled, false)
+        FS.LayoutEdit.CloseMenu()
+    end
+    local m = rightClick(FS.LayoutEdit.GetHandle("stance"))
+    eq(m.items.settings.fsDisabled, false, "a piece with settings is live")
+    eq(m.items.settings.hint._hidden, true, "and has no ?")
+    -- The tooltip row is not sticky: the next menu repaints it.
+    FS.LayoutEdit.CloseMenu()
+    -- No config window at all: Settings is greyed and says why.
+    FS.ConfigWindow = nil
+    m = rightClick(FS.LayoutEdit.GetHandle("stance"))
+    eq(m.items.settings.fsDisabled, true)
+    m.items.settings._scripts.OnEnter(m.items.settings)
+    eq(GameTooltip._text, "The config window is not available.")
+end
+
+function T.set_position_picks_the_piece_and_puts_the_cursor_in_its_x_box()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance"); seat("player")
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("player")
+    local h = FS.LayoutEdit.GetHandle("stance")
+    menuPick(h, "position")
+    eq(FS.LayoutEdit.IsMenuOpen(), false)
+    local panel = posNow()
+    eq(panel._points[1].rel, h, "the panel is over the piece that was clicked")
+    eq(panel.xBox.edit:HasFocus(), true, "the cursor is in X"); eq(panel.yBox.edit:HasFocus(), false)
+    eq(panel.xBox.edit:GetText(), "0")
+    typed(panel, "40", "-300")
+    eq(override("stance").x, 40, "typed through the menu path"); eq(override("stance").y, -300)
+    eq(panel.xBox.edit:HasFocus(), false, "focus released")
+    -- A piece with no handle opens nothing.
+    eq(FS.LayoutEdit.FocusPosition("chat"), false)
+end
+
+function T.reset_position_is_reset_one_for_the_clicked_piece_only()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance"); seat("player")
+    local asked = {}
+    local one = FS.LayoutEdit.ResetOne
+    FS.LayoutEdit.ResetOne = function(id) asked[#asked + 1] = id; return one(id) end
+    FS.LayoutEdit.Enter()
+    setSnap(false)
+    dropAt("stance", 100, 100); dropAt("player", 50, -50)
+    FS.LayoutEdit.Select("player")
+    menuPick(FS.LayoutEdit.GetHandle("stance"), "reset")
+    eq(table.concat(asked, ","), "stance")
+    eq(override("stance"), nil, "the clicked piece is home"); eq(override("player") ~= nil, true, "the picked one is not")
+end
+
+function T.every_handle_id_has_a_settings_map_entry_and_its_row_exists_in_the_window()
+    FS.ConfigWindow = fakeWindow()
+    edit()
+    local pieces = FS.LayoutEdit.GetPieces()
+    local ids, known = FS.LayoutEdit.MovableIds(), {}
+    for _, id in ipairs(ids) do
+        known[id] = true
+        local e = pieces[id]
+        eq(e ~= nil, true, "no Settings map entry for the handle '" .. id .. "'")
+        if not e.none then
+            eq(type(e.page), "string", id .. " needs a page"); eq(type(e.tab), "string", id .. " needs a tab")
+        end
+        eq(e.row == nil or type(e.row) == "string", true, id .. " row")
+    end
+    for id in pairs(pieces) do eq(known[id], true, "a map entry for '" .. id .. "', which has no handle") end
+    -- The row keys must be rows of the window (CW.Rows) wherever the window has the registry; a missing one is reported.
+    local function missing(window)
+        local rows = window.Rows
+        if type(rows) == "function" then rows = rows() end
+        if type(rows) ~= "table" then return nil end
+        local out = {}
+        for id, e in pairs(pieces) do
+            if e.row and not e.none then
+                local found = rows[e.row] ~= nil
+                for _, r in ipairs(rows) do
+                    if r.key == e.row and (r.page == nil or r.page == e.page) then found = true end
+                end
+                if not found then out[#out + 1] = id .. ":" .. e.row end
+            end
+        end
+        table.sort(out)
+        return out
+    end
+    local all = {}
+    for _, e in pairs(pieces) do
+        if e.row then all[#all + 1] = { key = e.row, page = e.page, tab = e.tab } end
+    end
+    local win = fakeWindow()
+    win.Rows = function() return all end
+    eq(#missing(win), 0, "every row key is in a complete registry")
+    local short = {}
+    for _, r in ipairs(all) do if r.key ~= "tracker.w" then short[#short + 1] = r end end
+    win.Rows = function() return short end
+    eq(table.concat(missing(win), ","), "objectives:tracker.w", "a row the registry lacks is found")
+    eq(missing(fakeWindow()), nil, "no registry, nothing to check")
+    -- And against whatever window is loaded.
+    if FS.ConfigWindow and FS.ConfigWindow.Rows then eq(#missing(FS.ConfigWindow), 0, "rows missing from the loaded window") end
 end
 
 __checks = T
