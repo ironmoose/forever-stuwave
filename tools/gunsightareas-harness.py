@@ -748,6 +748,121 @@ check(#BLOCKED == 0, "nothing protected was touched in combat: " .. table.concat
 """)
 
 
+# ---- the config window's sample (Areas.Preview) --------------------------------------------
+
+PREVIEW_HELPERS = r"""
+-- The sample target gate as Theme.lua gives it: a flag, and the callbacks FS.OnTargetGate collects (Areas listens at login).
+local GATE_CBS = {}
+PREVIEW_ON = false
+function FS.TargetPreviewOn() return PREVIEW_ON end
+function FS.OnTargetGate(fn) GATE_CBS[#GATE_CBS + 1] = fn end
+-- The caller's FS.SetTargetPreview: every gate reads "has a target" while it is on, then the callbacks fire.
+function setGate(on)
+    PREVIEW_ON = on
+    TARGET = on
+    for _, fn in ipairs(GATE_CBS) do fn() end
+end
+-- A module with a sample of its own (Target Debuffs), recording each ask.
+local function sampled(name)
+    local m = module(name)
+    m.pv = {}
+    m.spec.preview = {
+        show = function(area) m.pv[#m.pv + 1] = "show:" .. area end,
+        hide = function() m.pv[#m.pv + 1] = "hide" end,
+    }
+    return m
+end
+"""
+
+def preview_case(name: str):
+    def deco(body: str):
+        case(name)(PREVIEW_HELPERS + body)
+        return body
+    return deco
+
+
+preview_case("preview_asks_the_occupants_module_for_a_sample_only_with_the_sample_target_on_and_out_of_combat")(r"""
+local dh, cl = sampled("dh"), module("cl")
+cl.spec.classes = { "WARLOCK" }
+local Gs, Areas = boot({ before = function()
+    TARGET = false
+    FS.GunsightAreas.RegisterModule("debuffsH", dh.spec)
+    FS.GunsightAreas.RegisterModule("class", cl.spec)
+end })
+check(type(Areas.Preview) == "table" and Areas.Preview.Show and Areas.Preview.Hide and Areas.Preview.IsShown, "the Preview seam exists")
+check(Areas.Preview.Show("upper") == false and #dh.pv == 0, "no sample target, no sample")
+setGate(true)
+check(Areas.Host("upper"):IsShown(), "the sample target brings the host up")
+check(#dh.pv == 0, "and asks nothing until the config window does")
+check(Areas.Preview.Show("upper") == true, "Show answers true when the host is up with a sample")
+check(table.concat(dh.pv, ",") == "show:upper", "the module is asked once for its sample in its area, got " .. table.concat(dh.pv, ","))
+check(Areas.Preview.IsShown("upper") and not Areas.Preview.IsShown("lower"), "IsShown says which area is sampled")
+check(Areas.Preview.Show("upper") == true and #dh.pv == 1, "a second Show asks nothing again")
+check(Areas.Preview.Show("lower") == true, "a class module has no sample of its own: its host being up is the preview")
+check(Areas.Preview.Show("sideways") == false and Areas.Preview.Show(nil) == false, "an unknown area is refused")
+Areas.Preview.Hide("upper")
+check(dh.pv[#dh.pv] == "hide" and not Areas.Preview.IsShown("upper"), "Hide takes the module's sample down")
+check(Areas.Preview.IsShown("lower"), "and leaves the other area alone")
+Areas.Preview.Show("upper")
+Areas.Preview.Hide()
+check(dh.pv[#dh.pv] == "hide" and not Areas.Preview.IsShown("upper") and not Areas.Preview.IsShown("lower"), "Hide() takes both down")
+check(#BLOCKED == 0, "nothing protected was touched")
+""")
+
+preview_case("preview_ends_with_the_sample_target_combat_the_dot_piece_off_or_the_occupant_changing")(r"""
+local dh = sampled("dh")
+local Gs, Areas = boot({ before = function() TARGET = false; FS.GunsightAreas.RegisterModule("debuffsH", dh.spec) end })
+setGate(true)
+Areas.Preview.Show("upper")
+setGate(false)
+check(dh.pv[#dh.pv] == "hide", "the sample target going off ends the sample")
+check(not Areas.Preview.IsShown("upper"), "and forgets the ask")
+setGate(true)
+check(#dh.pv == 2, "a gate back on does not bring a sample nobody asked for again")
+Areas.Preview.Show("upper")
+IN_COMBAT = true
+check(Areas.Preview.Show("lower") == false, "no sample is started in combat")
+setGate(false)                                  -- Theme turns the gate off itself when a fight begins
+check(dh.pv[#dh.pv] == "hide", "a fight takes the sample down")
+IN_COMBAT = false
+setGate(true)
+Areas.Preview.Show("upper")
+local asked = #dh.pv
+Gs.SetPiece("dot", false, true)
+check(not Areas.Host("upper"):IsShown() and dh.hides[#dh.hides] == "upper", "the dot piece off hides the host and the module (its own onHide clears its sample)")
+check(#dh.pv == asked, "and nothing is asked of a module that is not drawn")
+Gs.SetPiece("dot", true, true)
+check(dh.pv[#dh.pv] == "show:upper" and #dh.pv == asked + 1, "the area back, the row still pointed at: the sample comes back once")
+Gs.SetArea("upper", "empty")
+check(Areas.Preview.Show("upper") == false, "an area set to Empty has no sample, Show answers false")
+check(#BLOCKED == 0, "nothing protected was touched")
+""")
+
+preview_case("preview_follows_a_swap_asks_the_new_occupant_and_a_throwing_sample_is_logged_not_fatal")(r"""
+local dh, cl = sampled("dh"), sampled("cl")
+cl.spec.classes = { "WARLOCK" }
+local Gs, Areas = boot({ before = function()
+    TARGET = false
+    FS.GunsightAreas.RegisterModule("debuffsH", dh.spec)
+    FS.GunsightAreas.RegisterModule("class", cl.spec)
+end })
+check(Areas.AreaOf("debuffsH") == "upper" and Areas.AreaOf("class") == "lower", "the default seats")
+setGate(true)
+Areas.Preview.Show("upper")
+check(table.concat(dh.pv, ",") == "show:upper" and #cl.pv == 0, "the upper occupant is asked")
+Gs.SetArea("upper", "class")                    -- the dropdown changes under the hover: the two modules swap
+check(Areas.AreaOf("class") == "upper" and Areas.AreaOf("debuffsH") == "lower", "the swap landed")
+check(cl.pv[#cl.pv] == "show:upper", "the new occupant of the pointed at area is asked for its sample, got " .. table.concat(cl.pv, ","))
+for _, v in ipairs(dh.pv) do check(v ~= "show:lower", "the module that moved to the other area is not asked there") end
+cl.spec.preview.show = function() error("boom") end
+Areas.Preview.Hide()
+Areas.Preview.Show("upper")
+local any = false
+for k in pairs(DEGRADED) do any = true end
+check(any, "a throwing sample is logged")
+check(Areas.Host("upper"):IsShown(), "and the area is still up")
+""")
+
 # ---- the class module's backing plate -------------------------------------------------------
 
 PLATE_HELPERS = r"""

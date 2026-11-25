@@ -1689,6 +1689,118 @@ end
 """)
 
 
+# ---------------------------------------------------------------------------------------
+# The config window's sample (the spec's `preview`, Dots.SAMPLE): made up generic debuffs through the real Update.
+# ---------------------------------------------------------------------------------------
+
+case("the_sample_draws_generic_debuffs_through_the_real_rows_and_stops_cleanly")(r"""
+local D = boot({ combat = false })
+local S = D.SAMPLE
+check(type(S) == "table" and #S >= 3 and #S <= 5, "a short sample list is named, got " .. tostring(S and #S))
+for i, e in ipairs(S) do
+    check(type(e.icon) == "string" and e.icon:find("^Interface\\Icons\\"), "sample " .. i .. " has an icon, so its name is never drawn")
+    check(type(e.name) == "string" and e.duration > 0, "sample " .. i .. " has a name and a duration")
+end
+local m, _, spec = mount("debuffsH", "upper")
+check(spec.preview and type(spec.preview.show) == "function" and type(spec.preview.hide) == "function", "the module spec has a preview")
+check(liveRows(m) == 0 and not isVisible(m.body), "no target debuffs: the box is empty")
+check(spec.preview.show("upper") == true, "show answers true")
+check(liveRows(m) == 3, "three generic debuffs are live rows (the fourth is the reminder, off by default), got " .. liveRows(m))
+check(isVisible(m.body) and isVisible(m.rows[1].frame), "the rows are on screen")
+for i = 1, 3 do check(m.rows[i].chip.frame.icon.path == S[i].icon, "row " .. i .. " draws sample " .. i .. "'s icon") end
+check(m.rows[1].time.text == "22s" and m.rows[2].time.text == "14s" and m.rows[3].time.text == "6s",
+    "the timers read the sample's time left, got " .. m.rows[1].time.text .. " " .. m.rows[2].time.text .. " " .. m.rows[3].time.text)
+check(m.rows[1].stack.text == "x3", "the first has a stack count, got " .. tostring(m.rows[1].stack.text))
+local _, _, fillW = imgRect(m.rows[1].fillTex)
+near3(fillW, MU.BAR_W * 22 / 24, "the bar is the real bar at its fraction")
+check(onUpdateFrames() == 1, "one OnUpdate drives the timers")
+tick(10)
+check(m.rows[1].time.text == "12s" and m.rows[2].time.text == "4s", "the timers count down, got " .. m.rows[1].time.text .. " " .. m.rows[2].time.text)
+check(m.rows[3].mode == "live" and m.rows[3].time.text ~= "", "the one about to run out is cast again, so the rows keep going")
+check(TDLIST ~= nil and #TDLIST == 0, "the data service's list was never touched")
+check(#AURA_TOUCHED == 0, "no aura was read")
+spec.preview.hide()
+check(liveRows(m) == 0 and not isVisible(m.body) and onUpdateFrames() == 0, "hide empties the box and stops the timer")
+check(m.sample == nil and m.want == nil, "and forgets the ask")
+""")
+
+case("the_sample_shows_the_fallen_reminder_row_only_with_the_option_on")(r"""
+boot({ combat = false, fallen = true })
+local m, _, spec = mount("debuffsH", "upper")
+spec.preview.show("upper")
+check(liveRows(m) == 3 and m.rows[4].mode == "fallen", "the fourth sample is the red reminder row, got " .. tostring(m.rows[4].mode))
+check(m.rows[4].time.text == "" and isVisible(m.rows[4].frame), "no time, on screen")
+FS.Config.Set(KEEP_KEY, false)
+check(m.rows[4].mode == "off", "the option off takes the reminder row away live")
+FS.Config.Set(KEEP_KEY, true)
+check(m.rows[4].mode == "fallen", "and back")
+spec.preview.hide()
+check(not isVisible(m.body), "hide clears the reminder too")
+""")
+
+case("the_vertical_module_samples_its_lanes_too")(r"""
+boot({ combat = false })
+local m, _, spec = mount("debuffsV", "upper")
+check(spec.preview and spec.preview.show("upper") == true, "the vertical module has a sample")
+check(liveRows(m) == 3, "three lanes are live, got " .. liveRows(m))
+tick(3)
+check(liveRows(m) == 3, "the lanes keep going")
+spec.preview.hide()
+check(liveRows(m) == 0 and onUpdateFrames() == 0, "hide empties them")
+""")
+
+case("a_real_list_replaces_the_sample_and_the_sample_returns_when_the_real_rows_go")(r"""
+boot({ combat = false })
+local m, _, spec = mount("debuffsH", "upper")
+spec.preview.show("upper")
+check(m.rows[1].chip.frame.icon.path == FS.GunsightDots.SAMPLE[1].icon, "sample up")
+local real = { ent("Rend", 9) }
+pushList(real, 2)
+check(m.sample == nil and m.rows[1].key == "Rend" and m.rows[2].mode == "off", "a real debuff list takes the rows over")
+pushList({}, 2)
+check(m.rows[1].chip.frame.icon.path == FS.GunsightDots.SAMPLE[1].icon, "the hover goes on: the sample is back when the real rows go")
+spec.preview.hide()
+pushList(real, 3)
+check(m.rows[1].key == "Rend" and m.rows[1].mode == "live", "after the hover the real list draws as it always did")
+-- a real list already up when the hover starts is left alone
+spec.preview.show("upper")
+check(m.sample == nil and m.rows[1].key == "Rend", "real rows up: nothing is put over them")
+spec.preview.hide()
+check(m.rows[1].key == "Rend" and m.rows[1].mode == "live", "and hide leaves them")
+""")
+
+case("a_sample_is_never_started_in_combat_and_ends_when_a_fight_begins_or_the_area_hides")(r"""
+boot({ combat = true })
+local m, _, spec = mount("debuffsH", "upper")
+check(spec.preview.show("upper") == false and liveRows(m) == 0 and m.sample == nil, "no sample in combat")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(spec.preview.show("upper") == true and liveRows(m) == 3, "out of combat it starts")
+IN_REGEN_DISABLED = true
+fire("PLAYER_REGEN_DISABLED")
+IN_REGEN_DISABLED, IN_COMBAT = false, true
+check(m.sample == nil and liveRows(m) == 0 and not isVisible(m.body), "a fight beginning takes it down")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(liveRows(m) == 0, "and the end of the fight does not bring it back")
+spec.preview.show("upper")
+check(liveRows(m) == 3, "up again")
+spec.onHide()
+check(m.sample == nil and m.want == nil and liveRows(m) == 0 and not isVisible(m.body), "the area hiding clears the sample and the ask")
+spec.onShow("upper")
+check(liveRows(m) == 0, "and showing the area again brings no stale sample")
+""")
+
+case("the_sample_names_no_class_spell_and_no_player_character")(r"""
+local D = boot({ combat = false })
+local banned = { "stu", "shockalaka", "moolah", "urgal", "father", "hans" }
+for i, e in ipairs(D.SAMPLE) do
+    local n = e.name:lower()
+    for _, b in ipairs(banned) do check(not n:find(b, 1, true), "sample " .. i .. " name " .. e.name .. " must not name a character") end
+    check(e.icon:find("Ability_", 1, true) or e.icon:find("Spell_", 1, true), "sample " .. i .. " is a stock ability icon")
+end
+""")
+
 def static_checks() -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]

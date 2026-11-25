@@ -1084,6 +1084,179 @@ function T.the_gunsight_target_side_row_turns_the_target_preview_on_while_hovere
 end
 
 
+-- ---- the Upper and Lower area rows: a sample of whatever the dropdown holds, through the area's own Preview ---------------
+
+-- A stand-in for GunsightAreas.Preview: records every call, answers true unless told otherwise.
+local function areasStub(answer)
+    local a = { shows = {}, hides = {}, up = {} }
+    FS.GunsightAreas = FS.GunsightAreas or {}
+    FS.GunsightAreas.Preview = {
+        Show = function(area)
+            a.shows[#a.shows + 1] = area
+            if answer == false or __combat then return false end
+            a.up[area] = true
+            return true
+        end,
+        Hide = function(area) a.hides[#a.hides + 1] = area or "all"; a.up[area] = nil end,
+        IsShown = function(area) return a.up[area] == true end,
+    }
+    return a
+end
+
+function T.the_area_rows_ask_for_a_sample_with_a_target_and_a_preview_without_one_and_say_so_when_empty()
+    local W = boot()
+    local Tg = W.Targets
+    gunsightWith(true)
+    local up = Tg.Seats({ key = "gunsight.area.upper" })
+    eq(#up, 1); no(up[1].hidden, "with a target the area is up"); eq(up[1].sample, "gs.upper", "and may be empty: it asks for a sample")
+    eq(Tg.Seats({ key = "gunsight.area.lower" })[1].sample, "gs.lower")
+    local both = Tg.Seats({ key = "gunsight.pieces.dot" })
+    eq(#both, 2); eq(both[1].sample, "gs.upper"); eq(both[2].sample, "gs.lower")
+    eq(#Tg.Resolve({ key = "gunsight.area.upper" }), 1, "a showing area is still a resolved frame")
+    gunsightWith(false)
+    local no1 = Tg.Seats({ key = "gunsight.area.upper" })
+    yes(no1[1].hidden, "no target: hidden"); eq(no1[1].reason, "Shows with a target"); eq(no1[1].preview, "gs.upper", "with its own preview key")
+    eq(Tg.Seats({ key = "gunsight.area.lower" })[1].preview, "gs.lower")
+    eq(Tg.Seats({ key = "gunsight.pieces.tgt" })[1].preview, "gs.target", "the target tape keeps the whole target sample")
+    FS.Gunsight.GetArea = function(which) return which == "upper" and "empty" or "debuffsH" end
+    local empty = Tg.Seats({ key = "gunsight.area.upper" })
+    yes(empty[1].hidden, "an area set to Empty has nothing to sample"); eq(empty[1].reason, "Set to Empty"); eq(empty[1].preview, nil)
+    eq(Tg.Seats({ key = "gunsight.area.lower" })[1].preview, "gs.lower", "the other area still previews")
+    gunsightWith(true)
+    FS.Gunsight.GetArea = function() return "empty" end
+    eq(Tg.Seats({ key = "gunsight.area.upper" })[1].reason, "Set to Empty", "empty with a target says so too")
+    FS.Gunsight.GetArea = nil
+end
+
+function T.hovering_an_area_row_turns_the_sample_target_on_and_the_areas_preview_on_and_off_after()
+    local W = boot()
+    gunsightWith(false)
+    local calls = {}
+    FS.SetTargetPreview = function(on) calls[#calls + 1] = on; return true end
+    local a = areasStub()
+    W.Flash.Show({ key = "gunsight.area.upper" }); tick(W, 0.01)
+    eq(calls[1], true, "the shared sample target is on")
+    eq(a.shows[1], "upper", "the upper area is asked for its sample"); eq(#a.shows, 1, "and not the lower one")
+    local o = overlays(W)[1]
+    yes(o, "the outline is drawn at the area"); eq(captionOf(o), nil, "the sample is up, so no caption")
+    for _, e in ipairs(o.fsEdges) do near(e.color[1], W.C.cyan[1]) end
+    tick(W, 0.06); tick(W, 0.06)
+    eq(#a.shows, 1, "asked once, not every refresh"); eq(#calls, 1, "the gate is told once")
+    W.Flash.Clear()
+    eq(a.hides[1], "upper", "the area's sample goes down with the hover"); eq(calls[2], false, "and the sample target after it")
+    eq(#a.hides, 1)
+end
+
+function T.a_real_target_still_gets_the_area_sample_and_the_gate_so_an_empty_debuff_row_is_filled()
+    local W = boot()
+    gunsightWith(true)
+    local calls = {}
+    FS.SetTargetPreview = function(on) calls[#calls + 1] = on; return true end
+    local a = areasStub()
+    W.Flash.Show({ key = "gunsight.area.lower" }); tick(W, 0.01)
+    eq(a.shows[1], "lower", "with a target the empty area is asked for its sample")
+    eq(calls[1], true, "the gate Preview needs is on")
+    eq(captionOf(overlays(W)[1]), nil)
+    W.Flash.Clear()
+    eq(a.hides[1], "lower"); eq(calls[#calls], false)
+end
+
+function T.the_target_side_areas_row_samples_both_areas_under_one_gate_and_a_row_change_swaps_them()
+    local W = boot()
+    gunsightWith(false)
+    local calls = {}
+    FS.SetTargetPreview = function(on) calls[#calls + 1] = on; return true end
+    local a = areasStub()
+    W.Flash.Show({ key = "gunsight.pieces.dot" }); tick(W, 0.01)
+    eq(#overlays(W), 2, "both areas are outlined")
+    eq(#a.shows, 2, "both asked"); yes(a.up.upper and a.up.lower)
+    eq(#calls, 1, "one gate for both")
+    W.Flash.Show({ key = "gunsight.area.lower" }); tick(W, 0.01)
+    yes(a.up.lower, "the lower sample stays"); no(a.up.upper, "the upper one is taken down")
+    eq(calls[#calls], true, "and the sample target is on for the new row")
+    W.Flash.Clear()
+    no(a.up.lower); eq(calls[#calls], false, "the last word is off")
+end
+
+function T.an_area_sample_is_never_started_in_combat_and_a_refusal_leaves_todays_look()
+    local W = boot()
+    gunsightWith(true)
+    local a = areasStub()
+    __combat = true
+    W.Flash.Show({ key = "gunsight.area.upper" }); tick(W, 0.01)
+    eq(#a.shows, 0, "no sample in combat")
+    local o = overlays(W)[1]
+    yes(o, "the area is still outlined"); eq(captionOf(o), nil, "with a showing area there is no caption to give")
+    for _, e in ipairs(o.fsEdges) do near(e.color[1], W.C.cyan[1]) end
+    W.Flash.Clear()
+    __combat = false
+    -- the area refuses (nothing to draw, no occupant): the target side keeps the outline and the gate is not left behind
+    local calls = {}
+    FS.SetTargetPreview = function(on) calls[#calls + 1] = on; return true end
+    areasStub(false)
+    W.Flash.Show({ key = "gunsight.area.upper" }); tick(W, 0.01)
+    yes(overlays(W)[1], "an area that cannot sample still shows its plain outline")
+    W.Flash.Clear()
+    eq(calls[#calls], false, "and the gate is off after the hover")
+    -- no seam at all (an old file set): the same
+    FS.GunsightAreas.Preview = nil
+    W.Flash.Show({ key = "gunsight.area.upper" }); tick(W, 0.01)
+    yes(overlays(W)[1], "no Preview table, plain outline"); W.Flash.Clear()
+end
+
+function T.an_area_sample_goes_down_when_the_window_closes_the_page_changes_or_a_fight_starts()
+    local W = boot()
+    gunsightWith(false)
+    FS.SetTargetPreview = function() return true end
+    local a = areasStub()
+    W.Flash.Show({ key = "gunsight.area.upper" }); tick(W, 0.01)
+    yes(a.up.upper)
+    __combat = true
+    W.Flash.combatWatch.scripts.OnEvent(W.Flash.combatWatch, "PLAYER_REGEN_DISABLED")
+    no(a.up.upper, "a fight starting takes the area sample down")
+    __combat = false
+    W.Flash.Show({ key = "gunsight.area.upper" }); tick(W, 0.01)
+    yes(a.up.upper)
+    W.Open("profiles", "p")
+    no(a.up.upper, "a page change takes it down")
+end
+
+function T.the_player_side_piece_rows_preview_through_combathud_while_pointed_at_and_never_in_combat()
+    local W = boot()
+    local up, shows = {}, {}
+    FS.CombatHud = { Preview = {
+        Show = function(piece) shows[#shows + 1] = piece; if __combat then return false end up[piece] = true; return true end,
+        Hide = function(piece) up[piece] = nil end,
+    } }
+    for _, piece in ipairs({ "next", "shard", "buff" }) do
+        W.SetHover({ key = "gunsight.pieces." .. piece, row = {} })
+        yes(up[piece], piece .. ": pointing at the row shows its sample")
+        for _, other in ipairs({ "next", "shard", "buff" }) do
+            if other ~= piece then no(up[other], piece .. " row does not start " .. other) end
+        end
+        W.SetHover(nil)
+        no(up[piece], piece .. ": leaving takes it down")
+    end
+    W.SetHover({ key = "gunsight.pieces.prc", row = {} })
+    no(up.next or up.shard or up.buff, "another piece row starts none of them")
+    W.SetHover(nil)
+    __combat = true
+    local before = #shows
+    W.SetHover({ key = "gunsight.pieces.next", row = {} })
+    no(up.next, "nothing starts in combat")
+    W.SetHover(nil)
+    __combat = false
+    W.SetHover({ key = "gunsight.pieces.shard", row = {} })
+    yes(up.shard)
+    __combat = true
+    W.Flash.combatWatch.scripts.OnEvent(W.Flash.combatWatch, "PLAYER_REGEN_DISABLED")
+    no(up.shard, "a fight starting takes the sample down")
+    __combat = false
+    FS.CombatHud = nil
+    W.SetHover({ key = "gunsight.pieces.buff", row = {} })
+    W.SetHover(nil)
+end
+
 -- A stand-in for an alert module's Preview table.
 local function alertStub(W)
     local p = { shown = false, shows = 0, hides = 0, restyles = 0 }

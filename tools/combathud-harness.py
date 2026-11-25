@@ -3998,6 +3998,154 @@ hover(n.holder); check(not TT.shown, "an inactive Gunsight shows no NEXT tip")
 hover(t.holder); check(not TT.shown, "an inactive Gunsight shows no reminder tip")
 """)
 
+
+# ---------------------------------------------------------------------------------------
+# The config window's sample of the three player side pieces (FS.CombatHud.Preview): hovering a piece row draws what the
+# real tile draws, with made up readings, so the outline is never an empty box. Out of combat only, real state wins.
+# ---------------------------------------------------------------------------------------
+
+gcase("preview_next_cast_draws_the_real_tile_with_a_sample_and_the_real_cast_wins", r"""
+local ui, gs = gsBoot({ state = mkState({}) })
+local P = FS.CombatHud.Preview
+check(type(P) == "table" and type(P.Show) == "function" and type(P.Hide) == "function" and type(P.IsShown) == "function", "the Preview seam exists")
+check(not ui.nextTile.holder._shown, "an idle HUD draws no next tile")
+check(P.Show("next") == true, "Show answers true when the sample is up")
+check(P.IsShown("next") == true, "IsShown agrees")
+local n = ui.nextTile
+check(n.holder._shown, "the sample tile shows")
+sameRect(n.holder, gs.anchors.next, "the sample is on the next anchor, where the real tile is")
+check(n.icon._texture == 134400 and n.icon._shown, "the sample is a generic icon (the placeholder question mark)")
+check(n.ring.kind == "cyan", "the ring is the plain cyan one")
+check(n.key._shown and n.key._text ~= nil and n.key._text ~= "", "the key label has a sample key")
+-- the Hud pushes about every 0.2 s: the sample survives each one
+for _ = 1, 5 do push(mkState({})) end
+check(n.holder._shown and n.icon._texture == 134400, "five idle pushes later the sample is still up")
+-- a real next cast takes over, with its own icon, key and ring
+push(nextState({ inCombat = true }))
+check(n.holder._shown and n.icon._texture == iconOf("shadow_bolt"), "a real next cast shows its own icon over the sample")
+push(mkState({}))
+check(n.holder._shown and n.icon._texture == 134400, "the sample is back when the real cast goes")
+P.Hide("next")
+check(not n.holder._shown and not P.IsShown("next"), "Hide takes the sample down")
+push(mkState({}))
+check(not n.holder._shown, "and an idle push does not bring it back")
+-- the real tile redraws cleanly after a sample: nothing of the sample's key label or icon is left cached
+push(nextState({}))
+check(n.holder._shown and n.icon._texture == iconOf("shadow_bolt") and n.abbr._text == "", "the real tile draws itself after a sample")
+check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("preview_soul_shards_draws_the_lit_glyph_and_a_count_and_the_real_count_wins", r"""
+local ui, gs = gsBoot({ state = mkState({}) })
+local P = FS.CombatHud.Preview
+check(not ui.shards._shown, "an idle HUD draws no shard seat")
+check(P.Show("shard") == true, "Show answers true")
+check(ui.shards._shown and homeGlyphShown(ui), "the seat and the glyph show")
+checkHomeShard(ui, gs.anchors.shards, 1, 3, "the shard sample")
+check(colorEq(ui.shardNum._textColor, FS.Theme.COLOR_TEXT_WHITE), "a lit sample, so the count is white")
+for _ = 1, 4 do push(mkState({})) end
+check(ui.shards._shown and ui.shardNum._text == "3", "four idle pushes later the sample is still up")
+push(nextState({ shards = 5 }))
+check(ui.shardNum._text == "5", "a real count takes over")
+checkHomeShard(ui, gs.anchors.shards, 1, 5, "the real count under a sample")
+push(mkState({}))
+check(ui.shards._shown and ui.shardNum._text == "3", "the sample is back when the real count goes")
+P.Hide("shard")
+check(not ui.shards._shown and not P.IsShown("shard"), "Hide takes it down")
+push(nextState({ shards = 2 }))
+check(ui.shards._shown and ui.shardNum._text == "2", "a real count draws itself after a sample")
+check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("preview_buff_reminders_draws_one_pulsing_tile_on_the_anchor_and_a_real_one_wins", r"""
+local ui, gs = gsBoot({ state = mkState({}) })
+local P, C = FS.CombatHud.Preview, FS.CombatHud
+check(not ui.buffs._shown, "an idle HUD draws no buff row")
+check(P.Show("buff") == true, "Show answers true")
+local t, host = C.sampleTile, C.sampleHost
+check(t and host and host._shown and effectivelyShown(t.holder), "the sample tile shows")
+sameRect(t.holder, gs.anchors.buff, "the sample tile is on the buff anchor, where a real tile is")
+check(isUnder(host, seen.buff.frame), "the sample lives inside the buff piece frame, so the registry's fade and hide carry it")
+check(not isUnder(t.holder, ui.buffs), "and outside the real row, which the state hides and shows every push")
+check(t.icon._texture == 134400, "the sample is the generic icon")
+check(t.pulse.playing and t.glowPulse.playing, "the border and the glow pulse as a real reminder does")
+local plays = t.pulse.plays
+for _ = 1, 4 do push(mkState({})) end
+check(effectivelyShown(t.holder) and t.pulse.playing and t.pulse.plays == plays, "four idle pushes later the sample is up and its pulse was not restarted")
+push(nextState({}))
+check(ui.buffTiles.demon_armor.holder._shown and ui.buffs._shown, "a real missing buff draws its own tile")
+check(not effectivelyShown(t.holder) and not t.pulse.playing, "and the sample steps aside")
+push(mkState({}))
+check(effectivelyShown(t.holder) and t.pulse.playing, "the sample is back when nothing is missing")
+P.Hide("buff")
+check(not effectivelyShown(t.holder) and not t.pulse.playing and not P.IsShown("buff"), "Hide takes it down")
+push(nextState({}))
+check(ui.buffTiles.demon_armor.holder._shown and ui.buffs._shown, "a real reminder draws itself after a sample")
+check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("preview_never_runs_in_combat_and_stops_when_a_fight_begins_or_the_piece_goes_off", r"""
+local ui, gs = gsBoot({ state = mkState({}) })
+local P, C = FS.CombatHud.Preview, FS.CombatHud
+local function anyUp() return ui.nextTile.holder._shown or ui.shards._shown or (C.sampleHost ~= nil and C.sampleHost._shown) end
+check(P.Show("nonsense") == false and P.Show(nil) == false, "an unknown piece is refused")
+__combat = true
+check(P.Show("next") == false and P.Show("shard") == false and P.Show("buff") == false, "no sample starts in combat")
+check(not anyUp(), "and nothing was drawn")
+__combat = false
+check(P.Show("next") and P.Show("shard") and P.Show("buff"), "out of combat all three start")
+__combat = true
+fire("PLAYER_REGEN_DISABLED")
+check(not anyUp(), "a fight beginning takes every sample down")
+check(not P.IsShown("next") and not P.IsShown("shard") and not P.IsShown("buff"), "and none reads as up")
+push(mkState({ inCombat = true }))
+check(not anyUp(), "a state push in combat brings none back")
+__combat = false
+-- a piece switched off: its sample is refused (the registry hides the piece frame, and the row says why)
+gs.SetPiece("next", false, true)
+check(P.Show("next") == false, "a piece that is off gets no sample")
+gs.SetPiece("next", true, true)
+check(P.Show("next") == true, "back on, it does")
+P.Hide()
+check(not P.IsShown("next"), "Hide with no piece takes every sample down")
+""")
+
+gcase("preview_a_rescale_reseats_the_samples_and_a_hide_leaves_no_state_behind", r"""
+local ui, gs = gsBoot({ state = mkState({}) })
+local P = FS.CombatHud.Preview
+local held, containers = {}, #__acs
+for key, v in pairs(ui.heldMissing) do held[key] = v end
+P.Show("next"); P.Show("shard"); P.Show("buff")
+setScreen(1200); fire("UI_SCALE_CHANGED")
+local k = 1200 / 1440
+sameRect(ui.nextTile.holder, gs.anchors.next, "the next sample follows the rescale")
+checkHomeShard(ui, gs.anchors.shards, k, 3, "the shard sample after the rescale")
+sameRect(FS.CombatHud.sampleTile.holder, gs.anchors.buff, "the buff sample follows the rescale")
+check(effectivelyShown(FS.CombatHud.sampleTile.holder), "and is still up")
+P.Hide()
+for key, v in pairs(ui.heldMissing) do check(held[key] == v, "a sample changed the held verdict of " .. key) end
+for key in pairs(held) do check(ui.heldMissing[key] ~= nil, "a sample dropped the held verdict of " .. key) end
+check(next(ui.castCleared) == nil, "a sample touched no cast clearing")
+check(#__acs == containers, "the sample built no aura container")
+check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("preview_draws_for_a_class_with_no_hud_profile_without_starting_the_hud", r"""
+local ui, gs = gsBoot({ state = mkState({ active = false }) })
+local P = FS.CombatHud.Preview
+check(not FS.CombatHud.IsEnabled() and #FS.Hud.subs == 0, "a mage's HUD is off and never subscribed")
+check(P.Show("next") == true, "the next sample still draws")
+ui = FS.CombatHud.ui
+check(FS.CombatHud.IsGunsight() and ui.nextTile.holder._shown, "the tile is up")
+sameRect(ui.nextTile.holder, gs.anchors.next, "on the next anchor")
+check(P.Show("shard") == true and ui.shards._shown and homeGlyphShown(ui), "the shard sample draws")
+check(P.Show("buff") == true and effectivelyShown(FS.CombatHud.sampleTile.holder), "the buff sample draws")
+check(not FS.CombatHud.IsEnabled() and #FS.Hud.subs == 0, "showing a sample does not start or subscribe the HUD")
+P.Hide()
+check(not ui.nextTile.holder._shown and not ui.shards._shown and not effectivelyShown(FS.CombatHud.sampleTile.holder), "Hide takes all three down")
+check(#__degrade == 0, "no degrade logged")
+""", cls="MAGE")
+
 FILE_CASES = {}
 
 

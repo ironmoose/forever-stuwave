@@ -1684,9 +1684,9 @@ local function BuffGlow(t, size, cut)
     return hit
 end
 
-local function NewBuffTile(key)
+local function NewBuffTile(key, parent)
     local k = K()
-    local holder = CreateFrame("Frame", nil, ui.buffs)
+    local holder = CreateFrame("Frame", nil, parent or ui.buffs)
     holder:SetSize(G.BUFF * k, G.BUFF * k)
     CombatHud.AttachTip(holder)
     local bg = holder:CreateTexture(nil, "BACKGROUND")
@@ -2181,6 +2181,12 @@ local function OnState(state)
     lastState = state
     local ok, err = pcall(Render, state)
     if not ok then LogOnce("render", err) end
+    -- the config window's samples are drawn over whatever the state left empty (CombatHud.Preview)
+    local want = CombatHud.previewOn
+    if want and next(want) ~= nil then
+        local pok, perr = pcall(CombatHud.PaintPreview, true)
+        if not pok then LogOnce("preview", perr) end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -2307,6 +2313,11 @@ local function ApplyGunsightScale()
     for _, tile in pairs(ui.buffTiles) do RescaleBuffTile(tile, k) end
     ui.buffSig = nil
     Rerender()
+    local want = CombatHud.previewOn
+    if want and next(want) ~= nil then
+        local pok, perr = pcall(CombatHud.PaintPreview, false)
+        if not pok then LogOnce("preview", perr) end
+    end
 end
 
 local function BuildUI()
@@ -2354,6 +2365,170 @@ function CombatHud.IsEnabled() return enabled end
 
 -- True once the UI was built as the Gunsight view (false for Stack A, and before the first build).
 function CombatHud.IsGunsight() return ui.gunsight == true end
+
+-------------------------------------------------------------------------------
+-- The config window's sample of the player side pieces
+-------------------------------------------------------------------------------
+
+-- Hovering the Next cast, Soul shards or Buff reminders row in /fsconfig puts a sample of that piece on its own anchor: the
+-- real tile code (the next tile, the shard glyph and count, a buff reminder tile with its pulse) drawn with made up readings,
+-- so the outline is never an empty box (the piece draws nothing with no cast, no shards or no missing buff, and nothing at
+-- all for a class with no HUD profile). { Show(piece) -> true when the sample is wanted and can be drawn, Hide(piece) (nil
+-- hides all), IsShown(piece) }. Gunsight view only, out of combat only (a refused Show answers false, and the start of a
+-- fight takes every sample down), never for a piece that is switched off, and the HUD itself is not started or subscribed
+-- (a class with no profile gets the frames built and nothing else). Real wins: a sample is drawn over what the last Hud
+-- state left empty, and every later state re-checks, so the real cast, count or reminder replaces it and it comes back when
+-- the real one goes. Nothing here reads a target or an aura, and the held verdicts, the engine flags and the aura
+-- containers are never touched. The buff sample lives in its own host frame (the real row is hidden and shown with every
+-- state, which would restart the pulse of a tile inside it).
+CombatHud.SAMPLE = { icon = 134400, bind = "1", shards = 3, buff = "sample.buff" }   -- the question mark icon, as the proc sample's
+CombatHud.previewOn = {}                 -- piece -> true while its sample is wanted
+CombatHud.previewDrawn = {}              -- piece -> true while the frames hold the sample (not the real piece)
+CombatHud.PIECES = { next = true, shard = true, buff = true }
+
+-- The frames can take a sample: the Gunsight view is built (built here for a class with no HUD profile), the HUD module and
+-- the Gunsight are on, and the piece switch is not off.
+function CombatHud.PreviewReady(piece)
+    if not CombatHud.PIECES[piece] or InCombatSafe() then return false end
+    local gs = FS.Gunsight
+    if type(gs) ~= "table" then return false end
+    if type(gs.IsActive) == "function" then
+        local ok, active = pcall(gs.IsActive)
+        if ok and active ~= true then return false end
+    end
+    if type(gs.IsPieceOn) == "function" then
+        local ok, on = pcall(gs.IsPieceOn, piece)
+        if ok and on == false then return false end
+    end
+    if not ui.built then
+        if ModuleOff() or not GunsightOn() or not BuildUI() then return false end
+    end
+    return ui.gunsight == true
+end
+
+function CombatHud.PaintNext()
+    local n, S = ui.nextTile, CombatHud.SAMPLE
+    if n.shownKey ~= nil then CombatHud.previewDrawn.next = nil; return end      -- a real next cast is up
+    -- false (never nil, never a real value): the real draw rewrites its icon, label and key text on the next state
+    n.iconId, n.hadIcon, n.bindText = false, false, false
+    n.icon:SetTexture(S.icon)
+    n.icon:Show()
+    n.abbr:SetText("")
+    n.key:SetText(S.bind)
+    n.key:Show()
+    SetRing(n.ring, "cyan")
+    n.holder:Show()
+    CombatHud.previewDrawn.next = true
+end
+
+function CombatHud.PaintShards()
+    local drawn, S = CombatHud.previewDrawn, CombatHud.SAMPLE
+    if ui.shards:IsShown() and not drawn.shard then return end                  -- a real count is up
+    if not ui.shardGlyph then BuildShardGlyph() end
+    SetShardGlyphLit(ui.shardGlyph, S.shards >= 1)
+    ui.shardCount, ui.shardDigits = S.shards, #tostring(S.shards)
+    SeatShardsGunsight(K())
+    local c = Theme.COLOR_TEXT_WHITE
+    ui.shardNum:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+    ui.shardNum:SetText(tostring(S.shards))
+    ui.shards:Show()
+    drawn.shard = true
+end
+
+-- The buff sample down: its pulses stopped, its frame hidden. Nothing of the real row is touched.
+function CombatHud.HideBuffSample()
+    local host, t = CombatHud.sampleHost, CombatHud.sampleTile
+    if not host then return end
+    SetPulse(t.pulse, false)
+    SetPulse(t.glowPulse, false)
+    host:Hide()
+end
+
+function CombatHud.PaintBuff()
+    local drawn, S, k = CombatHud.previewDrawn, CombatHud.SAMPLE, K()
+    if ui.buffs:IsShown() then                                                  -- a real reminder is up: it wins
+        CombatHud.HideBuffSample()
+        drawn.buff = nil
+        return
+    end
+    local host, t = CombatHud.sampleHost, CombatHud.sampleTile
+    if not host then
+        host = CreateFrame("Frame", nil, ui.buffPiece)
+        CombatHud.sampleHost = host
+        t = NewBuffTile(S.buff, host)
+        CombatHud.sampleTile = t
+        t.holder:SetPoint("LEFT", host, "LEFT", 0, 0)
+        t.icon:SetTexture(S.icon)
+        t.icon:Show()
+        t.abbr:SetText("")
+        t.holder:Show()                 -- the host carries the show and hide from here on
+        t.k = k
+    end
+    host:ClearAllPoints()
+    host:SetPoint("TOP", FS.Gunsight.anchors.buff, "TOP", 0, 0)
+    host:SetSize(math.max(G.BUFF * k, 1), G.BUFF_ROW_H * k)
+    if t.k ~= k then
+        t.k = k
+        RescaleBuffTile(t, k)
+    end
+    host:Show()
+    SetPulse(t.pulse, true)
+    SetPulse(t.glowPulse, true)
+    drawn.buff = true
+end
+
+-- Draws every wanted sample the real state is not covering. `afterRender` says a state was just drawn, so what the frames
+-- hold is the real piece's, whatever the sample drew before.
+function CombatHud.PaintPreview(afterRender)
+    local want, drawn = CombatHud.previewOn, CombatHud.previewDrawn
+    if next(want) == nil then return end
+    if InCombatSafe() or not (ui.built and ui.gunsight) then CombatHud.Preview.Hide(); return end
+    if afterRender then
+        for piece in pairs(drawn) do drawn[piece] = nil end
+    end
+    if want.next then CombatHud.PaintNext() end
+    if want.shard then CombatHud.PaintShards() end
+    if want.buff then CombatHud.PaintBuff() end
+end
+
+CombatHud.Preview = {}
+
+function CombatHud.Preview.Show(piece)
+    if not CombatHud.PreviewReady(piece) then return false end
+    ui.root:Show()
+    CombatHud.previewOn[piece] = true
+    local ok, err = pcall(CombatHud.PaintPreview, false)
+    if not ok then LogOnce("preview", err) end
+    return true
+end
+
+function CombatHud.Preview.IsShown(piece)
+    return CombatHud.previewDrawn[piece] == true
+end
+
+-- Takes a piece's sample down (nil: every one). A piece the real state drew meanwhile is left as it is.
+function CombatHud.Preview.Hide(piece)
+    local want, drawn = CombatHud.previewOn, CombatHud.previewDrawn
+    for p in pairs(CombatHud.PIECES) do
+        if piece == nil or piece == p then
+            want[p] = nil
+            if drawn[p] then
+                drawn[p] = nil
+                if p == "next" then
+                    ui.nextTile.holder:Hide()
+                    SetRing(ui.nextTile.ring, nil)
+                elseif p == "shard" then
+                    ui.shards:Hide()
+                    ui.shardCount = nil
+                else
+                    CombatHud.HideBuffSample()
+                end
+            end
+        end
+    end
+    -- a HUD that never started keeps its root hidden once nothing of it is drawn
+    if not enabled and ui.root and next(want) == nil then ui.root:Hide() end
+end
 
 function CombatHud.Enable()
     if enabled then return true end
@@ -2559,6 +2734,7 @@ end
 -- replay of lastState redraws them (and their flags) now that the flags are secret. Stack A keeps its own
 -- behaviour (its container is protected and its state is the Hud's, as before).
 function handlers.PLAYER_REGEN_DISABLED()
+    CombatHud.Preview.Hide()                -- a config window sample never outlives the start of a fight
     Flags.Reset()
     if ui.gunsight then Rerender() end
 end

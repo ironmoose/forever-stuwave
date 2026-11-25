@@ -274,12 +274,42 @@ local function HideGunsightTarget()
     if type(FS.SetTargetPreview) == "function" then pcall(FS.SetTargetPreview, false) end
 end
 
--- Shows the sample for a hidden rect and answers the rect it fills (and its key), or nil when there is none to show.
-local function ShowGhost(rect)
-    local key = rect.preview
+-- One of the two target side areas (the Upper and Lower area rows, and every row that outlines an area): the sample target is
+-- turned on as above, then the area is asked to show what its dropdown holds (GunsightAreas.Preview: Target Debuffs a made up
+-- list through its own drawing, a class module or the coming soon plate as it draws, the host being up). The area's own preview
+-- is up only while this row is, and ends with the sample target, combat or the area changing under it.
+local AREA_OF = { ["gs.upper"] = "upper", ["gs.lower"] = "lower" }
+local areaByUs = {}
+
+local function HideGunsightArea(area)
+    if not areaByUs[area] then return end
+    areaByUs[area] = nil
+    local pv = FS.GunsightAreas and FS.GunsightAreas.Preview
+    if type(pv) == "table" and type(pv.Hide) == "function" then pcall(pv.Hide, area) end
+end
+
+local function ShowGunsightArea(rect, key, used)
+    local area = AREA_OF[key]
+    local pv = FS.GunsightAreas and FS.GunsightAreas.Preview
+    if not (area and type(pv) == "table" and type(pv.Show) == "function") then return nil end
+    if not ShowGunsightTarget(rect) then return nil end
+    used["gs.target"] = true            -- the sample target stays up for as long as the row is, whatever the area answers
+    if not areaByUs[area] then
+        local ok, up = pcall(pv.Show, area)
+        if not (ok and up == true) then return nil end
+        areaByUs[area] = true
+    end
+    return rect, key
+end
+
+-- Shows the sample for a hidden rect (or for an area that is showing but may be empty: `rect.sample`) and answers the rect it
+-- fills (and its key), or nil when there is none to show. `used` is the pass's set of keys in use.
+local function ShowGhost(rect, used)
+    local key = rect.preview or rect.sample
     if not key or InCombat() then return nil end
     if key == "raid" then return ShowRaid() end
     if key == "gs.target" then return ShowGunsightTarget(rect) end
+    if AREA_OF[key] then return ShowGunsightArea(rect, key, used) end
     local maker = MAKERS[key]
     if not maker then return nil end
     local g = ghosts[key]
@@ -325,6 +355,9 @@ local function SweepGhosts(used)
         end
     end
     if raidByUs and not (used and used.raid) then HideRaid() end
+    for key, area in pairs(AREA_OF) do
+        if areaByUs[area] and not (used and used[key]) then HideGunsightArea(area) end
+    end
     if gunsightByUs and not (used and used["gs.target"]) then HideGunsightTarget() end
 end
 
@@ -400,11 +433,11 @@ local function Draw(rects)
             pool[i] = o
         end
         local rect, dim = rects[i], false
-        if rect.hidden then
-            local seat, key = ShowGhost(rect)
+        if rect.hidden or rect.sample then
+            local seat, key = ShowGhost(rect, used)
             if seat then
                 rect, used[key] = seat, true
-            else
+            elseif rect.hidden then
                 dim = true
             end
         end
@@ -700,6 +733,22 @@ for _, class in ipairs({ "WARLOCK", "PALADIN", "PLACEHOLDER" }) do
         match = function(entry)
             return entry.key == "gunsight.pieces.prc" and OwnRungClass() == class
         end,
+    })
+end
+
+-- The player side pieces (Next cast, Soul shards, Buff reminders) draw nothing without a cast, shards or a missing buff, and
+-- nothing at all for a class with no HUD profile: CombatHud.Preview draws each one's own tile with made up readings while its
+-- piece row is pointed at (out of combat, and never over a real cast, count or reminder).
+for piece, label in pairs({ next = "Next cast", shard = "Soul shards", buff = "Buff reminders" }) do
+    F.RegisterAlert({
+        id = "hud." .. piece, label = label,
+        api = function()
+            local hud = FS.CombatHud
+            local p = hud and hud.Preview
+            if not (p and p.Show and p.Hide) then return nil end
+            return { Show = function() return p.Show(piece) end, Hide = function() p.Hide(piece) end }
+        end,
+        match = function(entry) return entry.key == "gunsight.pieces." .. piece end,
     })
 end
 

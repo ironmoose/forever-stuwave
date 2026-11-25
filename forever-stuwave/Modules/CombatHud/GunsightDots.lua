@@ -26,6 +26,14 @@
 -- CHIP: a dark plate, the icon seated inside the cut by FrameHelpers.SeatAuraTile, the cut ring over it (violet,
 -- amber inside the 3 s band), and a white pop for 0.35 s when the debuff is (re)applied. Masks do not clip on this
 -- client, so the icon is inset like every other tile. The target gate belongs to GunsightAreas, not to this file.
+--
+-- SAMPLE (the config window, Dots.SAMPLE and the spec's `preview`): hovering the Upper or Lower area row in /fsconfig
+-- with nothing of yours on the target would outline an empty box, so GunsightAreas.Preview asks the module in that area
+-- to stand a made up list in for the real one. The list goes through the same Update as a real push (so the rows, bars,
+-- amber band, stack text, apply pop and the reapply reminder are the real drawing), generic debuffs with a generic icon
+-- each, re-cast when one is about to run out so the rows keep moving for as long as the row is pointed at. The real list
+-- is kept and drawn again when the sample ends (hover over, the HUD hidden, a fight starting) or the moment it has a row
+-- of its own. Out of combat only, and nothing of the target or the data service is touched.
 
 local _, FS = ...
 
@@ -97,6 +105,20 @@ Dots.D, Dots.H, Dots.V = D, H, V
 local SETTINGS = { keepFallen = { key = "gunsight.target.keepfallen", default = true } }
 Dots.SETTINGS = SETTINGS
 if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(SETTINGS.keepFallen.key, SETTINGS.keepFallen.default) end
+
+-- The sample list (see the header): generic debuffs, one generic icon each, no class spell. `left` is the time left when the
+-- sample starts; a `left` of 0 or less has already run out, so it is the reapply reminder (shown only while "Keep
+-- fallen-off debuffs" is on, and by a list of four it still fits the four lanes of the vertical axis). A stack of 3 on the
+-- first shows the stack text. The names are the debuffs' own generic words and are never drawn (every sample has an icon).
+local ICONS = "Interface\\Icons\\"
+Dots.SAMPLE = {
+    { name = "Poison", icon = ICONS .. "Ability_Poisons", duration = 24, left = 22, count = 3 },
+    { name = "Bleed", icon = ICONS .. "Ability_Gouge", duration = 18, left = 14, count = 1 },
+    { name = "Slow", icon = ICONS .. "Spell_Frost_FrostBolt02", duration = 8, left = 5.5, count = 1 },
+    { name = "Curse", icon = ICONS .. "Spell_Shadow_CurseOfSargeras", duration = 30, left = 0, count = 1 },
+}
+local SAMPLE_EPOCH = "sample"     -- the list's epoch while a sample stands in: a real list is always a new target after it
+local SAMPLE_REARM = 0.5          -- a sample debuff this close to running out is cast again (pop and all)
 
 local LINE = G.LINE or 1.3
 local RAIL_CORE, RAIL_GLOW, DOT_BLOOM = 2.6, 7, 9
@@ -674,10 +696,26 @@ local function StepRow(m, row, now)
     return true
 end
 
+-- A sample debuff about to run out is cast again, so the rows keep moving (and show the amber band and the pop) for as long as
+-- the area row is pointed at. The entries are edited in place; the list is read again only when one moved.
+local function RearmSample(m, now)
+    local list = m.sample.list
+    local moved = false
+    for i = 1, #list do
+        local def = Dots.SAMPLE[i]
+        if def.left > 0 and list[i].expires - now < SAMPLE_REARM then
+            list[i].expires = now + def.duration
+            moved = true
+        end
+    end
+    if moved then m.feed(m.list, m.lastEpoch) end
+end
+
 local function MakeStep(m)
     return function()
         local now = GetTime()
         local live, ranOut = 0, false
+        if m.sample then RearmSample(m, now) end
         for i = 1, #m.rows do
             local row = m.rows[i]
             if row.mode == "live" then
@@ -685,7 +723,7 @@ local function MakeStep(m)
             end
         end
         if ranOut then
-            m.onList(m.list, m.lastEpoch)           -- the expired entry is skipped; Update stops the driver when none is left
+            m.feed(m.list, m.lastEpoch)             -- the expired entry is skipped; Update stops the driver when none is left
         elseif live == 0 then
             StopTicking(m)
         end
@@ -883,7 +921,7 @@ local function Update(m, list, epoch)
     m.lastEpoch = epoch
     m.list = list
     local now = GetTime()
-    local keep = inCombat and KeepFallenOn() and TargetTakes()
+    local keep = (inCombat or m.sample ~= nil) and KeepFallenOn() and TargetTakes()   -- a sample shows the reminder too
     if newTarget or not keep then WipeFallen(m.fallen) end
     if keep and not newTarget then NoteFallen(m, now) end
     Gather(m, type(list) == "table" and list or {}, now, keep)
@@ -903,6 +941,66 @@ local function Update(m, list, epoch)
 end
 
 -------------------------------------------------------------------------------
+-- The config window's sample
+-------------------------------------------------------------------------------
+
+-- True when a list has an entry that would take a row of its own now (the data service's own list, read for a real row).
+local function HasLive(m, list, now)
+    if type(list) ~= "table" then return false end
+    for i = 1, #list do
+        local e = list[i]
+        if type(e) == "table" and (m.kind == "H" or KnownExpiry(e)) and not RanOut(e, now) and PlainString(e.name) then
+            return true
+        end
+    end
+    return false
+end
+
+local function RowsUp(m)
+    for i = 1, #m.rows do
+        if m.rows[i].mode ~= "off" then return true end
+    end
+    return false
+end
+
+-- Puts the sample list in the place of the real one: it goes through Update like a real push. Nothing happens while the
+-- module has rows of its own (they are what a sample would stand in for) or in a fight; `want` stays set, so the sample
+-- starts when the real rows go. True when there is something to see (a sample, or real rows).
+local function StartSample(m)
+    m.want = true
+    if m.sample then return true end
+    if not (m.active and m.built) then return false end
+    HealCombat()
+    if inCombat then return false end
+    if RowsUp(m) then return true end
+    local now = GetTime()
+    local list = {}
+    for i, def in ipairs(Dots.SAMPLE) do
+        list[i] = { name = def.name, icon = def.icon, duration = def.duration, expires = now + def.left, count = def.count, order = i }
+    end
+    m.sample = { list = list, real = m.list, realEpoch = m.lastEpoch }
+    m.list, m.lastEpoch = list, SAMPLE_EPOCH
+    m.feed(list, SAMPLE_EPOCH)
+    return true
+end
+
+-- Takes the sample down and draws the real list again (or nothing, when none ever came).
+local function EndSample(m)
+    local s = m.sample
+    if not s then return end
+    m.sample = nil
+    m.list, m.lastEpoch = s.real, s.realEpoch
+    if s.real ~= nil then
+        m.feed(s.real, s.realEpoch)
+    else
+        WipeFallen(m.fallen)
+        for i = 1, #m.rows do ClearRow(m, m.rows[i]) end
+        StopTicking(m)
+        m.body:Hide()
+    end
+end
+
+-------------------------------------------------------------------------------
 -- Module build and hooks
 -------------------------------------------------------------------------------
 
@@ -910,7 +1008,7 @@ end
 -- login into the world and the option switch.
 local function Refresh()
     for _, m in pairs(Dots.modules or {}) do
-        if m.active and m.lastEpoch ~= nil then m.onList(m.list, m.lastEpoch) end
+        if m.active and m.lastEpoch ~= nil then m.feed(m.list, m.lastEpoch) end
     end
 end
 
@@ -925,6 +1023,7 @@ local function EnsureShared()
     events:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_REGEN_DISABLED" then
             inCombat = true                 -- the event itself: InCombatLockdown() may still read false here
+            for _, m in pairs(Dots.modules or {}) do EndSample(m) end    -- a sample never runs in a fight
         elseif event == "PLAYER_REGEN_ENABLED" then
             inCombat = false
         else
@@ -979,10 +1078,16 @@ local function ModuleSpec(m)
                 TD.Subscribe(m.onList)             -- pushes the current list at once
             end
         end,
+        -- The config window's sample (GunsightAreas.Preview): show answers true while there is something on screen.
+        preview = {
+            show = function() return StartSample(m) end,
+            hide = function() m.want = nil; EndSample(m) end,
+        },
         onHide = function()
             m.active, m.area = false, nil
             if m.subscribed and FS.TargetDebuffs then FS.TargetDebuffs.Unsubscribe(m.onList) end
             m.subscribed = false
+            m.sample, m.want = nil, nil
             m.lastEpoch, m.list = nil, nil
             WipeFallen(m.fallen)
             StopTicking(m)
@@ -994,10 +1099,21 @@ end
 
 local function Register(id, kind)
     local m = NewModule(id, kind)
-    m.onList = function(list, epoch)
-        if not m.active then return end
+    -- feed draws a list through Update; onList is the data service's push (a real list). A sample is standing in for
+    -- the real list while m.sample is set: a push is then kept for when it ends, and takes over the moment it has a row.
+    m.feed = function(list, epoch)
         local ok, err = pcall(Update, m, list, epoch)
         if not ok then LogOnce("state", err) end
+    end
+    m.onList = function(list, epoch)
+        if not m.active then return end
+        if m.sample then
+            m.sample.real, m.sample.realEpoch = list, epoch
+            if HasLive(m, list, GetTime()) then EndSample(m) end
+            return
+        end
+        m.feed(list, epoch)
+        if m.want and not RowsUp(m) then StartSample(m) end          -- the real rows went away under a hover
     end
     Dots.modules = Dots.modules or {}
     Dots.modules[id] = m

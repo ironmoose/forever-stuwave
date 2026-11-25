@@ -57,14 +57,15 @@ end
 -- One thing a provider answered, as a rect { left, bottom, width, height } in UIParent units. A frame that is showing gives
 -- the plain rect. A frame that has a rect but is not showing (hidden, faded out, or held down by `hidden`) gives the same
 -- rect with `hidden = true`, `reason` and `preview` (what the provider says about why and what could stand in for it).
--- A provider may answer a wrapper { seat = frame, reason, preview, hidden } to say those itself. A plain table with the
--- four fields is taken as it is (the quest tracker answers its own rect).
+-- A provider may answer a wrapper { seat = frame, reason, preview, hidden, sample } to say those itself. `sample` (a key like
+-- `preview`) is for a frame that IS showing but may be empty (a Gunsight area with no debuffs of yours): the flash puts the
+-- sample in it for the hover. A plain table with the four fields is taken as it is (the quest tracker answers its own rect).
 local function Read(thing, ctx)
     if type(thing) ~= "table" then return nil end
     local ok, rect = pcall(function()
-        local frame, reason, preview, forced = thing, nil, nil, false
+        local frame, reason, preview, forced, sample = thing, nil, nil, false, nil
         if thing.seat ~= nil then
-            frame, reason, preview, forced = thing.seat, thing.reason, thing.preview, thing.hidden == true
+            frame, reason, preview, forced, sample = thing.seat, thing.reason, thing.preview, thing.hidden == true, thing.sample
         end
         if type(frame) ~= "table" then return nil end
         if type(frame.GetRect) ~= "function" then
@@ -81,6 +82,8 @@ local function Read(thing, ctx)
             r.hidden = true
             r.reason = reason or (ctx and ctx.reason) or T.GENERIC_REASON
             r.preview = preview or (ctx and ctx.preview) or nil
+        elseif type(sample) == "string" then
+            r.sample = sample
         end
         return r
     end)
@@ -163,6 +166,16 @@ end
 -- and the target side only shows while there is a target. An anchor that is not drawn is still answered, marked hidden with
 -- the reason, so the flash can say why it is empty.
 local TARGET_SIDE = { tapeR = true, boxR = true, areaU = true, areaL = true }
+-- The two target side areas: what each holds is `gunsight.target.upper` / `.lower`, and the sample the flash puts in one is
+-- keyed `gs.upper` / `gs.lower` (GunsightAreas.Preview). An area set to Empty has nothing to sample.
+local AREA_OF = { areaU = "upper", areaL = "lower" }
+
+local function AreaIsEmpty(area)
+    local G = FS.Gunsight
+    if type(G) ~= "table" or type(G.GetArea) ~= "function" then return false end
+    local ok, id = pcall(G.GetArea, area)
+    return ok and id == "empty"
+end
 
 local function HasTarget()
     if type(FS.HasTarget) ~= "function" then return true end
@@ -188,11 +201,17 @@ local function Anchors(piece, ...)
         local out = {}
         for _, name in ipairs(names) do
             local frame = G.anchors[name]
+            local area = AREA_OF[name]
             if frame then
                 if reason then
                     out[#out + 1] = { seat = frame, hidden = true, reason = reason }
+                elseif area and AreaIsEmpty(area) then
+                    out[#out + 1] = { seat = frame, hidden = true, reason = "Set to Empty" }
                 elseif noTarget and TARGET_SIDE[name] then
-                    out[#out + 1] = { seat = frame, hidden = true, reason = "Shows with a target", preview = "gs.target" }
+                    out[#out + 1] = { seat = frame, hidden = true, reason = "Shows with a target",
+                        preview = area and ("gs." .. area) or "gs.target" }
+                elseif area then
+                    out[#out + 1] = { seat = frame, sample = "gs." .. area }
                 else
                     out[#out + 1] = frame
                 end

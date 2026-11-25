@@ -25,6 +25,14 @@
 -- that part (the fill's textures and the ring and glow regions are plain regions of the plate, kept at build); with both off
 -- the plate hides like opacity 0. The alert scale SETTINGS.alertScale (50 to 200 percent) is not drawn here: the pop up class
 -- alerts (Warrior power-ups, Clearcasting) read it through Areas.AlertScale().
+--
+-- SAMPLE (Areas.Preview, for the config window). Pointing at the Upper or Lower area row in /fsconfig shows what the area holds:
+-- the caller first turns the sample target on (FS.SetTargetPreview(true), which makes every gate here read "has a target", so
+-- the host comes up), then Areas.Preview.Show(area). A module that registered a `preview = { show(area), hide() }` in its spec
+-- (Target Debuffs: a made up list through its own drawing) is asked to show a sample in its area; a module with none (the class
+-- modules, the coming soon plate) just draws what it draws, and the host being up is the preview. Never in a fight; it ends
+-- with Preview.Hide, the sample target going off (combat starts through the gate) or the occupant changing. Nothing of the real
+-- target, its data or any setting is touched.
 
 local _, FS = ...
 
@@ -69,6 +77,8 @@ local plateFills = {}     -- area -> the fill's textures (the regions Theme.AddR
 local plateRings = {}     -- area -> the ring and the glow (the regions Theme.SkinButton made on the plate)
 local fillOn, ringOn = {}, {}   -- area -> whether that part is shown
 local occupant = {}       -- area -> the record shown there
+local previewOn = {}      -- area -> true while the config window is showing a sample there
+local previewActive      -- true while any area has a sample asked for or a module's sample is up (so a health event costs nothing)
 local changedCallbacks = {}
 local pieceFrame, built, lastSnapshot, classToken
 
@@ -249,11 +259,44 @@ local function ApplyHosts()
     return flipped
 end
 
+local function InCombat()
+    return type(InCombatLockdown) == "function" and InCombatLockdown() == true
+end
+
+-- Puts a module's sample up where the config window asked for one and takes it down where it did not: the sample target must
+-- be on (it is what lets the host show), the host up, and no fight. Runs from Refresh, from a gate edge and from Preview.
+local function SyncPreview()
+    if not previewActive then return end
+    local gate = type(FS.TargetPreviewOn) == "function" and FS.TargetPreviewOn() == true and not InCombat()
+    if not gate then
+        for _, area in ipairs(AREA_NAMES) do previewOn[area] = nil end
+    end
+    local any = false
+    for _, record in ipairs(AllRecords()) do
+        local pv = record.spec.preview
+        local area = record.shown
+        local want = gate and area ~= nil and previewOn[area] == true and hostOn[area] == true
+        if want then any = true end
+        if pv and want and not record.sampling then
+            record.sampling = true
+            Safe("preview show " .. record.id, pv.show, area)
+        elseif pv and not want and record.sampling then
+            record.sampling = nil
+            Safe("preview hide " .. record.id, pv.hide)
+        end
+    end
+    if not any then
+        for _, area in ipairs(AREA_NAMES) do if previewOn[area] then any = true end end
+    end
+    previewActive = any
+end
+
 local function HideRecord(record)
     local area = record.shown
     if not area then return end
     record.shown = nil
     occupant[area] = nil
+    record.sampling = nil          -- the module's own onHide clears its sample
     if not NEEDS_TARGET[record.id] or record.live then RunHook(record, "onHide", area) end
     record.live = nil
     if record.frame then record.frame:Hide() end
@@ -311,6 +354,7 @@ local function Refresh(force)
     end
     local flipped = ApplyHosts()
     ApplyPlates()
+    SyncPreview()
     local snapshot = Snapshot()
     local moved = snapshot ~= lastSnapshot
     if force or flipped or moved then
@@ -396,6 +440,33 @@ local function OnTargetEvent()
     if ApplyHosts() then
         for _, fn in ipairs(changedCallbacks) do Safe("OnAreaChanged callback", fn, "gate") end
     end
+    if previewActive then SyncPreview() end
+end
+
+-- The config window's sample of what an area holds (see the header). Show answers true when the area has something on screen
+-- (a module's sample, or the module itself drawing under the sample target), false when it is empty, the dot piece is off,
+-- the sample target is not on, or a fight is on. Hide(area) takes one area's down, Hide() both.
+Areas.Preview = {}
+
+function Areas.Preview.Show(area)
+    if not built or (area ~= "upper" and area ~= "lower") then return false end
+    local gate = type(FS.TargetPreviewOn) == "function" and FS.TargetPreviewOn() == true
+    if not gate or InCombat() or not occupant[area] then return false end
+    previewOn[area] = true
+    previewActive = true
+    SyncPreview()
+    return hostOn[area] == true
+end
+
+function Areas.Preview.Hide(area)
+    for _, name in ipairs(AREA_NAMES) do
+        if area == nil or area == name then previewOn[name] = nil end
+    end
+    SyncPreview()
+end
+
+function Areas.Preview.IsShown(area)
+    return previewOn[area] == true
 end
 
 -- One plate per host, made with the host (before any module frame, which the host's child level keeps above it). The
