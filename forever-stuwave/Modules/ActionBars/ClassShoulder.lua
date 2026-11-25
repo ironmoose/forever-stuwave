@@ -104,6 +104,7 @@ end
 local OWNERS = {
     DRUID = ClassTab("druid", "ShapeshiftTab", 1),
     HUNTER = ClassTab("hunter", "CallPetTab", 1),
+    MAGE = ClassTab("mage", "PortalsTab", 2),
     PALADIN = {
         key = "paladin", cols = C.COLS, rows = C.ROWS,
         wants = function()
