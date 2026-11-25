@@ -9,7 +9,8 @@
 -- bar is anchored to this bar and the control deck chassis to the XP bar, and the
 -- deck's bag slots are secure buttons, so this bar is RESTRICTED in combat (see
 -- Rescale below). Hovering the TIME segment shows a GameTooltip with the local and the realm time; hovering DUR
--- lists each equipped piece's durability.
+-- lists each equipped piece's durability. A click on DUR, TIME, GOLD, REP and PROF opens the matching window (see
+-- OpenWindow); a click on BAGS is delegated to the stock backpack button through a secure overlay (see BindSecureClick).
 --
 -- Which segments show, in what order and under what title are settings (databar.order, databar.seg.<key>,
 -- databar.title.<seg>), read at layout time and re-laid out live when one changes. Every available segment is built
@@ -87,6 +88,11 @@ local HAS_XP_EXHAUSTION = type(GetXPExhaustion) == "function"
 local HAS_GET_FRAMERATE = type(GetFramerate) == "function"
 local HAS_GET_NET_STATS = type(GetNetStats) == "function"
 local HAS_DURABILITY = type(GetInventoryItemDurability) == "function"
+-- C_Reputation.GetWatchedFactionData is what the 16001 dump has (the old GetWatchedFactionInfo is not in it).
+local HAS_REPUTATION = type(C_Reputation) == "table" and type(C_Reputation.GetWatchedFactionData) == "function"
+-- GetProfessions / GetProfessionInfo answer on Forever (CharacterExport.lua reads them; live 2026-11-10); the old
+-- skill line list (GetNumSkillLines) is not in the dump.
+local HAS_PROFESSIONS = type(GetProfessions) == "function" and type(GetProfessionInfo) == "function"
 
 -- C_Container.GetContainerNumFreeSlots replaced the global GetContainerNumFreeSlots
 -- on modern clients; feature-detect both and pick whichever exists once, rather
@@ -163,11 +169,53 @@ local function TipOwnedBy(segment)
     return false
 end
 
+-- Click to open. DUR, TIME, GOLD, REP and PROF call a Blizzard toggle (def.open) from an ordinary click handler, under
+-- pcall and only out of combat: those toggles show UI panels, which this addon has no business doing mid-fight. In
+-- combat the click does nothing and the segment's tooltip says "Opens after combat." (OpenWindow, CombatNote). BAGS is
+-- not here: bag windows must not be opened by addon code (BagBar.lua), so its click is secure (BindSecureClick).
+-- A segment is clickable only while its toggle exists on this client; the config row's click sentence follows suit.
+local function IsClickable(def)
+    if def.secureClick then return type(_G[def.secureClick]) == "table" end
+    if not def.open then return false end
+    return def.canOpen == nil or def.canOpen() and true or false
+end
+
+local function OpenWindow(segment)
+    local def = segment.def
+    if not (def and def.open and IsClickable(def)) then return false end
+    if InCombatLockdown() then return false end
+    return pcall(def.open) and true or false
+end
+
+-- A tooltip's last line while the click would do nothing, and the bit of its signature that redraws it when combat
+-- starts or ends under the mouse.
+local function InCombatClickBlocked(segment)
+    return segment.def and segment.def.open and IsClickable(segment.def) and InCombatLockdown() and true or false
+end
+
+local function CombatSig(segment)
+    return InCombatClickBlocked(segment) and "|combat" or ""
+end
+
+local function CombatNote(segment, tip)
+    if InCombatClickBlocked(segment) and type(tip.AddLine) == "function" then
+        tip:AddLine("Opens after combat.", TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3])
+    end
+end
+
+local function ToggleCharacterTab(tab)
+    return function() ToggleCharacter(tab) end
+end
+
+local function HasGlobalFunction(name)
+    return function() return type(_G[name]) == "function" end
+end
+
 local function ShowTimeTooltip(segment, refresh)
     local tip = GameTooltip
     if not tip then return end
     local localText, realmText = LocalTimeText() or "--", RealmTimeText() or "--"
-    local sig = localText .. "|" .. realmText
+    local sig = localText .. "|" .. realmText .. CombatSig(segment)
     if refresh then
         if segment.tipSig == sig then return end
     else
@@ -180,6 +228,7 @@ local function ShowTimeTooltip(segment, refresh)
         COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3])
     tip:AddDoubleLine("Realm", realmText, TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3],
         COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3])
+    CombatNote(segment, tip)
     tip:Show()
 end
 
@@ -288,7 +337,7 @@ local function ShowGoldTooltip(segment, refresh)
     local rows, me = GoldRows(), PlayerGUID()
     local parts = {}
     for i, r in ipairs(rows) do parts[i] = r.guid .. r.copper end
-    local sig = table.concat(parts, "|")
+    local sig = table.concat(parts, "|") .. CombatSig(segment)
     if refresh then
         if segment.tipSig == sig then return end
     else
@@ -310,6 +359,7 @@ local function ShowGoldTooltip(segment, refresh)
     if #rows > 1 then
         tip:AddDoubleLine("Total", MoneyText(total), COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 1, 1, 1)
     end
+    CombatNote(segment, tip)
     tip:Show()
 end
 
@@ -431,7 +481,7 @@ local function ShowDurabilityTooltip(segment, refresh)
     local pieces = DurabilityPieces()
     local parts = {}
     for i, p in ipairs(pieces) do parts[i] = p.name .. ("%.0f"):format(p.pct) end
-    local sig = table.concat(parts, "|")
+    local sig = table.concat(parts, "|") .. CombatSig(segment)
     if refresh then
         if segment.tipSig == sig then return end
     else
@@ -448,6 +498,7 @@ local function ShowDurabilityTooltip(segment, refresh)
         if p.pct < 20 then c = DUR_COLOR_LOW elseif p.pct < 50 then c = DUR_COLOR_WARN end
         tip:AddDoubleLine(p.name, ("%.0f%%"):format(p.pct), TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3], c[1], c[2], c[3])
     end
+    CombatNote(segment, tip)
     tip:Show()
 end
 
@@ -634,6 +685,191 @@ local function UpdateBags(segment)
     end
 end
 
+-- Reputation: the watched faction (the bar under the character window's reputation list). C_Reputation answers a
+-- table, nil when no faction is watched; every field is checked plain before use. Progress is within the current
+-- standing, as the character window shows it: (standing - this standing's floor) over (next floor - this floor),
+-- full at the top standing where the two floors meet.
+local function IsPlainString(v)
+    return type(v) == "string" and not (FS.IsSecret and FS.IsSecret(v))
+end
+
+local function WatchedFaction()
+    local data = C_Reputation.GetWatchedFactionData()
+    if type(data) ~= "table" then return nil end
+    local name = data.name
+    if not IsPlainString(name) or name == "" then return nil end
+    local id = data.factionID
+    if IsPlainNumber(id) and id == 0 then return nil end
+    local reaction, low, high, current = data.reaction, data.currentReactionThreshold, data.nextReactionThreshold, data.currentStanding
+    local faction = { name = name }
+    if IsPlainNumber(reaction) then faction.reaction = reaction end
+    if IsPlainNumber(low) and IsPlainNumber(high) and IsPlainNumber(current) then
+        faction.progress, faction.span = current - low, high - low
+        faction.fraction = faction.span > 0 and math.min(math.max(faction.progress / faction.span, 0), 1) or 1
+    else
+        faction.fraction = 0
+    end
+    return faction
+end
+
+-- A faction's name in at most REP_NAME_MAX letters: whole words while they fit ("Thunder Bluff" reads "Thunder"), the
+-- first word cut when it alone is longer.
+local REP_NAME_MAX = 10
+
+local function ShortFactionName(name)
+    if #name <= REP_NAME_MAX then return name end
+    local short
+    for word in name:gmatch("%S+") do
+        local candidate = short and (short .. " " .. word) or word
+        if #candidate > REP_NAME_MAX then break end
+        short = candidate
+    end
+    return short or name:sub(1, REP_NAME_MAX)
+end
+
+local function StandingLabel(reaction)
+    local label = reaction and _G["FACTION_STANDING_LABEL" .. reaction]
+    return IsPlainString(label) and label or nil
+end
+
+-- The tooltip the mouse is on is redrawn when its value moved (`show` skips an unchanged one); a tooltip another frame
+-- took over is forgotten.
+local function RefreshHover(segment, show)
+    if not segment.hover then return end
+    if TipOwnedBy(segment) then
+        show(segment, true)
+    else
+        segment.hover, segment.tipSig = false, nil
+    end
+end
+
+local ShowRepTooltip, ShowProfTooltip
+
+local function UpdateRep(segment)
+    local faction = WatchedFaction()
+    SetMeterFraction(segment.meter, faction and faction.fraction or 0)
+    segment.meter.track:SetShown(true)
+    if faction then
+        segment.valueText:SetTextColor(COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3], 1)
+        segment.valueText:SetText(ShortFactionName(faction.name))
+    else
+        segment.valueText:SetTextColor(COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3], 0.35)
+        segment.valueText:SetText("none")
+    end
+    RefreshHover(segment, ShowRepTooltip)
+end
+
+-- Hover: the faction, its standing and how far into it you are (current / max); "No faction is watched." when none.
+function ShowRepTooltip(segment, refresh)
+    local tip = GameTooltip
+    if not tip then return end
+    local faction = WatchedFaction()
+    local sig = faction and table.concat({ faction.name, tostring(faction.reaction), tostring(faction.progress),
+        tostring(faction.span) }, "|") or "none"
+    sig = sig .. CombatSig(segment)
+    if refresh then
+        if segment.tipSig == sig then return end
+    else
+        tip:SetOwner(segment.frame, "ANCHOR_CURSOR")
+    end
+    segment.tipSig = sig
+    if refresh and type(tip.ClearLines) == "function" then tip:ClearLines() end
+    if faction then
+        tip:SetText(faction.name, COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3])
+        local standing = StandingLabel(faction.reaction)
+        if standing then
+            tip:AddDoubleLine("Standing", standing, TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3],
+                COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3])
+        end
+        if faction.span then
+            local text = faction.span > 0 and ("%d / %d"):format(faction.progress, faction.span) or "Max"
+            tip:AddDoubleLine("Progress", text, TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3],
+                COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3])
+        end
+    else
+        tip:SetText("Reputation", COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3])
+        if type(tip.AddLine) == "function" then
+            tip:AddLine("No faction is watched.", TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3])
+        end
+    end
+    CombatNote(segment, tip)
+    tip:Show()
+end
+
+-- Professions: GetProfessions answers up to six slot numbers (the two primaries first, then the secondary skills; a
+-- slot the character does not have is nil) and GetProfessionInfo(slot) their name, icon, skill, max, ..., skill line.
+-- The bar shows the two primaries as "BS 142  MIN 150"; the tooltip lists everything the character has.
+local PROFESSION_SHORT_BY_LINE = {
+    [171] = "ALC", [164] = "BS", [333] = "ENCH", [202] = "ENG", [182] = "HERB", [773] = "INSC", [755] = "JC",
+    [165] = "LW", [186] = "MIN", [393] = "SKIN", [197] = "TAIL", [185] = "COOK", [356] = "FISH", [129] = "FA",
+    [794] = "ARCH",
+}
+local PROFESSION_SHORT_BY_NAME = {
+    Alchemy = "ALC", Blacksmithing = "BS", Enchanting = "ENCH", Engineering = "ENG", Herbalism = "HERB",
+    Inscription = "INSC", Jewelcrafting = "JC", Leatherworking = "LW", Mining = "MIN", Skinning = "SKIN",
+    Tailoring = "TAIL", Cooking = "COOK", Fishing = "FISH", ["First Aid"] = "FA", Archaeology = "ARCH",
+}
+
+local function ReadProfessions()
+    local slots = { GetProfessions() }
+    local list = {}
+    for slot = 1, 6 do
+        local index = slots[slot]
+        if IsPlainNumber(index) then
+            local name, _, skill, max, _, _, line = GetProfessionInfo(index)
+            if IsPlainString(name) and IsPlainNumber(skill) then
+                local short = (IsPlainNumber(line) and PROFESSION_SHORT_BY_LINE[line]) or PROFESSION_SHORT_BY_NAME[name]
+                    or name:sub(1, 4):upper()
+                list[#list + 1] = { name = name, short = short, skill = skill, max = IsPlainNumber(max) and max or nil,
+                    primary = slot <= 2 }
+            end
+        end
+    end
+    return list
+end
+
+local function UpdateProf(segment)
+    local parts = {}
+    for _, entry in ipairs(ReadProfessions()) do
+        if entry.primary then parts[#parts + 1] = ("%s %d"):format(entry.short, entry.skill) end
+    end
+    if #parts == 0 then
+        segment.valueText:SetTextColor(COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3], 0.35)
+        segment.valueText:SetText("none")
+    else
+        segment.valueText:SetTextColor(COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3], 1)
+        segment.valueText:SetText(table.concat(parts, "  "))
+    end
+    RefreshHover(segment, ShowProfTooltip)
+end
+
+function ShowProfTooltip(segment, refresh)
+    local tip = GameTooltip
+    if not tip then return end
+    local list = ReadProfessions()
+    local parts = {}
+    for i, entry in ipairs(list) do parts[i] = entry.name .. entry.skill .. tostring(entry.max) end
+    local sig = table.concat(parts, "|") .. CombatSig(segment)
+    if refresh then
+        if segment.tipSig == sig then return end
+    else
+        tip:SetOwner(segment.frame, "ANCHOR_CURSOR")
+    end
+    segment.tipSig = sig
+    if refresh and type(tip.ClearLines) == "function" then tip:ClearLines() end
+    tip:SetText("Professions", COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3])
+    if #list == 0 and type(tip.AddLine) == "function" then
+        tip:AddLine("No professions learned.", TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3])
+    end
+    for _, entry in ipairs(list) do
+        local right = entry.max and ("%d / %d"):format(entry.skill, entry.max) or ("%d"):format(entry.skill)
+        tip:AddDoubleLine(entry.name, right, TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3],
+            COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3])
+    end
+    CombatNote(segment, tip)
+    tip:Show()
+end
+
 -------------------------------------------------------------------------------
 -- Segment definitions
 -------------------------------------------------------------------------------
@@ -681,19 +917,50 @@ local SEGMENT_DEFS = {
       missing = "This client does not report rested XP." },
     { key = "durability", label = "DUR", available = HAS_DURABILITY, update = UpdateDurability, meter = true,
       tooltip = ShowDurabilityTooltip, tooltipHide = HideTimeTooltip,
+      open = ToggleCharacterTab("PaperDollFrame"), canOpen = HasGlobalFunction("ToggleCharacter"),
       tip = "Durability across all your gear, as one percent. Hover for each piece.",
+      clickTip = "Click opens the character window.",
       missing = "This client does not report gear durability." },
     { key = "bags", label = "BAGS", available = (GetFreeSlotsForBag ~= nil), update = UpdateBags, meter = true,
+      secureClick = "MainMenuBarBackpackButton",
       tip = "Free bag slots.",
+      clickTip = "Click opens your bags.",
       missing = "This client does not report bag slots." },
     { key = "time", label = "TIME", available = HAS_DATE or HAS_GET_GAME_TIME, update = UpdateTime,
       tooltip = ShowTimeTooltip, tooltipHide = HideTimeTooltip,
+      open = function() ToggleCalendar() end, canOpen = HasGlobalFunction("ToggleCalendar"),
       tip = "Realm and local time.",
+      clickTip = "Click opens the calendar.",
       missing = "This client does not report the time." },
     { key = "gold", label = "GOLD", available = HAS_GET_MONEY, update = UpdateGold, coins = true,
       tooltip = ShowGoldTooltip, tooltipHide = HideTimeTooltip,
+      open = ToggleCharacterTab("TokenFrame"), canOpen = HasGlobalFunction("ToggleCharacter"),
       tip = "Gold on this character; the tooltip lists your other characters.",
+      clickTip = "Click opens currencies.",
       missing = "This client does not report your gold." },
+    { key = "rep", label = "REP", available = HAS_REPUTATION, update = UpdateRep, meter = true, off = true,
+      tooltip = ShowRepTooltip, tooltipHide = HideTimeTooltip,
+      open = ToggleCharacterTab("ReputationFrame"), canOpen = HasGlobalFunction("ToggleCharacter"),
+      events = { "UPDATE_FACTION" },
+      tip = "Your watched faction and its standing.",
+      clickTip = "Click opens reputation.",
+      missing = "This client does not report reputation." },
+    { key = "prof", label = "PROF", available = HAS_PROFESSIONS, update = UpdateProf, off = true, reserve = 110,
+      tooltip = ShowProfTooltip, tooltipHide = HideTimeTooltip,
+      open = function()
+          if type(ToggleProfessionsBook) == "function" then
+              ToggleProfessionsBook()
+          else
+              ToggleSpellBook(BOOKTYPE_PROFESSION)
+          end
+      end,
+      canOpen = function()
+          return type(ToggleProfessionsBook) == "function" or (type(ToggleSpellBook) == "function" and BOOKTYPE_PROFESSION ~= nil)
+      end,
+      events = { "SKILL_LINES_CHANGED" },
+      tip = "Profession skill levels.",
+      clickTip = "Click opens the profession book.",
+      missing = "This client does not report professions." },
 }
 
 -------------------------------------------------------------------------------
@@ -868,7 +1135,7 @@ function Segments.Model()
             on = on,
             available = available,
             reason = (not available) and def.missing or nil,
-            tip = def.tip .. (def.clickTip and (" " .. def.clickTip) or ""),
+            tip = def.tip .. ((def.clickTip and IsClickable(def)) and (" " .. def.clickTip) or ""),
             canUp = index > 1,
             canDown = index < #order,
             lock = lock,
@@ -1043,6 +1310,7 @@ local function CreateSegment(bar, def)
 
     local segment = {
         key = def.key,
+        def = def,
         frame = seg,
         divider = divider,
         labelText = labelText,
@@ -1066,8 +1334,47 @@ local function CreateSegment(bar, def)
         seg:SetScript("OnLeave", function() def.tooltipHide(segment) end)
         seg:SetScript("OnHide", function() def.tooltipHide(segment) end)
     end
+    -- Segments flagged `open` open their window on a left click (OpenWindow: out of combat only).
+    if def.open then
+        seg:EnableMouse(true)
+        seg:SetScript("OnMouseUp", function(_, button)
+            if button == nil or button == "LeftButton" then OpenWindow(segment) end
+        end)
+    end
 
     return segment
+end
+
+-- BAGS: bag windows are never opened by addon code (BagBar.lua: that taints the bag frames and the first item click
+-- afterwards is forbidden), so the click is delegated like the deck's bag slots are: a secure button laid over the
+-- segment with type="click" and clickbutton = Blizzard's stock backpack button, whose own OnClick runs from the secure
+-- path. SetAttribute is protected in combat, so this runs out of combat (Init, then PLAYER_ENTERING_WORLD and
+-- PLAYER_REGEN_ENABLED until it holds); a client without the stock button leaves BAGS without a click. UNVERIFIED in
+-- game, like the deck slots: that the stock button's click runs while it is dimmed.
+local function BindSecureClick(segment)
+    local def = segment.def
+    if segment.secureBound or not (def and def.secureClick) or InCombatLockdown() then return end
+    local stock = _G[def.secureClick]
+    if type(stock) ~= "table" or type(stock.Click) ~= "function" then return end
+    local button = segment.secureButton
+    if not button then
+        local made, created = pcall(CreateFrame, "Button", nil, segment.frame, "SecureActionButtonTemplate")
+        if not (made and created) then return end
+        button = created
+        button:SetAllPoints(segment.frame)
+        button:RegisterForClicks("AnyUp")
+        segment.secureButton = button
+    end
+    local set = pcall(function()
+        button:SetAttribute("type", "click")
+        button:SetAttribute("clickbutton", stock)
+        button:SetAttribute("useOnKeyDown", false)
+    end)
+    if set then segment.secureBound = true end
+end
+
+local function BindSecureClicks()
+    for _, segment in ipairs(segments) do BindSecureClick(segment) end
 end
 
 -- The STATUS slot: the bar's own divider, an Orbitron "STATUS" label like its neighbours, then a
@@ -1167,6 +1474,8 @@ local TITLE_END_PAD = 4
 local TITLE_MIN_W = 6   -- less room than this and the title is dropped (the value moves up to PAD_X)
 
 local function BodyReserve(segment)
+    local own = segment.def and segment.def.reserve
+    if own then return own end
     if segment.coins then
         return 3 * (COIN_SIZE + COIN_TEXT_GAP + COIN_TEXT_RESERVE) + 2 * COIN_GROUP_GAP
     end
@@ -1364,6 +1673,7 @@ local function Init()
     link = CreateLink(bar)
     bar.linkSlot = link.frame
     LayoutSegments(bar, screenWidth)
+    BindSecureClicks()
 
     UpdateAllSegments()
 
@@ -1449,9 +1759,39 @@ loader:RegisterEvent("PLAYER_LOGIN")
 loader:RegisterEvent("PLAYER_ENTERING_WORLD")
 loader:RegisterEvent("PLAYER_REGEN_ENABLED")
 loader:RegisterEvent("PLAYER_MONEY")
+
+-- The events that move a segment's value ahead of the 1 s tick (REP: UPDATE_FACTION, PROF: SKILL_LINES_CHANGED). A name
+-- this client refuses is skipped quietly (FrameHelpers.RegisterEvent) rather than raising at load.
+local eventSegments = {}
+for _, def in ipairs(SEGMENT_DEFS) do
+    for _, event in ipairs(def.events or {}) do
+        if not eventSegments[event] then
+            eventSegments[event] = {}
+            local helpers = FS.FrameHelpers
+            if helpers and helpers.RegisterEvent then
+                helpers.RegisterEvent(loader, event)
+            else
+                pcall(loader.RegisterEvent, loader, event)
+            end
+        end
+        table.insert(eventSegments[event], def.key)
+    end
+end
+
+-- Reads the segments the event is about, if they are on the bar.
+local function RefreshForEvent(event)
+    for _, key in ipairs(eventSegments[event]) do
+        local segment = segmentByKey[key]
+        if segment then TryUpdate(segment) end
+    end
+end
+
 loader:SetScript("OnEvent", function(self, event)
-    if event == "PLAYER_REGEN_ENABLED" then
+    if eventSegments[event] then
+        RefreshForEvent(event)
+    elseif event == "PLAYER_REGEN_ENABLED" then
         if pendingRescale then Rescale() end
+        BindSecureClicks()
     elseif event == "PLAYER_MONEY" then
         RecordGoldOffBar()
     elseif event == "PLAYER_LOGIN" then
@@ -1465,5 +1805,6 @@ loader:SetScript("OnEvent", function(self, event)
     elseif FS.dataBar then
         HookStrip()
         Rescale()
+        BindSecureClicks()
     end
 end)

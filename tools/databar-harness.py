@@ -18,6 +18,10 @@ widget method is a no-op). It pins the behaviour the bar promises:
     text the bar shows) and a "Realm" line (GetGameTime, 12-hour like the bar), anchored at the mouse (ANCHOR_CURSOR),
     refreshed when a minute rolls over, hidden on leave and on hide, never taking a tooltip another frame owns.
 
+  * REP and PROF (E2): the watched faction as a meter plus its short name ("none" when nothing is watched), the two
+    primary professions as "BS 142  MIN 150", their tooltips, both off by default, refreshed on UPDATE_FACTION and
+    SKILL_LINES_CHANGED; a left click opens the window for DUR, TIME, GOLD, REP and PROF (out of combat only, in combat
+    nothing happens and the tooltip says so), BAGS delegates to the stock backpack button through a secure overlay.
   * SETTINGS (E1): databar.order, databar.seg.<key> and databar.title.<key> pick, order and rename the segments; a
     change re-lays the bar out live (no reload), hidden segments stop updating, the STATUS slot keeps its rule (before
     TIME, at the end without TIME), defaults leave the bar as it was (minus MEM and CPU, which start off), at least one
@@ -99,6 +103,9 @@ function Region:GetEffectiveScale() return self.scale * (self.parent and self.pa
 function Region:CreateTexture() return new("texture", self) end
 function Region:CreateFontString() return new("fontstring", self) end
 function Region:SetText(t) self.text = t end
+function Region:SetValue(v) self.value = v end
+function Region:SetAttribute(k, v) self.attrs = self.attrs or {}; self.attrs[k] = v end
+function Region:RegisterForClicks(...) self.clicks = { ... } end
 function Region:SetFormattedText(f, ...) self.text = string.format(f, ...) end
 function Region:GetStringWidth() return #(self.text or "") * 6.5 end   -- "STATUS" = 39
 function Region:GetStatusBarTexture() return new("texture", self) end
@@ -203,10 +210,11 @@ function __createdKeys()
         fps = GetFramerate ~= nil, mem = UpdateAddOnMemoryUsage ~= nil, cpu = GetAddOnCPUUsage ~= nil,
         latency = GetNetStats ~= nil, rested = GetXPExhaustion ~= nil, durability = GetInventoryItemDurability ~= nil,
         bags = (C_Container and C_Container.GetContainerNumFreeSlots) ~= nil, time = date ~= nil or GetGameTime ~= nil,
-        gold = GetMoney ~= nil,
+        gold = GetMoney ~= nil, rep = (C_Reputation and C_Reputation.GetWatchedFactionData) ~= nil,
+        prof = GetProfessions ~= nil and GetProfessionInfo ~= nil,
     }
     local out = {}
-    for _, k in ipairs({ "fps", "mem", "cpu", "latency", "rested", "durability", "bags", "time", "gold" }) do
+    for _, k in ipairs({ "fps", "mem", "cpu", "latency", "rested", "durability", "bags", "time", "gold", "rep", "prof" }) do
         if has[k] then out[#out + 1] = k end
     end
     return out
@@ -789,10 +797,11 @@ def test_gold_tooltip() -> None:
 # Settings (E1): which segments show, in what order, under what title
 # ---------------------------------------------------------------------------------------------------------------
 
-ALL = ["fps", "mem", "cpu", "latency", "rested", "durability", "bags", "time", "gold"]
+NINE = ["fps", "mem", "cpu", "latency", "rested", "durability", "bags", "time", "gold"]   # what FULL_PRE builds
+ALL = NINE + ["rep", "prof"]                                                              # every row of the page
 DEFAULT_SHOWN = ["fps", "latency", "rested", "durability", "bags", "time", "gold"]   # MEM and CPU start off
 LABELS = {"fps": "FPS", "mem": "FS MEM", "cpu": "FS CPU", "latency": "MS", "rested": "REST", "durability": "DUR",
-          "bags": "BAGS", "time": "TIME", "gold": "GOLD"}
+          "bags": "BAGS", "time": "TIME", "gold": "GOLD", "rep": "REP", "prof": "PROF"}
 TIPS = {
     "fps": "Frames per second.",
     "mem": "Memory this addon uses. For bug reports; most players leave it off.",
@@ -803,6 +812,8 @@ TIPS = {
     "bags": "Free bag slots.",
     "time": "Realm and local time.",
     "gold": "Gold on this character; the tooltip lists your other characters.",
+    "rep": "Your watched faction and its standing.",
+    "prof": "Profession skill levels.",
 }
 LOCK = "At least one segment stays on."
 
@@ -875,8 +886,8 @@ def test_settings_defaults() -> None:
     for key in ("mem", "cpu"):
         seg = b.seg(key)
         check(seg["shown"] is False and seg["placed"] is False, f"{key} is built but parked (hidden, no anchors)", str(seg))
-    check(all(b.seg(k)["label"] == LABELS[k] for k in ALL), "every default title is today's label",
-          str({k: b.seg(k)["label"] for k in ALL}))
+    check(all(b.seg(k)["label"] == LABELS[k] for k in NINE), "every default title is today's label",
+          str({k: b.seg(k)["label"] for k in NINE}))
     check(all(b.seg(k)["labelShown"] for k in DEFAULT_SHOWN) and all(b.seg(k)["labelW"] == 0 for k in DEFAULT_SHOWN),
           "default titles are shown at their natural width (no clip)")
     check(all(b.seg(k)["firstPt"] == {"point": "LEFT", "rel": "label", "relPoint": "RIGHT", "x": 6, "y": 0}
@@ -898,14 +909,18 @@ def test_settings_model() -> None:
     b = full()
     b.login()
     rows = model(b)
-    check([r["key"] for r in rows] == ALL, "one row per segment in default order", str([r["key"] for r in rows]))
+    check([r["key"] for r in rows] == ALL, "one row per segment in default order, REP and PROF last",
+          str([r["key"] for r in rows]))
     check(all(r["label"] == LABELS[r["key"]] and r["title"] == LABELS[r["key"]] and r["titleIsDefault"] for r in rows),
           "label and title are today's label")
-    check(all(r["tip"] == TIPS[r["key"]] for r in rows), "tips are the row texts", str([r["tip"] for r in rows]))
+    check(all(r["tip"] == TIPS[r["key"]] for r in rows), "tips are the row texts (no click sentence without the toggles)",
+          str([r["tip"] for r in rows]))
     check([r["on"] for r in rows] == [k in DEFAULT_SHOWN for k in ALL], "on follows the defaults", str([r["on"] for r in rows]))
-    check(all(r["available"] and r.get("reason") is None and r.get("lock") is None for r in rows),
-          "all nine are available and unlocked")
-    check([r["canUp"] for r in rows] == [False] + [True] * 8 and [r["canDown"] for r in rows] == [True] * 8 + [False],
+    check(all(r["available"] and r.get("reason") is None and r.get("lock") is None for r in rows[:9]),
+          "the nine this mock can build are available and unlocked")
+    check([r["available"] for r in rows[9:]] == [False, False] and all(r["lock"] == r["reason"] for r in rows[9:]),
+          "REP and PROF are unavailable here (no reputation or profession API): disabled with the reason")
+    check([r["canUp"] for r in rows] == [False] + [True] * 10 and [r["canDown"] for r in rows] == [True] * 10 + [False],
           "the first row cannot go up and the last cannot go down")
     texts = " ".join(r["tip"] for r in rows).lower()
     check(not any(w in texts for w in ("bot", "automat", "macro")), "tips stay neutral", texts)
@@ -915,7 +930,7 @@ def test_settings_model() -> None:
     b.login()
     rows = {r["key"]: r for r in model(b)}
     check([k for k in rows] == ALL, "unavailable segments still have a row", str(list(rows)))
-    for key in ("mem", "cpu", "latency", "rested", "durability"):
+    for key in ("mem", "cpu", "latency", "rested", "durability", "rep", "prof"):
         r = rows[key]
         check(r["available"] is False and r["on"] is False and r["reason"] and r["lock"] == r["reason"],
               f"{key}: unavailable, off, and the lock text names why", str(r))
@@ -937,12 +952,12 @@ def test_settings_order_live() -> None:
     check(all(abs(k["w"] - SCREEN_W / 7) < 1e-9 for k in lay) and contiguous(lay), "widths unchanged by a reorder")
     check(b.seg("gold")["dividerShown"] is False and b.seg("fps")["dividerShown"] is True,
           "the divider follows the position: GOLD first has none, FPS now has one")
-    check(len(stored(b, "databar.order")) == 9, "the stored order lists every segment")
+    check(len(stored(b, "databar.order")) == 11, "the stored order lists every segment")
     check([r["key"] for r in model(b)][:3] == ["gold", "fps", "mem"], "Model follows the order", str([r["key"] for r in model(b)]))
 
     ok, _ = api(b, 'SetOrder(__FS.DataBarSegments.Order())')
     check(ok is True and placed(b)[0] == "gold", "SetOrder(Order()) changes nothing")
-    api(b, 'SetOrder({"fps","mem","cpu","latency","rested","durability","bags","time","gold"})')
+    api(b, 'SetOrder({"fps","mem","cpu","latency","rested","durability","bags","time","gold","rep","prof"})')
     check(placed(b) == DEFAULT_SHOWN and stored(b, "databar.order") is None,
           "the default order is stored as nothing and comes back as it was", str(placed(b)))
 
@@ -951,7 +966,7 @@ def test_settings_order_live() -> None:
     check(api(b, 'Move("gold", -1)')[0] is True and placed(b)[-2:] == ["gold", "time"], "Move left swaps with the neighbour",
           str(placed(b)))
     check(api(b, 'Move("fps", -1)')[0] is False, "Move refuses at the left end")
-    ok, why = api(b, 'Move("time", 1)')
+    ok, why = api(b, 'Move("prof", 1)')
     check(ok is False, "Move refuses at the right end", str(why))
     check(api(b, 'Move("nope", 1)')[0] is False, "Move refuses an unknown key")
     # hidden segments move too: MEM sits between FPS and CPU even though it is off
@@ -1222,6 +1237,307 @@ def test_settings_gold_record_off_bar() -> None:
           "on the bar, PLAYER_MONEY leaves the recording to the segment (no second path)")
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# REP and PROF segments, click to open (E2)
+# ---------------------------------------------------------------------------------------------------------------
+
+REPPROF_PRE = """
+FACTION_STANDING_LABEL4, FACTION_STANDING_LABEL5, FACTION_STANDING_LABEL8 = "Neutral", "Friendly", "Exalted"
+__repCalls = 0
+__watched = { name = "Thunder Bluff", factionID = 81, reaction = 4, currentReactionThreshold = 0,
+              nextReactionThreshold = 3000, currentStanding = 1250 }
+C_Reputation = { GetWatchedFactionData = function() __repCalls = __repCalls + 1; return __watched end }
+-- GetProfessions answers slot numbers (nil where the character has none); GetProfessionInfo(slot) the details.
+__profSlots = { 1, 2, 3, 4 }
+__profInfo = { { "Blacksmithing", 142, 150, 164 }, { "Mining", 150, 150, 186 }, { "Cooking", 75, 150, 185 },
+               { "First Aid", 40, 150, 129 } }
+__profCalls = 0
+function GetProfessions() __profCalls = __profCalls + 1; return __profSlots[1], __profSlots[2], __profSlots[3], __profSlots[4], __profSlots[5], __profSlots[6] end
+function GetProfessionInfo(i) local p = __profInfo[i]; return p[1], "icon", p[2], p[3], 0, 0, p[4] end
+"""
+
+OPEN_PRE = """
+__opened = {}
+function ToggleCharacter(tab) __opened[#__opened + 1] = tab end
+function ToggleCalendar() __opened[#__opened + 1] = "calendar" end
+function ToggleProfessionsBook() __opened[#__opened + 1] = "professions" end
+"""
+
+ADD_LINE = "function GameTooltip:AddLine(t, r, g, bl) self.lines[#self.lines + 1] = { left = t, color = { r, g, bl } } end"
+CLICK_TIPS = {
+    "durability": " Click opens the character window.", "bags": " Click opens your bags.", "time": " Click opens the calendar.",
+    "gold": " Click opens currencies.", "rep": " Click opens reputation.", "prof": " Click opens the profession book.",
+}
+
+
+def rep_pro(extra: str = "", **kw) -> Bar:
+    """A bar with every API, REP and PROF switched on and the open calls defined; `extra` is more Lua before the load."""
+    b = Bar(pre=FULL_PRE + REPPROF_PRE + OPEN_PRE + extra, **kw)
+    b.run('__cfg.settings["databar.seg.rep"] = true; __cfg.settings["databar.seg.prof"] = true')
+    return b
+
+
+def meter_value(b: Bar, label: str):
+    return b.rt.eval('function() local f = __segment("%s"); for _, c in ipairs(__frames) do '
+                     'if c.kind == "StatusBar" and c.parent and c.parent.parent == f then return c.value end end end' % label)()
+
+
+def value_of(b: Bar, label: str) -> str:
+    return str(b.rt.eval(f'select(2, __segment("{label}")).text'))
+
+
+def click(b: Bar, label: str, button: str = "LeftButton") -> None:
+    b.run(f'local f = __segment("{label}"); f.scripts.OnMouseUp(f, "{button}")')
+
+
+def test_rep_segment() -> None:
+    print("\n== REP: the watched faction as a meter and its short name")
+    b = rep_pro()
+    b.login()
+    check(placed(b)[-2:] == ["rep", "prof"] and len(placed(b)) == 9, "REP and PROF on (set in the save): last on the bar", str(placed(b)))
+    check(value_of(b, "REP") == "Thunder", "the value is the faction's short name, whole words that fit in ten letters",
+          value_of(b, "REP"))
+    check(abs(meter_value(b, "REP") - 1250 / 3000) < 1e-9, "the meter is progress within the standing (1250 / 3000)",
+          str(meter_value(b, "REP")))
+    for name, want in (("Stormwind", "Stormwind"), ("Honor Hold", "Honor Hold"), ("Argent Dawn", "Argent"),
+                       ("Bloodsail Buccaneers", "Bloodsail"), ("Gadgetzanwolfpack", "Gadgetzanw")):
+        b.run(f'__watched.name = "{name}"')
+        tick(b)
+        check(value_of(b, "REP") == want, f"short name of {name}", value_of(b, "REP"))
+    b.run('__watched = nil')
+    tick(b)
+    check(value_of(b, "REP") == "none" and meter_value(b, "REP") == 0, "nothing watched: the value reads none, the meter is empty")
+    b.run('__watched = { name = "Orgrimmar", factionID = 76, reaction = 8, currentReactionThreshold = 42000, '
+          'nextReactionThreshold = 42000, currentStanding = 42999 }')
+    tick(b)
+    check(meter_value(b, "REP") == 1 and value_of(b, "REP") == "Orgrimmar", "at the top standing the meter is full")
+    b.run('__watched = { name = "Orgrimmar", factionID = 76, reaction = 4, currentReactionThreshold = 0, '
+          'nextReactionThreshold = 3000, currentStanding = 99 }')      # 99 stands in for a secret number
+    tick(b)
+    check(meter_value(b, "REP") == 0 and value_of(b, "REP") == "Orgrimmar", "a secret standing shows an empty meter, no error")
+    b.run('__watched = { name = "x", factionID = 0 }')
+    tick(b)
+    check(value_of(b, "REP") == "none", "a faction id of 0 is nothing watched")
+    b.run('__watched = "junk"')
+    tick(b)
+    check(value_of(b, "REP") == "none" and b.seg("rep")["shown"] is True, "an answer that is not a table reads as nothing, nothing throws")
+
+    # off by default: not on the bar, not read
+    b = Bar(pre=FULL_PRE + REPPROF_PRE)
+    b.login()
+    tick(b)
+    check("rep" not in placed(b) and b.rt.eval("__repCalls") == 0 and b.rt.eval("__profCalls") == 0,
+          "REP and PROF are off until switched on, and are not read", str(placed(b)))
+    api(b, 'SetEnabled("rep", true)')
+    check(placed(b)[-1] == "rep" and value_of(b, "REP") == "Thunder", "switched on: read at once", str(placed(b)))
+    check(stored(b, "databar.seg.rep") is True, "stored under databar.seg.rep")
+
+
+def hover_lines(b: Bar, label: str) -> list[tuple]:
+    hover(b, label)
+    return lines(b)
+
+
+def test_rep_tooltip() -> None:
+    print("\n== REP tooltip: faction, standing, current / max")
+    b = rep_pro(ADD_LINE)
+    b.login()
+    got = hover_lines(b, "REP")
+    check(got[:3] == [("Thunder Bluff", None), ("Standing", "Neutral"), ("Progress", "1250 / 3000")],
+          "header the faction, then its standing and progress", str(got))
+    check(b.rt.eval("GameTooltip.anchor") == "ANCHOR_CURSOR" and b.rt.eval('GameTooltip.owner == (__segment("REP"))'),
+          "at the mouse, owned by the segment")
+    clears = b.rt.eval("GameTooltip.clears")
+    tick(b)
+    check(b.rt.eval("GameTooltip.clears") == clears, "a tick with nothing changed rewrites nothing")
+    b.run("__watched.currentStanding = 1500")
+    b.rt.execute('__event("UPDATE_FACTION")')
+    check(lines(b)[2] == ("Progress", "1500 / 3000"), "a reputation gain while hovering updates the line", str(lines(b)))
+    b.run('__watched = { name = "Orgrimmar", factionID = 76, reaction = 8, currentReactionThreshold = 42000, '
+          'nextReactionThreshold = 42000, currentStanding = 42999 }')
+    b.rt.execute('__event("UPDATE_FACTION")')
+    check(lines(b) == [("Orgrimmar", None), ("Standing", "Exalted"), ("Progress", "Max")], "the top standing reads Max", str(lines(b)))
+    b.run("__watched = nil")
+    b.rt.execute('__event("UPDATE_FACTION")')
+    check(lines(b) == [("Reputation", None), ("No faction is watched.", None)], "nothing watched says so", str(lines(b)))
+    b.run('local f = __segment("REP"); f.scripts.OnLeave(f)')
+    check(b.rt.eval("GameTooltip.shown") is False, "leave hides it")
+    texts = " ".join(f"{l} {r or ''}" for l, r in got).lower()
+    check(not any(w in texts for w in ("bot", "automat", "macro")), "client text stays neutral", texts)
+
+
+def test_prof_segment_and_tooltip() -> None:
+    print("\n== PROF: the two primary professions on the bar, every profession in the tooltip")
+    b = rep_pro(ADD_LINE)
+    b.login()
+    check(value_of(b, "PROF") == "BS 142  MIN 150", "the bar reads BS 142  MIN 150", value_of(b, "PROF"))
+    got = hover_lines(b, "PROF")
+    check(got == [("Professions", None), ("Blacksmithing", "142 / 150"), ("Mining", "150 / 150"), ("Cooking", "75 / 150"),
+                  ("First Aid", "40 / 150")], "the tooltip lists all of them with their max, primaries first", str(got))
+    b.run("__profInfo[1][2] = 143")
+    b.rt.execute('__event("SKILL_LINES_CHANGED")')
+    check(value_of(b, "PROF") == "BS 143  MIN 150" and lines(b)[1] == ("Blacksmithing", "143 / 150"),
+          "a skill up (SKILL_LINES_CHANGED) updates the bar and the open tooltip at once", f"{value_of(b, 'PROF')} {lines(b)}")
+    b.run('__profSlots = { 1 }')
+    tick(b)
+    check(value_of(b, "PROF") == "BS 143", "one profession reads as one", value_of(b, "PROF"))
+    b.run('__profSlots = {}')
+    tick(b)
+    check(value_of(b, "PROF") == "none", "none learned reads none", value_of(b, "PROF"))
+    check(lines(b) == [("Professions", None), ("No professions learned.", None)], "and the tooltip says so", str(lines(b)))
+    b.run('__profInfo = { { "Herbalism", 300, 300, 182 }, { "Zzzz Craft", 12, 75, 0 } }; __profSlots = { 1, 2 }')
+    tick(b)
+    check(value_of(b, "PROF") == "HERB 300  ZZZZ 12", "an unknown profession shows its first four letters", value_of(b, "PROF"))
+    b.run('GetProfessionInfo = function() return "Mining", "icon", 98, 150 end; __profSlots = { 1 }')   # no skill line
+    tick(b)
+    check(value_of(b, "PROF") == "MIN 98", "the name stands in when the skill line is missing", value_of(b, "PROF"))
+    b.run('GetProfessionInfo = function() return "Mining", "icon", 98, nil end')
+    tick(b)
+    hover(b, "PROF")
+    check(lines(b)[1] == ("Mining", "98"), "a missing max shows the skill alone", str(lines(b)))
+    b.run('GetProfessionInfo = function() return "Mining", "icon", 99, 150 end')       # 99 is the mock's secret number
+    tick(b)
+    check(value_of(b, "PROF") == "none" and b.seg("prof")["shown"] is True, "a secret skill reads as nothing, no throw",
+          value_of(b, "PROF"))
+
+
+def test_event_refresh() -> None:
+    print("\n== REP and PROF: refreshed on their events only while on the bar")
+    b = Bar(pre=FULL_PRE + REPPROF_PRE + OPEN_PRE)
+    b.login()                                    # REP and PROF are off
+    check(b.rt.eval("__repCalls") == 0 and b.rt.eval("__profCalls") == 0, "off: nothing read at login")
+    b.rt.execute('__event("UPDATE_FACTION")')
+    b.rt.execute('__event("SKILL_LINES_CHANGED")')
+    check(b.rt.eval("__repCalls") == 0 and b.rt.eval("__profCalls") == 0, "off: the events read nothing")
+    registered = b.rt.eval("function() local out = {} for _, f in ipairs(__frames) do if f.events then "
+                           "for e in pairs(f.events) do out[#out + 1] = e end end end return out end")()
+    registered = [str(v) for v in registered.values()]
+    check("UPDATE_FACTION" in registered and "SKILL_LINES_CHANGED" in registered, "both events are registered", str(registered))
+    api(b, 'SetEnabled("rep", true)')
+    n = b.rt.eval("__repCalls")
+    b.run("__watched.currentStanding = 2000")
+    b.rt.execute('__event("UPDATE_FACTION")')
+    check(b.rt.eval("__repCalls") == n + 1 and abs(meter_value(b, "REP") - 2000 / 3000) < 1e-9,
+          "on: UPDATE_FACTION reads it once and moves the meter", f"{n} -> {b.rt.eval('__repCalls')}")
+    check(b.rt.eval("__profCalls") == 0, "and does not read PROF")
+    # a client that refuses the event names: the bar still loads
+    b = Bar(pre=FULL_PRE + REPPROF_PRE + "local real = __FS.FrameHelpers; __FS.FrameHelpers = { RegisterEvent = function() return false end }")
+    b.login()
+    check(placed(b) == DEFAULT_SHOWN, "a refused event name is skipped and the bar loads as usual")
+
+
+def test_click_opens() -> None:
+    print("\n== click: DUR, TIME, GOLD, REP and PROF open their window out of combat")
+    b = rep_pro(ADD_LINE)
+    b.login()
+    for label, want in (("DUR", "PaperDollFrame"), ("TIME", "calendar"), ("GOLD", "TokenFrame"), ("REP", "ReputationFrame"),
+                        ("PROF", "professions")):
+        b.run("__opened = {}")
+        click(b, label)
+        got = [str(v) for v in b.rt.eval("__opened").values()]
+        check(got == [want], f"{label}: a left click calls {want}", str(got))
+        b.run("__opened = {}")
+        click(b, label, "RightButton")
+        check(len(b.rt.eval("__opened")) == 0, f"{label}: a right click does nothing")
+    check(b.rt.eval('(__segment("FPS")).scripts == nil'), "FPS stays click-through, no scripts")
+    rows = {r["key"]: r for r in model(b)}
+    check(all(rows[k]["tip"] == TIPS[k] + CLICK_TIPS[k] for k in ("durability", "time", "gold", "rep", "prof")),
+          "the row tips end with the click sentence", str({k: rows[k]["tip"] for k in ("durability", "time", "gold", "rep", "prof")}))
+    check(rows["bags"]["tip"] == TIPS["bags"], "BAGS has no click sentence while there is no stock backpack button")
+
+    # a toggle that throws, or is missing, is harmless
+    b.run('function ToggleCalendar() error("nope") end')
+    try:
+        click(b, "TIME")
+        ok = True
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        print(f"    raised {exc}")
+    check(ok, "a toggle that throws never throws out of the click")
+    b = rep_pro("ToggleCalendar = nil; ToggleCharacter = nil")
+    b.login()
+    for label in ("TIME", "DUR", "GOLD", "REP"):
+        click(b, label)
+    check(len(b.rt.eval("__opened")) == 0, "a client without the toggles: the click does nothing")
+    rows = {r["key"]: r for r in model(b)}
+    check(all(rows[k]["tip"] == TIPS[k] for k in ("durability", "time", "gold", "rep")),
+          "and the row tips drop the click sentence", str({k: rows[k]["tip"] for k in ("durability", "time", "gold", "rep")}))
+    b = rep_pro("ToggleProfessionsBook = nil; BOOKTYPE_PROFESSION = 7; function ToggleSpellBook(t) __opened[#__opened + 1] = 'book' .. t end")
+    b.login()
+    click(b, "PROF")
+    check([str(v) for v in b.rt.eval("__opened").values()] == ["book7"], "no professions book: the spell book's profession page")
+
+
+def test_click_in_combat() -> None:
+    print("\n== click in combat: nothing opens, the tooltip says when")
+    b = rep_pro(ADD_LINE)
+    b.login()
+    b.run("__combat = true")
+    for label in ("DUR", "TIME", "GOLD", "REP", "PROF"):
+        click(b, label)
+    check(len(b.rt.eval("__opened")) == 0, "no window is opened in combat")
+    for label, head in (("TIME", "Time"), ("DUR", "Durability"), ("GOLD", "Gold"), ("REP", "Thunder Bluff"), ("PROF", "Professions")):
+        got = hover_lines(b, label)
+        check(got[0][0] == head and got[-1] == ("Opens after combat.", None), f"{label}: the tooltip's last line says it opens after combat",
+              str(got))
+    # leaving combat while the mouse stays on it: the next tick drops the line and the click works
+    hover(b, "TIME")
+    b.run("__combat = false")
+    tick(b)
+    check(all(l[0] != "Opens after combat." for l in lines(b)), "combat over: the line goes at the next tick", str(lines(b)))
+    click(b, "TIME")
+    check([str(v) for v in b.rt.eval("__opened").values()] == ["calendar"], "and the click opens it")
+    # no AddLine on the tooltip (an old client): no throw
+    b = rep_pro()
+    b.login()
+    b.run("__combat = true")
+    try:
+        hover(b, "TIME")
+        ok = True
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        print(f"    raised {exc}")
+    check(ok, "a tooltip without AddLine takes no note and throws nothing")
+
+
+def test_bags_secure_click() -> None:
+    print("\n== BAGS: the click is a secure delegate to the stock backpack button, never an addon call")
+    stock = 'MainMenuBarBackpackButton = { Click = function() end }'
+    b = Bar(pre=stock + "\nfunction ToggleAllBags() __opened = (__opened or 0) + 1 end")
+    b.login()
+    btn = b.rt.eval('function() for _, f in ipairs(__frames) do if f.kind == "Button" then return f end end end')()
+    check(btn is not None, "a secure button is laid over the BAGS segment")
+    attrs = b.rt.eval('function() for _, f in ipairs(__frames) do if f.kind == "Button" then return f.attrs end end end')()
+    check(attrs["type"] == "click" and attrs["useOnKeyDown"] is False
+          and b.rt.eval('function() for _, f in ipairs(__frames) do if f.kind == "Button" then return f.attrs.clickbutton == MainMenuBarBackpackButton end end end')(),
+          "type click, clickbutton the stock backpack button, up clicks", str(dict(attrs)))
+    check(b.rt.eval('function() for _, f in ipairs(__frames) do if f.kind == "Button" then return f.parent == (__segment("BAGS")) end end end')(),
+          "it is a child of the BAGS segment")
+    check(b.rt.eval('(__segment("BAGS")).scripts == nil') and b.rt.eval("__opened") is None,
+          "the segment itself keeps no script and no addon call opens a bag")
+    check({r["key"]: r for r in model(b)}["bags"]["tip"] == TIPS["bags"] + CLICK_TIPS["bags"], "the row tip carries the click sentence")
+
+    # no stock button: no overlay, no sentence
+    b = Bar()
+    b.login()
+    check(b.rt.eval('function() for _, f in ipairs(__frames) do if f.kind == "Button" then return true end end return false end')() is False,
+          "without the stock button there is no overlay")
+
+    # login in combat: SetAttribute is protected, so the overlay is bound once combat ends
+    b = Bar(pre=stock + "\n__combat = true")
+    b.login()
+    bound = b.rt.eval('function() for _, f in ipairs(__frames) do if f.kind == "Button" and f.attrs then return true end end return false end')()
+    check(bound is False, "in combat nothing is bound")
+    b.run("__combat = false")
+    b.rt.execute('__event("PLAYER_REGEN_ENABLED")')
+    check(b.rt.eval('function() for _, f in ipairs(__frames) do if f.kind == "Button" and f.attrs and f.attrs.type == "click" then return true end end return false end')(),
+          "PLAYER_REGEN_ENABLED binds it")
+    b.run("local n = 0; for _, f in ipairs(__frames) do if f.kind == 'Button' then n = n + 1 end end; __buttons = n")
+    b.rt.execute('__event("PLAYER_ENTERING_WORLD")')
+    b.run("local n = 0; for _, f in ipairs(__frames) do if f.kind == 'Button' then n = n + 1 end end; __buttons2 = n")
+    check(b.rt.eval("__buttons") == 1 and b.rt.eval("__buttons2") == 1, "binding again makes no second overlay")
+
+
 def main() -> int:
     test_equal_without_bridge()
     test_link_between_bags_and_time()
@@ -1249,6 +1565,13 @@ def main() -> int:
     test_settings_combat()
     test_settings_failed_segment()
     test_settings_gold_record_off_bar()
+    test_rep_segment()
+    test_rep_tooltip()
+    test_prof_segment_and_tooltip()
+    test_event_refresh()
+    test_click_opens()
+    test_click_in_combat()
+    test_bags_secure_click()
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")
     for f in FAILURES:
         print(f"  - {f}")
