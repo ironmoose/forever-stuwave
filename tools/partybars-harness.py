@@ -303,6 +303,28 @@ def _check_pet_placeholder_dashes_follow_the_height():
     P._assert_quiet(rt)
 
 
+def _check_tray_follows_the_row_height_after_combat():
+    rt = _party()
+    row = P._party1(rt)
+    icon = row.alertIcons[1]
+    before = icon.points.TOPRIGHT.y
+    rt.execute("__combat=true")
+    _set(rt, hpH=15)
+    assert close(icon.points.TOPRIGHT.y, before), "the tray moved before the secure row did"
+    _leave_combat(rt)
+    h = ROW + 6
+    assert close(icon.points.TOPRIGHT.y, _row_y(2, h) - (h - icon.h) / 2), icon.points.TOPRIGHT.y
+    P._assert_quiet(rt)
+
+
+def _check_hand_edited_heights_are_held_to_the_range():
+    rt = _party()
+    row = P._party1(rt)
+    rt.execute("FS.Config.Set('bars.party.hpH', 999) FS.Config.Set('bars.party.mpH', -5)")
+    assert row.health.shell.h == 60 and not row.power.shell.shown and close(row.h, ROW + 51 - 13), (row.health.shell.h, row.h)
+    P._assert_quiet(rt)
+
+
 def _check_width_and_height_together():
     rt = _party()
     row = P._party1(rt)
@@ -401,6 +423,33 @@ def _check_power_text_formats():
     rt.execute("__state='live'")
     _update(rt)
     assert text.shown
+    P._assert_quiet(rt)
+
+
+def _check_a_down_row_shows_its_label_at_full_strength():
+    rt = _party("""__secMissing=__sec(880) __fraction=1 __rolePick='missing'""")
+    row = P._party1(rt)
+    text = row.health.text
+    _update(rt)
+    assert text.alpha == 0, "full health: the gate hides the missing amount"
+    rt.execute("__state='dead'")
+    _update(rt)
+    assert text.text == "Dead" and text.alpha == 1 and text.shown, (text.text, text.alpha)
+    rt.execute("__state='live'")
+    _update(rt)
+    assert text.alpha == 0, "back alive at full health: hidden again"
+    P._assert_quiet(rt)
+
+
+def _check_without_a_role_api_or_percent_read():
+    rt = _party("""__fraction=.78""")
+    rt.execute("FS.Role=nil")
+    _update(rt)
+    assert P._party1(rt).health.text.text == "78%"
+    # a power percent with no UnitPowerPercent: the number shows
+    rt = _party("""__secPower=__sec(1100) __secPowerMax=__sec(2000) UnitPowerPercent=nil""")
+    _set(rt, mpFmt="percent")
+    assert P._party1(rt).power.text.text == "1.1K / 2.0K", P._party1(rt).power.text.text
     P._assert_quiet(rt)
 
 
@@ -545,7 +594,7 @@ def _check_no_new_file_scope_local():
     for name in ("PartyFrames.lua", "ConfigPageBars.lua", "ConfigPageRoles.lua"):
         path = next(ADDON.rglob(name))
         text = path.read_text(encoding="utf-8")
-        assert "—" not in text and "–" not in text, f"{name} has an em or en dash"
+        assert chr(0x2014) not in text and chr(0x2013) not in text, f"{name} has an em or en dash"
 
 
 def main() -> int:
@@ -558,12 +607,16 @@ def main() -> int:
         ("heights: the drawing at once, the secure row after combat", _check_heights_in_combat),
         ("the box dashes follow the height", _check_box_dashes_follow_the_height),
         ("the pet placeholder dashes follow the height", _check_pet_placeholder_dashes_follow_the_height),
+        ("the tray follows the row height after combat", _check_tray_follows_the_row_height_after_combat),
+        ("hand edited heights are held to the range", _check_hand_edited_heights_are_held_to_the_range),
         ("width and height together", _check_width_and_height_together),
         ("text size, position and offset", _check_text_size_position_offset),
         ("health text formats with secret stubs", _check_health_text_formats_with_secret_stubs),
         ("number text without the engine abbreviation", _check_number_text_without_the_engine_abbreviation),
         ("power text formats", _check_power_text_formats),
         ("the dead label shows whatever the format", _check_dead_state_shows_its_label_whatever_the_format),
+        ("a down row shows its label at full strength", _check_a_down_row_shows_its_label_at_full_strength),
+        ("no role API and no percent read", _check_without_a_role_api_or_percent_read),
         ("Missing goes to the engine untouched", _check_missing_text_goes_to_the_engine_untouched),
         ("Missing falls back to the percent", _check_missing_text_fallbacks),
         ("the Roles page picks the healer's text", _check_roles_page_picks_the_healer_text),
