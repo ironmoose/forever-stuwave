@@ -43,7 +43,7 @@ LOAD_ORDER = (
     "GunsightPriest.lua", "GunsightPriestClick.lua", "MageState.lua", "GunsightMage.lua", "GunsightMageClick.lua", "HunterState.lua",
     "GunsightHunter.lua", "RogueArt.lua", "RogueState.lua", "GunsightRogue.lua", "DruidArt.lua", "DruidState.lua", "GunsightDruid.lua",
     "DruidBearArt.lua", "GunsightDruidBear.lua", "DruidCatArt.lua", "GunsightDruidCat.lua", "DruidFlowerArt.lua", "GunsightDruidFlower.lua",
-    "DruidClearcastingArt.lua", "DruidClearcasting.lua", "GunsightWarlock.lua", "NameplateCombo.lua", "PlateThreat.lua",
+    "DruidClearcastingArt.lua", "DruidClearcasting.lua", "PlaceholderAlertArt.lua", "PlaceholderAlert.lua", "GunsightWarlock.lua", "NameplateCombo.lua", "PlateThreat.lua",
     "Questie.lua", "FSCheck.lua", "BugReport.lua", "CharacterExport.lua", "Hitch.lua", "HelpModules.lua", "HelpPicturesArt.lua",
     "ConfigSpec.lua", "ConfigWindow.lua", "ConfigBuilders.lua", "ConfigPageBars.lua", "ConfigPageUnitFrames.lua", "ConfigPageParty.lua", "ConfigPageRaid.lua",
     "ConfigPagePet.lua", "ConfigPagePlates.lua", "ConfigPageScreen.lua", "ConfigPageAddonTabs.lua", "ConfigPageClassModules.lua",
@@ -105,7 +105,7 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 211
+    assert len(set(modules)) == 213
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))

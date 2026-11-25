@@ -694,14 +694,14 @@ function F.AddTest(sec, id)
     return b
 end
 
--- Which alert the shared scale row stands for: the player's own class's, or the STAY RAD sample rung for a class with no
+-- Which alert the shared scale row stands for: the player's own class's, or the STAY RAD sample alert for a class with no
 -- pop up alert yet (a Priest is never shown a Warrior's Overpower as if it were theirs).
 local function ScaleOwner()
     local DC = FS.DruidClearcasting
     if DC and DC.Applies and DC.Applies() then return "druid" end
     local PU = FS.WarriorPowerUps
     if PU and PU.Applies and PU.Applies() then return "warrior" end
-    return "procs.placeholder"
+    return "placeholder"
 end
 
 F.ScaleOwner = ScaleOwner
@@ -727,6 +727,13 @@ F.RegisterAlert({
     match = function(entry)
         return Starts(entry.key, "gunsight.druid.clearcasting") or (entry.key == ScaleKey() and ScaleOwner() == "druid")
     end,
+})
+-- A class with no pop up alert of its own tests the STAY RAD sample alert (PlaceholderAlert.lua): the same 8-bit pop up
+-- as Overpower, shown only as a preview.
+F.RegisterAlert({
+    id = "placeholder", label = "STAY RAD sample alert",
+    api = function() return FS.PlaceholderAlert and FS.PlaceholderAlert.Preview end,
+    match = function(entry) return entry.key == ScaleKey() and ScaleOwner() == "placeholder" end,
 })
 
 -- The Gunsight proc rungs of a class (HudProfiles procs with a side): Warlock (Nightfall's Shadow Trance and Decimation) and Paladin (Holy Strike and Judgement), and for every other class a sample rung ("STAY RAD"). Shown at the real posts whatever your class,
@@ -754,8 +761,7 @@ for _, class in ipairs({ "WARLOCK", "PALADIN", "PLACEHOLDER" }) do
         id = "procs." .. class:lower(), label = class:sub(1, 1) .. class:sub(2):lower() .. " procs",
         api = RungApi(class),
         match = function(entry)
-            return (entry.key == "gunsight.pieces.prc" and OwnRungClass() == class)
-                or (class == "PLACEHOLDER" and entry.key == ScaleKey() and ScaleOwner() == "procs.placeholder")
+            return entry.key == "gunsight.pieces.prc" and OwnRungClass() == class
         end,
     })
 end

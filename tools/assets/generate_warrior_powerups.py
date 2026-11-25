@@ -503,6 +503,7 @@ FONT = {
     "S": ["..XXX", ".X...", "X....", ".XXX.", "....X", "...X.", "XXX.."],
     "H": ["X...X", "X...X", "X...X", "XXXXX", "X...X", "X...X", "X...X"],
     "A": [".XXX.", "X...X", "X...X", "XXXXX", "X...X", "X...X", "X...X"],
+    "D": ["XXXX.", "X...X", "X...X", "X...X", "X...X", "X...X", "XXXX."],      # for generate_placeholder_alert.py; no Warrior title has a D
 }
 SC, GAP = 2, 2
 

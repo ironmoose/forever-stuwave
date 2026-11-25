@@ -217,6 +217,10 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # 1 texel per sprite px); it also writes DruidClearcastingArt.lua. It imports the Warrior generator's bake machinery
     # (FS_ASSETS_DIR) and loads its head frames from druid_cc_art/ (FS_DRUID_CC_ART_DIR), both set by _run_generator.
     "druid_clearcasting": {"druid_clearcasting_1": (2048, 1024)},
+    # generate_placeholder_alert.py: the STAY RAD sample alert's one atlas (the Overpower alert's bake with a synthwave sun and the new
+    # title, 1 texel per sprite px); it also writes PlaceholderAlertArt.lua. It imports the Warrior generator's bake machinery
+    # (FS_ASSETS_DIR, set by _run_generator) and draws its emblem in code, so it loads no art folder.
+    "placeholder_alert": {"placeholder_alert_1": (2048, 128)},
     # generate_druid_bear.py: the Druid Bear look's one atlas (the cloud loop, bolts, halo, sound arcs, shock rings, the bear head frames
     # and the Thorns segments, 1 texel per sprite px); it also writes DruidBearArt.lua. It imports the Warrior generator's bake
     # machinery and loads its head frames from druid_bear_art/, both found through FS_ASSETS_DIR (set by _run_generator).

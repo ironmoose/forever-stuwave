@@ -1280,12 +1280,12 @@ function T.a_class_with_no_pop_up_alert_previews_the_sample_rung_not_the_warrior
     local p = alertStub(W)
     __alertClass = "PRIEST"
     local row = { fsTrack = { fsDragging = false }, fsEdit = { HasFocus = function() return false end } }
-    eq(W.Flash.ScaleOwner(), "procs.placeholder", "a priest with no pop up alert tests the STAY RAD sample")
+    eq(W.Flash.ScaleOwner(), "placeholder", "a priest with no pop up alert tests the STAY RAD sample")
     local shown = {}
-    FS.GunsightFrame = { Preview = { Show = function(class) shown[#shown + 1] = class; return true end, Hide = function() end } }
+    FS.PlaceholderAlert = { Preview = { Show = function() shown[#shown + 1] = "STAYRAD"; return true end, Hide = function() end } }
     W.SetHover({ key = "gunsight.alertScale", row = row })
     no(p.shown, "the scale row shows no Overpower on a priest")
-    eq(shown[#shown], "PLACEHOLDER", "the scale row shows the sample rung instead")
+    eq(shown[#shown], "STAYRAD", "the scale row shows the STAY RAD pop up instead")
     W.SetHover(nil)
     __alertClass = "WARRIOR"
 end

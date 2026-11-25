@@ -179,6 +179,8 @@ Modules/CombatHud/DruidFlowerArt.lua
 Modules/CombatHud/GunsightDruidFlower.lua
 Modules/CombatHud/DruidClearcastingArt.lua
 Modules/CombatHud/DruidClearcasting.lua
+Modules/CombatHud/PlaceholderAlertArt.lua
+Modules/CombatHud/PlaceholderAlert.lua
 Modules/CombatHud/GunsightWarlock.lua
 Modules/Nameplates/NameplateCombo.lua
 Modules/Nameplates/PlateThreat.lua
