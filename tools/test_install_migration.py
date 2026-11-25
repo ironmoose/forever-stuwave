@@ -31,7 +31,7 @@ LOAD_ORDER = (
     "PaladinArt.lua", "GunsightSeals.lua", "WarlockArt.lua", "WarlockState.lua", "GunsightFrame.lua", "GunsightBoxes.lua", "GunsightTape.lua",
     "GunsightTags.lua", "GunsightMyBuffs.lua",
     "ConsoleKeys.lua", "ClassShoulder.lua", "SealBar.lua", "TotemPiece.lua", "TotemBar.lua", "TotemPresets.lua", "TotemDial.lua", "ShamanBuffs.lua", "BuffTab.lua", "FiveSecondTab.lua", "ThunderClapTab.lua", "AmmoTab.lua", "CombatHud.lua", "GunsightClass.lua", "GunsightShamanShocks.lua", "GunsightShaman.lua", "GunsightShamanDrop.lua", "WarriorShouts.lua", "WarriorWindows.lua", "WarriorPowerUpArt.lua", "WarriorPowerUps.lua", "GunsightWarrior.lua", "GunsightWarriorClick.lua", "PriestShields.lua", "PriestRight.lua", "GunsightPriest.lua", "GunsightPriestClick.lua", "MageState.lua", "GunsightMage.lua", "GunsightMageClick.lua", "HunterState.lua", "GunsightHunter.lua", "RogueArt.lua", "RogueState.lua", "GunsightRogue.lua", "DruidArt.lua", "DruidState.lua", "GunsightDruid.lua", "DruidBearArt.lua", "GunsightDruidBear.lua", "DruidCatArt.lua", "GunsightDruidCat.lua", "DruidFlowerArt.lua", "GunsightDruidFlower.lua", "DruidClearcastingArt.lua", "DruidClearcasting.lua", "GunsightWarlock.lua", "NameplateCombo.lua", "Questie.lua", "FSCheck.lua",
-    "BugReport.lua", "CharacterExport.lua", "HelpModules.lua", "HelpPicturesArt.lua", "ConfigWindow.lua", "MenuButton.lua", "LayoutEdit.lua",
+    "BugReport.lua", "CharacterExport.lua", "Hitch.lua", "HelpModules.lua", "HelpPicturesArt.lua", "ConfigWindow.lua", "MenuButton.lua", "LayoutEdit.lua",
 )
 
 
@@ -86,7 +86,7 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 171
+    assert len(set(modules)) == 172
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))

@@ -172,6 +172,7 @@ Modules/Compat/Questie.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua
 Modules/Diagnostics/CharacterExport.lua
+Modules/Diagnostics/Hitch.lua
 Modules/Config/HelpModules.lua
 Modules/Config/HelpPicturesArt.lua
 Modules/Config/ConfigWindow.lua
