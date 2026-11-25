@@ -303,6 +303,12 @@ function Config.Get(key)
     return Effective(ActiveTable().settings, key)
 end
 
+-- The default a module registered for `key`, or nil when none was. A table default is the shared one: read it, never write it.
+function Config.GetDefault(key)
+    if type(key) ~= "string" then return nil end
+    return defaults[key]
+end
+
 -- True when the active profile holds its own value for `key` (a value equal to the default is stored as nothing).
 function Config.IsStored(key)
     if type(key) ~= "string" then return false end
@@ -378,6 +384,33 @@ function Config.NewProfile(name, copyFrom)
         if not source then return false, "the profile to copy does not exist" end
     end
     db.profiles[clean] = source and DeepCopy(source) or NewProfileTable()
+    return true, clean
+end
+
+-- Makes a new profile from `data` ({ settings = {}, layout = { frames = {} } }), which the caller has already validated
+-- (ProfileCodec). It only adds: a taken name is refused, the active profile is not switched and no callback fires. What is
+-- kept is copied (text, number and boolean values, lists of them), and a value equal to its default is stored as nothing.
+function Config.ImportProfile(name, data)
+    if not Writable() then return false, "settings are read-only" end
+    local clean, err = CleanName(name)
+    if not clean then return false, err end
+    if type(data) ~= "table" then return false, "there is nothing to import" end
+    if NameTaken(clean) then return false, "a profile with that name exists" end
+    local profile = NewProfileTable()
+    if type(data.settings) == "table" then
+        for key, value in pairs(data.settings) do
+            local kind = type(value)
+            if type(key) == "string" and key ~= "" and (kind == "boolean" or kind == "number" or kind == "string" or kind == "table")
+                and value ~= defaults[key] then
+                profile.settings[key] = DeepCopy(value)
+            end
+        end
+    end
+    local layout = data.layout
+    if type(layout) == "table" and type(layout.frames) == "table" then
+        profile.layout.frames = DeepCopy(layout.frames)
+    end
+    db.profiles[clean] = profile
     return true, clean
 end
 

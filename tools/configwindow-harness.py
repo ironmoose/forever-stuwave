@@ -1210,7 +1210,7 @@ function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_clas
         ["Animate the tab"] = "Tip five.", ["Cast flash"] = "Tip six.", ["Regen sweep"] = "Tip seven." }) do
         local r, found = row(label), nil
         for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
-        eq((found:gsub("\nChanged from the default%.$", "")), tip, label .. ": explained by a ? tip")
+        eq((found:gsub("\nChanged[^\n]*$", "")), tip, label .. ": explained by a ? tip")
         eq(plainCount(r), 3, label .. ": label, state and the ? icon only, no helper line")
     end
 end
@@ -1368,7 +1368,7 @@ function T.the_unit_frames_page_has_the_buff_tab_combat_state_switch_for_a_shama
     eq(FS.Config.Get("buffs.combatstate"), false)
     local r, found = row("Buff tab combat state"), nil
     for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
-    eq((found:gsub("\nChanged from the default%.$", "")), "Tip four.", "explained by a ? tip")
+    eq((found:gsub("\nChanged[^\n]*$", "")), "Tip four.", "explained by a ? tip")
     eq(plainCount(r), 3, "label, state and the ? icon only, no helper line")
     W = boot({ preWindow = withBuffTab(true) })
     W.UIState("tabsCls", "MAGE")
@@ -1408,7 +1408,7 @@ function T.the_icon_style_rows_have_a_tip_each_and_write_their_own_key()
     for label, tip in pairs({ ["Micro menu icons"] = "Micro tip.", ["Spell icons"] = "Spell tip." }) do
         local r, found = row(label), nil
         for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
-        eq((found:gsub("\nChanged from the default%.$", "")), tip, label .. ": explained by a ? tip")
+        eq((found:gsub("\nChanged[^\n]*$", "")), tip, label .. ": explained by a ? tip")
         yes(row(label).control, label .. ": a control")
         click("Stock", r)
     end
