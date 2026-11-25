@@ -10,9 +10,10 @@ The Chat, Minimap and Quest tracker pages of /fsconfig carry the rows of the pro
     slider moves the map live and survives the Edit Mode reseat, and scale grows the map, the key row, the tray and the
     text together (one Minimap:SetScale), keeping the map's centre where the layout put it;
   * the Quest tracker opacity (tracker.alpha), background opacity (tracker.bgAlpha) and scale (tracker.scale);
-  * every row of the three prototype pages is registered under the prototype's key (a row that cannot be built says why).
+  * every row of the three prototype pages is registered under the prototype's key, label, range, format and parent
+    switch (parsed from proto-pages.js, FS_MOCKUPS_DIR names its folder); a row that cannot be applied says why.
 
-    python3 tools/panelsettings-harness.py
+    python3 tools/panelsettings-harness.py          (--keys lists the prototype row keys of the three pages)
 
 Exit 0 = every check passed.
 """
@@ -20,6 +21,7 @@ Exit 0 = every check passed.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -563,6 +565,261 @@ def tracker_cases() -> list[tuple[str, "callable"]]:
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# The three pages against the prototype's rows
+# ---------------------------------------------------------------------------------------------------------------------
+
+PROTO = Path(os.environ.get("FS_MOCKUPS_DIR", ADDON.parent / "mockups")) / "proto-src-2026-11-25/proto-pages.js"
+
+# Rows whose words differ from the prototype's on purpose, and why.
+TIP_DEVIATIONS = {
+    "tracker.w": "locked: the page gives the reason in place of the layout editor tip",
+    "tracker.h": "locked: the page gives the reason in place of the scroll tip",
+    "chat.band.raid": "the prototype's tip is the one word 'New.'",
+}
+
+
+def js_value(text: str, i: int):
+    """One JS literal at text[i:]: a quoted string, a number, a bool or a flat array. Returns (value, next index)."""
+    if text[i] == "'":
+        out, i = [], i + 1
+        while text[i] != "'":
+            if text[i] == "\\":
+                i += 1
+            out.append(text[i])
+            i += 1
+        return "".join(out), i + 1
+    if text[i] == "[":
+        items, i = [], i + 1
+        while text[i] != "]":
+            if text[i] == ",":
+                i += 1
+                continue
+            value, i = js_value(text, i)
+            items.append(value)
+        return items, i + 1
+    j = i
+    while j < len(text) and text[j] not in ",}]":
+        j += 1
+    word = text[i:j].strip()
+    if word in ("true", "false"):
+        return word == "true", j
+    try:
+        return (int(word) if word.lstrip("-").isdigit() else float(word)), j
+    except ValueError:
+        return word, j
+
+
+def proto_rows(page: str) -> list[dict]:
+    """The rows of one prototype page ({key:'<page>', ...} up to the next page), in order, as dicts."""
+    text = PROTO.read_text(encoding="utf-8")
+    start = text.index(f" {{key:'{page}',label:")
+    end = text.index("\n {key:", start + 5)
+    block = text[start:end]
+    rows = []
+    for m in re.finditer(r"\{ty:'(\w+)'", block):
+        i, row = m.start() + 1, {}
+        while block[i] != "}":
+            if block[i] in ", ":
+                i += 1
+                continue
+            j = block.index(":", i)
+            name = block[i:j]
+            value, i = js_value(block, j + 1)
+            row[name] = value
+        rows.append(row)
+    return rows
+
+
+def dump(obj):
+    """A Lua table as plain Python (a function becomes the string '<function>')."""
+    if hasattr(obj, "items"):
+        items = dict(obj.items())
+        if items and all(isinstance(k, int) for k in items):
+            return [dump(items[k]) for k in sorted(items)]
+        return {k: dump(v) for k, v in items.items()}
+    return "<function>" if callable(obj) else obj
+
+
+PAGE_RECORDER = r"""
+-- A recorder in place of the window: every builder call is kept as a row, in order.
+__rows, __sections, __cat = {}, {}, nil
+local function add(kind, o)
+    __rows[#__rows + 1] = { kind = kind, o = o }
+    return {}
+end
+local UI = {
+    Section = function(_, o) __sections[#__sections + 1] = o end,
+    Toggle = function(_, o) return add("switch", o) end,
+    Segmented = function(_, o) return add("segmented", o) end,
+    Slider = function(_, o) return add("slider", o) end,
+}
+FS.ConfigWindow = { UI = UI, RegisterCategory = function(c) __cat = c end }
+"""
+
+
+def page_rows(fixtures: dict, page_file: str) -> list[dict]:
+    """Loads one real page file on a recorder and the given module fixtures; returns what its build asked for."""
+    lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
+    lua.execute("FS = {}")
+    for name, value in fixtures.items():
+        lua.globals().__fixture = lua.table_from(to_lua_deep(lua, value)) if isinstance(value, (dict, list)) else value
+        lua.execute(f"FS[{name!r}] = __fixture")
+    lua.execute(PAGE_RECORDER)
+    src = (ADDON / "Modules/Config" / page_file).read_text(encoding="utf-8")
+    lua.execute("function __load(src) return assert(loadstring(src, '=page'))('forever-stuwave', FS) end")
+    lua.eval("__load")(src)
+    lua.execute("__cat.tabs[1].build({})")
+    out = []
+    for row in dump(lua.eval("__rows")):
+        o = dict(row["o"])
+        o["kind"] = row["kind"]
+        out.append(o)
+    return out
+
+
+def to_lua_deep(lua, value):
+    if isinstance(value, dict):
+        return lua.table_from({k: (lua.table_from(to_lua_deep(lua, v)) if isinstance(v, (dict, list)) else v) for k, v in value.items()})
+    if isinstance(value, list):
+        return lua.table_from([(lua.table_from(to_lua_deep(lua, v)) if isinstance(v, (dict, list)) else v) for v in value])
+    return value
+
+
+def lua_data(lua, expr: str):
+    return dump(lua.eval(expr))
+
+
+def module_fixtures(mh) -> tuple[dict, dict]:
+    """The real modules' specs and registered defaults, read from their own worlds: (fixtures by FS name, defaults by key)."""
+    fixtures: dict = {}
+    defaults: dict = {}
+
+    # Chat: the size from ChatWindowState (the chat reseat world), the fill from ChatFrameSkin, the tint from ChatFormat.
+    rs = load_module("chatreseat-harness.py", "chatreseat_harness")
+    lua = rs.boot()
+    chat = {"SIZE": lua_data(lua, "FS.Chat.SIZE")}
+    defaults.update({"chat.w": chat["SIZE"]["w"]["default"], "chat.h": chat["SIZE"]["h"]["default"]})
+    skin = chat_boot()
+    chat["BG"] = lua_data(skin, "FS.Chat.BG")
+    defaults["chat.bgAlpha"] = skin.eval("FS.Config.Get('chat.bgAlpha')")
+    fixtures["Chat"] = chat
+    cf = load_module("chatformat-harness.py", "chatformat_harness")
+    rt = LuaRuntime(unpack_returned_tuples=False)
+    rt.globals().SRC, rt.globals().CORE = cf.SRC, cf.CORE
+    rt.execute(cf.MOCK)
+    fixtures["ChatFormat"] = {
+        "BAND_SPEC": dump(rt.eval("FS.ChatFormat.BAND_SPEC")),
+        "BAND_SETTING": dump(rt.eval("FS.ChatFormat.BAND_SETTING")),
+    }
+    defaults.update(dump(rt.eval("__config")))
+    # Minimap and the coords switch.
+    lua, g = mm_seated(mh)
+    fixtures["MinimapSettings"] = lua_data(lua, "FS.MinimapSettings")
+    fixtures["MinimapCoords"] = lua_data(lua, "FS.MinimapCoords")
+    for key in ("minimap.w", "minimap.h", "minimap.scale", "minimap.coords"):
+        defaults[key] = lua.eval(f"FS.Config.Get({key!r})")
+    return fixtures, defaults
+
+
+def tracker_fixture() -> tuple[dict, dict]:
+    tsk = load_module("trackerskin-harness.py", "trackerskin_harness")
+    from charskin_support import Harness
+
+    h = Harness({"Tracker": "Modules/Tracker/Tracker.lua"}, tsk.BLIZZARD + TRACKER_EXTRA)
+    h.sources["PanelConfig"] = "local _, FS = ...\n" + CONFIG_STUB
+    h.extra_names.insert(0, "PanelConfig")
+    rt = h.runtime()
+    rt.execute(h.load_line() + "\nfunction __out() return FS.Tracker.SIZE, FS.Tracker.SIZE_LOCKED end")
+    size, locked = rt.eval("__out()")
+    size = dump(size)
+    return {"Tracker": {"SIZE": size, "SIZE_LOCKED": locked}}, {v["key"]: v["default"] for v in size.values()}
+
+
+UNITS = {"px": "%d px", "%": "%d%%"}
+KINDS = {"sl": "slider", "sw": "switch", "seg": "segmented"}
+
+
+def page_cases(mh) -> list[tuple[str, "callable"]]:
+    out = []
+    fixtures, defaults = module_fixtures(mh)
+    tracker, tracker_defaults = tracker_fixture()
+    defaults.update(tracker_defaults)
+    timer = {"QuestTimer": {"SETTING": {"label": "Quest timer under the minimap", "key": "questTimer.shown",
+                                       "tip": "Shows quest timers in a strip under the minimap, in place of the game's own timer window."}}}
+
+    def check_page(page: str, file: str, extra: dict) -> None:
+        wanted = [r for r in proto_rows(page) if r["ty"] in KINDS]
+        got = page_rows({**fixtures, **tracker, **timer, **extra}, file)
+        by_key = {r.get("key"): r for r in got}
+        need(len(by_key) == len(got), "a key is registered twice")
+        need(set(by_key) == {r["k"] for r in wanted},
+             f"keys differ: missing {sorted({r['k'] for r in wanted} - set(by_key))}, extra {sorted(set(by_key) - {r['k'] for r in wanted})}")
+        for row in wanted:
+            key, mine = row["k"], by_key[row["k"]]
+            where = f"{key}"
+            need(mine["kind"] == KINDS[row["ty"]], f"{where}: a {mine['kind']} for a {row['ty']}")
+            need(mine["label"] == row["l"], f"{where}: label {mine['label']!r} want {row['l']!r}")
+            if row["ty"] == "sl":
+                need((mine["min"], mine["max"], mine["step"]) == (row["min"], row["max"], row["st"]),
+                     f"{where}: range {mine['min']}-{mine['max']} by {mine['step']}")
+                need(mine.get("fmt") == UNITS[row["u"]], f"{where}: format {mine.get('fmt')!r}")
+            if row["ty"] == "seg":
+                need([o["value"] for o in mine["options"]] == row["o"], f"{where}: options")
+            if key in defaults:
+                want = row["d"]
+                if row["ty"] == "seg" or isinstance(want, bool) or not isinstance(want, str):
+                    need(defaults[key] == want, f"{where}: default {defaults[key]!r}, prototype {want!r}")
+            need(bool(mine.get("sub")) == bool(row.get("sub")), f"{where}: sub")
+            need(mine.get("needs") == row.get("needs"), f"{where}: needs {mine.get('needs')!r}")
+            if row.get("needs"):
+                need(mine.get("nl") == row.get("nl"), f"{where}: nl {mine.get('nl')!r} want {row.get('nl')!r}")
+            if key not in TIP_DEVIATIONS and row.get("tip") is not None:
+                need(mine.get("tip") == row["tip"], f"{where}: tip {mine.get('tip')!r}")
+
+    def make(page, file, extra=None):
+        def run():
+            check_page(page, file, extra or {})
+        return run
+
+    out.append(("page_chat_registers_every_prototype_row", make("chat", "ConfigPageChat.lua")))
+    out.append(("page_minimap_registers_every_prototype_row", make("mini", "ConfigPageMinimap.lua")))
+    out.append(("page_tracker_registers_every_prototype_row", make("track", "ConfigPageTracker.lua")))
+
+    def locked_rows():
+        rows = {r["key"]: r for r in page_rows({**tracker, **timer}, "ConfigPageTracker.lua")}
+        for key in ("tracker.w", "tracker.h"):
+            need(rows[key].get("reason") and rows[key].get("enabled") is not None, f"{key} is not locked with a reason")
+            need(rows[key]["reason"] == tracker["Tracker"]["SIZE_LOCKED"], f"{key} reason")
+
+    out.append(("page_tracker_width_and_height_say_why_they_are_locked", locked_rows))
+
+    def tint_rows():
+        rows = {r["key"]: r for r in page_rows(fixtures, "ConfigPageChat.lua")}
+        for kind in ("guild", "party", "whisper", "raid"):
+            on, colour = rows[f"chat.band.{kind}"], rows[f"chat.band.{kind}C"]
+            need(on.get("needs") == "chat.lineBands", f"{kind}: the switch needs the master")
+            need(colour.get("needs") == f"chat.band.{kind}", f"{kind}: the colour needs its own switch")
+        need(rows["chat.bandAlpha"].get("needs") == "chat.lineBands", "strength needs the master")
+        need(defaults["chat.band.raid"] is False, "the raid kind is off by default")
+
+    out.append(("page_chat_tint_rows_chain_the_master_the_kind_and_the_colour", tint_rows))
+
+    def height_row():
+        spec = dict(fixtures["MinimapSettings"], heightFollowsWidth=True)
+        rows = {r["key"]: r for r in page_rows({**fixtures, "MinimapSettings": spec}, "ConfigPageMinimap.lua")}
+        need(rows["minimap.h"]["enabled"] is not None and rows["minimap.h"].get("reason"), "locked with a reason")
+
+    out.append(("page_minimap_height_row_locks_when_the_map_can_only_draw_square", height_row))
+
+    def missing_modules():
+        for file in ("ConfigPageChat.lua", "ConfigPageMinimap.lua", "ConfigPageTracker.lua"):
+            need(page_rows({}, file) == [], f"{file}: rows without their module")
+
+    out.append(("pages_leave_a_row_out_when_its_module_is_absent", missing_modules))
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -572,10 +829,15 @@ def run_lua_group(boot) -> list[tuple[str, "callable"]]:
 
 
 def main() -> int:
+    if "--keys" in sys.argv:
+        for page in ("chat", "mini", "track"):
+            print(page, " ".join(r["k"] for r in proto_rows(page) if r["ty"] in KINDS))
+        return 0
     cases = run_lua_group(chat_boot)
     mh = load_minimap_harness()
     cases += minimap_cases(mh)
     cases += tracker_cases()
+    cases += page_cases(mh)
     failed = 0
     for name, fn in cases:
         try:
