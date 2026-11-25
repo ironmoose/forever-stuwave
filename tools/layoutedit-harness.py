@@ -2409,7 +2409,7 @@ function T.the_position_tip_says_what_the_numbers_count_from()
     local function has(text, part, what) eq(text:find(part, 1, true) ~= nil, true, what .. ": '" .. part .. "' in " .. text) end
     local tip = tipOf("stance")
     has(tip, "centre of the screen to the centre of the piece", "stance")
-    has(tip, "X grows to the right", "stance"); has(tip, "Y grows up", "stance"); has(tip, "layout pixel", "stance")
+    has(tip, "X grows to the right", "stance"); has(tip, "Y grows up", "stance"); has(tip, "2560 x 1440 design", "stance")
     tip = tipOf("player")
     has(tip, "top left corner of the screen to the top left corner of the piece", "player")
     has(tip, "UI unit", "player")

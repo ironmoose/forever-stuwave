@@ -1025,9 +1025,9 @@ local function PositionTip(id)
     local unscaled = Provider(id) ~= nil or FS.Layout.IsUnscaled(id)
     return ("Counts from the %s of the screen to the %s of the piece. X grows to the right and Y grows up. "
         .. "px is %s; grid is px over the grid step (now %d). Enter moves the piece, Esc puts the number back, Tab goes to the other box. "
-        .. "A piece cannot leave the screen. Positions round to half a pixel."):format(
+        .. "A piece cannot leave the screen. A position rounds to the nearest half."):format(
         PointWords(relPoint), PointWords(point),
-        unscaled and "a UI unit, the game's own screen unit" or "a layout pixel of the 2560 x 1440 design, which stretches with your UI",
+        unscaled and "a UI unit, the game's own screen unit" or "one unit of the 2560 x 1440 design, which stretches with your UI",
         GridStep())
 end
 
@@ -1173,7 +1173,7 @@ local function NewPositionPanel()
     panel.xBox = NewValueBox(panel, function() return panel.yBox end)
     panel.yBox = NewValueBox(panel, function() return panel.xBox end)
     panel.pxChip = NewSeg(panel, "px", function() SetPositionUnit("px") end,
-        "Type the position in layout pixels, the units the position is saved in.")
+        "Type the position in px, the units it is saved in.")
     panel.gridChip = NewSeg(panel, "grid", function() SetPositionUnit("grid") end,
         function() return ("Type the position in grid steps: 3 here is 3 times the grid step (now %d px)."):format(GridStep()) end)
     panel.help, panel.helpOwn = NewHelp(panel, "")
@@ -1751,7 +1751,7 @@ local function NewDonePanel()
     for index, step in ipairs({ 4, 8, 16, 32 }) do
         local chip = NewSeg(panel, tostring(step), function()
             if FS.Config and FS.Config.Set then FS.Config.Set("layout.grid", step) end
-        end, ("Snap and show the grid every %d layout pixels."):format(step))
+        end, ("Snap and show the grid every %d px."):format(step))
         chip.fsStep = step
         panel.stepChips[index] = chip
     end
