@@ -64,6 +64,41 @@ local function NewArrowGlyph(host, direction)
 end
 I.NewArrowGlyph, I.ARROW_W, I.ARROW_H = NewArrowGlyph, ARROW_W, ARROW_H
 
+-- The reset mark (U+21BA, a turn back arrow) is drawn the same way: the fonts carry no glyph for it, so typed it showed as an
+-- empty box. 8 by 8, one rect per run of lit pixels in each row, centred on the host.
+local RESET_ROWS = {
+    "X.XXXX..",
+    "XX....X.",
+    "XXX....X",
+    ".......X",
+    ".......X",
+    "X......X",
+    ".X....X.",
+    "..XXXX..",
+}
+local function NewResetGlyph(host, color)
+    local h, w = #RESET_ROWS, #RESET_ROWS[1]
+    local textures = {}
+    for y, row in ipairs(RESET_ROWS) do
+        local x = 1
+        while x <= w do
+            if row:sub(x, x) == "X" then
+                local run = x
+                while run + 1 <= w and row:sub(run + 1, run + 1) == "X" do run = run + 1 end
+                local t = host:CreateTexture(nil, "OVERLAY", nil, 1)
+                t:SetSize(run - x + 1, 1)
+                t:SetPoint("TOPLEFT", host, "CENTER", -w / 2 + (x - 1), h / 2 - (y - 1))
+                t:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
+                textures[#textures + 1] = t
+                x = run + 1
+            else
+                x = x + 1
+            end
+        end
+    end
+    return textures
+end
+
 local CHEV_CELL = 8   -- the square a chevron or caret is centred in; the chevron's is the gutter the page leaves left of the content
 
 -------------------------------------------------------------------------------
@@ -214,7 +249,8 @@ function I.AttachChanged(row, edge)
     glow:SetPoint("CENTER", dot, "CENTER", 0, 0)
     glow:Hide()
     local reset = I.MakeButton(row, { width = S.RESET, height = S.RESET, ring = C.line, textColor = C.cyan, chamfer = 3,
-        text = "\226\134\186", glow = 0 })
+        text = "", glow = 0 })
+    reset.fsGlyph = NewResetGlyph(reset, C.cyan)
     reset:SetPoint("RIGHT", edge or row.control or row, "LEFT", -S.CTL_GAP, 0)
     I.HoverStyle(reset, C.cyan)
     reset:Hide()

@@ -416,7 +416,7 @@ local function hasText(root, needle)
 end
 local function plainCount(r)       -- a row's texts without the reset glyph of a changed row
     local n = 0
-    for _, t in ipairs(texts(r)) do if t ~= "\226\134\186" then n = n + 1 end end
+    for _, t in ipairs(texts(r)) do if t ~= "" then n = n + 1 end end
     return n
 end
 local function count(t) local n = 0; for _ in pairs(t) do n = n + 1 end; return n end

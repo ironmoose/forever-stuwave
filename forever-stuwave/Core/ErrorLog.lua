@@ -816,7 +816,7 @@ local RELOAD_NAME = "ForeverSTUwaveReload"
 local SecureReload = { NAME = RELOAD_NAME, CLICK = "/click " .. RELOAD_NAME }
 FS.SecureReload = SecureReload
 local reloadButton, covering, lastRefusal = nil, nil, 0
-local coverMiss, buildMiss = nil, nil   -- why the last Cover did not take, and why the button could not be made
+local coverMiss, buildMiss, lastCovered = nil, nil, nil   -- why the last Cover did not take, and why the button could not be made
 
 local function Say(text) print("|cff22e0ffForever STUwave|r: " .. text) end
 
@@ -916,6 +916,7 @@ function SecureReload.Cover(target)
         b:Show()
     end)
     covering = ok and target or nil
+    lastCovered = target
     coverMiss = (not ok) and tostring(err) or nil
     if not ok then Uncover() end
     return ok
@@ -930,7 +931,23 @@ function SecureReload.Explain()
     if not why then
         why = "type /reload"
         if coverMiss then why = why .. " (cover: " .. coverMiss .. ")"
-        elseif reloadButton then why = why .. " (cover shown " .. tostring(reloadButton:IsShown()) .. ")" end
+        elseif reloadButton then
+            local b = reloadButton
+            local function R(f)
+                if not f then return "nil" end
+                local ok, txt = pcall(function()
+                    local s = f:GetEffectiveScale() / UIParent:GetEffectiveScale()
+                    return ("%.0f,%.0f %.0fx%.0f %s/%d"):format((f:GetLeft() or -1) * s, (f:GetBottom() or -1) * s,
+                        (f:GetWidth() or 0) * s, (f:GetHeight() or 0) * s, tostring(f:GetFrameStrata()), f:GetFrameLevel() or -1)
+                end)
+                return ok and txt or "?"
+            end
+            local focus = "?"
+            local foci = type(GetMouseFoci) == "function" and GetMouseFoci() or nil
+            local top = type(foci) == "table" and foci[1] or (type(GetMouseFocus) == "function" and GetMouseFocus()) or nil
+            if top then focus = (top == b and "cover") or (top.GetName and top:GetName()) or tostring(top:GetObjectType()) end
+            why = why .. (" (cover %s %s; mouse on %s; last %s)"):format(tostring(b:IsShown()), R(b), focus, R(lastCovered))
+        end
     end
     Refuse(why)
 end
