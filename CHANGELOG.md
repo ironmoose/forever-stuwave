@@ -1,5 +1,62 @@
 # Changelog
 
+## Unreleased
+
+A rebuilt /fsconfig with search, tabs and a power button for every module, a page for nearly every frame, six new class tabs, and a better layout editor.
+
+### New
+- /fsconfig, rebuilt:
+  - Pages sit in four groups down the left (Frames, Screen, Panels, General), and most have tabs across the top. Sections fold shut and long ones run in two columns.
+  - Search box at the top: type part of a setting's name or its ? tip and press Enter. The page opens, the section unfolds and the row is outlined. "changed only" lists everything you have changed from the default, on every page.
+  - A pink dot marks what you changed, on the row, its section, its tab and its page, with a small reset arrow on the row. The row's ? tip names the default.
+  - Drag the corner to resize the window (780 by 560 up to 1600 by 1000). Its size and place are remembered.
+  - Click a slider's number to type a value: Enter or Tab sets it, Esc puts it back.
+  - A setting that needs another one is dimmed, and its ? says which to turn on.
+  - Footer: Reload UI (with a count of what is waiting for it), Reset page (asks first, only touches the page you are on) and Close.
+  - Point at a setting and the frame it changes is outlined on screen. Profiles, Window has a switch to turn that off.
+  - A power button on every module's row on the left, and a Modules page that lists them all. Off, the game's own frame or window takes over after a Reload UI; Nameplates turns off at once. Profiles has an ALL ON button.
+  - Profiles: Export this profile makes a string you can copy, and Import a profile reads one into a new profile. It never writes over a profile you have. An export can hold your settings, your frame positions or both, and it carries which modules are on.
+- Pages and tabs for what had no settings before:
+  - Unit Frames: show or hide the focus and boss frames, and a Style tab for player, target, focus and boss: bar looks (cut, laser, flat, LED, slant, chevron or the game's own), bar heights, text formats, elite and rare mark, target of target, combat icon, portrait, a cast bar on the frame, PvP flag, leader crown and an aggro ring.
+  - Party frames and Raid frames: a Style tab each, with a preview. Width, bar heights and looks, text formats, background opacity, markers for your heals over time and for debuffs you can remove, an aggro ring with the share of threat, and (party) a tray of cleansable debuffs and missing buffs. Raid frames also get Scale, Group columns or Grid, Frames per row and Sort by.
+  - Pet bar: Style, Hunter and Warlock tabs. Size, text, looks, background opacity, a cast bar for the pet, Wider or Leave the gap when the cast bar is hidden, and a Hunter happiness dot.
+  - Nameplates: Size, Text, Parts and Friendly tabs, each with a preview of the plates. Plate width, health, power and cast bar heights, name size, level, health text, quest marker, auras row, raid marker, and friendly plates as the same as enemy, smaller or off.
+  - Roles: tabs for Tank, Healer, Melee and Ranged. Auto picks your role from your group role, then your talents, then your class. Plates colour by threat for your role, with optional Aggro % or Lead text, an alert when you lose aggro (tank) or a mob turns to you (healer), a warning when you near the tank's threat (melee, ranged) and a dim for a target out of range. Each alert and sound has an off switch.
+  - Class modules: Background and Border switches for the module plate, Opacity, and an Alert scale for the Warrior and Druid alerts. A tab per class: Priest Show, Hunter low ammo warning, the four Warlock cues, the three Warrior alerts.
+  - Addon tabs: every class tab on one page, with a strip of the nine classes.
+  - Chat: window width and height, background opacity, line tint strength, a switch and colour for each kind of line, and a Raid kind.
+  - Minimap: width, height and scale. Quest tracker: scale, opacity, background opacity and Height. Bags: a switch for the bag bar's right click.
+- Six new class tabs on the Console, beside the ones you have:
+  - Druid: the forms you know (Bear, Cat, Travel, Aquatic, Moonkin), the one you are in lit, and an optional caster form button.
+  - Hunter: one button for each pet you can call, with optional Revive Pet and Dismiss Pet. It shows once you can call two or more pets.
+  - Mage: a portals and teleports tab with rune counts, and a food and water tab with the count you carry.
+  - Rogue: a button for each poison, then Main hand or Off hand to apply it, the time left and charges on each weapon, and a pulse when a hand has none.
+  - Warlock: a summon demon tab, the demon you have out lit, and Soul Shard counts.
+- Layout editor (/fsedit):
+  - A grid shows while you edit, lined up with where a piece snaps. A Show grid switch sits in the top panel and on the Layout page.
+  - Pick a piece and its X and Y show in boxes. Type an exact position (px or grid steps) and press Enter.
+  - Right click a piece for a menu: Settings (opens that piece's page), Set position and Reset position.
+  - The chat has a corner handle that resizes it, and the Chat page's Width and Height follow.
+- Data bar page: choose which segments show, reorder them with the arrows and rename each one (up to 10 letters). New REP and PROF segments. Click DUR, GOLD, REP, TIME, PROF or BAGS on the bar to open its window (after combat).
+- Bags: right click a quiver, ammo pouch or soul bag in the bag bar to open only that bag, in a window of its own.
+- Party and raid frames keep showing debuffs you can remove, your heal over time markers and the debuff border during a fight.
+
+### Changes
+- Right click on a piece in /fsedit opens a menu. Reset position is in it; it no longer resets at once. The panel on top reads EDIT MODE.
+- Settings moved to the page of the thing they change. Mana regen, Ammo tab, Icon style (spell icons), the Thunder Clap tab, Totem presets and the Shaman buff tab are on Addon tabs. Background grid and the micro menu icon style are on Action bars. Professions panel is on Window skins. STUwave nameplates is on Nameplates, Parts. Show party frames and Show raid frames are on their own pages.
+- The Move and Reset position rows for the party and raid frames are gone from their pages. Use /fsedit, or EDIT LAYOUT on the Layout page.
+- Priest: "Right side shows" is now Show on Class modules, Priest, with Auto, Spirit Tap and Inner Fire, Prayer of Mending and Nothing. The Inner Fire reminder reads "Pulse Inner Fire when it is missing".
+- The Class module background slider is now Opacity on Class modules, General, next to the Background and Border switches.
+- A healer now sees missing health ("-880") on the party frames instead of the percent. Change it under Party frames, Style, Text, or on Roles.
+- Plate threat colours follow your role. A tank sees cyan on you, amber slipping and pink off you; damage dealers see pink on you, amber close and cyan safe.
+- The settings window opens larger (960 by 640).
+- The data bar's MEM and CPU segments start off. Turn them on under Data bar.
+- Quest tracker Height sets the height of the tracker in the game's Edit Mode layout, so move it once in /fsedit first. Width stays fixed.
+
+### Fixes
+- Druid: with the shapeshift tab on, the stance bar no longer draws the same forms a second time.
+- The quest timer drawer under the minimap follows the minimap's scale, and sits under the game's own map when ours is off.
+
 ## 1.0.0-beta.5.2 (2026-11-24)
 
 Smoother frames while moving, a Forever STUwave button in the game menu, and a way to send a stutter report.

@@ -4,6 +4,8 @@ Use the [README installation and update instructions](../README.md). Close the g
 
 Judgement behavior and its HUD lane, Quick Keybind, and the current key label visuals have been checked in game. Seal/aura clicks, chamber expiry and no-seal states, the shoulder seam, and minimap placement on a new character's first login still need checks. Advanced Paladin level 10/20 rotation rules remain incomplete. The checklist below also helps catch regressions in checked features.
 
+To run every check of the rebuilt settings window in one sitting, work down [Config rebuild client checks](#config-rebuild-client-checks); it is ordered by page.
+
 ## Report a bug: /fsbug
 
 Inspect reports before posting them publicly. Use [GitHub issues](https://github.com/ironmoose/forever-stuwave/issues/new) or send the report directly to the maintainer. Include the build's version or Git commit when you know it.
@@ -70,6 +72,41 @@ Make a fresh Shaman and level it a little. This records what a Shaman totem bar 
 6. Send the `fscheck.shaman` table from `ForeverSTUwaveDB` in `WTF/Account/<id>/SavedVariables/forever-stuwave.lua`. It holds the account's settings too: strip those first.
 
 `/fscheck reset` clears it too.
+
+### Reads check (developer diagnostic)
+
+This records what a group, a bag, a cast bar and a pet let an addon read on this client: group threat, spell range, other units' cast information, profile string encoding, bag families, talent trees and roles, pet happiness and the stable list, weapon enchant timers and the aura container filters. It only reads, apart from two hidden throwaway frames of its own (a cast bar and an aura container) that it uses to test the duration object and the filters. Nothing runs until you type `/fscheck reads`; it registers four events (combat start and end, cast start, channel start) and drops them again when the run ends, is stopped or is reset. It never opens a panel or clicks anything.
+
+Run 1, solo (any character, no group; a Hunter or Warlock with the pet out, a Shaman with a weapon imbue or a Rogue with a poison on makes the pet and weapon rows meaningful):
+
+1. Out of combat, target something (a critter is fine) and type `/fscheck reads`. Chat says it saved the out of combat part (solo) and what is armed. Ten parts are saved at once.
+2. Pull a mob. Samples come 4, 12 and 24 seconds into the fight. If a mob casts at you, or you target something that casts, the first 8 casts of target, focus, nameplates and bosses are recorded too, and three of them drive a throwaway cast bar to see whether the duration object is accepted.
+3. When the fight ends chat says "done, /reload or log out to save". Type `/reload`. `/fscheck reads off` stops early, and a run stops itself after 30 minutes.
+4. If you forget to start before the pull, type it in combat: it skips the out of combat part and samples 4, 12 and 24 seconds from that moment.
+
+Run 2, in a group (the part that matters most for threat): join a party, or a raid if you can, with someone tanking. Out of combat, target the mob or the tank's target and type `/fscheck reads` (the mode is party for 2 to 5 members and raid above that; the solo record is kept, and only a second run in the same state replaces its own). Pull and fight for at least 24 seconds, keeping the mob targeted so member threat has a target to read, then `/reload`. A raid run records up to 40 raid units and the first 12 nameplates.
+
+The results are in `ForeverSTUwaveDB.fscheck.reads` in `WTF/Account/<id>/SavedVariables/forever-stuwave.lua` (written on `/reload` or logout). It holds the account's settings too: strip those before sending. Values are stored as text: the plain value, `secret`, `nil`, `absent` (the API is missing) or `error: ...` (the call threw). How to read the parts:
+
+- `threat`: `mobs.target / focus / nameplateN` is the player's threat on that mob and `members.player / party1..4 / raid1..40 / pet` is that member's threat on the target. Plain digits in the party or raid records mean a group Aggro % can be shown; `secret` in the combat samples but plain out of combat means in combat it must fall back to the status colour. `predicates` is what the game says should be secret; a `false` there next to a `secret` read is worth a note.
+- `range`: boolean text in and out of combat means range checks may drive fades; `secret` in combat means they cannot.
+- `encoding`: `equal = true` means a profile string survives serialize, compress, encode and back; `sizes.encode` is the characters a pasted string costs and `failedAt` names a step that broke.
+- `bags`: `b0..b5` with `free` ("freeSlots,bagFamily"), `family` (bit mask: soul bag, ammo pouch, quiver), `name` and `slots`, plus `numBagSlots` and `reagentBagIndex`.
+- `roles`: the talent trees, the talent art sheet names and the specs of every class, so the class to tree to role table can use real names.
+- `casts`: plain name and times on other units mean a cast bar on a frame can show the spell name; `secret` there with `setTimerDuration = ok` means the bar can fill but cannot be labelled.
+- `pet`: `infoHappiness` (plain digits mean the happiness dot can use them), `stable` (the pet list) and `callPet`.
+- `weapon`: plain values in the combat samples mean poison and imbue timers can be read live (run it with an imbue or poison on).
+- `auraFilters`: `accepted = ok` and `frames` above 0 on the party unit mean the engine's aura container takes that filter for party cells.
+
+### Panels check (developer diagnostic)
+
+This opens each of a few stock panels once, closes it again and saves whether the calls were allowed, out of combat and in combat. It runs only when you type `/fscheck panels`. It touches only the panels in its own list, closes what it opened and leaves alone a panel that was already open or whose state it cannot read.
+
+1. Out of combat with no panel open, type `/fscheck panels`. Chat prints one line with every call's result. The record is `panels.ooc`.
+2. Pull something, then type `/fscheck panels` in combat. The record is `panels.combat`. Some calls are expected to be blocked; the client may print an ADDON_ACTION_BLOCKED popup, which is itself the answer (the record keeps the error text). `leftOpen` must read "none" in both records.
+3. `/reload`, then send the `fscheck.panels` table from the same file as above, settings stripped. `open = ok` with `shown = true` in combat means a click may open that panel in combat; an error text or `shown = false` means it has to wait until combat ends.
+
+`/fscheck reset` clears every result, the reads and panels records included. Typing a plain `/fscheck` again keeps them.
 
 ## Paladin: seals, auras, Seal module, chat font
 
@@ -156,7 +193,7 @@ slots stay empty until learned. Do a FULL client restart, not /reload.
    shockwaves (cyan, then pink) with a flash, and the key fills violet for the
    6 second cooldown, flashing back to cyan at ready. Under 20 rage it reads
    RAGE in red; in Berserker Stance it goes grey and reads STANCE. The tab is a
-   display only: clicking it does nothing. Unit Frames page: "Thunder Clap
+   display only: clicking it does nothing. Addon tabs page, Warrior: "Thunder Clap
    tab" turns it off, "Shockwave motion" keeps it still. Note whether every
    other ability's global cooldown also starts a short fill on it.
 
@@ -236,7 +273,7 @@ Use a Shaman who knows at least two totems of different elements (Earth 4, Fire 
 5. The editor card (Shift click a cell with a preset, or any keybind on the cell that includes Shift): a name box (up to 8 letters), a row of seven outline colour swatches (cyan, pink, violet, amber, green, red, white), four drop order rows, and CLEAR. Each drop order row is one button across its whole width: click it to pick that element's totem from a list of the totems you know, or "left out". The up and down arrows reorder the rows. Every change saves at once. CLEAR asks twice.
 6. Pick a colour swatch: the cell's border, glow, underline and name plate take the colour at once. The colour belongs to the cell: clearing the preset keeps it.
 7. Editing is shut in combat: the card closes when combat starts and refuses clicks. Choosing a colour is an edit too, and is refused in combat. Report it if the card stays open into a fight.
-8. Name plates: the name sits on a small plate above each cell. Turn "Name plates" off in `/fsconfig` (Unit Frames, Totem presets) and the plates go.
+8. Name plates: the name sits on a small plate above each cell. Turn "Name plates" off in `/fsconfig` (Addon tabs, Shaman, Totem presets) and the plates go.
 9. Preset 2 and Call of the Ancestors (level 30): with "Also on Call of the Ancestors" on, Preset 2's totems are also written into the Call of the Ancestors set, out of combat only. Casting that spell should drop them. Turning the setting off leaves the set as it is. Report with `/fsbug` if your normal Call of the Elements set changed.
 10. `/fsconfig` has an on/off switch for Preset 1 and for Preset 2 (off hides the cell), each with a ? tip.
 11. Migration: a character whose saved presets came from the earlier build (a dial with up to four presets) is moved once. The active preset becomes Preset 1, a second different preset becomes Preset 2, and the rest are kept aside, not deleted. Colours start cyan and pink. Check that your old presets are where you expect after the first login on this build.
@@ -250,7 +287,7 @@ Use a Shaman who knows Rockbiter Weapon and, from level 8, Lightning Shield. Thi
 2. Cast Rockbiter Weapon on your weapon (no target needed). The tile shows the Rockbiter icon in full colour with the minutes left, for example 59m, under a quiet gold underline. Switching to another imbue changes the icon to that spell.
 3. Cast Lightning Shield. The right tile shows its icon with the number of orbs left. Get hit: the number goes down, and the tile goes red when the last orb is gone.
 4. Under five minutes left on the imbue (or the shield), the underline and the time turn pink. Under one minute the time counts in seconds. Let it run out: the tile goes dim and red again.
-5. Not yet checked in game: the combat state. The weapon imbue tile may not show it yet (the client keeps the imbue slot's shown state secret, so the tile may never trust it); the Lightning Shield half is expected to work. In combat the game itself draws your Lightning Shield and weapon enchant on the tab, so an expired shield or imbue still shows red until you recast. The "Buff tab combat state" switch in `/fsconfig` (Unit Frames) turns that off; off shows the last known state instead. Without it the shield count shows a "~" and a dashed underline (an estimate). A "?" on a dimmed tile means there is nothing to go on yet. Cast an imbue or the shield in the middle of a fight: the tile updates. Swapping a weapon in combat shows "?" until the fight ends.
+5. Not yet checked in game: the combat state. The weapon imbue tile may not show it yet (the client keeps the imbue slot's shown state secret, so the tile may never trust it); the Lightning Shield half is expected to work. In combat the game itself draws your Lightning Shield and weapon enchant on the tab, so an expired shield or imbue still shows red until you recast. The "Buff tab combat state" switch in `/fsconfig` (Addon tabs, Shaman, Shaman buff tab) turns that off; off shows the last known state instead. Without it the shield count shows a "~" and a dashed underline (an estimate). A "?" on a dimmed tile means there is nothing to go on yet. Cast an imbue or the shield in the middle of a fight: the tile updates. Swapping a weapon in combat shows "?" until the fight ends.
 6. Dual wield (two weapons): with imbues on both, the tile shows the one with less time left. With an imbue on only one weapon while the other hand holds a weapon, the tile shows the missing look until both are imbued. A shield or an empty off hand never triggers it.
 7. With a Water Shield up instead of Lightning Shield, the right tile shows the Water Shield icon quietly (it does not nag).
 8. Hover a tile: the border turns cyan and the tooltip names the spell, the time left and what a click does. Click the IMBUE tile: it casts the imbue it shows (the best one you know when none is up). Click the SHIELD tile: it casts Lightning Shield. Try the clicks in combat too. If a tile stops responding in combat, or a click does nothing, report it with `/fsbug`.
@@ -262,7 +299,7 @@ Use a Shaman who knows Rockbiter Weapon and, from level 8, Lightning Shield. Thi
 
 Not yet checked in game. Mocked checks cover the layers, the setting, the proof and the combat rules; nothing here has been seen on the client. Design: the design mockup "Priest right slot" (2026-11-10), variant A. This build adds a texture (`priest_medallion.tga`) and a file in the `.toc`, so do a FULL client restart, not /reload. Use a Priest with a target selected (the class module only shows then), ideally one with the Spirit Tap talent and Inner Fire learned.
 
-1. `/fsconfig`, Gunsight HUD page, "Priest class module": "Right side shows" with Auto, Spirit Tap + Inner Fire, Prayer of Mending and Off, and "Remind me when Inner Fire is missing". Auto is the default. Alone in the world with Auto, the right side of the module is two round medallions: Spirit Tap above (a plain skull in spirit green) and Inner Fire below (a flame shield in gold). Pick Prayer of Mending: the beads, heart and party strip come back, with L40 before you have learned it. Pick Off: nothing on the right. Changing it out of combat applies at once; changing it in combat applies when the fight ends.
+1. `/fsconfig`, Class modules page, Priest tab: "Show" with Auto, Spirit Tap and Inner Fire, Prayer of Mending and Nothing (one line under it says what the pick does), and "Pulse Inner Fire when it is missing". Auto is the default. Alone in the world with Auto, the right side of the module is two round medallions: Spirit Tap above (a plain skull in spirit green) and Inner Fire below (a flame shield in gold). Pick Prayer of Mending: the beads, heart and party strip come back, with L40 before you have learned it. Pick Nothing: nothing on the right. Changing it out of combat applies at once; changing it in combat applies when the fight ends.
 2. Auto in a group: join a raid group, or enter a dungeon, with Prayer of Mending learned: the right side switches to Prayer of Mending. Without Prayer of Mending (a leveling Priest) it stays on the medallions. It never swaps in the middle of a fight; the change lands when combat ends.
 3. Locked looks: before you learn Inner Fire (level 12) its medallion is a dotted rim and a dotted flame shield with L12 beside it. Without the Spirit Tap talent the Spirit Tap medallion is the same dotted look with no label.
 4. Calm and the reminder: with Spirit Tap not active the skull medallion is a faint ghost with a dim skull. With Inner Fire not on you the flame shield medallion breathes amber (dashes, glyph and halo). Turn the reminder off and it goes calm and dim. Cast Inner Fire: the medallion lights in gold with its charge count to the right (it counts down as you are hit, in and out of combat). Report it if the amber stays on while Inner Fire is up, or the count never shows.
@@ -280,13 +317,13 @@ Use any class that uses mana (Priest, Mage, Warlock, Paladin, Shaman, Druid, Hun
 3. At 0.0 the digits turn cyan, a bright band sweeps across, the cells flip to the word REGEN, the rim flashes once, and a few seconds later the tab fades back to its dim look. A new cast during the countdown restarts it.
 4. The rate line: out of combat it shows your full mana per second. While the countdown runs it shows the casting rate. The chip shows the percent of the full rate that casting keeps (a talent such as Meditation); a hollow 0% means none, "--" means no reading. A dashed bar means the numbers on show were kept from before the fight.
 5. Channelled spells are unverified: a channel that costs mana should hold the countdown at 5.0 until it ends, then run it down. A free cast from a proc (such as Clearcasting) can leave the countdown longer than the real window. Report anything else that looks wrong with `/fsbug`.
-6. `/fsconfig` (Unit Frames, Mana regen): Mana regen module (off hides it), Regen pulse, Regen sound (off by default), Animate the tab (master), and one switch each for Cast flash, LED digit motion, Whole second pulse, Gauge flicker, Regen sweep, Regen tick pulse, Idle glow, and Kept and unreadable stutter. Each has a ? tip. Motion off keeps the tab still; only colours and numbers change.
+6. `/fsconfig` (Addon tabs, Mana regen): Mana regen module (off hides it), Regen pulse, Regen sound (off by default), Animate the tab (master), and one switch each for Cast flash, LED digit motion, Whole second pulse, Gauge flicker, Regen sweep, Regen tick pulse, Idle glow, and Kept and unreadable stutter. Each has a ? tip. Motion off keeps the tab still; only colours and numbers change.
 7. Hide the interface (Alt+Z): nothing on the tab animates. Warriors and Rogues see no tab.
 8. Druid: shift to cat form and the tab hides; shift back to caster form and it returns. Bear form hides it too.
 
 ## Icon style: Micro menu icons and Spell icons
 
-The micro menu and the class tabs use the game's own icons, restyled while the game runs. No game art ships with the addon. `/fsconfig` (Unit Frames, Icon style) has two dropdowns, each Stock or Gradient. A change repaints at once, with no reload.
+The micro menu and the class tabs use the game's own icons, restyled while the game runs. No game art ships with the addon. `/fsconfig` has two switches, each Stock or Gradient: Micro menu on the Action bars page and Icon style (the class tab spell icons) on the Addon tabs page. A change repaints at once, with no reload.
 
 1. Micro menu icons (default Stock): Stock shows the game's own icons in their own colours, upright, filling the whole slanted key with no gap at the two slanted sides and no cut corner. Gradient draws them in the STUwave colours. Character and Legacy have our own artwork and look the same in both.
 2. Spell icons (default Gradient; the row appears once a class tab has drawn a spell icon): covers the Shaman buff tab and totem tab, Paladin seals and auras, and Warrior stances. Switch to Stock and the tiles show the game's own icons; Gradient restyles them.
@@ -314,13 +351,22 @@ Out of combat only. Close Blizzard Edit Mode first.
 1. Type `/fsedit`. A cyan box with a name appears over each movable piece. The box's outline sits just outside the piece, with a small clear gap, so it never lies on the piece's own border (check the party frames, the player frame and the chat for a doubled border; report any). The Raid handles' labels ("Raid 25") sit above the box, off the grid's names.
 2. Drag a box. On release the piece moves there and snaps to the grid.
 3. Click a box, then press the arrow keys: 1 unit per press, Shift+arrow moves one grid step. (Keys that are not arrows or Esc should still reach the game; report it if movement keys stop working.)
-4. Right-click a box: that piece goes back to its default seat.
-5. A small LAYOUT EDIT panel with a DONE button sits top-centre while editing, with a RAID row of size chips under it (5 10 15 20 25 40). Each chip is one clean ring: the current size has a cyan ring, a cyan tint and a cyan label, the others a violet ring (check for a double border or an offset second ring; report any). DONE or Esc leaves; positions are already saved as you drop. Starting a fight leaves too and drops a drag in progress.
+4. Right-click a box: a menu opens at the cursor with the piece's name, Settings, Set position and Reset position. Reset position sends that piece back to its default seat. Esc or a click elsewhere closes the menu.
+5. A small EDIT MODE panel with a DONE button sits top-centre while editing; grid step chips, a Show grid switch and a ? icon sit in it, with a RAID row of size chips under it (5 10 15 20 25 40). Each chip is one clean ring: the current size has a cyan ring, a cyan tint and a cyan label, the others a violet ring (check for a double border or an offset second ring; report any). DONE or Esc leaves; positions are already saved as you drop. Starting a fight leaves too and drops a drag in progress.
    The DONE bar can cover a box seated under it (buffs, minimap): a box is selected only by clicking it, so click its visible part, then use the arrow keys.
 6. Check the minimap moves with its addon tray, the chat keeps its minimised and maximised states, and the pet panel (floating, not on the Console) follows the box.
 7. `/reload`: every position holds. `/fsedit reset all`, then `/fsedit reset all confirm` puts everything back.
-8. The Layout page of `/fsconfig` has the same controls: EDIT LAYOUT, snap on/off, grid size 4/8/16/32, and Reset all positions, plus a Raid frames section (a preview size and MOVE RAID FRAMES; see Raid frames below). The Raid layout size and the Move and Reset rows are also on the Unit Frames page.
+8. The Layout page of `/fsconfig` has the same controls: EDIT LAYOUT, snap on/off, Show grid, grid size 4/8/16/32, and Reset all positions, plus a Raid frames section (a preview size and MOVE RAID FRAMES; see Raid frames below). The Raid layout size is also on the Raid frames page, Style tab.
 9. EDIT LAYOUT closes the settings window; DONE or Esc reopens it on the Layout page. Leaving after `/fsedit`, by a fight, or by Blizzard Edit Mode does not open it.
+10. Grid: `/fsedit` shows cyan grid lines with a pink cross on the screen centre. Pick the player frame and the grid shifts to that piece's own corner lattice (the places it snaps to). Lines are one crisp pixel wide at your UI scale, and a step of 4 (about 1000 lines on a big screen) costs no frames.
+11. Top panel: the chips 4, 8, 16 and 32 redraw the grid at once, the Show grid switch hides and shows the lines, and turning Snap to grid off on the Layout page hides the grid.
+12. Drag a piece: it lands on a line, and the numbers in the position panel follow the drag.
+13. Exact position: pick a piece and click into its X box, type a number and press Enter, and the piece moves exactly there. Esc puts the number back, Tab goes to the Y box. After Enter and Esc the keyboard returns to the game (the arrows nudge again and movement keys work), and Esc in a box does not leave edit mode.
+14. The px and grid chips change the unit: 3 grid at step 8 is 24 px. Type `abc`: the box flashes pink and nothing moves. Type a huge number: the piece stops at the screen edge.
+15. Right click a piece: the menu opens at the cursor. Settings opens `/fsconfig` on that piece's page with the row outlined, the window above the handles and edit mode still on; close the window and the handles are clickable again. Set position puts the cursor in the X box. Reset position sends the piece home. Esc closes the menu first.
+16. The objectives tracker, a raid handle and the floating pet: right click and typed position on each (the tracker writes Blizzard's Edit Mode layout).
+17. Chat corner: the chat handle has a small cyan corner. Drag it: the chat's top left stays and its size follows, and the Chat page's Width and Height sliders show the new size. Move a slider and the handle follows.
+18. Look: the top panel, the menu and the position panel. Say what differs from what you expected.
 
 ## Moving the tooltip
 
@@ -330,22 +376,146 @@ Out of combat for the editing; the tooltip itself follows in combat too.
 2. Hover a unit, an item and an action button: the tooltip shows there, growing up and left from the box's bottom right corner.
 3. Open `/fsconfig` and hover a `?` icon: its tooltip still shows beside its icon, not at the Tooltip box.
 4. `/reload`: the Tooltip box and the tooltip stay where you put them.
-5. In `/fsedit`, right-click the Tooltip box (or run `/fsedit reset all`, then `/fsedit reset all confirm`): the tooltip returns to the bottom right.
+5. In `/fsedit`, right click the Tooltip box and pick Reset position (or run `/fsedit reset all`, then `/fsedit reset all confirm`): the tooltip returns to the bottom right.
 
 ## Settings window: /fsconfig
 
 Safe in combat. Esc, the X, or `/fsconfig` again closes it; with a menu or confirm box open, Esc closes only that. `/fsconfig profiles` opens a page directly.
 
-1. Unit Frames: turn "Hide player frame" on. The player frame goes invisible and click-through at once (in combat it waits until combat ends). Turn it off again, then do the same for the target frame.
+1. Unit Frames, Frames tab: turn "Show player frame" off. The player frame goes invisible and click-through at once (in combat it waits until combat ends). Turn it on again, then do the same for the target frame, the focus frame and the boss frames.
 2. Gunsight HUD: switch "Your cast bar" off, then on. The piece fades with the console key light following. Check each piece the same way: Your cast bar, Target cast bar, Target side areas, Soul shards, Proc posts, Buff reminders, and under Player side Next cast. The party frames are not a Gunsight piece; they have their own section below. `/fsgun piece shard off` must flip the same switch while the window is open.
 3. Gunsight HUD master switch (not yet checked in game; mocked checks only): turn it off with a spell cast in progress. The whole Gunsight HUD disappears at once and the standard player and target cast bars (the pair below the character) take over, showing that cast. A "Reload to restore the classic HUD" line with a Reload button appears on the row; the classic combat HUD itself only returns after `/reload`. The Console's key tab on the right half of the top edge keeps one key, Party Frame: the HUD keys go with the HUD and the tab shrinks to that one key at the right end of the top edge, as tall as before. The party frames themselves do not change. In combat the HUD keys hide at once and the tab shrinks when combat ends. Turn it on: the HUD and its cast bars return and the standard pair goes quiet, and the tab grows back to the size it had, with its keys and the party key last. Never two player cast bars, never none. Repeat the toggle several times, and once during combat: in combat the HUD fades by alpha and the final hide lands when combat ends. Log in with the master switch off and turn it on: the row asks for a `/reload` to build the HUD, and until then the tab stays the one party key. `/fsedit` lists "Player cast bar" and "Target cast bar" handles only while the Gunsight is off. With the HUD off, the standard pair rides above the Console and the tabs standing on its top line: on a Shaman (totem, buff, Imbue / Shield and Mana regen tabs) cast a spell and the lower edge of the pair, the name tab under the player bar included, clears the tallest tab with a small gap, and the same on a Priest, where only the short party key tab stands, at the far right and not under the pair on its usual seat, so the pair does not lift for it (report it if it does). Switch the HUD on and off, change the shown keys, or learn a tab-bearing spell and cast again: the pair follows the new height (at once if it is on screen, otherwise from the next cast). A pair you moved in `/fsedit` stays where you put it. Casting at yourself (your own target) shows the target bar repeating that cast, as the stock target bar does; that is not a second player bar.
 4. Profiles: type a name under "New profile". It is created and switched to. Switch between profiles with "Profile in use": every switch in the other pages and every Gunsight piece follows. "This character" shows your name and realm.
 5. Rename and Delete: Rename is off on Default. Delete lists only profiles that are neither Default nor the active one, and asks before deleting. "Copy from..." and "Reset profile" also ask first.
 6. Hover each small ? icon: the explanation shows in the addon's tooltip. No settings text mentions the word "tape".
 7. After `/reload`, the profile and every switch you set are still in place.
-8. Unit Frames, Panels: turn "Background grid" off. The perspective grid at the bottom of the screen disappears at once, in or out of combat, and the action bars stay. Turn it on and it returns. Switch to a profile with the opposite setting and it follows. With `/fsbars blizz` it stays hidden whatever the switch says; `/fsbars fs` brings it back only if the switch is on.
+8. Action bars page: turn "Background grid" off. The perspective grid at the bottom of the screen disappears at once, in or out of combat, and the action bars stay. Turn it on and it returns. Switch to a profile with the opposite setting and it follows. With `/fsbars blizz` it stays hidden whatever the switch says; `/fsbars fs` brings it back only if the switch is on.
 
-## Target bars and numbers: /fsconfig, Gunsight HUD page
+## Config rebuild client checks
+
+Not yet checked in game. The rebuilt `/fsconfig`, the pages it gained and the modules built with it were tested against mocked frames only, so every line below is a check for the real client. Run them in one sitting, top to bottom. The groups follow the window: the window itself, then each page in the order of the left column (Frames, Screen, Panels, General), then the in combat group frames check, the class tabs and the diagnostic runs. When something is off, note the group and the number, and run `/fsbug` right then if a line about an error printed. The looks (sizes, colours, spacing, glows) are judged by eye, so say what differs and not only pass or fail.
+
+Setup: a group of two or more (a raid for the Raid frames lines), a Priest or another class that can remove a debuff, a Hunter with a pet, a Warlock with a demon, a Shaman, and a Druid, a Mage, a Rogue and a Warrior if you have them. Run each class line on that class only. Start from a `/reload` with the settings window closed. A few weak mobs or a dummy give you combat. Do a FULL client restart once first, not only `/reload`: this build adds files.
+
+### 1. The window
+
+1. Open `/fsconfig`. It opens at 960 by 640. The left column has four groups (Frames, Screen, Panels, General), pages have tabs across the top, a section header folds and unfolds its rows, and long sections run in two columns.
+2. Drag the corner grip: the window stops at 780 by 560 and at 1600 by 1000. Close it, `/reload`, open it: same size and place. Shrink the game window, `/reload`: the window is still on screen.
+3. Drag the window by its title strip, close, reopen, `/reload`: it comes back where you left it.
+4. Change two settings on one page. A pink dot shows on each changed row, on its section, on its tab and on the page's row on the left, and a small reset arrow sits on each changed row. Hover a changed row's ? tip: it reads "Changed. Default: ..." with the default. Click one reset arrow: that row goes back and its dots clear.
+5. Click a slider's number and type a value. Enter or Tab sets it, Esc puts it back, the up and down arrows step it and Shift with them steps by ten. Then click the world and check that movement keys work at once.
+6. Addon tabs, Mana regen (a mana class): turn "Mana regen module" off. The rows under it dim, and their ? tips start with "Requires Mana regen module to be on."
+7. Search. Click the box at the top (cyan edge, a `>` mark, "search settings"). Type `cast bar`, `totem`, `threat` and `mana regen` in turn and press Enter on each: the page and tab open, a folded section unfolds, and the row sits near the top with a cyan outline that fades in and stays until your next click. Esc once clears the text, twice leaves the box; a click elsewhere puts the list away.
+8. Type one letter, click "changed only", clear the text: every row you changed, on every page, is listed. Search a setting that is off because another is: its row is dimmed with a badge and the footer says why. The first click in the box after a login must not make the window flicker or jump.
+9. Footer. Flip a setting that needs a reload (Gunsight HUD master switch, or Show raid frames). RELOAD UI gets a pink count and a glow; hover it for the list; one click reloads (out of combat only: in combat the click prints a line and never reloads). Close the window with a change waiting: one chat line says so, and nothing else prints.
+10. Change two settings on one page: RESET PAGE shows 2. Click it: a dialog asks. Enter and Esc keep your settings, RESET 2 puts them back. Other pages keep their changes.
+11. Hover flash. Point at a setting row: after a moment the frame it changes is outlined on screen (cyan, with corner brackets), pulses twice, then holds; move off and it goes. Try Addon tabs, Mana regen, Regen pulse (the mana regen tab); "Show target frame" with no target (nothing draws and the ? says "Not on screen right now."); a Gunsight HUD piece; a Nameplates row with a target selected (the plate of your target outlines). Drag a size slider and the outline follows the frame. Do it once in combat: it still draws. Profiles, Window: turn "Flash frames on hover" off and hover again: nothing.
+12. Fold arrows: a folded section shows a small violet right triangle, cyan under the mouse, inside the left margin and not cut off; an open section shows none until you point at its header. Dropdowns show a cyan down triangle, dimmed when the control is off. Look at your usual UI scale and one other.
+13. Look: the window, the search box and its list, the footer buttons at rest, hover, pressed and disabled, the dots, the typed value box and the outline. Say what differs.
+
+### 2. Frames: Unit Frames
+
+1. Frames tab: turn Show player frame, Show target frame, Show focus frame and Show boss frames off in turn. The frame goes invisible and click-through at once (in combat it waits until combat ends) and returns when the switch is on.
+2. Style tab: the preview shows the frame picked in its header (Player, Target, Focus, Boss), drawn by the real frame code. Pointing at a row turns that feature on in the preview for a moment. With every row at its default the real frames look exactly as before.
+3. Bar style, Look: try each look (cut, laser, flat, LED, slant, chevron and the game's own) on the player frame. The tiled ones (LED, slant, chevron) must fill correctly from empty to full at a few heights, and the colours must stay right when you switch looks back and forth.
+4. Height, Text, Text size, Text position and Text offset on the health and power bars change the real frame at once, in combat too.
+5. Extras: Elite and rare mark (target a rare or an elite), Target of target, Combat icon, Portrait, Cast bar on the frame (target something casting: the spell name and time show; note if other units' casts show only the bar), PvP flag, Group leader crown (in a group).
+6. Aggro, in a group with a mob on someone: Aggro status draws the ring (pink when a mob is on them, amber one step behind) and Aggro % the share. Say if the numbers stay blank in combat.
+
+### 3. Frames: Party frames (in a party)
+
+1. Frames tab: Show party frames follows the Console key and `/fsparty` both ways.
+2. Style tab, sizes: Width 240 with a pet out (the pet slot and the dashes of a downed member follow); Height; health and power Height at a few values (the row and pet slot grow with them and the rows below move down; power Height 0 hides the power bar and the halo still hugs the health bar). A taller bar changed in combat may overhang the next row until combat ends.
+3. Text: for health and for power try None, Percent, Number and Num + %, then Text size, Text position (left, centre, right) and Text offset. Background opacity at 0 and 100.
+4. A healer who touched nothing sees the missing amount (a style like "-880") on a damaged member, gone at full health, with "Dead" still shown on a downed member. Roles, Healer, Health text and Style, Text change it; setting the Style Text greys the Roles row with its reason.
+5. Markers: My heal over time (a square in the corner after your heal over time lands, held through a fight), Debuff border, Debuff markers (Ones I can remove or All, Magic, Curse, Poison, Disease) and Missing buff markers, with Marker size and Corner. Look at the markers over the health text.
+6. Cleanse and missing buffs: Alert icons, Side, Icon size, Most icons per row, Debuffs you can cleanse and one switch per buff of your class. Try the right side and 32 px.
+7. Aggro: the ring and the share, as in Unit Frames 6.
+8. Compare the preview with a real row.
+
+### 4. Frames: Raid frames (in a raid)
+
+1. Frames tab: Show raid frames. Off, the grid hides and the party frames return at once; a line offers a Reload UI to give the game's own raid frames back.
+2. Style tab: the Raid layout picker in the preview header (5, 10, 15, 20, 25, 40) changes the preview and the layout editor's preview together. Layout section: Scale, Arrange (Group columns or Grid), Frames per row and Sort by (Group, Role, Class, Name) with a real roster.
+3. Text format (Percent, Number) in a real raid, health and power Height, tiles at 11 or more members, Background opacity at 0 and 100, and Look on a raid of 10 or fewer (note whether a tiled look draws correctly on the small boxes).
+4. Markers, Debuff border and the aggro ring and share, as in Party frames 5 and 7.
+5. A member joining or leaving in combat changes the grid only when the fight ends.
+
+### 5. Party and raid frames in combat
+
+Debuffs you can remove, your heal over time and the debuff border show during a fight, drawn by the game itself. There are three modes. `engine` is the default and needs nothing typed. For `borrow`, type `/run ForeverSTUwaveDB.groupAuras={mode="borrow"}` then `/reload`. Back: `/run ForeverSTUwaveDB.groupAuras={mode="engine"}` then `/reload`. Off: `mode="off"`. Run the test once per mode, with a group (a party for the party half, a raid for the raid half), you a Priest (Magic and Disease) or any class that can dispel, and your own heal over time known. In the Party Style tab turn on My heal over time and Alert icons, in the Raid Style tab Debuff border and Debuff markers (Ones I can remove). For borrow in a party, the game's Edit Mode "Use Raid-Style Party Frames" must be on.
+
+1. Out of combat: cast your heal over time on a member and have a cleansable debuff on someone. The display is the one you know (halo, tray icon, square), nothing doubled, and the game's own frames are invisible and unclickable.
+2. Pull. Within a moment of a debuff landing in combat, `engine`: the party row shows the coloured outline round its bars and the debuff icon in the tray (a ring in the type colour); the raid cell shows the coloured edge and the type square. `borrow`: the debuff icon shows at the tray spot (party) or the cell's bottom edge (raid) and your heal over time as a small icon in the marker corner; the halo and edge stay the ones held from before the fight. Cleanse it and it clears. Cast your heal over time in combat: it shows and drops when it ends.
+3. A missing buff tile still shows in combat next to, not over, the debuff icons.
+4. Kill a member in combat: their pieces vanish. End the fight: the combat pieces go and the normal display returns with the real state. In `borrow` check that no icon is left floating where the game anchors it.
+5. No Lua error. A member joining mid fight gets their pieces when the fight ends. Turning the switches (heal over time squares, Debuff border, tray) on and off in combat takes the pieces in and out.
+6. Chat lines such as "aura container could not be built" or "no compact frame carries the aura icons" name the part that fell back. If the edge or squares never show but the tray does (`engine`), say which. If `engine` shows nothing for the party but `borrow` does, leave `borrow` set. Fast kill switch: `mode="off"` and `/reload`.
+
+### 6. Frames: Pet bar
+
+1. Hunter with a pet: Pet bar, Hunter tab, Happiness dot on: a dot between the name and LV, its colour following the pet's mood (it is off by default, and hidden for demons). Cast bar, Show Auto: the plate goes for a hunter pet and the health and mana widen (Wider) or leave the gap (Leave the gap).
+2. Warlock with a demon: Show Auto keeps the plate; cast Firebolt and see the cast on the bar; the power rail is blue.
+3. Float the bar (no Console drawn): Width, Health height and Power height change the panel at once. With the Console drawn those rows are greyed with their reason.
+4. Rail heights and text sizes change live; in combat the rails change and the panel follows after combat. Background opacity moves the panel fill, floating and docked. The kind picker in the preview header switches Hunter pet and Warlock demon.
+
+### 7. Frames: Nameplates
+
+1. Every tab (Size, Text, Parts, Friendly) shows a preview of four plates. Drag Plate width and the bar heights and the plates follow; point at a row and the part it changes pulses.
+2. In the game with plates up: width and heights change at once with no reload; power height 0 shrinks the plate and cast bar height 0 never shows the cast bar; Name size and Level move the name and the raid marker.
+3. Health text None, Percent, Number and Num + % on enemies in combat (the numbers are shortened).
+4. Friendly plates: Smaller on a friendly NPC and a duel opponent, Off, then back to Same as enemy.
+5. Parts: STUwave nameplates, Quest marker, Auras row, Raid marker, combo points and Target mark each switch their part. Look at the aura icons over a long name.
+
+### 8. Screen: Action bars, Addon tabs and Class modules
+
+1. Action bars page: Background grid hides and shows the grid, and Micro menu (Stock or Gradient) repaints the micro menu at once.
+2. Addon tabs page: the strip of nine classes opens on your own class. Mana regen, Ammo tab and Icon style (Stock or Gradient for the class tab spell icons) are above it; the class sections follow the strip. Pick other classes: their sections show, and classes with nothing yet show a short note.
+3. Class modules, General tab, Module plate: turn Background off (the fill goes, the cyan ring and glow stay), then Border off (the plate goes), then back on one at a time, changing Opacity in between. The defaults look exactly like before.
+4. Alert scale at 150, 50 and 200 with a Warrior Overpower or Revenge alert (or a Druid Clearcasting proc): the alert grows and shrinks about its own middle without moving. In `/fsedit` the preview at 200 reaches past its handle.
+5. Priest tab: pick each of the four choices; the note under Show changes; the Pulse row hides for Prayer of Mending and Nothing. The four buttons fit at the minimum window width. Hunter tab: Low ammo warning at 0, 60 and 400 with the ammo tab and the quiver. Warlock tab: the four cue switches. Warrior tab: the master and its three sub rows.
+6. Gunsight HUD page, Pieces and Target side tabs: every piece switch, the two area dropdowns and Target box tags work as in "Gunsight target side" and "Box tags" below.
+
+### 9. Panels: Chat, Minimap, Bags, Quest tracker, Data bar, Window skins
+
+1. Chat: Width 800 and Height 450 move the window at once and hold after `/reload`. Background opacity 40 lightens only the dark fill (text, tabs and the border stay solid); back at 85 it looks as before.
+2. Chat line tint: guild, party and whisper lines are still tinted green, cyan and pink. Strength 30 and 4 are clearly stronger and fainter. Raid on (amber) bands a raid or raid warning line. Each colour changes its band at once.
+3. Minimap: Width 300 with Height 200, then 400 by 200: say whether the map stretches or crops, and whether the key row, coordinates and tray stay put. Scale 75 and 150: keys, coordinates tag and tray grow with the map and its centre stays put (look at the right screen edge at 150). The quest timer under it follows the scale.
+4. Bags: the page has one switch, Right click opens only that bag, on by default with a ? tip. Needs a quiver, an ammo pouch or a soul bag on the bag bar. Right click that bag's slot: only a window of its own opens (not the combined bag window), above the slot and titled with the bag's name, and the bar's open mark lights. Right click again closes it. The left click still does what it did. A normal bag shows no extra tooltip line and its right click is the stock click. Right click an item or an empty slot in the window: nothing happens and no error (these bags hold items that cannot be used). Left click picks up and drops, drag works, shift click links to chat. In combat: the right click on the slot opens the window when combat ends, and an open window still repaints. Turn combined bags off in the game's options: the right click is then the stock click. Turn the switch off: the stock click, at once.
+5. Quest tracker: Opacity 60 fades the text with the panel; Background opacity 40 fades only the panel; Scale 150 and back to 100 keeps the corner in place, in the default seat and after a move in `/fsedit`. Width is greyed with its reason. Height is greyed until the tracker has been moved in `/fsedit`; then Height 600 resizes it at once (out of combat; in combat it applies when combat ends), the game's own Edit Mode layout named "STUwave" shows 600, and it stays after a relog.
+6. Data bar: hide FPS and MS, move GOLD first, rename TIME to CLOCK: the bar follows each step with no reload. Type in a title box: the bar renames as you type. Enter, Tab and a click elsewhere keep the title and release the keyboard (movement keys work again); Esc puts back the title the box had when you clicked in. The first row's left arrow and the last row's right arrow are dim and do nothing; the arrows are clean triangles that light on hover and darken on press.
+7. Data bar: turn REP and PROF on and click each segment; click DUR, TIME, GOLD and BAGS too. In combat nothing opens and the tooltip says "Opens after combat". Turn every segment off one by one: the last switch dims and its ? says why. Reset page puts switches, titles and order back. MEM and CPU are off by default.
+8. Window skins, Windows tab, Panels: Professions panel is the same switch as `/fsprof`.
+
+### 10. General: Roles, Profiles, Modules and Layout
+
+1. Roles, solo then in a group: the pinned Your role bar has Auto, Tank, Healer, Melee and Ranged, Auto shows what it chose in cyan beside the label, and the tab and section tags (YOUR ROLE, and "<ROLE> ONLY" in amber) and the small cyan triangle after the tab of the role in use match it. Switch the bar and everything moves at once.
+2. Tank: with Aggro colours on, plates are cyan when a mob is on you, amber when it is slipping and pink when it is not on you. Threat text, Aggro %, shows a percent on the plate (or stays hidden if the game withholds it in combat; note which). Let a mob go to someone else: a pink flash and a sound (each has its own off switch).
+3. Healer: a mob turning to you flashes pink with a sound. Melee and Ranged: the amber flash as you near the tank's threat (Warn at), and the target's plate health bar dims when you are out of range. The party frames keep working when you switch the role.
+4. Profiles, Window: Flash frames on hover. Share: EXPORT opens a box with the string selected; Ctrl+C copies all of it; All, Settings and Layout change the string and the line under it; DONE and Esc close. Your first export starts with `STUW1C` (the game's own encoding) or `STUW1L` (our own): say which.
+5. On another character: IMPORT, Ctrl+V. One cyan line says what the string holds, the Save as name is filled in, and IMPORT AS NEW PROFILE lights. Import, then pick the new profile under Profile in use and compare settings and frame positions with the first character. A normal sentence pasted in, or a string with one letter changed, shows one pink reason ("Not a STUwave profile string", "Damaged string") and the button stays off. An import never writes over a profile and never switches to it.
+6. A string made with a module off: tick "Also set which modules are on" on import and check the Reload UI count. Profiles, Modules, ALL ON: with one module off, press it and the module comes back on.
+7. Modules. Every module page's row on the left has a power button, pink when on, with the ? mark to its left. Turn Cast bars off: its page is covered by an off card ("Cast bars is off."), the row dims, the Modules row gets a count chip of 1, and the Modules list shows a RELOAD chip on Cast bars. Turn it back on: the chips clear. Turn Cast bars off and use Reload UI: the game's own cast bars show.
+8. Modules, one at a time, each turned off, Reload UI, then looked at with it on again afterwards (every module on, the default, must look and behave as before): Cast bars (the game's own player and target cast bars), Buffs and debuffs (the game's rows), Minimap (the round map and its buttons; with the quest tracker on and a timed quest, the timer drawer sits under the game's own map), Quest tracker (the game's tracker, and `/fsedit` shows no tracker handle), Bags (the game's bags and bag bar), Window skins (the game's own windows, the tooltip where the game puts it, `/fsprof` unknown), Action bars (the game's bars, stance bar and micro menu; no Console and no tabs, and turning it off turns Addon tabs off with it after one question; the bag bar still shows if Bags is on), Addon tabs (no class tab on the Console; a Shaman keeps the game's totem bar; a Druid or Paladin gets the forms on the stance bar), Gunsight HUD (no HUD and no classic HUD, the standard cast bars show, the party, quests and chat keys are still on the Console, `/fsgun` and `/fshud on` say the module is off, and the Class modules page shows a note on every tab), Pet bar (with a pet out the game's own pet bar shows, the class tabs sit closer to the Console edge, `/fspet` says the module is off; the off card's ? says the game's pet unit frame belongs to Unit Frames). Unit frames, Party frames, Raid frames, Nameplates, Chat and Data bar have switches too: they act only in a build that gates those modules, so if one does nothing but show the off card, note it and move on.
+9. Turn two modules off at once (any two of Action bars, Addon tabs, Gunsight HUD and Pet bar), Reload UI, then fight, shapeshift and summon a pet: no error.
+10. Layout page (Edit mode): the grid, typed position and right click menu checks are in "Layout editor: /fsedit", items 10 to 18. Run them here.
+
+### 11. Class tabs
+
+Each tab stands on the Console, so the Console must be drawn (`/fsconsole on`); open Addon tabs, pick the class on the strip and read the section and its ? tips. Try the clicks in combat too.
+
+1. Druid: the forms you know show in order Bear, Cat, Travel, Aquatic, Moonkin; click each and the shift happens; the ring follows the form you are in and goes dark in caster form. "Add a caster form button" gives a button that drops you out of a form; check its icon draws. With the tab on the stance bar must not draw the same forms a second time; with it off the stance bar draws them again. Switch the tab off and the block goes.
+2. Hunter: expect no tab until you can call two or more pets. With two or more, one button per pet: click calls it, the ring follows the pet out, and Revive Pet and Dismiss Pet appear with their switches.
+3. Mage, portals and teleports: teleports on the top row, portals on the bottom (teleports on the bottom with no portals); click one and it casts; the rune counts show on the buttons and dim at 0; try each of the three switches. Mage, food and water: two buttons that cast the highest rank, counts, the count switch, and the block sits right of the portals block.
+4. Rogue: each poison button shows the best rank you carry; click a poison then Main hand or Off hand and check the poison goes on; time left and charges show on the weapon buttons; strip a poison and the weapon button pulses, apply one and it stops at once; switch the pulse off. In a fight the time may disappear if the client hides it: that is right, it must not show a wrong one. The weapon tooltip line looks like "Instant Poison VI (30 min)".
+5. Warlock: a button for each demon you know; click summons; the ring follows the demon out and goes dark when it dies or is dismissed; a Soul Shard count on every demon that costs a shard (none on the Imp), dim at 0 shards. Check the Felguard button if you have it.
+6. Shaman and Warrior: Totem presets, the Shaman buff tab and Thunder Clap tab switches on the same page work as in their own sections above.
+
+### 12. Diagnostic runs
+
+1. The reads check, solo then in a group, and the panels check out of combat then in combat: see "Reads check" and "Panels check" under Developer diagnostics at the top. Send the saved tables afterwards.
+
+## Target bars and numbers: /fsconfig, Gunsight HUD, Target side
 
 Not yet checked in game. Mocked checks cover the sizes, the secret-safe numbers and the combat rules, not how it looks. With every control left alone the target box has a taller health rule than before (11 px, was 6), a 4 px resource rule, the bars as wide as the old 120% setting drew them, and no numbers.
 
@@ -356,17 +526,17 @@ Not yet checked in game. Mocked checks cover the sizes, the secret-safe numbers 
 5. Switch profile, then `/reload`: every control and the look hold per profile. Do it all once during combat: the bars are plain frames, so each change applies at once and nothing is blocked.
 6. Reset to the starting look: health 11 px, resource 4 px, width 100%, numbers off.
 
-## Gunsight target side: /fsconfig, Gunsight HUD page
+## Gunsight target side: /fsconfig, Gunsight HUD, Target side
 
 Not yet checked in game. Mocked checks cover which module sits in which area, the swap rule and the combat rules, not how it looks. Beside the target cast bar the horizon line splits two areas: upper (Target Debuffs Horizontal by default) and lower (Class Module by default). The design was a browser mockup of the Gunsight class modules (kept locally, not in this repository).
 
-1. Open /fsconfig, Gunsight HUD. The page starts with Target side (Upper area, Lower area), then Target box tags, then Player side (Next cast only; My buffs is deferred to the next release). Each group header has a ? icon; Target side's says Target debuffs shows only the debuffs you applied and the Class Module shows your class's own resource.
+1. Open /fsconfig, Gunsight HUD, Target side tab. It starts with Target side (Upper area, Lower area), then Target box tags and Target health and resource; Player side is the next tab (Next cast only; My buffs is deferred to the next release). Each group header has a ? icon; Target side's says Target debuffs shows only the debuffs you applied and the Class Module shows your class's own resource.
 2. Each area dropdown offers Target Debuffs Horizontal, Target Debuffs Vertical, Class Module, Empty, in that order. Pick Class Module for the upper area: the lower area takes Target Debuffs Horizontal at once (the swap), and both modules move on screen. Pick Target Debuffs Vertical for the lower area while the upper holds the Class Module: no swap, the lower area changes style.
 3. Pick Empty for an area: nothing draws there, no outline either (only `/fsgun outlines` outlines the areas). Both areas Empty with the tags off should look like the box did before this change.
 4. Switch "Target side areas" in the Pieces list off, or press the Console's key 6: both areas hide together. The key now shows for every class, including one with no class module yet (a Mage shows Target debuffs only).
 5. With no target, or a friendly or dead one, the Target Debuffs area is hidden. With no target at all the Class Module hides too (its chips never float alone); a friendly or dead target keeps it. Retarget a hostile mob and everything returns.
 6. Switch profile, then `/reload`: both dropdowns and the modules in the areas hold per profile. Do it once in combat: the areas are plain frames and nothing is blocked.
-7. Class module background (Target side, a slider with a ? icon, 0 to 100 percent in steps of 5, default 80): with a hostile target, a dark plate with the party frame boxes' cut corner, cyan edge and soft glow sits behind the Class Module (compare it with a party box: same border), a few pixels larger than its area, and it reads on bright ground (Barrens daylight); the edge and glow never draw over the module's art. Drag the slider: the plate fades and firms live, with no reload. At 0 it is gone entirely. It follows the module to the other area, hides with no target, and never shows behind Target Debuffs or the Coming soon plate. Not yet checked in game; mocked checks only.
+7. Class module plate (Class modules page, General tab, Module plate: the Background and Border switches and an Opacity slider with a ? icon, 0 to 100 percent in steps of 5, default 80; each switch off takes away the fill or the edge and glow, both off takes the plate away): with a hostile target, a dark plate with the party frame boxes' cut corner, cyan edge and soft glow sits behind the Class Module (compare it with a party box: same border), a few pixels larger than its area, and it reads on bright ground (Barrens daylight); the edge and glow never draw over the module's art. Drag the slider: the plate fades and firms live, with no reload. At 0 it is gone entirely. It follows the module to the other area, hides with no target, and never shows behind Target Debuffs or the Coming soon plate. Not yet checked in game; mocked checks only.
 
 ### Target debuffs: rows, axis, time and stacks
 
@@ -375,7 +545,7 @@ Not yet checked in game. Mocked checks cover the layout, the time text, the comb
 1. Horizontal: Warrior on a hostile mob, cast Rend and Sunder Armor. Each debuff gets a row (icon, time, drain bar), at most five rows. Time reads whole seconds above 3 s ("13s") and tenths below ("2.6", never wider than "13s", so it stops short of the bar); the bar drains 30 s to 0 and turns amber at 3 s or less. Sunder Armor shows "x2", "x3" as it stacks. A debuff that runs out leaves its row at once and the rows below move up, for every class (a Shaman's Flame Shock after its 12 s, a Priest's Shadow Word: Pain), when "Keep fallen-off debuffs as a reapply reminder" is off or you are out of combat. Cast it again and the row comes back with a white flash.
 2. Vertical: pick Target Debuffs Vertical. The existing time axis shows compressed (about 3.7 px a second), 26 px right of the target cast bar, with TARGET DEBUFFS above it. A Priest or Warlock chip slides down toward the amber band and is gone when its DoT runs out.
 3. In combat the numbers are an estimate: a cast that is resisted still counts, and refreshes that are not casts (a Rogue's poison procs, Deep Wounds) do not show until combat ends. A row with "?" has no known duration yet; it fills in after one fight on any mob with that debuff. Report a row that stays wrong after combat ends.
-4. Reapply reminder: Gunsight HUD page, Target side, "Keep fallen-off debuffs as a reapply reminder" (on by default; its ? says what it does). In a fight, let a debuff of yours run out (Flame Shock, Rend): its row or chip stays with a red outline, no time and an empty bar track (the vertical chip rests at 0). Recast it and the normal row returns with the white flash. The red outline also goes when you change target, the target dies, the fight ends, or you switch the option off. Out of combat nothing is kept.
+4. Reapply reminder: Gunsight HUD page, Target side tab, "Keep fallen-off debuffs as a reapply reminder" (on by default; its ? says what it does). In a fight, let a debuff of yours run out (Flame Shock, Rend): its row or chip stays with a red outline, no time and an empty bar track (the vertical chip rests at 0). Recast it and the normal row returns with the white flash. The red outline also goes when you change target, the target dies, the fight ends, or you switch the option off. Out of combat nothing is kept.
 5. Paladin: with the Class Module (Seal) in an area, Judgement is not listed in Target debuffs; Holy Vengeance and Hammer of Justice are. Retarget: the list restarts for the new target.
 
 ### Class Module: shards, combo points and totem poles
@@ -391,7 +561,7 @@ Not yet checked in game. Mocked checks cover the layout and the events, not how 
 
 ## Gunsight buff reminders in combat (Priest, Warlock)
 
-Not yet checked in game. Mocked checks cover the logic and the secret handling, not what the client really answers. Needs `/reload` after an update, and a mob to pull. The pink pulsing tile under the Gunsight HUD is the reminder; Buff reminders must be on in `/fsconfig`, Gunsight HUD page.
+Not yet checked in game. Mocked checks cover the logic and the secret handling, not what the client really answers. Needs `/reload` after an update, and a mob to pull. The pink pulsing tile under the Gunsight HUD is the reminder; Buff reminders must be on in `/fsconfig`, Gunsight HUD page, Pieces tab.
 
 1. Priest: with Power Word: Fortitude and Inner Fire both up, pull a mob. No pink tile shows. In the fight, right click Fortitude off your buff bar. Within about a tenth of a second a pink pulsing Fortitude tile appears; Inner Fire stays dark. Cast Fortitude on yourself again in the fight: the tile goes dark again.
 2. Priest: right click Inner Fire off in the fight. Its tile appears, Fortitude's stays dark if it is up.
@@ -409,16 +579,16 @@ Not yet checked in game. Mocked checks cover the switch, the key tab and the com
 1. HUD on: the Console's last key is Party Frame (the green group key). Click it: the party frames hide and the key light goes out; click again: they return. Hover it: the tooltip opens toward the Console and stays on screen.
 2. HUD off (`/fsgun off`, or the master switch in `/fsconfig`): the HUD keys go and the tab is the one Party Frame key at the right end of the top edge. The key still switches the frames, and the frames do not move or flicker when the HUD goes off or comes back. `/fsgun on` brings the keys back with Party Frame last (after a login with the HUD off it needs a `/reload` first).
 3. `/fsparty hide`, then `/fsparty show`: each prints one line (`party frames: hidden` / `shown`), the frames follow, and the Console key light follows. Do it with the HUD on and again with it off.
-4. `/fsconfig`, Unit Frames page: a Party frames group sits under Player and target, with "Show party frames", "Move party frames" and "Reset position". The switch follows the key and `/fsparty` both ways while the window is open, and is not dimmed when the Gunsight master switch is off. Each row has a `?` icon; hover them.
-5. Move: press Move. The window closes and `/fsedit` opens; drag the Party handle, then DONE or Esc: the window reopens on Unit Frames and the frames sit where you dropped them. Right-click the Party handle in `/fsedit` to send them back.
-6. Reset position: press Reset, answer the question: the frames return to their default seat. Cancel leaves them. In combat Move prints "can't edit the layout in combat" and the window stays; Reset clears the saved seat at once and the frames move when combat ends.
+4. `/fsconfig`, Party frames page, Frames tab: "Show party frames" follows the key and `/fsparty` both ways while the window is open, and is not dimmed when the Gunsight master switch is off. The row has a `?` icon; hover it.
+5. Move: type `/fsedit`, drag the Party handle, then DONE or Esc: the frames sit where you dropped them. Right click the Party handle and pick Reset position to send them back.
+6. Reset position: in `/fsedit` right click the Party handle and pick Reset position: the frames return to their default seat. In combat `/fsedit` refuses to start.
 7. In combat: click the key (or `/fsparty hide`) with the frames up: they fade at once and the real hide lands when combat ends (the line says "settles when combat ends"). Clicking the frames while faded still targets until then. Switching on while they were hidden before the fight shows them when combat ends. Nothing prints an "action blocked" error.
 8. Profiles: turn the party frames off in one profile and leave them on in another. Switching profile in `/fsconfig` moves the frames, the key light and the config switch together, with the HUD on and off.
 9. `/reload` and a login: the frames come back as you left them. Do a `/reload` mid fight (or log in mid fight): the frames build when the fight ends and follow the saved switch; with the HUD off the tab is its full width until then and shrinks to the party key when the fight ends.
 
 ## Raid frames: /fsconfig
 
-Not yet checked in game. Mocked checks cover the grid, the looks, the combat rules and the switch, not how it looks. The raid grid has its own switch, "Show raid frames" under "Show party frames" on the Unit Frames page of `/fsconfig` (on by default, `raid.shown`). Join a raid (or convert a party to a raid) to see it.
+Not yet checked in game. Mocked checks cover the grid, the looks, the combat rules and the switch, not how it looks. The raid grid has its own switch, "Show raid frames" on the Raid frames page of `/fsconfig`, Frames tab (on by default, `raid.shown`). Join a raid (or convert a party to a raid) to see it.
 
 1. Ten or fewer in the raid: one column per subgroup with members, five boxes down, your own group first with a pink "G" label, the others in violet. Each box shows the role letter (T cyan, H green, D red), the name in its class colour, a health rail and a thin mana line. Your own box has a short pink tick on its left. The grid sits on the seat of its size (see below), not on the party frames, and the party frames are gone.
 2. Eleven or more: the boxes turn into taller tiles that fill from the bottom in the class colour, with the name centred in white and a hairline of mana at the foot. Groups that emptied leave no gap. Report how far the 40 member grid reaches to the right.
@@ -432,23 +602,23 @@ Not yet checked in game. Mocked checks cover the grid, the looks, the combat rul
 
 Moving the grid and the preview (not yet checked in game; mocked checks only). A `/reload` after updating is enough, no full restart:
 
-10. Open the editor: `/fsedit`, Move on the "Move raid frames" row of the Unit Frames page, or MOVE RAID FRAMES on the Layout page. A preview raid appears even when you are not in a raid, at the default seat of the size on show (10 until you pick another), with a cyan "Raid 10" handle outside it, its label above the box. The default seats are just left of the party frames' default place, with every size's right edge on the same line, so a bigger size grows leftward; none of them overlaps the party frames or the focus frame (report any overlap you see at the default UI scale). The panel's RAID row has 5, 10, 15, 20, 25 and 40, the current size selected. Click each size: 5 and 10 draw the mini boxes, 15 and up the tiles, in group columns of five with G1 and so on above them (G1 pink, the rest violet), and the handle swaps to that size's ("Raid 25"). The handle covers the preview exactly at every size. Report any difference in look between the preview and the real grid at the same size; there should be none.
+10. Open the editor: `/fsedit`, or MOVE RAID FRAMES on the Layout page. A preview raid appears even when you are not in a raid, at the default seat of the size on show (10 until you pick another), with a cyan "Raid 10" handle outside it, its label above the box. The default seats are just left of the party frames' default place, with every size's right edge on the same line, so a bigger size grows leftward; none of them overlaps the party frames or the focus frame (report any overlap you see at the default UI scale). The panel's RAID row has 5, 10, 15, 20, 25 and 40, the current size selected. Click each size: 5 and 10 draw the mini boxes, 15 and up the tiles, in group columns of five with G1 and so on above them (G1 pink, the rest violet), and the handle swaps to that size's ("Raid 25"). The handle covers the preview exactly at every size. Report any difference in look between the preview and the real grid at the same size; there should be none.
 11. The fake members: a spread of classes, roles and first names; your own box with the pink tick and your name; one member under 35% (red edge, red percent), one dead (DEAD, dashed edge), one offline (OFF), one out of range (faded). Even at size 5 each of those four shows.
 12. Drag one size's handle elsewhere, then pick another size: the other size is still at its own default seat. Each size keeps its own place. Arrows and Shift+arrow nudge the size on show from where it sits. DONE or Esc. In a raid, the grid sits at the seat of the smallest size that fits the group (1 to 5 members use 5, 6 to 10 use 10, 11 to 15 use 15, 16 to 20 use 20, 21 to 25 use 25, 26 to 40 use 40), snapped to the grid, and the party frames never move it. `/reload`: every seat stays.
-13. Right-click a handle, or press Reset on the "Reset raid position" row (it resets the size picked on the "Raid layout" row), or Reset all positions: that size (or every size) goes back to its default seat. The other sizes keep their seats.
+13. Right click a handle and pick Reset position, or press Reset all positions on the Layout page: that size (or every size) goes back to its default seat. The other sizes keep their seats.
 14. In a raid, the preview takes the real grid's place on screen while the editor is up (the real grid is only made invisible) and the real grid is back when you leave, in its current look. Someone joins past a size's limit (10 to 11 members, for example): out of combat the grid moves to the next size's seat; in combat it stays until the fight ends. Start a fight with the editor up: it leaves, the preview goes, the real grid returns, and no "action blocked" error prints. The editor refuses to start in combat.
-15. The preview size on the Layout page ("Preview size"), on the Unit Frames page ("Raid layout") and on the editor's panel are one setting: change one with the editor open and the others follow, and the handle changes with it. It survives `/reload`.
+15. The preview size on the Layout page ("Preview size"), on the Raid frames page, Style tab ("Raid layout", in the preview header) and on the editor's panel are one setting: change one with the editor open and the others follow, and the handle changes with it. It survives `/reload`.
 
 ## Professions panel: /fsprof
 
-Not yet checked in game. `/fsprof` shows or hides the panel and the choice survives `/reload`. The "Professions panel" switch on the Unit Frames page of `/fsconfig` is the same setting, saved per profile. A hidden panel from before this update stays hidden once (it is copied into the active profile on first load, unless that profile already stores its own choice).
+Not yet checked in game. `/fsprof` shows or hides the panel and the choice survives `/reload`. The "Professions panel" switch on the Window skins page of `/fsconfig` (Windows tab, Panels) is the same setting, saved per profile. A hidden panel from before this update stays hidden once (it is copied into the active profile on first load, unless that profile already stores its own choice).
 
 1. Click each profession row once (an Alchemy, Blacksmithing, Cooking or First Aid row, for example). That profession's window opens. Hovering a row names the profession and, on those rows, adds "Click to open".
 2. A Mining row opens the Smelting window.
 3. Herbalism, Skinning and Fishing rows do nothing when clicked: no window, no cast, no bobber. Their tooltip shows the name only. Unknown or non-English profession names are not clickable.
 4. In combat, type `/fsprof`. It prints that the change applies after combat, the panel stays as it is, and it flips when combat ends. Learn or drop a profession in combat (if you can) and the rows catch up after combat.
 5. `/reload` with the panel hidden: it stays hidden. A click opens the window once (it does not open and immediately close), with the action-button "on key down" option both on and off.
-6. Open `/fsconfig`, Unit Frames: "Professions panel" shows the same state as the panel. Flip it, and `/fsprof` flips it back. In combat it waits until combat ends, like `/fsprof`.
+6. Open `/fsconfig`, Window skins, Windows tab: "Professions panel" shows the same state as the panel. Flip it, and `/fsprof` flips it back. In combat it waits until combat ends, like `/fsprof`.
 7. Click the small pink glyph at the right end of the panel's title bar (hover: "Minimise"). The rows fold away and the panel collapses down: the title bar ends up where the panel's bottom edge was, like the chat's minimise. Hover again: "Restore"; click it and the full list grows back upward from the same bottom edge. `/fsprof` twice keeps the panel minimised. `/reload` keeps it minimised, and each profile keeps its own state.
 8. In combat, click the glyph. It prints that the change applies after combat, the panel stays as it is, and it folds or unfolds when combat ends. Drag the panel in `/fsedit` while minimised: its bottom edge follows the drag and it stays minimised after Done.
 
@@ -461,7 +631,7 @@ Not yet checked in game. `/fsprof` shows or hides the panel and the choice survi
 
 ## Nameplates: STUwave nameplates switch
 
-Not yet checked in game. `/fsconfig`, Unit Frames, Nameplates: "STUwave nameplates" (on by default, `nameplates.enabled`, hover the `?` for the tip).
+Not yet checked in game. `/fsconfig`, Nameplates page, Parts tab (What shows): "STUwave nameplates" (on by default, `nameplates.enabled`, hover the `?` for the tip).
 
 1. Turn it off with plates on screen: our bars, auras and "!" disappear at once and the game's own nameplates are back on every plate. Other addons' plate additions (Questie icons) are back where Questie puts them. A plate that comes into range afterwards also stays the game's own.
 2. Turn it on: our plates come back on every plate in range without a `/reload`, including in combat.
@@ -540,7 +710,7 @@ Pick the class module for the upper or lower Gunsight area in the config window,
 
 ## Box tags: level and class, health percent, target of target
 
-Not yet checked in game. Mocked checks cover the seats, the secret-safe text and the combat rules, not how it looks. Design: the Gunsight class modules mockup (kept locally), states A to F. The three tags (Level and rank, Health percent, Target of target) are switches on the Gunsight HUD page under Target box tags, all on by default.
+Not yet checked in game. Mocked checks cover the seats, the secret-safe text and the combat rules, not how it looks. Design: the Gunsight class modules mockup (kept locally), states A to F. The three tags (Level and rank, Health percent, Target of target) are switches on the Gunsight HUD page, Target side tab, under Target box tags, all on by default.
 
 1. Target a hostile elite: a small tag on the top edge, left of KICK, reads L plus the level in white and ELITE in gold. A normal mob shows only the level, a rare shows RARE, a boss BOSS, a skull-level mob `??`. Switch target and the tag follows; level up on a target dummy of another level and it updates.
 2. A tag on the bottom edge, left, shows the target's health percent in green and follows hits and heals, in combat too (the value is hidden by the game there; say if it stays blank).
@@ -561,7 +731,7 @@ Not yet checked in game. With numbers off the target box is exactly as before.
 
 ## Gunsight: player class badge
 
-Not yet checked in game. Mocked checks cover the seat, the tex coords per class, the secret-safe reads and the combat rules, not how it looks. Design: the player class icon mockup (kept locally), concept B, with the game's own round class icon instead of the mockup's drawn disc. A `/reload` applies it; no full restart is needed (no new file). Switch: "Player class icon" on the Gunsight HUD page under Target box tags, on by default.
+Not yet checked in game. Mocked checks cover the seat, the tex coords per class, the secret-safe reads and the combat rules, not how it looks. Design: the player class icon mockup (kept locally), concept B, with the game's own round class icon instead of the mockup's drawn disc. A `/reload` applies it; no full restart is needed (no new file). Switch: "Player class icon" on the Gunsight HUD page, Target side tab, under Target box tags, on by default.
 
 1. Target a player (a friendly one in town is enough): a small chamfered tile with the round class icon sits on the target box's top left corner, hanging out of the box, and the level tag is a little further right than usual. Try a few classes (a Priest, a Warlock, a Rogue, a Druid) and say if any icon is the wrong class or is cropped, stretched or square instead of round.
 2. Target an NPC, a pet and a totem: no tile, and the level tag is exactly where it always was. Switch from a player to an NPC and back: the tile goes and returns with the right class at once, never the previous target's class.
