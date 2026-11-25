@@ -77,7 +77,8 @@ end
 -- `sample` (a key like `preview`) is for a frame that IS showing but may be empty (a Gunsight area with no debuffs of yours): the
 -- flash puts the sample in it for the hover. `fallback` (a rect, or a function answering one) stands in for the rect of a frame
 -- that is hidden and has never been laid out, so the client has none to give; a frame that is showing never takes it. `seat` may
--- itself be a plain rect (a frame that was never built, seated from the layout); `scale` is then the scale its sample is drawn at.
+-- itself be a plain rect (a frame that was never built, seated from the layout). `scale` is the scale the sample is drawn at (the
+-- scale the real frame is drawn at, so the sample is 1:1 with it); a hidden rect carries it to the flash.
 -- A plain table with the four fields is taken as it is (the quest tracker answers its own rect).
 local function Read(thing, ctx)
     if type(thing) ~= "table" then return nil end
@@ -100,6 +101,7 @@ local function Read(thing, ctx)
                 if type(fallback) == "function" then fallback = fallback() end
                 if type(fallback) == "table" then r = PlainRect(fallback, false) end
             end
+            if r and scale and hidden then r.scale = scale end
         end
         if not r then return nil end
         if hidden then
@@ -176,14 +178,15 @@ end
 -- `module` the Core/ModuleSwitch.lua key that builds it, `use` the unit frame the Unit Frames page can hand back to the game,
 -- `layout` the Layout.lua entry it sits at (the id itself when none is named; a function for the raid, whose seat follows a
 -- size), `preview` the key of the sample the flash can build (none: the dimmed outline says why), and `draw` what the sample is
--- drawn in: "ui" the UI units the frame is built in (the unit frames, the raid grid, already scaled), "design" the design px of
--- the pet panel (times the layout scale), none the party stack, fitted to the width of the seat as the real container's is.
+-- drawn in: "ui" the UI units the frame is built in (the unit frames, the raid grid, already scaled), "design" design px, which the
+-- sample takes to the layout scale as the real frame does (the pet panel, the party stack). `corner` seats the sample by its top
+-- left on the seat's (the party rows hang from the top left of the container, so a stack taller than the box grows downward).
 local OFF = {
     player = { module = "m.uf", use = "player", preview = "player", draw = "ui" },
     target = { module = "m.uf", use = "target", preview = "target", draw = "ui" },
     focus = { module = "m.uf", use = "focus", preview = "focus", draw = "ui" },
     boss = { module = "m.uf", use = "boss", preview = "boss", draw = "ui" },
-    party = { module = "m.party", preview = "party" },
+    party = { module = "m.party", preview = "party", draw = "design", corner = true },
     petcontainer = { module = "m.pet", preview = "petcontainer", draw = "design" },
     raid = { module = "m.raid", layout = RaidSeatId, preview = "raid.sample", draw = "ui" },
     grid = { module = "m.ab" },
@@ -218,7 +221,21 @@ local function OffSeat(id)
     local rect = SeatRect(layout or id)
     if not rect then return nil end
     local scale = spec.draw == "ui" and 1 or spec.draw == "design" and rect.scale or nil
+    if spec.corner then rect.point, rect.ax, rect.ay = "TOPLEFT", rect.left, rect.bottom + rect.height end
     return { { seat = rect, hidden = true, reason = reason, preview = spec.preview, scale = scale } }
+end
+
+-- The scale the sample of a frame that IS built (and only hidden) is drawn at: the one the real frame is drawn at, 1 for the frames
+-- built in UI units and the layout scale for the design px ones. nil where the frame has no sample.
+local function DrawScale(id)
+    local spec = OFF[id]
+    if not spec then return nil end
+    if spec.draw == "ui" then return 1 end
+    if spec.draw == "design" and type(FS.Layout) == "table" and type(FS.Layout.Scale) == "function" then
+        local scale = Num(FS.Layout.Scale())
+        if scale and scale > 0 then return scale end
+    end
+    return nil
 end
 
 -- Frames that can be hidden by a switch of their own: when it is off that, not the group or the target, is why they are empty.
@@ -262,7 +279,7 @@ local function Seat(id)
             local ok, off = pcall(switch)
             if ok and off == true then reason = T.SWITCH_REASON end
         end
-        return { { seat = found, reason = reason, preview = SEAT_PREVIEWS[id] and id or nil,
+        return { { seat = found, reason = reason, preview = SEAT_PREVIEWS[id] and id or nil, scale = DrawScale(id),
             fallback = function() return SeatRect(id) end } }
     end
 end

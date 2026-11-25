@@ -1394,6 +1394,24 @@ def _check_preview_sizes_and_looks() -> None:
     _assert_quiet(rt)
 
 
+def _check_style_sample_is_the_size_of_the_editor_preview_at_any_raid_scale() -> None:
+    """The sample the config hover draws for a raid that was never built (RaidFrames.NewStylePreview) takes its size in UI units
+    from the same PlaceGrid as the editor's preview and the real grid, so it needs no scaling at the seat: at the Raid scale
+    setting too, a ten member grid of the sample is as big as the editor's."""
+    for percent in (100, 150):
+        rt = _client()
+        rt.execute(f"FS.Config.Set('raid.scale', {percent})")
+        pv = _preview(rt)
+        assert pv.SetSize(10) is True and pv.Show() is True
+        _, _, width, height = pv.Rect()
+        assert width > 100 and height > 50, f"the editor's grid is {width}x{height}"
+        rt.execute("__sample = FS.RaidFrames.NewStylePreview(CreateFrame('Frame')) __sample.Restyle()")
+        sample = rt.eval("__sample.frame")
+        assert _close(sample.w, width) and _close(sample.h, height), (
+            f"raid scale {percent}: the sample is {sample.w}x{sample.h}, the editor's grid {width}x{height}"
+        )
+
+
 def _check_preview_fake_members() -> None:
     """The fake raid is varied and deterministic: the player's own cell with the pink tick, one member at
     or under 35% (the red edge and the percent), one dead, one offline, one out of range (the cell at
@@ -1856,6 +1874,7 @@ def main() -> int:
         ("own seat waits out combat", _check_own_seat_waits_out_combat),
         ("own seat on whole pixels", _check_own_seat_on_whole_pixels),
         ("preview sizes and looks", _check_preview_sizes_and_looks),
+        ("style sample matches the editor preview at any raid scale", _check_style_sample_is_the_size_of_the_editor_preview_at_any_raid_scale),
         ("preview fake members", _check_preview_fake_members),
         ("preview reads no unit and builds nothing secure", _check_preview_reads_no_unit_and_builds_nothing_secure),
         ("preview seat", _check_preview_seat),

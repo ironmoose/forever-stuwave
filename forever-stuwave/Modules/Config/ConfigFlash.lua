@@ -35,7 +35,6 @@ local GLOW_SIZE, GLOW_ALPHA = 12, 0.5   -- the prototype's box-shadow: 0 0 12px 
 local NOT_SHOWN = "Not on screen right now."
 local DIM = 0.45              -- a dimmed outline's share of the pulse
 local CAP_PAD, CAP_H = 6, 16  -- the caption plate: side padding and height, whole pixels
-local PARTY_ROWS = 4          -- sample rows stacked in the party preview
 
 if Config and Config.RegisterDefault then Config.RegisterDefault(F.KEY, true) end
 
@@ -205,29 +204,13 @@ MAKERS.petcontainer = function(host)
     return { frame = pv.frame, restyle = pv.Restyle }
 end
 
+-- The party module's own stack of sample rows, at the container's offsets and sizes in design px (PartyFrames.NewSampleStack).
 MAKERS.party = function(host)
     local party = FS.PartyFrames
-    if not (party and party.NewStylePreview) then return nil end
-    local stack = CreateFrame("Frame", nil, host)
-    local rows = {}
-    for i = 1, PARTY_ROWS do
-        local pv = party.NewStylePreview(stack)
-        if type(pv) ~= "table" or not pv.frame then return nil end
-        rows[i] = pv
-    end
-    local function Restyle()
-        local y, w = 0, 0
-        for _, pv in ipairs(rows) do
-            if pv.Restyle then pv.Restyle() end
-            local h = pv.frame:GetHeight() or 0
-            pv.frame:ClearAllPoints()
-            pv.frame:SetPoint("TOPLEFT", stack, "TOPLEFT", 0, -y)
-            y = y + h + 2
-            w = math.max(w, pv.frame:GetWidth() or 0)
-        end
-        stack:SetSize(math.max(w, 1), math.max(y - 2, 1))
-    end
-    return { frame = stack, restyle = Restyle }
+    if not (party and party.NewSampleStack) then return nil end
+    local pv = party.NewSampleStack(host)
+    if type(pv) ~= "table" or not pv.frame then return nil end
+    return { frame = pv.frame, restyle = pv.Restyle }
 end
 
 -- The Raid page's own sample (plain cells on made up members, no unit and no event), for a raid grid that was never built.
@@ -323,7 +306,9 @@ end
 -- Shows the sample for a hidden rect (or for an area that is showing but may be empty: `rect.sample`) and answers the rect it
 -- fills (and its key), or nil when there is none to show. `used` is the pass's set of keys in use. A rect from a frame that was
 -- never built carries `scale`, `point`, `ax` and `ay`: the sample is drawn at that scale and its own anchor point sits on that
--- spot; any other rect has the sample fitted to its width, from its top left.
+-- spot. A rect with a `scale` and no spot (a built frame that is hidden) has the sample drawn at that scale with its top left
+-- on the rect's. A sample is never fitted to the width of a seat: it is drawn at the scale the real frame is, which is `scale`;
+-- only a rect that gives none (nothing real does) has it fitted to its width, from its top left.
 local function ShowGhost(rect, used)
     local key = rect.preview or rect.sample
     if not key or InCombat() then return nil end

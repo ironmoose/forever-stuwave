@@ -1020,9 +1020,9 @@ function T.the_party_pet_and_raid_previews_are_built_from_the_style_tab_samples_
     local W = boot()
     local rows = 0
     FS.PartyFrames = FS.PartyFrames or {}
-    FS.PartyFrames.NewStylePreview = function(parent)
+    FS.PartyFrames.NewSampleStack = function(parent)
         rows = rows + 1
-        local f = CreateFrame("Frame", nil, parent); f:SetSize(231, 68)
+        local f = CreateFrame("Frame", nil, parent); f:SetSize(231, 294)
         return { frame = f, Restyle = function() end }
     end
     local pet = 0
@@ -1041,7 +1041,7 @@ function T.the_party_pet_and_raid_previews_are_built_from_the_style_tab_samples_
     } }
     local p = seat("party", target("PartyF", 40, 700, 231, 294)); p.shown = false
     W.Flash.Show({ key = "x", page = "party" }); tick(W, 0.01)
-    eq(rows, 4, "a short stack of sample rows"); yes(W.Flash.ghosts.party.host:IsShown())
+    eq(rows, 1, "the party module's own stack of sample rows"); yes(W.Flash.ghosts.party.host:IsShown())
     W.Flash.Clear(); no(W.Flash.ghosts.party.host:IsShown())
     local pp = seat("petcontainer", target("PetF", 90, 300, 348, 68)); pp.shown = false
     W.Flash.Show({ key = "x", page = "pet" }); tick(W, 0.01)
@@ -1442,12 +1442,14 @@ local function trackScale()
     end
 end
 
-local function partyStub()
-    local made = { rows = 0 }
+-- The stack the party module draws is the container's own box in design px (the real one is checked against the real rows in
+-- tools/partyframes-harness.py); `w` and `h` make it overflow the container, as rows with custom sizes do.
+local function partyStub(w, h)
+    local made = { stacks = 0 }
     FS.PartyFrames = FS.PartyFrames or {}
-    FS.PartyFrames.NewStylePreview = function(parent)
-        made.rows = made.rows + 1
-        local f = CreateFrame("Frame", nil, parent); f:SetSize(231, 68)
+    FS.PartyFrames.NewSampleStack = function(parent)
+        made.stacks = made.stacks + 1
+        local f = CreateFrame("Frame", nil, parent); f:SetSize(w or 231, h or 294)
         return { frame = f, Restyle = function() end }
     end
     return made
@@ -1499,7 +1501,7 @@ function T.a_party_row_hovered_with_party_frames_off_shows_the_sample_at_the_lay
     near(seats[1].left, 775.5); near(seats[1].bottom, 498); near(seats[1].width, 231); near(seats[1].height, 294)
     eq(#W.Targets.Resolve(PARTY_ROW), 0, "nothing of it is showing")
     W.Flash.Show(PARTY_ROW); tick(W, 0.01)
-    eq(made.rows, 4, "the Style tab's party row, four of them")
+    eq(made.stacks, 1, "the party module's own stack of sample rows")
     local g = W.Flash.ghosts.party
     yes(g and g.host:IsShown(), "the sample is up")
     eq(g.host.parent, UIParent, "on UIParent, a plain host")
@@ -1509,7 +1511,7 @@ function T.a_party_row_hovered_with_party_frames_off_shows_the_sample_at_the_lay
     yes(o, "the outline frames it"); eq(captionOf(o), nil, "a real sample needs no caption")
     local ox, oy, ow, oh = rectOf(o)
     near(ox, 775.5 - W.Spec.FLASH_OUT); near(ow, 231 + 2 * W.Spec.FLASH_OUT, "the outline is as wide as the sample")
-    near(oy, 514 - W.Spec.FLASH_OUT, "and as tall as the four rows (278)"); near(oh, 278 + 2 * W.Spec.FLASH_OUT)
+    near(oy, 498 - W.Spec.FLASH_OUT, "and as tall as the container"); near(oh, 294 + 2 * W.Spec.FLASH_OUT)
     W.Flash.Clear()
     no(g.host:IsShown(), "gone when the hover ends"); eq(#overlays(W), 0)
     W.Open("party", "style")
@@ -1553,7 +1555,7 @@ function T.with_party_frames_off_in_combat_nothing_is_built_and_the_dimmed_outli
     local made = partyStub()
     __combat = true
     W.Flash.Show(PARTY_ROW); tick(W, 0.01)
-    eq(made.rows, 0, "nothing is built in combat")
+    eq(made.stacks, 0, "nothing is built in combat")
     local o = overlays(W)[1]
     yes(o, "the seat is outlined"); eq(captionOf(o), "Module is off")
     local x, y, w, h = rectOf(o)
@@ -1746,6 +1748,92 @@ function T.a_party_frame_hidden_by_its_switch_with_no_rect_yet_still_gets_its_sa
     -- a visible frame whose rect is unreadable is not replaced by the seat
     container.shown = true
     eq(#W.Targets.Seats(PARTY_ROW), 0, "a showing frame with no rect is skipped as before")
+end
+
+-- ---- the sample is drawn 1:1, at the scale the real frame is drawn at, never fitted to the width of the seat -----------------
+
+local function scaled720(scale)
+    UIParent.w, UIParent.h = 1280, 720
+    FS.Layout.Scale = function() return scale end
+end
+
+function T.a_party_sample_with_the_module_on_is_drawn_at_the_layout_scale_whatever_the_size_of_the_container()
+    local W = offboot({})
+    scaled720(0.5)
+    realSeats({ "party" })
+    trackScale()
+    local made = partyStub(300, 400)                 -- rows with custom sizes overflow the container's box
+    local container = seat("party", target("ForeverSTUwavePartyContainer", 40, 600, 115.5, 147))
+    container.shown = false                          -- solo: the container is hidden
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    eq(made.stacks, 1)
+    local g = W.Flash.ghosts.party
+    yes(g and g.host:IsShown(), "the sample is up")
+    eq(g.host.scaleSet, 0.5, "the scale the real rows are drawn at, not the width of the seat over the width of the sample")
+    local point, x, y = hostAnchor(g)
+    eq(point, "TOPLEFT"); near(x, 40 / 0.5, "the sample's top left is the container's"); near(y, (600 + 147) / 0.5)
+    local ox, oy, ow, oh = rectOf(overlays(W)[1])
+    near(ow, 300 * 0.5 + 2 * W.Spec.FLASH_OUT, "the outline is as big as what is drawn"); near(oh, 400 * 0.5 + 2 * W.Spec.FLASH_OUT)
+    near(ox, 40 - W.Spec.FLASH_OUT); near(oy, 747 - 200 - W.Spec.FLASH_OUT)
+    W.Flash.Clear()
+end
+
+function T.a_party_sample_with_the_module_off_is_drawn_at_the_layout_scale_from_the_top_left_of_the_seat()
+    local W = offboot({ "m.party" })
+    scaled720(0.5)
+    realSeats({ "party" })
+    trackScale()
+    local made = partyStub(300, 400)
+    W.Flash.Show(PARTY_ROW); tick(W, 0.01)
+    eq(made.stacks, 1)
+    local g = W.Flash.ghosts.party
+    eq(g.host.scaleSet, 0.5)
+    local point, x, y = hostAnchor(g)
+    -- the seat: centre 640 - 389 * 0.5 across and 360 - 75 * 0.5 up, 115.5 by 147 (the container box at the layout scale)
+    eq(point, "TOPLEFT", "rows hang from the top left of the container, as the real ones do, so a taller stack grows downward")
+    near(x, (445.5 - 115.5 / 2) / 0.5); near(y, (322.5 + 147 / 2) / 0.5)
+    local ox, oy, ow, oh = rectOf(overlays(W)[1])
+    near(ow, 150 + 2 * W.Spec.FLASH_OUT); near(oh, 200 + 2 * W.Spec.FLASH_OUT)
+    near(ox, 387.75 - W.Spec.FLASH_OUT); near(oy, 396 - 200 - W.Spec.FLASH_OUT)
+    W.Flash.Clear()
+end
+
+function T.a_pet_sample_with_the_module_on_is_drawn_at_the_layout_scale_whatever_the_size_of_the_container()
+    local W = offboot({})
+    scaled720(0.5)
+    realSeats({ "petcontainer" })
+    trackScale()
+    local made = petStub()
+    local panel = seat("petcontainer", target("FSPetContainer", 100, 200, 100, 34))     -- not 348 * 0.5 wide
+    panel.shown = false
+    W.Flash.Show({ key = "bars.w", page = "pet", tab = "style" }); tick(W, 0.01)
+    eq(made.built, 1)
+    local g = W.Flash.ghosts.petcontainer
+    eq(g.host.scaleSet, 0.5, "the pet panel's design px at the layout scale")
+    local point, x, y = hostAnchor(g)
+    eq(point, "TOPLEFT"); near(x, 100 / 0.5); near(y, 234 / 0.5)
+    local _, _, ow, oh = rectOf(overlays(W)[1])
+    near(ow, 348 * 0.5 + 2 * W.Spec.FLASH_OUT); near(oh, 68 * 0.5 + 2 * W.Spec.FLASH_OUT)
+    W.Flash.Clear()
+end
+
+function T.a_unit_frame_sample_with_the_module_on_is_drawn_in_ui_units_whatever_the_size_of_the_hidden_frame()
+    local W = offboot({})
+    scaled720(0.5)
+    realSeats({ "target" })
+    trackScale()
+    sampleFrames()
+    local frame = seat("target", target("ForeverSTUwaveTargetFrame", 300, 600, 100, 30))     -- not 260 by 73
+    frame.shown = false
+    W.Flash.Show({ key = "unitFrames.hideTarget" }); tick(W, 0.01)
+    local g = W.Flash.ghosts.target
+    yes(g and g.host:IsShown())
+    eq(g.host.scaleSet, 1, "built in UI units, so drawn at 1")
+    local point, x, y = hostAnchor(g)
+    eq(point, "TOPLEFT"); near(x, 300); near(y, 630)
+    local _, _, ow, oh = rectOf(overlays(W)[1])
+    near(ow, 260 + 2 * W.Spec.FLASH_OUT); near(oh, 73 + 2 * W.Spec.FLASH_OUT)
+    W.Flash.Clear()
 end
 
 function T.a_party_frame_hidden_by_its_switch_that_has_a_rect_keeps_its_own_rect()

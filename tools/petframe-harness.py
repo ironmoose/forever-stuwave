@@ -1721,6 +1721,21 @@ def check_the_preview_draws_without_the_dock_file() -> None:
     approx(made.frame.w, 348, "the panel keeps its size")
 
 
+def check_the_preview_is_the_real_panel_in_design_px_at_any_layout_scale() -> None:
+    """The config hover draws the preview at the layout scale (never fitted to the seat's width): the preview's design px size
+    times that scale is the size the real container takes, at the default and with the settings that change the plan."""
+    for scale in (1.0, 0.5, 0.8333):
+        rt = runtime(scale)
+        p = preview(rt)
+        for settings in ({}, {"w": 160, "hpH": 12, "mpH": 9}):
+            put(rt, **settings)
+            p.Restyle()
+            rt.eval("FS.PetFrame.ReseatStyle()")
+            real = bounds(rt, rt.globals().FS.PetFrame.container)
+            approx(real["w"], p.frame.w * scale, f"scale {scale} {settings}: the panel's width")
+            approx(real["h"], p.frame.h * scale, f"scale {scale} {settings}: the panel's height")
+
+
 def check_the_preview_follows_sizes_wider_and_the_dock() -> None:
     rt = runtime(1.0)
     p = preview(rt)
@@ -1846,6 +1861,7 @@ def main() -> int:
         ("style: no protected frame is touched in combat", check_the_container_changes_never_touch_a_protected_frame_in_combat),
         ("preview: a hunter pet as the panel draws it", check_the_preview_draws_a_hunter_pet_as_the_panel_does),
         ("preview: a demon with a Firebolt cast and a blue rail", check_the_preview_draws_a_demon_with_a_firebolt_cast_and_a_blue_rail),
+        ("preview: the real panel in design px at any layout scale", check_the_preview_is_the_real_panel_in_design_px_at_any_layout_scale),
         ("preview: sizes, Wider and the dock", check_the_preview_follows_sizes_wider_and_the_dock),
         ("preview: draws without the dock file", check_the_preview_draws_without_the_dock_file),
         ("preview: text, opacity and the hover override", check_the_preview_follows_text_opacity_and_the_hover_override),

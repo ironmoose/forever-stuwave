@@ -2840,7 +2840,8 @@ function T.the_style_samples_the_hover_draws_build_with_their_modules_off_and_st
     for _, key in ipairs({ "player", "target", "focus", "boss" }) do
         made[#made + 1] = { key, FS.UnitFrames.NewPreview(UIParent, key) }
     end
-    for _, pair in ipairs({ { "party", FS.PartyFrames.NewStylePreview }, { "raid", FS.RaidFrames.NewStylePreview },
+    for _, pair in ipairs({ { "party", FS.PartyFrames.NewStylePreview }, { "party stack", FS.PartyFrames.NewSampleStack },
+        { "raid", FS.RaidFrames.NewStylePreview },
         { "pet", FS.PetFrame.NewStylePreview } }) do
         local pv = pair[2](UIParent)
         yes(type(pv) == "table" and pv.frame and type(pv.Restyle) == "function", pair[1] .. " answers { frame, Restyle }")

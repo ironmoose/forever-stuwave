@@ -3011,18 +3011,23 @@ function PartyFrames.ApplyStyle()
     end
 end
 
+-- The names the sample rows wear, one each (80s and 90s film and game characters). The first is the Style tab's single sample.
+PartyFrames.SAMPLE_NAMES = { "RIPLEY", "MARTY", "INDY", "SAMUS", "SNAKE" }
+
 -- A plain party row for the config window's Style tab, built by BuildPartyRow and filled with a sample member (no unit,
--- no secret value). Returns { frame, Restyle }; the settings are read again on every Restyle.
-function PartyFrames.NewStylePreview(parent)
+-- no secret value). `index` picks the member's name from SAMPLE_NAMES (the first without it). Returns { frame, Restyle };
+-- the settings are read again on every Restyle.
+function PartyFrames.NewStylePreview(parent, index)
     local row = BuildPartyRow(nil, nil, parent, true)
     local Style = FS.FrameStyle
     row.trayContent, row.trayY = row, 0
     row.petFrame = nil
     local sample = {}
+    local sampleName = PartyFrames.SAMPLE_NAMES[index or 1] or PartyFrames.SAMPLE_NAMES[1]
     local function Restyle()
         PartyFrames.StyleRow(row)
         PartyFrames.SizeRow(row)
-        row.name:SetText("RIPLEY")
+        row.name:SetText(sampleName)
         row.name:SetTextColor(COLOR_HEALTH[1], COLOR_HEALTH[2], COLOR_HEALTH[3], HEADER.NAME_ALPHA)
         if HAS.CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS.PRIEST then
             row.classIcon:SetTexCoord(unpack(CLASS_ICON_TCOORDS.PRIEST))
@@ -3075,6 +3080,31 @@ function PartyFrames.NewStylePreview(parent)
     end
     row:Show()
     return { frame = row, Restyle = Restyle }
+end
+
+-- The party stack as the container draws it, for the config window's hover while the group is not there: ROW_COUNT sample
+-- rows (each with a name of its own) hung from the top left of a frame the size of the container, PANEL_PAD in and one row
+-- height plus ROW_GAP apart, exactly where Init and SizeRow seat the real rows. All in design px: draw it at FS.Layout.Scale()
+-- (the scale of the container's content) with its top left on the container's. The frame grows past the container's box when
+-- rows with custom sizes overflow it, as the real ones do. Returns { frame, Restyle, rows }; Restyle reads the settings again.
+function PartyFrames.NewSampleStack(parent)
+    local stack = CreateFrame("Frame", nil, parent)
+    local rows = {}
+    for i = 1, ROW_COUNT do rows[i] = PartyFrames.NewStylePreview(stack, i) end
+    local function Restyle()
+        local width, height = 0, 0
+        for i, pv in ipairs(rows) do
+            pv.Restyle()
+            local row = pv.frame
+            local h = row:GetHeight()
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", stack, "TOPLEFT", PANEL_PAD, -PANEL_PAD - ((i - 1) * (h + ROW_GAP)))
+            width = math.max(width, row:GetWidth())
+            height = PANEL_PAD + i * h + (i - 1) * ROW_GAP + PANEL_PAD
+        end
+        stack:SetSize(math.max(CONTAINER_WIDTH, width + 2 * PANEL_PAD), math.max(CONTAINER_HEIGHT, height))
+    end
+    return { frame = stack, Restyle = Restyle, rows = rows }
 end
 
 

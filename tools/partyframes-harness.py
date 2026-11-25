@@ -3702,11 +3702,78 @@ def _check_style_preview_and_opacity() -> None:
     assert abs(rt.eval("FS.PartyFrames.rows[1].alpha") - 0.4) < 1e-6, "the live rows follow the setting"
 
 
+def _sample_stack_parity(settings: list[str]) -> None:
+    """The stack the config hover draws is the real one at 1:1: five rows at the offsets and sizes the real container gives its
+    own rows for the same settings, in the same design px, each row with a name of its own."""
+    rt = _client()
+    for setting in settings:
+        rt.execute(f"FS.Config.Set({setting})")
+    rt.execute("""
+        __stack = FS.PartyFrames.NewSampleStack(CreateFrame('Frame'))
+        __stack.Restyle()
+        __bad = {}
+        local real, sample = FS.partyRows, __stack.rows
+        if #sample ~= #real then __bad[#__bad + 1] = 'rows: ' .. #sample .. ' want ' .. #real end
+        local names = {}
+        for i = 1, #real do
+            local r, s = real[i], sample[i] and sample[i].frame
+            if not s then break end
+            local rp, sp = r.points.TOPLEFT, s.points.TOPLEFT
+            if not (rp and sp and math.abs(rp.x - sp.x) < 1e-6 and math.abs(rp.y - sp.y) < 1e-6) then
+                __bad[#__bad + 1] = 'row ' .. i .. ' at ' .. tostring(sp and sp.x) .. ',' .. tostring(sp and sp.y)
+                    .. ' want ' .. tostring(rp and rp.x) .. ',' .. tostring(rp and rp.y)
+            end
+            if math.abs(r:GetWidth() - s:GetWidth()) > 1e-6 or math.abs(r:GetHeight() - s:GetHeight()) > 1e-6 then
+                __bad[#__bad + 1] = 'row ' .. i .. ' is ' .. s:GetWidth() .. 'x' .. s:GetHeight()
+                    .. ' want ' .. r:GetWidth() .. 'x' .. r:GetHeight()
+            end
+            local name = s.name.text
+            if type(name) ~= 'string' or name == '' or names[name] then __bad[#__bad + 1] = 'row ' .. i .. ' name ' .. tostring(name) end
+            names[name or i] = true
+        end
+        -- the stack is the container's box (its rows hang from the top left), grown when the rows overflow it
+        local box = FS.Layout.party
+        local w, h = __stack.frame:GetWidth(), __stack.frame:GetHeight()
+        if w < box.w or h < box.h then __bad[#__bad + 1] = 'stack ' .. w .. 'x' .. h .. ' is smaller than the container' end
+        local last = sample[#sample] and sample[#sample].frame
+        if last and h + 1e-6 < -last.points.TOPLEFT.y + last:GetHeight() then __bad[#__bad + 1] = 'stack ends above its last row' end
+        __bad = table.concat(__bad, '; ')
+    """)
+    bad = rt.globals().__bad
+    assert bad == "", f"settings {settings}: {bad}"
+
+
+def _check_sample_stack_matches_the_real_rows() -> None:
+    _sample_stack_parity([])
+    _sample_stack_parity(["'bars.party.w', 148", "'bars.party.hpH', 60"])
+    _sample_stack_parity(["'bars.party.hpH', 12", "'bars.party.mpH', 0"])
+
+
+def _check_sample_names_are_80s_and_90s_characters_each_row_its_own() -> None:
+    rt = _client()
+    rt.execute("""
+        __names = {}
+        for i = 1, #FS.PartyFrames.SAMPLE_NAMES do
+            local pv = FS.PartyFrames.NewStylePreview(CreateFrame('Frame'), i)
+            pv.Restyle()
+            __names[i] = pv.frame.name.text
+        end
+        local first = FS.PartyFrames.NewStylePreview(CreateFrame('Frame'))
+        first.Restyle()
+        __first = first.frame.name.text
+    """)
+    names = [rt.eval(f"__names[{i}]") for i in range(1, int(rt.eval("#__names")) + 1)]
+    assert len(names) >= 5 and len(set(names)) == len(names), f"each sample row needs a name of its own: {names}"
+    assert names[0] == "RIPLEY" and rt.globals().__first == "RIPLEY", "the Style tab's single sample keeps its name"
+
+
 def main() -> int:
     """Run the focused regressions and return a failing exit code on any error."""
     cases = [
         ("layout after late UIParent rescale", _check_late_rescale),
         ("party style preview and opacity", _check_style_preview_and_opacity),
+        ("party sample stack matches the real rows", _check_sample_stack_matches_the_real_rows),
+        ("party sample names", _check_sample_names_are_80s_and_90s_characters_each_row_its_own),
         ("full surname readout", _check_full_name),
         ("class atlas icon", _check_class_icon),
         ("shared FrameHelpers CreatePillBar (cut)", _check_shared_pill_bar),
