@@ -1842,6 +1842,10 @@ events:SetScript("OnEvent", function(self, event, arg1)
     end
 
     self:UnregisterEvent("PLAYER_LOGIN")
+    -- Module power: the micro bar is part of the Action bars module; off, the stock micro menu is left alone (nothing
+    -- is hooked, dimmed or reparented, and no event is listened for).
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.ab") then return end
     for _, e in ipairs({ "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD", "ADDON_LOADED" }) do
         pcall(self.RegisterEvent, self, e)
     end

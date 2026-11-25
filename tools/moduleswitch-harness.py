@@ -1471,6 +1471,138 @@ function T.the_layout_editor_gives_the_tooltip_and_professions_no_handle_while_w
     end
 end
 
+
+-- ---- B5b: action bars (m.ab), addon tabs (m.class), Gunsight HUD (m.gs), pet bar (m.pet) -----------------------------------
+--
+-- The same tolerant client, with the stand-ins these four modules need to run to the end on: the action button fields, the
+-- unit and action APIs. Every row then plays the events the modules answer (a fight, a form change, a pet, a rescale) and the
+-- slash commands that act on the stock bars, so an "off" module has to stay silent through all of them, not only at load.
+
+local B5B = {
+    ["m.ab"] = {
+        files = { "Modules/ActionBars/ActionBars.lua", "Modules/ActionBars/Console.lua", "Modules/ActionBars/ConsoleKeys.lua",
+            "Modules/ActionBars/StanceBar.lua", "Modules/ActionBars/MicroBars.lua", "Modules/ActionBars/ClassShoulder.lua" },
+        named = { "FSActionBarStack", "FSConsole", "FSConsoleTab", "FSStanceBar" },
+        blizzard = { "MainActionBar", "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft", "MultiBar5",
+            "MultiBar6", "MultiBar7", "OverrideActionBar", "MultiCastActionBarFrame", "StanceBar", "MicroMenu", "MicroMenuContainer" },
+    },
+}
+local B5B_HOOKED = { "ActionButtonDown", "ActionButtonUp", "MultiActionButtonDown", "MultiActionButtonUp", "MicroButtonPulse",
+    "MicroButtonPulseStop" }
+local B5B_EVENTS = {
+    { "UI_SCALE_CHANGED" }, { "DISPLAY_SIZE_CHANGED" }, { "UPDATE_BINDINGS" }, { "ACTIONBAR_SLOT_CHANGED", 0 },
+    { "ACTIONBAR_PAGE_CHANGED" }, { "UPDATE_BONUS_ACTIONBAR" }, { "UPDATE_SHAPESHIFT_FORM" }, { "UPDATE_SHAPESHIFT_FORMS" },
+    { "PET_BAR_UPDATE" }, { "UNIT_PET", "player" }, { "UNIT_AURA", "player" }, { "PLAYER_TOTEM_UPDATE", 1 }, { "SPELLS_CHANGED" },
+    { "PLAYER_TARGET_CHANGED" }, { "UNIT_HEALTH", "pet" }, { "UNIT_POWER_UPDATE", "player" }, { "PLAYER_ENTERING_WORLD", false, false },
+}
+local B5B_SLASH = { { "FSBARS", "blizz" }, { "FSBARS", "fs" }, { "FSTAINT", "stash" }, { "FSCONSOLE", "off" }, { "FSCONSOLE", "on" } }
+
+local function b5bStubs()
+    date = os.date
+    __combat = false
+    InCombatLockdown = function() return __combat end
+    for name, value in pairs({ UnitXP = 0, UnitXPMax = 100, UnitHealth = 100, UnitHealthMax = 100, UnitPower = 0, UnitPowerMax = 100,
+        UnitLevel = 12, GetBindingText = "" }) do
+        _G[name] = function() return value end
+    end
+    UnitPowerType = function() return 0, "MANA" end
+    GetBindingKey = function() end
+    Watch("Minimap")
+    for _, n in ipairs({ "HasAction", "GetActionTexture", "GetActionInfo", "IsUsableAction", "IsActionInRange", "IsCurrentAction",
+        "IsAutoRepeatAction", "IsAttackAction", "GetActionCooldown", "GetActionCount", "GetActionText", "IsConsumableAction",
+        "IsStackableAction", "IsEquippedAction", "GetActionCharges", "GetActionLossOfControlCooldown", "IsPlayerSpell",
+        "IsSpellKnown", "GetSpellInfo", "GetSpellTexture", "GetSpellCooldown", "GetNumShapeshiftForms", "GetShapeshiftForm",
+        "GetShapeshiftFormInfo", "GetShapeshiftFormCooldown", "GetActionBarPage", "GetBonusBarOffset", "GetOverrideBarIndex",
+        "HasOverrideActionBar", "HasVehicleActionBar", "HasBonusActionBar", "GetPetActionInfo", "GetPetActionCooldown",
+        "GetPetActionsUsable", "PetHasActionBar", "UnitAffectingCombat", "GetTotemInfo", "GetItemCount", "GetItemInfo",
+        "GetInventoryItemID", "GetInventorySlotInfo" }) do
+        if _G[n] == nil then _G[n] = function() end end
+    end
+    for _, n in ipairs(B5B_HOOKED) do _G[n] = function() end end
+    -- the pieces of an action button the stock template brings and the code reads as fields
+    local base = CreateFrame
+    CreateFrame = function(kind, name, parent, template)
+        local f = base(kind, name, parent, template)
+        rawset(f, "TextOverlayContainer", false)
+        if template and tostring(template):find("ActionButtonTemplate") then
+            for _, k in ipairs({ "NormalTexture", "PushedTexture", "HighlightTexture", "CheckedTexture", "QuickKeybindHighlightTexture" }) do
+                rawset(f, k, f:CreateTexture())
+            end
+            for _, k in ipairs({ "HotKey", "Count", "Name" }) do rawset(f, k, f:CreateFontString()) end
+            rawset(f, "UpdateFlyout", false)
+        end
+        return f
+    end
+end
+
+-- every Blizzard frame any of the four modules may touch is watched; `off` is the saved store
+local function b5bWorld(off, extra)
+    local watch = {}
+    for _, module in pairs(B5B) do
+        for _, name in ipairs(module.blizzard) do watch[#watch + 1] = name end
+    end
+    Boot({ off = off, watch = watch, pre = function() b5bStubs(); if extra then extra() end end })
+    for _, ev in ipairs(B5B_EVENTS) do Fire(unpack(ev)) end
+    __combat = true
+    Fire("PLAYER_REGEN_DISABLED"); Fire("UPDATE_SHAPESHIFT_FORM"); Fire("PET_BAR_UPDATE"); Fire("UNIT_PET", "player")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED")
+    for _, pair in ipairs(B5B_SLASH) do
+        local fn = SlashCmdList[pair[1]]
+        if fn then pcall(fn, pair[2]) end
+    end
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+local function b5bClean(key)
+    local module = B5B[key]
+    for _, f in ipairs(module.files) do loaded(f) end
+end
+
+local function b5bNotBuilt(key)
+    local module = B5B[key]
+    eq(FS.ModuleSwitch.On(key), false)
+    eq(FS.ModuleSwitch.Built(key), false, key .. " built nothing")
+    for _, f in ipairs(module.files) do eq(BuiltBy(f), 0, f .. " made no frame after the files loaded") end
+    for _, name in ipairs(module.named) do no(MadeNamed(name), name .. " exists") end
+    for _, f in ipairs(module.files) do
+        for _, name in ipairs(module.blizzard) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+        eq(TouchesOn("hooksecurefunc", f), "", f .. " hooked nothing")
+    end
+end
+
+function T.action_bars_off_builds_nothing_and_leaves_every_stock_bar_alone()
+    b5bWorld({ "m.ab" })
+    b5bClean("m.ab")
+    b5bNotBuilt("m.ab")
+end
+
+function T.action_bars_off_keeps_the_api_and_the_slash_commands_answer_without_touching_the_stock_bars()
+    b5bWorld({ "m.ab" })
+    local A = FS.ActionBars
+    eq(type(A), "table", "FS.ActionBars stays defined")
+    eq(type(A.OnGeometry), "function"); eq(type(A.SetConsoleActive), "function"); eq(type(A.LivePage), "function")
+    eq(A.geometry, nil, "no stack, no geometry: the Console has nothing to follow")
+    eq(type(FS.Console), "table"); eq(type(FS.StanceBar), "table"); eq(type(FS.ConsoleKeys), "table")
+    eq(type(SlashCmdList["FSBARS"]), "function")
+    yes(#__printed > 0)
+    for _, f in ipairs(B5B["m.ab"].files) do
+        for _, name in ipairs(B5B["m.ab"].blizzard) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+    end
+end
+
+function T.action_bars_on_builds_the_stack_dims_the_stock_bars_and_marks_itself_built()
+    b5bWorld({})
+    b5bClean("m.ab")
+    eq(FS.ModuleSwitch.Built("m.ab"), true)
+    for _, name in ipairs(B5B["m.ab"].named) do yes(MadeNamed(name), name .. " exists") end
+    for _, name in ipairs({ "MainActionBar", "MultiBarBottomLeft", "StanceBar", "MicroMenu" }) do
+        yes(TouchesOn(name) ~= "", name .. " dimmed")
+    end
+end
+
 return T
 """
 

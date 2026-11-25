@@ -831,7 +831,8 @@ end
 local function RequestBuild()
     -- SetAttribute, Show and SetPoint on a secure button are illegal in combat;
     -- the whole build is deferred to PLAYER_REGEN_ENABLED the same way as Init below.
-    if refreshing then return end
+    -- No container means Apply never ran (the Action bars module is off): a tab asking for a rebuild gets nothing.
+    if refreshing or not container then return end
     if InCombatLockdown() then
         pendingBuild = true
         return
@@ -940,6 +941,9 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+    -- Module power: the stance bar is part of the Action bars module; off, the stock stance bar is left alone.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.ab") then return end
     if InCombatLockdown() then
         self:RegisterEvent("PLAYER_REGEN_ENABLED")
         self:SetScript("OnEvent", function(inner)
