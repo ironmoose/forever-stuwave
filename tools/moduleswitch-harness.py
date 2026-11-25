@@ -687,6 +687,53 @@ function T.a_window_without_the_switch_store_still_opens()
     eq(#__errors, 0)
 end
 
+local CLASSMOD_TABS = { "general", "druid", "hunter", "mage", "paladin", "priest", "rogue", "shaman", "warlock", "warrior" }
+
+-- the rows the window holds for a Class modules tab (page, tab) as a list of their kinds
+local function classmodKinds(W, tab)
+    W.Open("classmod", tab)
+    local kinds = {}
+    for _, e in ipairs(W.Rows()) do
+        if e.page == "classmod" and e.tab == tab then kinds[#kinds + 1] = e.kind end
+    end
+    return kinds
+end
+
+function T.with_the_gunsight_off_every_class_modules_tab_says_so_in_place_of_its_rows()
+    local W = msboot({ db = { modules = { ["m.gs"] = false } } })
+    for _, tab in ipairs(CLASSMOD_TABS) do
+        local kinds = classmodKinds(W, tab)
+        eq(table.concat(kinds, ","), "note", "the " .. tab .. " tab holds the note and nothing else")
+    end
+    W.Open("classmod", "general")
+    yes(anyText("Gunsight HUD is off. Turning it on takes a Reload UI."), "the off text")
+    errorsClean()
+end
+
+function T.the_class_modules_note_follows_the_switch_turned_back_on_before_the_reload()
+    local W = msboot({ db = { modules = { ["m.gs"] = false } } })
+    W.Open("classmod", "general")
+    yes(anyText("Gunsight HUD is off."))
+    MS().Set("m.gs", true)
+    W.RefreshAll()
+    yes(anyText("Gunsight HUD turns on at the next Reload UI."), "switched back on, waiting for the reload")
+    no(anyText("Gunsight HUD is off."), "the old line is gone")
+    errorsClean()
+end
+
+function T.with_the_gunsight_on_the_class_modules_tabs_hold_their_rows()
+    -- this window loads no class module, so only the General tab (the plate, which needs the Gunsight areas file) has rows
+    local W = msboot()
+    local kinds = classmodKinds(W, "general")
+    yes(#kinds > 0, "the General tab has rows")
+    for _, kind in ipairs(kinds) do no(kind == "note", "no off note on General") end
+    for _, tab in ipairs(CLASSMOD_TABS) do
+        W.Open("classmod", tab)
+        no(anyText("Gunsight HUD is off."), "no off text on " .. tab .. " while the module is on")
+    end
+    errorsClean()
+end
+
 function T.zz_unused() end
 """
 
@@ -1742,6 +1789,99 @@ function T.addon_tabs_need_the_action_bars_because_every_tab_stands_on_the_conso
     local found = false
     for _, k in ipairs(deps) do if k == "m.class" then found = true end end
     yes(found, "turning the action bars off lists the tabs")
+end
+
+-- The Gunsight HUD is every file of Modules/CombatHud except HunterState, which the Hunter's ammo tab (Addon tabs) also runs.
+local function hudFiles()
+    local list = {}
+    for _, rel in ipairs(__toc) do
+        if rel:find("^Modules/CombatHud/") and rel ~= "Modules/CombatHud/HunterState.lua" then list[#list + 1] = rel end
+    end
+    return list
+end
+local B5B_GS_HOST = {
+    DRUID = "ForeverSTUwaveGunsightDruid", HUNTER = "ForeverSTUwaveGunsightHunter", MAGE = "ForeverSTUwaveGunsightMage",
+    PALADIN = "ForeverSTUwaveGunsightSeals", PRIEST = "ForeverSTUwaveGunsightPriest", ROGUE = "ForeverSTUwaveGunsightRogue",
+    SHAMAN = "ForeverSTUwaveGunsightShaman", WARLOCK = "ForeverSTUwaveGunsightWarlock", WARRIOR = "ForeverSTUwaveGunsightWarrior",
+}
+B5B_CLASSES.PRIEST = { id = 5 }
+
+local function gunsightOffRow(token)
+    classWorld({ "m.gs" }, token)
+    eq(FS.ModuleSwitch.On("m.gs"), false)
+    eq(FS.ModuleSwitch.Built("m.gs"), false, "nothing was built")
+    for _, f in ipairs(hudFiles()) do
+        loaded(f)
+        eq(BuiltBy(f, "Modules/ActionBars/AmmoTab.lua"), 0, f .. " made no frame after the files loaded")
+    end
+    for _, name in pairs(B5B_GS_HOST) do no(MadeNamed(name), name .. " exists") end
+    for _, name in ipairs({ "ForeverSTUwaveCombatHud", "ForeverSTUwaveWarriorPowerUps", "ForeverSTUwaveDruidClearcasting",
+        "ForeverSTUwaveGunsightTargetSide", "ForeverSTUwaveGunsightTargetMenu", "ForeverSTUwaveGunsightMyBuffs" }) do
+        no(MadeNamed(name), name .. " exists")
+    end
+end
+
+function T.gunsight_off_builds_nothing_for_a_druid() gunsightOffRow("DRUID") end
+function T.gunsight_off_builds_nothing_for_a_hunter() gunsightOffRow("HUNTER") end
+function T.gunsight_off_builds_nothing_for_a_mage() gunsightOffRow("MAGE") end
+function T.gunsight_off_builds_nothing_for_a_paladin() gunsightOffRow("PALADIN") end
+function T.gunsight_off_builds_nothing_for_a_priest() gunsightOffRow("PRIEST") end
+function T.gunsight_off_builds_nothing_for_a_rogue() gunsightOffRow("ROGUE") end
+function T.gunsight_off_builds_nothing_for_a_shaman() gunsightOffRow("SHAMAN") end
+function T.gunsight_off_builds_nothing_for_a_warlock() gunsightOffRow("WARLOCK") end
+function T.gunsight_off_builds_nothing_for_a_warrior() gunsightOffRow("WARRIOR") end
+
+function T.gunsight_off_keeps_the_api_and_says_it_is_not_the_display()
+    classWorld({ "m.gs" }, "SHAMAN")
+    local G = FS.Gunsight
+    eq(type(G), "table", "FS.Gunsight stays defined")
+    eq(G.IsActive(), false, "the stack A cast bars are the display")
+    eq(G.IsEnabled(), false)
+    eq(type(G.OnReady), "function"); eq(type(G.OnActiveChanged), "function"); eq(type(G.SetPiece), "function")
+    eq(type(FS.Hud), "table"); eq(type(FS.CombatHud), "table")
+    eq(FS.CombatHud.IsEnabled(), false, "the classic combat HUD is part of the module and stays off too")
+    eq(type(SlashCmdList["FSGUN"]), "function")
+    __printed = {}
+    SlashCmdList["FSGUN"]("on")
+    SlashCmdList["FSHUD"]("on")
+    yes(#__printed > 0, "the commands answer")
+    eq(FS.CombatHud.IsEnabled(), false, "/fshud on does not build it")
+    no(MadeNamed("ForeverSTUwaveCombatHud"))
+end
+
+function T.gunsight_off_leaves_the_console_keys_that_are_not_the_hud_standing()
+    classWorld({ "m.gs" }, "PRIEST")
+    yes(FS.ConsoleKeys.IsBuilt(), "the party, quest and chat keys are built")
+    eq(FS.ConsoleKeys.ShownCount(), 3, "party, quests and chat: no HUD key is drawn")
+    for _, k in ipairs(FS.ConsoleKeys.keys) do
+        local hud = k.key ~= "party" and k.key ~= "quests" and k.key ~= "chat"
+        if hud then no(k.shown, k.key .. " is a HUD key") end
+    end
+end
+
+local function gunsightOnRow(token)
+    classWorld({}, token)
+    for _, f in ipairs(hudFiles()) do loaded(f) end
+    eq(FS.ModuleSwitch.Built("m.gs"), true)
+    eq(FS.Gunsight.IsEnabled(), true)
+    yes(MadeNamed("ForeverSTUwaveGunsight"))
+    yes(MadeNamed(B5B_GS_HOST[token]), B5B_GS_HOST[token])
+end
+
+function T.gunsight_on_builds_the_druid_pieces() gunsightOnRow("DRUID") end
+function T.gunsight_on_builds_the_hunter_pieces() gunsightOnRow("HUNTER") end
+function T.gunsight_on_builds_the_mage_pieces() gunsightOnRow("MAGE") end
+function T.gunsight_on_builds_the_paladin_pieces() gunsightOnRow("PALADIN") end
+function T.gunsight_on_builds_the_priest_pieces() gunsightOnRow("PRIEST") end
+function T.gunsight_on_builds_the_rogue_pieces() gunsightOnRow("ROGUE") end
+function T.gunsight_on_builds_the_shaman_pieces() gunsightOnRow("SHAMAN"); yes(BuiltBy("Modules/CombatHud/GunsightTape.lua") > 0, "the tapes") end
+function T.gunsight_on_builds_the_warlock_pieces() gunsightOnRow("WARLOCK") end
+function T.gunsight_on_builds_the_warrior_pieces() gunsightOnRow("WARRIOR"); yes(MadeNamed("ForeverSTUwaveWarriorPowerUps")) end
+
+function T.the_hunter_ammo_tab_still_has_its_state_with_the_gunsight_off()
+    classWorld({ "m.gs" }, "HUNTER")
+    yes(MadeNamed("FSAmmoTab"), "the ammo tab is the Addon tabs module's, not the HUD's")
+    eq(type(FS.HunterState), "table")
 end
 
 return T

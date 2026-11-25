@@ -644,6 +644,9 @@ local boot = CreateFrame("Frame")
 boot:RegisterEvent("PLAYER_LOGIN")
 boot:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+    -- Module power (m.gs): the Gunsight HUD module off, this piece starts nothing.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.gs") then return end
     local ok, _, token = pcall(UnitClass, "player")
     if ok and not Secret(token) and token == "SHAMAN" then T.Start() end
 end)

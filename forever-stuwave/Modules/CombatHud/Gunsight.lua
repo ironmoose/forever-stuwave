@@ -160,6 +160,12 @@ local active = false        -- built, on, and the root really shown: the Gunsigh
 local masterOwed = false    -- the root's Show or Hide waits for PLAYER_REGEN_ENABLED
 local activeCallbacks = {}
 local inited, loggedIn, ready, outlinesOn = false, false, false, false
+
+-- Module power (m.gs): off, Init never runs and nothing is built from it: no piece registers a frame (OnReady callbacks are
+-- never run), IsEnabled and IsActive answer false so the stack A cast bars are the display, and the root and anchor frames
+-- (empty, never shown, 30 files seat from them) stay the only things this file made. Read at ADDON_LOADED or later only.
+local MS = FS.ModuleSwitch
+local function Off() return MS ~= nil and not MS.On("m.gs") end
 local root
 local anchors = {}
 local outlines = {}
@@ -550,6 +556,7 @@ local function Init()
     end
     for _, key in ipairs(PIECE_KEYS) do pieceState[key] = FS.Config.Get(PieceKey(key)) == true end
     inited = true
+    if MS then MS.MarkBuilt("m.gs") end
     for _, key in ipairs(PIECE_KEYS) do
         local piece = pieces[key]
         if piece then
@@ -774,8 +781,14 @@ events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" then
-        if arg1 == addonName then Init() end
+        if arg1 == addonName then
+            if Off() then enabled, masterOn = false, false else Init() end
+        end
     elseif event == "PLAYER_LOGIN" then
+        if Off() then
+            enabled, masterOn = false, false
+            return
+        end
         Init()
         loggedIn = true
         Reseat()
@@ -820,6 +833,10 @@ end
 
 SLASH_FSGUN1 = "/fsgun"
 SlashCmdList["FSGUN"] = function(msg)
+    if Off() then
+        Say("the Gunsight HUD module is off; turn it on in /fsconfig (it takes a Reload UI).")
+        return
+    end
     local cmd, a, b = string.match(string.lower(tostring(msg or "")), "^%s*(%S*)%s*(%S*)%s*(%S*)")
     if cmd == "" then
         PrintStatus()

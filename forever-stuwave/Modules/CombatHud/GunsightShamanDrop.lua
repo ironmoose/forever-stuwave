@@ -244,6 +244,9 @@ function Drop.Sync()
 end
 
 local function Request()
+    -- Module power (m.gs): the totem tab asks too, whether or not the Gunsight HUD is built; off, there is nothing to seat.
+    local MS = FS.ModuleSwitch
+    if MS and not MS.On("m.gs") then return end
     if not events then
         events = CreateFrame("Frame")
         events:SetScript("OnEvent", OnEvent)
