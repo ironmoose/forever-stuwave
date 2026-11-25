@@ -1255,7 +1255,6 @@ end
 
 function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_class()
     local W = boot({ preWindow = withFiveSecond(true) })
-    W.SetFolded("tabs/general/Mana regen effects", false)
     openOld(W, "unitframes")
     yes(headerY("MANA REGEN"), "a Mana regen header")
     yes(row("Mana regen module").control.fsChecked, "the tab is on by default")
@@ -1291,7 +1290,6 @@ end
 
 function T.a_row_with_needs_dims_with_its_reason_and_lights_when_the_parent_flips()
     local W = boot({ preWindow = withFiveSecond(true) })
-    W.SetFolded("tabs/general/Mana regen effects", false)
     openOld(W, "unitframes")
     local child = row("Regen pulse")
     yes(child.control.enabled, "on while Mana regen module is on")

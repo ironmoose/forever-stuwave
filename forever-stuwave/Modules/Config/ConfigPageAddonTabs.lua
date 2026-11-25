@@ -1,5 +1,5 @@
 -- Forever STUwave: Config page, Addon tabs
--- One page, one tab, no top tabs. The sections every class can use come first: Mana regen, its effects (folded), the Ammo
+-- One page, one tab, no top tabs. The sections every class can use come first: Mana regen (its effect switches sit in the same section), the Ammo
 -- tab, Icon style. Then Class tabs: a strip of the nine classes (a view choice kept in the account window state, not in
 -- the profile, so it has no changed dot) and, under it, one set of sections per class, shown by `when` on the strip. The
 -- tickets that add a class tab (shapeshift, call pet, portals, food and water, poisons, demons) add their section with
@@ -86,7 +86,6 @@ CW.RegisterCategory({
             UI.Section(content, { title = "Mana regen", tip = "The LED tab that counts down to full mana regen after a cast.", when = Applies(regen) })
             Toggles(content, regen, { "enabled", "pulse", "sound", "motion" }, true)
             if regen.FT and regen.FT.FX_NAMES then
-                UI.Section(content, { title = "Mana regen effects", fold = true, two = true, when = Applies(regen) })
                 for _, name in ipairs(regen.FT.FX_NAMES) do
                     local def = regen.SETTINGS[name]
                     UI.Toggle(content, { label = def.label, key = def.key, tip = def.tip })
