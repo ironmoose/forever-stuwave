@@ -13,8 +13,8 @@
 --     state mockup, 2026-11-10, option C: a faint wash the ground shows through, thin rings for the band and the boss, rivet
 --     dots, a solid thin rim, the rune in ice cyan), an amber dashed pulse with a glow in combat ("shield them"). Not learned:
 --     nothing is drawn (not learned = not drawn). The label under it is the absorb left (AbbreviateNumbers) or the Weakened Soul time in violet.
---   * THE RIGHT SIDE, one of three looks, chosen by the setting "Right side shows" (PriestRight.lua: Auto, Spirit Tap + Inner
---     Fire, Prayer of Mending, Off; a change waits for the end of a fight):
+--   * THE RIGHT SIDE, one of three looks, chosen by the setting "Show" (PriestRight.lua: Auto, Spirit Tap and Inner
+--     Fire, Prayer of Mending, Nothing; a change waits for the end of a fight):
 --       - MEDALLIONS (the default while leveling): two round medallions, the shield's art language, 35 px wide rings on one
 --         centre pixel. SPIRIT TAP above (a plain skull, spirit green), INNER FIRE below (a flame shield, gold), the engine's
 --         own number to the right of each (Spirit Tap's time left, Inner Fire's charges). See "THE MEDALLIONS" below.

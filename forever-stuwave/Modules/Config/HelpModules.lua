@@ -88,7 +88,7 @@ H.CLASSES = {
         },
         pins = { { 1, 14, 45, -9, 45 }, { 2, 38, 3, 38, -9 }, { 5, 96, 82, 96, 109 } },
         extras = { { n = 3, picture = "priest_empty" }, { n = 4, picture = "priest_tap" } },
-        note = "In a group the right side can show Prayer of Mending instead. Pick it under Right side shows.",
+        note = "In a group the right side can show Prayer of Mending instead. Pick it with Show in the Priest group of the Gunsight HUD page.",
     } } },
     SHAMAN = { pages = { {
         picture = "shaman",
