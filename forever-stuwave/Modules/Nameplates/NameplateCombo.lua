@@ -29,8 +29,9 @@ local ENERGY_POWER = (Enum and Enum.PowerType and Enum.PowerType.Energy) or 3
 local COUNT = 5
 local PIP, GAP = 16, 4                    -- physical px: a pip (one texel each), between pips
 -- Under the plate, below the slot Nameplates.lua keeps for the target's cast bar (its gap and height, plate units), so a cast
--- never covers them.
-local CAST_GAP, CAST_H, BELOW = 2, 6, 3
+-- never covers them. The height is the plate's own cast bar height setting (default 6, 0 to 16), read from the config.
+local CAST_GAP, BELOW = 2, 3
+local CAST_H_KEY, CAST_H_DEFAULT, CAST_H_MAX = "plates.castH", 6, 16
 local STRATA = "HIGH"
 
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
@@ -107,6 +108,12 @@ local function PixelSize(root)
     return nil
 end
 
+local function CastHeight()
+    local value = Config.Get(CAST_H_KEY)
+    if type(value) ~= "number" or FS.IsSecret(value) or value ~= value then return CAST_H_DEFAULT end
+    return math.max(0, math.min(CAST_H_MAX, math.floor(value + 0.5)))
+end
+
 local function Size()
     local px = PixelSize(seatedOn) or 1
     if px == shownPx then return end
@@ -115,7 +122,7 @@ local function Size()
     host:SetSize((COUNT * PIP + (COUNT - 1) * GAP) * px, pip)
     host:ClearAllPoints()
     local pad = FS.Theme and tonumber(FS.Theme.SLICE_GLOW_PAD) or 0
-    host:SetPoint("TOP", seatedOn, "BOTTOM", 0, -(math.max(CAST_GAP, pad) + CAST_H + BELOW))
+    host:SetPoint("TOP", seatedOn, "BOTTOM", 0, -(math.max(CAST_GAP, pad) + CastHeight() + BELOW))
     for i, p in ipairs(pips) do
         p:SetSize(pip, pip)
         p:ClearAllPoints()
@@ -214,3 +221,8 @@ ev:SetScript("OnEvent", function(_, event, unit)
 end)
 
 Config.OnChange(M.SETTING.key, M.Refresh)
+-- A new cast bar height moves the row at once: sized again for the plate it hangs from.
+Config.OnChange(CAST_H_KEY, function()
+    shownPx = nil
+    if host and host:IsShown() then Size() end
+end)
