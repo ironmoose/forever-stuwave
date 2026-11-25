@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.6 (2026-11-25)
 
 A rebuilt /fsconfig with search, tabs and a power button for every module, a page for nearly every frame, six new class tabs, and a better layout editor.
 
@@ -17,9 +17,11 @@ A rebuilt /fsconfig with search, tabs and a power button for every module, a pag
   - A power button on every module's row on the left, and a Modules page that lists them all. Off, the game's own frame or window takes over after a Reload UI; Nameplates turns off at once. Profiles has an ALL ON button for the profile you are in.
   - Which modules are on belongs to the profile. A new profile starts with every module on, Copy from brings the other profile's switches along, and Reset turns every module on. Switching, copying or resetting a profile that turns a module on or off prints one line in chat saying how many modules wait for a reload; the Reload UI button in /fsconfig counts them and lights up. A profile that had "STUwave nameplates" turned off keeps it off.
   - Profiles: Export this profile makes a string you can copy, and Import a profile reads one into a new profile. It never writes over a profile you have. An export can hold your settings, your frame positions or both, and it carries which modules are on; Import can give the new profile those module switches (a box in the dialog, off unless you tick it).
+  - Footer: EDIT LAYOUT opens the layout editor, and Done brings you back to the page you were on.
+  - Hidden frames still show while you point at their settings: a sample party, raid, pet, player, target, focus or boss frame at its place, sample debuffs in the Gunsight's upper and lower areas, and sample Next cast, Soul shard and buff reminder tiles. Class alerts and proc markers play on a loop at their real timing, with a Test button in their section to tune the scale. A class with no alert of its own tests a STAY RAD sample.
   - A PROFILE picker at the top right of the window swaps the profile in use from any page. It lists your profiles and does what Profiles, Profile in use does, so a profile that turns modules on or off lights Reload UI and says so once in chat. New, copy, rename, delete and reset stay on the Profiles page.
 - Pages and tabs for what had no settings before:
-  - Unit Frames: show or hide the focus and boss frames, and a Style tab for player, target, focus and boss: bar looks (cut, laser, flat, LED, slant, chevron or the game's own), bar heights, text formats, elite and rare mark, target of target, combat icon, portrait, a cast bar on the frame, PvP flag, leader crown and an aggro ring.
+  - Unit Frames: hand the player, target, focus or boss frame back to the game one at a time (STUwave frames, then Reload UI), without turning off party, raid or the Gunsight. Show or hide the focus and boss frames, and a Style tab for player, target, focus and boss: bar looks (cut, laser, flat, LED, slant, chevron or the game's own), bar heights, text formats, elite and rare mark, target of target, combat icon, portrait, a cast bar on the frame, PvP flag, leader crown and an aggro ring.
   - Party frames and Raid frames: a Style tab each, with a preview. Width, bar heights and looks, text formats, background opacity, markers for your heals over time and for debuffs you can remove, an aggro ring with the share of threat (off until you turn it on), and (party) a tray of cleansable debuffs and missing buffs. Raid frames also get Scale, Group columns or Grid, Frames per row and Sort by.
   - Pet bar: Style, Hunter and Warlock tabs. Size, text, looks, background opacity, a cast bar for the pet, Wider or Leave the gap when the cast bar is hidden, and a Hunter happiness dot.
   - Nameplates: Size, Text, Parts and Friendly tabs, each with a preview of the plates. Plate width, health, power and cast bar heights, name size, level, health text, quest marker, auras row, raid marker, and friendly plates as the same as enemy, smaller or off.
@@ -45,7 +47,7 @@ A rebuilt /fsconfig with search, tabs and a power button for every module, a pag
 
 ### Changes
 - Right click on a piece in /fsedit opens a menu. Reset position is in it; it no longer resets at once. The panel on top reads EDIT MODE.
-- Settings moved to the page of the thing they change. Mana regen, Ammo tab, Icon style (spell icons), the Thunder Clap tab, Totem presets and the Shaman buff tab are on Addon tabs. Background grid and the micro menu icon style are on Action bars. Professions panel is on Window skins. STUwave nameplates is on Nameplates, Parts. Show party frames and Show raid frames are on their own pages.
+- Settings moved to the page of the thing they change. The mana regen effects sit inside the Mana regen section. Mana regen, Ammo tab, Icon style (spell icons), the Thunder Clap tab, Totem presets and the Shaman buff tab are on Addon tabs. Background grid and the micro menu icon style are on Action bars. Professions panel is on Window skins. STUwave nameplates is on Nameplates, Parts. Show party frames and Show raid frames are on their own pages.
 - The Move and Reset position rows for the party and raid frames are gone from their pages. Use /fsedit, or EDIT LAYOUT on the Layout page.
 - Priest: "Right side shows" is now Show on Class modules, Priest, with Auto, Spirit Tap and Inner Fire, Prayer of Mending and Nothing. The Inner Fire reminder reads "Pulse Inner Fire when it is missing".
 - The Class module background slider is now Opacity on Class modules, General, next to the Background and Border switches.
@@ -56,6 +58,13 @@ A rebuilt /fsconfig with search, tabs and a power button for every module, a pag
 - Quest tracker Height sets the height of the tracker in the game's Edit Mode layout, so move it once in /fsedit first. Width stays fixed.
 
 ### Fixes
+- Slant, chevron and LED bar looks fill the bar instead of smearing.
+- Laser bars: the glowing point grows with the bar height on party, raid and pet frames.
+- Shaman buff tab: the shield tile keeps tracking in a fight, and the imbue tile follows an imbue you cancel mid fight (or shows it cannot tell, never a stale one).
+- What you hide with the quick keys (quest tracker, chat) and the chat tab you were on stay that way after a reload.
+- Nameplate Aggro % and Lead no longer read 0% on mobs that are not fighting you.
+- Pet cast bar: the timer fits whole.
+- A few notices that only meant something to us no longer print in chat.
 - Druid: with the shapeshift tab on, the stance bar no longer draws the same forms a second time.
 - The quest timer drawer under the minimap follows the minimap's scale, and sits under the game's own map when ours is off.
 - With the Minimap module off, the STU key is not lost: a STUwave button sits on the rim of the game's own minimap, drawn like every other addon's button (the game's gold ring and dark disc around the STUwave logo). Click it to open the settings, drag it round the rim to move it (the place is saved in the profile). Other addons' minimap buttons stay where they were.
