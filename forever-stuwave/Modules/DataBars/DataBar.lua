@@ -1093,6 +1093,8 @@ end
 local Segments = {
     TITLE_MAX = TITLE_MAX,
     ORDER_KEY = KEY_ORDER,
+    -- The bar's height, which the control deck reads to keep its seat when this module is off (Deck.lua).
+    BAR_HEIGHT = BAR_HEIGHT,
 }
 FS.DataBarSegments = Segments
 
@@ -1686,6 +1688,7 @@ local function Init()
     end)
 
     FS.dataBar = bar
+    if FS.ModuleSwitch then FS.ModuleSwitch.MarkBuilt("m.data") end
 end
 
 -- Re-measures for a new screen width. XPBar docks flush to this bar's top
@@ -1751,29 +1754,11 @@ local function RecordGoldOffBar()
     if type(copper) == "number" and not (FS.IsSecret and FS.IsSecret(copper)) then RecordGold(copper) end
 end
 
--- PLAYER_LOGIN, not file scope: UIParent:GetWidth() is the whole point of the
--- fix above, and at load it still reports the pre-settle value. PLAYER_ENTERING_WORLD
--- is the second look for a strip that was not there (or not yet shown) at login.
-local loader = CreateFrame("Frame")
-loader:RegisterEvent("PLAYER_LOGIN")
-loader:RegisterEvent("PLAYER_ENTERING_WORLD")
-loader:RegisterEvent("PLAYER_REGEN_ENABLED")
-loader:RegisterEvent("PLAYER_MONEY")
-
--- The events that move a segment's value ahead of the 1 s tick (REP: UPDATE_FACTION, PROF: SKILL_LINES_CHANGED). A name
--- this client refuses is skipped quietly (FrameHelpers.RegisterEvent) rather than raising at load.
+-- The events that move a segment's value ahead of the 1 s tick (REP: UPDATE_FACTION, PROF: SKILL_LINES_CHANGED), by event.
 local eventSegments = {}
 for _, def in ipairs(SEGMENT_DEFS) do
     for _, event in ipairs(def.events or {}) do
-        if not eventSegments[event] then
-            eventSegments[event] = {}
-            local helpers = FS.FrameHelpers
-            if helpers and helpers.RegisterEvent then
-                helpers.RegisterEvent(loader, event)
-            else
-                pcall(loader.RegisterEvent, loader, event)
-            end
-        end
+        eventSegments[event] = eventSegments[event] or {}
         table.insert(eventSegments[event], def.key)
     end
 end
@@ -1786,25 +1771,58 @@ local function RefreshForEvent(event)
     end
 end
 
-loader:SetScript("OnEvent", function(self, event)
-    if eventSegments[event] then
-        RefreshForEvent(event)
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        if pendingRescale then Rescale() end
-        BindSecureClicks()
-    elseif event == "PLAYER_MONEY" then
-        RecordGoldOffBar()
-    elseif event == "PLAYER_LOGIN" then
-        Init()
-        HookStrip()
-        RecordGoldOffBar()
+-- PLAYER_LOGIN, not file scope: UIParent:GetWidth() is the whole point of the
+-- fix above, and at load it still reports the pre-settle value. PLAYER_ENTERING_WORLD
+-- is the second look for a strip that was not there (or not yet shown) at login.
+--
+-- Module power: this frame, and so every event the bar answers, exists only with the Data bar switch on. It is made at this
+-- addon's ADDON_LOADED (before PLAYER_LOGIN), so with the switch off nothing is built, listened for or drawn. The bar and the
+-- XP bar beside it are one module (XPBar.lua starts the same way).
+local function Start()
+    local loader = CreateFrame("Frame")
+    loader:RegisterEvent("PLAYER_LOGIN")
+    loader:RegisterEvent("PLAYER_ENTERING_WORLD")
+    loader:RegisterEvent("PLAYER_REGEN_ENABLED")
+    loader:RegisterEvent("PLAYER_MONEY")
 
-        if FS.Layout.OnRescale then
-            FS.Layout.OnRescale(Rescale)
+    -- A name this client refuses is skipped quietly (FrameHelpers.RegisterEvent) rather than raising at load.
+    local helpers = FS.FrameHelpers
+    local seen = {}
+    for _, def in ipairs(SEGMENT_DEFS) do
+        for _, event in ipairs(def.events or {}) do
+            if not seen[event] then
+                seen[event] = true
+                if helpers and helpers.RegisterEvent then
+                    helpers.RegisterEvent(loader, event)
+                else
+                    pcall(loader.RegisterEvent, loader, event)
+                end
+            end
         end
-    elseif FS.dataBar then
-        HookStrip()
-        Rescale()
-        BindSecureClicks()
     end
-end)
+
+    loader:SetScript("OnEvent", function(self, event)
+        if eventSegments[event] then
+            RefreshForEvent(event)
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            if pendingRescale then Rescale() end
+            BindSecureClicks()
+        elseif event == "PLAYER_MONEY" then
+            RecordGoldOffBar()
+        elseif event == "PLAYER_LOGIN" then
+            Init()
+            HookStrip()
+            RecordGoldOffBar()
+
+            if FS.Layout.OnRescale then
+                FS.Layout.OnRescale(Rescale)
+            end
+        elseif FS.dataBar then
+            HookStrip()
+            Rescale()
+            BindSecureClicks()
+        end
+    end)
+end
+local MS = FS.ModuleSwitch
+if MS then MS.WhenOn("m.data", Start) else Start() end

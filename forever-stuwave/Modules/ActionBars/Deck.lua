@@ -239,6 +239,20 @@ local function ApplyGeometry(scale)
     end
 end
 
+-- Module power (m.data): the data bar and the XP bar are one module. With it off neither strip exists, and the deck keeps
+-- the seat it had on top of them: the same distance above the screen bottom (the data bar's height plus the XP bar's, the
+-- saved look's) and the same distance from the right edge. Anchored by design, so there is nothing to retry and nothing to report.
+local function DataStripOff()
+    return MS ~= nil and not MS.On("m.data")
+end
+
+local function StripHeight()
+    local segments = FS.DataBarSegments
+    local dataBar = segments and segments.BAR_HEIGHT or 20
+    local xpBar = type(FS.xpBarHeight) == "function" and FS.xpBarHeight() or 12
+    return dataBar + xpBar
+end
+
 -- Seats the chassis on the XP bar's top edge. Returns true once that anchor is
 -- the live one; false means the XP bar frame does not exist yet and the chassis
 -- is parked at the screen bottom in the meantime (a rescale or the PLAYER_LOGIN
@@ -247,6 +261,10 @@ local function AnchorChassis(scale)
     if not chassis then return true end   -- no deck this session (Action bars and Bags both off): nothing to seat
     local xp = _G["ForeverSTUwaveXPBar"]
     chassis:ClearAllPoints()
+    if DataStripOff() then
+        chassis:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -RIGHT_MARGIN * scale, StripHeight())
+        return true
+    end
     if xp then
         chassis:SetPoint("BOTTOMRIGHT", xp, "TOPRIGHT", -RIGHT_MARGIN * scale, 0)
         return true
@@ -325,9 +343,9 @@ events:SetScript("OnEvent", function(_, event)
         if pendingApply then ApplyOrDefer() end
         return
     end
-    -- PLAYER_LOGIN. XPBar.lua registered its own PLAYER_LOGIN handler earlier
-    -- (it loads first), so its frame normally exists by now. If it does not,
-    -- try once more a frame later, then say so and leave the chassis parked.
+    -- PLAYER_LOGIN. The data bar and the XP bar start at this addon's ADDON_LOADED (after the handler this file made at file
+    -- scope), so their frames do not exist yet at the first try and the retry a frame later is the normal seat, not a
+    -- fallback. If that one fails too, say so and leave the chassis parked.
     -- Both seats go through ApplyOrDefer: logging in mid-combat must wait for
     -- regen like any other seat once the bag buttons make the chassis protected.
     local anchored, deferred = ApplyOrDefer()

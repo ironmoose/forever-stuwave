@@ -144,5 +144,13 @@ Cfg.Build = Build
 
 PanelSkins.RegisterInspect("ChatSettings", { { name = "ChatConfigFrame", guard = "fsChatSettingsSkin" } })
 
-PanelSkins.DeferCombat(Build)
-PanelSkins.WatchAddonLoad(function() PanelSkins.DeferCombat(Build) end)
+-- Module power: the chat settings window is the Chat module's own look as well as a window skin, so it is skinned only with
+-- both switches on (Window skins and Chat). Started at this addon's ADDON_LOADED, where both are known; with either off the
+-- window is not listened for, hooked or touched.
+local function Start()
+    if FS.Chat and FS.Chat.ModuleOff and FS.Chat.ModuleOff() then return end
+    PanelSkins.DeferCombat(Build)
+    PanelSkins.WatchAddonLoad(function() PanelSkins.DeferCombat(Build) end)
+end
+local MS = FS.ModuleSwitch
+if MS then MS.WhenOn("m.skins", Start) else Start() end

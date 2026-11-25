@@ -189,6 +189,14 @@ local VARIANTS = {
 -- those two and Replay write appliedVariant.
 FS.xpVariants = VARIANTS
 
+-- The height the XP bar takes (or would take) on screen: the saved look's, as the login restore below picks it. The control
+-- deck reads this to keep its seat when the Data bar module is off and there is no bar to stand on (Deck.lua).
+function FS.xpBarHeight()
+    local saved = type(ForeverSTUwaveDB) == "table" and ForeverSTUwaveDB.xpVariant
+    local variant = type(saved) == "number" and VARIANTS[saved] or VARIANTS[1]
+    return variant.barHeight
+end
+
 -- activeVariant is the CHOSEN look (saved, listed by /fsxp). appliedVariant is the look
 -- whose layout is on the bar right now, and is what V() (every render and layout) reads:
 -- they differ only between a /fsxp in combat and the PLAYER_REGEN_ENABLED (or the next
@@ -1134,6 +1142,11 @@ end
 SLASH_FSXP1 = "/fsxp"
 SlashCmdList["FSXP"] = function(msg)
     msg = (msg or ""):lower():gsub("%s", "")
+    -- Module power: the XP bar goes with the Data bar switch, so with it off there is no bar to restyle and nothing is saved.
+    if FS.ModuleSwitch and not FS.ModuleSwitch.On("m.data") then
+        print("|cff22e0ffForever STUwave|r: the Data bar module is off, so there is no XP bar to change")
+        return
+    end
     if not SetVariant(msg, true) then
         -- Thirteen looks is too many to dump with full descriptions every time,
         -- so the list is labels only and the ACTIVE one gets its note. /fsxp n
@@ -1159,52 +1172,59 @@ end
 -- Init
 -------------------------------------------------------------------------------
 
-local events = CreateFrame("Frame")
+-- Module power: the XP bar is part of the Data bar module (one strip on screen, split in two), so this frame, the stock bar it
+-- hides and every event it answers exist only with that switch on. Made at this addon's ADDON_LOADED, after the data bar's own
+-- (DataBar.lua loads first), so the data bar's PLAYER_LOGIN seat still comes before this one.
+local function Start()
+    local events = CreateFrame("Frame")
 
--- Deferred to PLAYER_LOGIN for the same reason the action bars are: UIParent is
--- not fully sized during addon load, so anything seated at file scope lands at
--- roughly 64% of its intended size (see Theme.lua's FS.Layout notes).
-events:RegisterEvent("PLAYER_LOGIN")
-events:SetScript("OnEvent", function(self, event)
-    if event == "PLAYER_LOGIN" then
-        HideBlizzardBars()
+    -- Deferred to PLAYER_LOGIN for the same reason the action bars are: UIParent is
+    -- not fully sized during addon load, so anything seated at file scope lands at
+    -- roughly 64% of its intended size (see Theme.lua's FS.Layout notes).
+    events:RegisterEvent("PLAYER_LOGIN")
+    events:SetScript("OnEvent", function(self, event)
+        if event == "PLAYER_LOGIN" then
+            HideBlizzardBars()
 
-        -- Restore the chosen variant BEFORE the first Build, so the bar is laid
-        -- out once at the right height rather than built flat and resized.
-        -- ForeverSTUwaveDB is the account-wide store, which is the only one
-        -- this client actually restores -- see the .toc header.
-        local saved = type(ForeverSTUwaveDB) == "table" and ForeverSTUwaveDB.xpVariant
-        if type(saved) == "number" and VARIANTS[saved] then
-            activeVariant = saved
-            appliedVariant = saved
+            -- Restore the chosen variant BEFORE the first Build, so the bar is laid
+            -- out once at the right height rather than built flat and resized.
+            -- ForeverSTUwaveDB is the account-wide store, which is the only one
+            -- this client actually restores -- see the .toc header.
+            local saved = type(ForeverSTUwaveDB) == "table" and ForeverSTUwaveDB.xpVariant
+            if type(saved) == "number" and VARIANTS[saved] then
+                activeVariant = saved
+                appliedVariant = saved
+            end
+
+            if not Build() then return end
+
+            for _, e in ipairs({
+                "PLAYER_XP_UPDATE",
+                "PLAYER_LEVEL_UP",
+                "UPDATE_EXHAUSTION",
+                "PLAYER_ENTERING_WORLD",
+                "DISABLE_XP_GAIN",
+                "ENABLE_XP_GAIN",
+                "PLAYER_REGEN_ENABLED",
+            }) do
+                pcall(self.RegisterEvent, self, e)
+            end
+
+            if FS.Layout.OnRescale then
+                FS.Layout.OnRescale(Rescale)
+            end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            Replay()
+            return
+        elseif event == "PLAYER_ENTERING_WORLD" and pendingReplay and not InCombatLockdown() then
+            -- A regen that never arrived (zone change or death across a fight) must not
+            -- strand a held-back change: the next world entry out of combat applies it.
+            Replay()
+            return
         end
 
-        if not Build() then return end
-
-        for _, e in ipairs({
-            "PLAYER_XP_UPDATE",
-            "PLAYER_LEVEL_UP",
-            "UPDATE_EXHAUSTION",
-            "PLAYER_ENTERING_WORLD",
-            "DISABLE_XP_GAIN",
-            "ENABLE_XP_GAIN",
-            "PLAYER_REGEN_ENABLED",
-        }) do
-            pcall(self.RegisterEvent, self, e)
-        end
-
-        if FS.Layout.OnRescale then
-            FS.Layout.OnRescale(Rescale)
-        end
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        Replay()
-        return
-    elseif event == "PLAYER_ENTERING_WORLD" and pendingReplay and not InCombatLockdown() then
-        -- A regen that never arrived (zone change or death across a fight) must not
-        -- strand a held-back change: the next world entry out of combat applies it.
-        Replay()
-        return
-    end
-
-    Refresh()
-end)
+        Refresh()
+    end)
+end
+local MS = FS.ModuleSwitch
+if MS then MS.WhenOn("m.data", Start) else Start() end

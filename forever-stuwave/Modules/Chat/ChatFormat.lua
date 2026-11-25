@@ -777,6 +777,9 @@ end
 
 local function Enable()
     if applied then return end
+    -- Module power: the line format writes the class colour flag, wraps every chat window's AddMessage and adds message
+    -- filters, which is all the game's own chat; with the Chat switch off none of it happens, from any caller.
+    if FS.Chat and FS.Chat.ModuleOff and FS.Chat.ModuleOff() then return end
     CaptureOriginals()
 
     ApplyClassColors(true)
@@ -820,6 +823,11 @@ end
 SLASH_FSCHATFMT1 = "/fschatfmt"
 SlashCmdList["FSCHATFMT"] = function(msg)
     msg = (msg or ""):lower():gsub("%s", "")
+
+    if FS.Chat and FS.Chat.ModuleOff and FS.Chat.ModuleOff() then
+        print("|cff22e0ffstuwave://chat|r  the Chat module is off")
+        return
+    end
 
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
 
@@ -895,22 +903,27 @@ end
 -- Init
 -------------------------------------------------------------------------------
 
-local watcher = CreateFrame("Frame")
-watcher:RegisterEvent("PLAYER_LOGIN")
-watcher:RegisterEvent("UPDATE_CHAT_COLOR")
-watcher:SetScript("OnEvent", function(_, event)
-    if event == "PLAYER_LOGIN" then
-        -- Deferred to PLAYER_LOGIN rather than run at file scope: the saved
-        -- variables table does not exist yet when this file loads, so Wanted()
-        -- would read a default rather than the player's choice.
-        if Wanted() then Enable() end
-    elseif applied then
-        -- Blizzard just re-read ChatTypeInfo from the CVars, which can drop the
-        -- class-name flag. ApplyClassColors writes only on a real change, so
-        -- re-entering through the event it fires terminates.
-        ApplyClassColors(true)
-    end
-end)
+-- Made at this addon's ADDON_LOADED, and only while the Chat switch is on, so an off module listens for nothing.
+local function Watch()
+    local watcher = CreateFrame("Frame")
+    watcher:RegisterEvent("PLAYER_LOGIN")
+    watcher:RegisterEvent("UPDATE_CHAT_COLOR")
+    watcher:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_LOGIN" then
+            -- Deferred to PLAYER_LOGIN rather than run at file scope: the saved
+            -- variables table does not exist yet when this file loads, so Wanted()
+            -- would read a default rather than the player's choice.
+            if Wanted() then Enable() end
+        elseif applied then
+            -- Blizzard just re-read ChatTypeInfo from the CVars, which can drop the
+            -- class-name flag. ApplyClassColors writes only on a real change, so
+            -- re-entering through the event it fires terminates.
+            ApplyClassColors(true)
+        end
+    end)
+end
+local MS = FS.ModuleSwitch
+if MS then MS.WhenOn("m.chat", Watch) else Watch() end
 
 FS.ChatFormat = {
     Enable = Enable,

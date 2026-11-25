@@ -19,6 +19,10 @@ tree of tools/configwindow-harness.py (not the client). The checks pin:
     it back clears all three
   * turning off a module another module requires asks once, naming it, and a ? on the power button names the dependents
   * the Profiles Modules section's ALL ON button, read-only settings, the changed dot and reset of a list row
+  * B5d gate rows: the Chat switch (off leaves the game's chat untouched through every way into the module, on is built as
+    before) and the Data bar switch (both bars; the control deck keeps its screen seat with the strip gone), and a source audit
+    that all sixteen switches are read and marked built by module code. GATE_ONLY=<text> runs only the gate rows whose name
+    holds the text.
 
 The glyph art and the card are pending the owner's review; this proves behaviour, not looks.
 
@@ -843,7 +847,7 @@ end
 local NUMBERS = {
     GetWidth = 250, GetHeight = 252, GetScale = 1, GetEffectiveScale = 1, GetLeft = 100, GetRight = 350,
     GetTop = 700, GetBottom = 450, GetAlpha = 1, GetFrameLevel = 1, GetNumPoints = 0, GetNumChildren = 0,
-    GetNumRegions = 0, GetStringWidth = 40, GetStringHeight = 10, GetValue = 0, GetID = 0, GetDrawLayer = nil,
+    GetEffectiveAlpha = 1, GetNumRegions = 0, GetStringWidth = 40, GetStringHeight = 10, GetValue = 0, GetID = 0, GetDrawLayer = nil,
 }
 local STRINGS = { GetFrameStrata = "MEDIUM", GetObjectType = "Frame", GetText = "", GetTexture = "", GetFont = "x" }
 
@@ -2491,6 +2495,504 @@ function T.nameplates_the_module_switch_wins_over_a_stale_older_key_after_the_fi
     eq(FS.ModuleSwitch.Wanted("m.np"), true, "the migration is not run twice")
 end
 
+-- ---- B5d: chat (m.chat), data bar and XP bar (m.data) -----------------------------------------------------------------------
+--
+-- Chat is the module most of the addon reads, so its rows play every way a reader can reach it: the events the chat files
+-- answer, the slash commands, the Chat API the console key, the layout editor and the config page call, and a window size
+-- written through the settings. The stock chat has to come through all of it untouched while the module is off.
+-- The data bar and the XP bar are one module (one switch, one strip on screen); the control deck sits on top of them, so the
+-- deck's seat is checked with the strip gone.
+
+local CHAT_DIR = "Modules/Chat/"
+local CHAT_STATE_FILE = CHAT_DIR .. "ChatWindowState.lua"
+local CHAT_FILES = {}
+for _, name in ipairs({ "ChatCore", "ChatTabs", "ChatEditBox", "ChatTermBar", "ChatWindowState", "ChatFrameSkin",
+    "ChatSlashCommands", "ChatFormat" }) do
+    CHAT_FILES[#CHAT_FILES + 1] = CHAT_DIR .. name .. ".lua"
+end
+local CHAT_SETTINGS_FILE = "Modules/Skins/ChatSettings.lua"
+CHAT_FILES[#CHAT_FILES + 1] = CHAT_SETTINGS_FILE
+local DATABAR_FILE, XPBAR_FILE, DECK_FILE = "Modules/DataBars/DataBar.lua", "Modules/DataBars/XPBar.lua", "Modules/ActionBars/Deck.lua"
+
+local B5D = {
+    ["m.chat"] = {
+        files = CHAT_FILES,
+        named = { "ForeverSTUwaveChatTerminal" },
+        blizzard = { "ChatFrame1", "ChatFrame2", "ChatFrame3", "ChatFrame1Tab", "ChatFrame2Tab", "ChatFrame3Tab",
+            "ChatFrame1EditBox", "ChatFrame2EditBox", "ChatFrame3EditBox", "GeneralDockManager" },
+    },
+    ["m.data"] = {
+        files = { DATABAR_FILE, XPBAR_FILE },
+        named = { "ForeverSTUwaveDataBar", "ForeverSTUwaveXPBar" },
+        blizzard = { "StatusTrackingBarManager", "MainStatusTrackingBarContainer", "SecondaryStatusTrackingBarContainer" },
+    },
+}
+local B5D_CHAT_FILTERS = { "FCF_SelectDockFrame", "FCF_Tab_OnClick", "FCF_SetButtonSide", "FCF_OpenTemporaryWindow",
+    "FCF_OpenNewWindow", "ChatFrame_AddMessageEventFilter", "ChatFrame_RemoveMessageEventFilter", "SetChatColorNameByClass",
+    "FCF_SetChatWindowFontSize", "SetChatWindowSize" }
+
+local function b5dStubs()
+    __chatCalls = {}
+    __filterCalls = {}
+    -- the stock chat: three windows, each with its tab and edit box, and the dock that holds the tabs
+    for i = 1, 3 do
+        for _, suffix in ipairs({ "", "Tab", "EditBox" }) do
+            local f = _G["ChatFrame" .. i .. suffix]
+            if f then rawset(f, "GetID", function() return i end) end
+        end
+        -- parts of a stock chat window the skin reads as fields (absent here)
+        for _, field in ipairs({ "FontStringContainer", "ScrollBar", "ScrollToBottomButton", "ResizeButton", "ButtonFrame" }) do
+            rawset(_G["ChatFrame" .. i], field, false)
+        end
+    end
+    if EditModeManagerFrame then rawset(EditModeManagerFrame, "UpdateLayoutInfo", function() end) end
+    local function Record(name) return function() __chatCalls[#__chatCalls + 1] = name end end
+    FCFDock_GetChatFrames = function() return { ChatFrame1, ChatFrame2, ChatFrame3 } end
+    FCF_GetCurrentChatFrame = function() return ChatFrame2 end
+    for _, name in ipairs({ "FCF_SelectDockFrame", "FCF_Tab_OnClick", "FCF_SetButtonSide", "FCF_OpenTemporaryWindow",
+        "FCF_OpenNewWindow", "FCF_SetChatWindowFontSize", "SetChatWindowSize", "SetChatColorNameByClass", "ChatEdit_UpdateHeader",
+        "ChatEdit_ActivateChat" }) do
+        _G[name] = Record(name)
+    end
+    ChatFrame_AddMessageEventFilter = function(event) __filterCalls[#__filterCalls + 1] = "add " .. tostring(event) end
+    ChatFrame_RemoveMessageEventFilter = function(event) __filterCalls[#__filterCalls + 1] = "remove " .. tostring(event) end
+    GetChatWindowInfo = function(id) return "Window " .. tostring(id), 0 end
+    ChatTypeInfo = {}
+    for _, key in ipairs({ "SAY", "YELL", "GUILD", "OFFICER", "PARTY", "RAID", "WHISPER", "EMOTE", "CHANNEL1", "CHANNEL2" }) do
+        ChatTypeInfo[key] = { r = 0.5, g = 0.5, b = 0.5, colorNameByClass = false }
+        _G["CHAT_" .. key .. "_GET"] = "%s " .. key .. ": "
+    end
+    __chatOriginals = {}
+    for _, name in ipairs(B5D_CHAT_FILTERS) do __chatOriginals[name] = _G[name] end
+    __chatOriginals.SAY = _G.CHAT_SAY_GET
+    -- the data the strip reads, and the three pieces of the stock bar the XP bar takes
+    GetFramerate = function() return 60 end
+    GetNetStats = function() return 0, 0, 30, 30 end
+    GetMoney = function() return 12345 end
+    GetGameTime = function() return 12, 30 end
+    UnitXP = function() return 50 end
+    UnitXPMax = function() return 100 end
+    UnitLevel = function() return 12 end
+    GetMaxPlayerLevel = function() return 60 end
+    GetXPExhaustion = function() return nil end
+    -- the strip and the XP bar record the size they were given, so the stack they stand in can be measured
+    local base = CreateFrame
+    CreateFrame = function(kind, name, parent, template)
+        local f = base(kind, name, parent, template)
+        if name == "ForeverSTUwaveDataBar" or name == "ForeverSTUwaveXPBar" then
+            rawset(f, "SetSize", function(self, w, h) self._w, self._h = w, h end)
+            rawset(f, "SetHeight", function(self, h) self._h = h end)
+            rawset(f, "GetHeight", function(self) return self._h end)
+            rawset(f, "GetWidth", function(self) return self._w or 2560 end)
+        end
+        return f
+    end
+end
+
+local B5D_EVENTS = {
+    { "UPDATE_CHAT_WINDOWS" }, { "UPDATE_FLOATING_CHAT_WINDOWS" }, { "EDIT_MODE_LAYOUTS_UPDATED" }, { "UPDATE_CHAT_COLOR" },
+    { "UI_SCALE_CHANGED" }, { "DISPLAY_SIZE_CHANGED" }, { "ADDON_LOADED", "Blizzard_EditMode" }, { "PLAYER_ENTERING_WORLD", true, false },
+    { "PLAYER_MONEY" }, { "UPDATE_FACTION" }, { "SKILL_LINES_CHANGED" }, { "PLAYER_XP_UPDATE", "player" }, { "PLAYER_LEVEL_UP" },
+    { "UPDATE_EXHAUSTION" }, { "DISABLE_XP_GAIN" }, { "ENABLE_XP_GAIN" },
+}
+
+-- Every way into the chat module from outside it: the API the console key, the layout editor and the config page call, the
+-- settings the Chat page writes, and the slash commands. Each is its own pcall, so one that throws is counted, not hidden.
+local function b5dPoke()
+    __pokeErrors = {}
+    local function Try(label, fn, ...)
+        local ok, err = pcall(fn, ...)
+        if not ok then __pokeErrors[#__pokeErrors + 1] = label .. ": " .. tostring(err) end
+    end
+    local Chat, Config = FS.Chat, FS.Config
+    Try("ApplyWindowState", Chat.ApplyWindowState)
+    Try("ToggleWindowState min", Chat.ToggleWindowState, "min")
+    Try("ToggleWindowState max", Chat.ToggleWindowState, "max")
+    Try("ToggleWindowState back", Chat.ToggleWindowState, "max")
+    Try("ApplyDockState", Chat.ApplyDockState)
+    Try("ReassertPrimaryChat", Chat.ReassertPrimaryChat)
+    Try("SeatPrimaryChat", Chat.SeatPrimaryChat, _G.ChatFrame1, "poke")
+    Try("SeatTerminalChrome", Chat.SeatTerminalChrome)
+    Try("SetSize", Chat.SetSize, 500, 300)
+    Try("GetSize", Chat.GetSize)
+    Try("SyncSize", Chat.SyncSize)
+    Try("ApplyAllFontSizes", Chat.ApplyAllFontSizes)
+    Try("ApplyBackground", Chat.ApplyBackground)
+    Try("bgAlpha", Config.Set, "chat.bgAlpha", 40)
+    Try("bandAlpha", Config.Set, "chat.bandAlpha", 30)
+    Try("lineBands", Config.Set, "chat.lineBands", false)
+    Try("cycle", ForeverSTUwave_CycleChatTab)
+    for _, msg in ipairs({ "", "levels", "paint", "size 16" }) do Try("/fschat " .. msg, SlashCmdList["FSCHAT"], msg) end
+    for _, msg in ipairs({ "on", "off", "dump", "" }) do Try("/fschatfmt " .. msg, SlashCmdList["FSCHATFMT"], msg) end
+    Try("ChatFormat.Enable", FS.ChatFormat.Enable)
+    Try("ChatFormat.Disable", FS.ChatFormat.Disable)
+end
+
+local function b5dFlush()
+    local timers = __timers
+    __timers = {}
+    for _, fn in ipairs(timers) do pcall(fn) end
+end
+
+-- Every stock frame the three modules may touch is watched, plus the ones the action bar modules do (the deck and the console
+-- keys stand beside the two modules). `opts.db` seeds the saved store, `opts.combat` boots in a fight.
+local function b5dWorld(off, opts)
+    opts = opts or {}
+    local watch = {}
+    for _, module in pairs(B5B) do
+        for _, name in ipairs(module.blizzard) do watch[#watch + 1] = name end
+    end
+    for _, module in pairs(B5D) do
+        for _, name in ipairs(module.blizzard) do watch[#watch + 1] = name end
+    end
+    watch[#watch + 1] = "EditModeManagerFrame"
+    Boot({ off = off, watch = watch, db = opts.db, noRegen = opts.combat,
+        pre = function()
+            b5bStubs(); b5dStubs(); __combat = opts.combat or false
+            if opts.preDb then ForeverSTUwaveDB = opts.preDb end   -- a client that hands the saved store over before the files load
+        end })
+    for _, ev in ipairs(B5D_EVENTS) do Fire(unpack(ev)) end
+    b5dFlush()
+    if not opts.noPoke then b5dPoke() end
+    b5dFlush()
+    if opts.beforeRegen then opts.beforeRegen() end
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED")
+    b5dFlush()
+end
+
+local function b5dClean(key)
+    for _, f in ipairs(B5D[key].files) do loaded(f) end
+end
+
+local function b5dNotBuilt(key)
+    local module = B5D[key]
+    eq(FS.ModuleSwitch.On(key), false, key .. " switch")
+    eq(FS.ModuleSwitch.Built(key), false, key .. " built nothing")
+    for _, f in ipairs(module.files) do eq(BuiltBy(f), 0, f .. " made no frame after the files loaded") end
+    for _, name in ipairs(module.named) do no(MadeNamed(name), name .. " exists") end
+    for _, f in ipairs(module.files) do
+        for _, name in ipairs(module.blizzard) do eq(TouchesOn(name, f), "", name .. " untouched by " .. f) end
+        eq(TouchesOn("hooksecurefunc", f), "", f .. " hooked nothing")
+    end
+end
+
+local function b5dBuilt(key)
+    local module = B5D[key]
+    eq(FS.ModuleSwitch.On(key), true, key .. " switch")
+    eq(FS.ModuleSwitch.Built(key), true, key .. " built")
+    for _, name in ipairs(module.named) do yes(MadeNamed(name), name .. " exists") end
+end
+
+-- the events the frames made by a file listen to ("" when none)
+local function b5dListening(file)
+    local out = {}
+    for _, f in ipairs(__evFrames) do
+        if f._madeBy and f._madeBy[file] then
+            for event in pairs(f._events) do out[#out + 1] = event end
+        end
+    end
+    table.sort(out)
+    return table.concat(out, ",")
+end
+
+-- ---- chat ----
+
+function T.chat_off_builds_nothing_and_leaves_the_stock_chat_alone()
+    b5dWorld({ "m.chat" })
+    b5dClean("m.chat")
+    b5dNotBuilt("m.chat")
+    for _, name in ipairs(B5D["m.chat"].blizzard) do eq(TouchesOn(name), "", name .. " untouched by anything") end
+    eq(TouchesOn("EditModeManagerFrame", CHAT_STATE_FILE), "", "no Edit Mode hook")
+    eq(FS.chatTerminal, nil, "no terminal frame")
+    eq(FS.Chat.termPanel, nil)
+    eq(#__pokeErrors, 0, "every way into the module answered without an error: " .. table.concat(__pokeErrors, " | "))
+end
+
+function T.chat_off_changes_no_global_and_registers_no_filter_of_the_games()
+    b5dWorld({ "m.chat" })
+    eq(#__filterCalls, 0, "no message filter added or removed: " .. table.concat(__filterCalls, ","))
+    eq(#__chatCalls, 0, "no stock chat function called: " .. table.concat(__chatCalls, ","))
+    for _, name in ipairs(B5D_CHAT_FILTERS) do eq(_G[name], __chatOriginals[name], name .. " is still the game's own") end
+    eq(_G.CHAT_SAY_GET, __chatOriginals.SAY, "the say format is the game's")
+    eq(ChatTypeInfo.SAY.colorNameByClass, false, "the class colour flag was not written")
+end
+
+function T.chat_off_writes_none_of_its_saved_state()
+    b5dWorld({ "m.chat" })
+    local db = ForeverSTUwaveDB
+    for _, key in ipairs({ "chatSeatLog", "chatSeatLogPrev", "chatSelectedTab", "labelsAtApply", "chatWindowState", "chatLevels", "chatFormat" }) do
+        eq(db[key], nil, key .. " written")
+    end
+    eq(FS.Chat.windowState, "normal", "the window state never left normal")
+end
+
+function T.chat_off_listens_for_nothing()
+    b5dWorld({ "m.chat" })
+    for _, f in ipairs(CHAT_FILES) do eq(b5dListening(f), "", f .. " listens to") end
+end
+
+function T.chat_off_keeps_the_api_defined_and_the_commands_say_so()
+    b5dWorld({ "m.chat" }, { noPoke = true })
+    local Chat = FS.Chat
+    eq(type(Chat), "table"); eq(type(Chat.SIZE), "table"); eq(type(Chat.BG), "table")
+    for _, fn in ipairs({ "SetSize", "GetSize", "SyncSize", "ApplyWindowState", "ToggleWindowState", "ApplyDockState",
+        "ReassertPrimaryChat", "SeatPrimaryChat", "ApplyAllFontSizes", "ApplyBackground", "PlaceTermBarTooltip" }) do
+        eq(type(Chat[fn]), "function", "Chat." .. fn)
+    end
+    eq(type(FS.ChatFormat), "table"); eq(type(FS.ChatFormat.BAND_SPEC), "table"); eq(type(FS.ChatFormat.Enable), "function")
+    eq(FS.ChatFormat.IsApplied(), false)
+    eq(type(ForeverSTUwave_CycleChatTab), "function")
+    __printed = {}
+    SlashCmdList["FSCHAT"]("")
+    yes(#__printed > 0 and __printed[#__printed]:find("module is off", 1, true), "/fschat says the module is off")
+    __printed = {}
+    SlashCmdList["FSCHATFMT"]("on")
+    yes(#__printed > 0 and __printed[#__printed]:find("module is off", 1, true), "/fschatfmt says the module is off")
+    eq(FS.ChatFormat.IsApplied(), false, "and nothing was applied")
+end
+
+function T.chat_off_the_size_the_page_writes_does_not_reseat_the_stock_window()
+    b5dWorld({ "m.chat" }, { noPoke = true })
+    yes(FS.Config.Set("chat.w", 640) ~= false, "the setting still saves")
+    eq(FS.Config.Get("chat.w"), 640)
+    eq(TouchesOn("ChatFrame1"), "", "the stock window was not moved")
+    eq(ErrorsFrom(CHAT_STATE_FILE), "")
+end
+
+function T.chat_off_the_layout_editor_has_no_chat_handle_and_the_console_has_no_chat_key()
+    b5dWorld({ "m.chat" }, { noPoke = true })
+    local LE = FS.LayoutEdit
+    eq(type(LE), "table")
+    yes(LE.Enter(), "the editor opens")
+    eq(LE.GetHandle("chat"), nil, "no chat handle")
+    LE.Exit()
+    local keys = FS.ConsoleKeys
+    yes(keys.IsBuilt(), "the keys are built")
+    for _, k in ipairs(keys.keys) do
+        if k.key == "chat" then no(k.shown, "the chat key is not drawn") end
+    end
+    eq(TouchesOn("ChatFrame1"), "", "the stock window untouched by the editor or the keys")
+end
+
+function T.chat_off_the_console_chat_key_does_nothing_if_asked()
+    b5dWorld({ "m.chat" }, { noPoke = true })
+    local k
+    for _, key in ipairs(FS.ConsoleKeys.keys) do if key.key == "chat" then k = key end end
+    yes(k, "the key record exists")
+    eq(FS.Chat.windowState, "normal")
+    local ok, err = pcall(function() k.btn._scripts.OnClick(k.btn) end)
+    yes(ok, "the click answered: " .. tostring(err))
+    eq(FS.Chat.windowState, "normal", "a click does not minimise a chat that is not ours")
+    eq(TouchesOn("ChatFrame1"), "")
+end
+
+function T.chat_off_the_chat_settings_window_keeps_its_stock_look()
+    b5dWorld({ "m.chat" })
+    eq(BuiltBy(CHAT_SETTINGS_FILE), 0)
+    eq(ErrorsFrom(CHAT_SETTINGS_FILE), "")
+    eq(TouchesOn("ChatConfigFrame"), "")
+end
+
+function T.chat_on_builds_the_terminal_seats_the_stock_window_and_marks_itself_built()
+    b5dWorld({}, { noPoke = true })
+    b5dClean("m.chat")
+    b5dBuilt("m.chat")
+    eq(FS.chatTerminal, FS.Chat.termPanel)
+    yes(TouchesOn("ChatFrame1") ~= "", "the stock window is seated and skinned")
+    yes(TouchesOn("ChatFrame1", "Modules/Chat/ChatWindowState.lua") ~= "", "ChatFrame1 is hooked for the Edit Mode re-seat")
+    yes(TouchesOn("GeneralDockManager", "Modules/Chat/ChatTabs.lua") ~= "", "the dock is reparented")
+    yes(TouchesOn("EditModeManagerFrame", CHAT_STATE_FILE) ~= "", "UpdateLayoutInfo hooked")
+    yes(TouchesOn("hooksecurefunc", "Modules/Chat/ChatTabs.lua") ~= "", "the tab selection is hooked")
+    yes(b5dListening("Modules/Chat/ChatFormat.lua") ~= "", "the line format answers its events")
+    yes(b5dListening("Modules/Chat/ChatSlashCommands.lua") ~= "", "the font watcher listens")
+    yes(#__filterCalls > 0, "the line format registers its message filters")
+end
+
+function T.chat_on_every_way_in_answers_without_an_error()
+    b5dWorld({})
+    for _, f in ipairs(CHAT_FILES) do eq(ErrorsFrom(f), "", f) end
+    -- the two diagnostic dumps read text colours and rects this mock client does not have; every other way in must answer
+    local real = {}
+    for _, line in ipairs(__pokeErrors) do
+        if not line:find("/fschat levels", 1, true) and not line:find("/fschat paint", 1, true) then real[#real + 1] = line end
+    end
+    eq(#real, 0, table.concat(real, " | "))
+end
+
+function T.chat_on_the_window_state_still_minimises_and_restores()
+    b5dWorld({}, { noPoke = true })
+    local Chat = FS.Chat
+    Chat.ToggleWindowState("min")
+    eq(Chat.windowState, "min")
+    eq(ForeverSTUwaveDB.chatWindowState, "min")
+    Chat.ToggleWindowState("min")
+    eq(Chat.windowState, "normal")
+    eq(ForeverSTUwaveDB.chatWindowState, "normal")
+end
+
+function T.chat_on_the_size_the_page_writes_reseats_the_window()
+    b5dWorld({}, { noPoke = true })
+    yes(FS.Config.Set("chat.w", 640) ~= false)
+    local w, h = FS.Chat.GetSize()
+    eq(w, 640)
+    eq(FS.Layout.chat.w, 640, "the layout entry follows the setting")
+end
+
+function T.chat_on_the_console_key_and_the_layout_editor_see_the_chat()
+    b5dWorld({}, { noPoke = true })
+    local keys = FS.ConsoleKeys
+    local shown
+    for _, k in ipairs(keys.keys) do if k.key == "chat" then shown = k.shown end end
+    yes(shown, "the chat key is drawn")
+end
+
+-- The saved store is read when the files load (as before the gate), so a real client, which hands it over after, restores
+-- nothing at login; a store present at load is restored before the first paint.
+function T.chat_on_the_saved_window_state_is_read_when_the_files_load_as_before()
+    b5dWorld({}, { db = { chatWindowState = "min" }, noPoke = true })
+    eq(FS.Chat.windowState, "normal", "a state saved after the files loaded is not applied at login")
+end
+
+function T.chat_on_a_window_state_present_when_the_files_load_is_restored_at_the_first_paint()
+    b5dWorld({}, { preDb = { chatWindowState = "min" }, noPoke = true })
+    eq(FS.Chat.windowState, "min")
+    yes(TouchesOn("ChatFrame1"):find("Hide", 1, true), "the minimised window is hidden")
+end
+
+function T.chat_on_in_a_fight_waits_for_the_fight_to_end()
+    b5dWorld({}, { combat = true, noPoke = true, beforeRegen = function()
+        eq(FS.ModuleSwitch.Built("m.chat"), false, "not built while the fight lasts")
+    end })
+    eq(FS.ModuleSwitch.Built("m.chat"), true, "built once the fight ended")
+end
+
+function T.chat_off_in_a_fight_waits_for_nothing()
+    b5dWorld({ "m.chat" }, { combat = true })
+    for _, f in ipairs(CHAT_FILES) do eq(b5dListening(f), "", f .. " listens to") end
+    eq(FS.ModuleSwitch.Built("m.chat"), false)
+    eq(TouchesOn("ChatFrame1"), "")
+end
+
+-- ---- data bar and XP bar ----
+
+function T.data_bar_off_builds_neither_bar_and_leaves_the_stock_tracking_bars_alone()
+    b5dWorld({ "m.data" })
+    b5dClean("m.data")
+    b5dNotBuilt("m.data")
+    eq(FS.dataBar, nil, "no data bar")
+    eq(TouchesOn("StatusTrackingBarManager"), "", "the stock bar is the game's")
+    eq(ErrorsFrom(DECK_FILE), "")
+end
+
+function T.data_bar_off_listens_for_nothing_and_keeps_its_tables_and_commands()
+    b5dWorld({ "m.data" })
+    eq(b5dListening(DATABAR_FILE), "", "DataBar.lua listens to")
+    eq(b5dListening(XPBAR_FILE), "", "XPBar.lua listens to")
+    eq(type(FS.DataBarSegments), "table", "the config page reads these")
+    eq(type(FS.xpVariants), "table")
+    __printed = {}
+    SlashCmdList["FSXP"]("2")
+    yes(#__printed > 0 and __printed[#__printed]:find("module is off", 1, true), "/fsxp says the module is off")
+    eq(ForeverSTUwaveDB.xpVariant, nil, "the look was not saved for a bar that is not drawn")
+end
+
+function T.data_bar_on_builds_both_bars_hides_the_stock_ones_and_marks_itself_built()
+    b5dWorld({})
+    b5dClean("m.data")
+    b5dBuilt("m.data")
+    yes(FS.dataBar ~= nil)
+    for _, name in ipairs(B5D["m.data"].blizzard) do
+        yes(TouchesOn(name, XPBAR_FILE) ~= "", name .. " hidden by the XP bar")
+    end
+    local dataBar, xpBar = _G.ForeverSTUwaveDataBar, _G.ForeverSTUwaveXPBar
+    eq(dataBar._h + xpBar._h, 32, "today's stack: the data bar 20 plus the XP bar 12")
+    local p = xpBar._points[1]
+    eq(p[2], dataBar, "the XP bar stands on the data bar")
+    eq(p[3], "TOP")
+end
+
+-- ---- the deck stays where it is ----
+
+local function b5dDeckPoint()
+    local points = FS.Deck.frame._points
+    return points[#points]
+end
+
+function T.the_deck_stands_on_the_xp_bar_with_the_data_bar_on()
+    b5dWorld({})
+    local p = b5dDeckPoint()
+    eq(p[1], "BOTTOMRIGHT")
+    eq(p[2], _G.ForeverSTUwaveXPBar, "the chassis is anchored to the XP bar")
+    eq(p[3], "TOPRIGHT")
+    for _, line in ipairs(__printed) do no(line:find("control deck", 1, true), "the deck reported a problem: " .. line) end
+end
+
+function T.the_deck_keeps_its_screen_seat_with_the_data_bar_off()
+    b5dWorld({ "m.data" })
+    local p = b5dDeckPoint()
+    eq(p[1], "BOTTOMRIGHT")
+    eq(p[2], UIParent, "no strip to stand on: the chassis is anchored to the screen")
+    eq(p[3], "BOTTOMRIGHT")
+    eq(p[5], 32, "the same height above the screen bottom as the two bars made: 20 + 12")
+    yes(p[4] < 0, "and the same distance from the right edge")
+    for _, line in ipairs(__printed) do no(line:find("control deck", 1, true), "the deck reported a problem: " .. line) end
+end
+
+function T.the_deck_seat_is_the_same_spot_on_and_off_for_the_saved_xp_look()
+    local db = { xpVariant = 3 }
+    b5dWorld({ "m.data" }, { db = db })
+    local off = b5dDeckPoint()
+    eq(FS.xpVariants[3].barHeight, 16)
+    eq(off[5], 36, "20 + the saved look's 16")
+end
+
+function T.the_deck_stands_on_the_xp_bar_of_the_saved_look_with_the_data_bar_on()
+    b5dWorld({}, { db = { xpVariant = 3 } })
+    eq(_G.ForeverSTUwaveDataBar._h + _G.ForeverSTUwaveXPBar._h, 36, "20 + 16")
+    eq(b5dDeckPoint()[2], _G.ForeverSTUwaveXPBar)
+end
+
+-- ---- pairs and the whole set ----
+
+function T.chat_and_the_data_bar_off_together_load_and_run_clean()
+    b5dWorld({ "m.chat", "m.data" })
+    for _, key in ipairs({ "m.chat", "m.data" }) do b5dClean(key); b5dNotBuilt(key) end
+    eq(#__pokeErrors, 0, table.concat(__pokeErrors, " | "))
+end
+
+function T.the_data_bar_off_leaves_chat_on_and_the_other_way_round()
+    b5dWorld({ "m.data" })
+    b5dBuilt("m.chat")
+    b5dWorld({ "m.chat" })
+    b5dBuilt("m.data")
+end
+
+local ALL_KEYS = { "m.uf", "m.party", "m.raid", "m.pet", "m.cast", "m.np", "m.gs", "m.ab", "m.auras", "m.class", "m.chat",
+    "m.mini", "m.bags", "m.track", "m.data", "m.skins" }
+
+function T.all_sixteen_switches_are_registered()
+    Boot({})
+    local keys = FS.ModuleSwitch.Keys()
+    eq(#keys, 16)
+    for _, key in ipairs(ALL_KEYS) do
+        local found = false
+        for _, k in ipairs(keys) do if k == key then found = true end end
+        yes(found, key .. " is registered")
+    end
+end
+
+function T.with_all_sixteen_switches_off_nothing_is_built_and_no_module_file_raises()
+    b5dWorld(ALL_KEYS)
+    for _, key in ipairs(ALL_KEYS) do
+        eq(FS.ModuleSwitch.On(key), false, key .. " switch")
+        eq(FS.ModuleSwitch.Built(key), false, key .. " built nothing")
+    end
+    eq(ErrorsFrom("Modules/"), "", "a module file raised")
+    eq(ErrorsFrom("Core/"), "", "a core file raised")
+    for rel, err in pairs(__loadFailed) do error(rel .. " failed to load: " .. err) end
+end
+
 return T
 """
 
@@ -2514,7 +3016,10 @@ def run_gate_checks() -> int:
     global GATE_NAMES
     GATE_NAMES = re.findall(r"^function T\.([a-z0-9_]+)\(", GATE_CHECKS, re.M)
     failed = 0
+    only = os.environ.get("GATE_ONLY")   # a substring: runs just the rows whose name holds it (while developing a row)
     for name in GATE_NAMES:
+        if only and only not in name:
+            continue
         try:
             lua = base.LuaRuntime(unpack_returned_tuples=True, register_eval=False)
             lua.execute(GATE_WORLD)
@@ -2566,6 +3071,24 @@ def check_the_toc_loads_the_store_before_the_pages_that_gate_on_it() -> list[str
     return problems
 
 
+def check_every_one_of_the_sixteen_switches_is_gated_by_a_module_file() -> list[str]:
+    """No power button may be a dead one: each key is read by module code (not only the store, the layout editor or a config
+    page), and a module that builds (every one but the live nameplates) says so with MarkBuilt."""
+    rows = re.findall(r'\{\s*"(m\.[a-z]+)"\s*,\s*"[^"]*"\s*,\s*"[a-z]+"\s*(,\s*true)?\s*\}', MS_FILE.read_text(encoding="utf-8"))
+    problems = []
+    if len(rows) != 16:
+        return [f"expected the sixteen definitions in ModuleSwitch.lua, found {len(rows)}"]
+    files = [f for f in toc_files() if f not in ("Core/ModuleSwitch.lua", "Core/LayoutEdit.lua") and not f.startswith("Modules/Config/")]
+    for key, live in rows:
+        readers = [f for f in files if f'"{key}"' in read_toc_file(f)]
+        if not readers:
+            problems.append(f"{key}: no module file reads the switch")
+            continue
+        if not live and not any(f'MarkBuilt("{key}")' in read_toc_file(f) for f in files):
+            problems.append(f"{key}: no module file marks it built")
+    return problems
+
+
 def check_the_footer_count_reads_the_pending_switches() -> list[str]:
     src = MODULES_FILE.read_text(encoding="utf-8")
     problems = []
@@ -2580,6 +3103,7 @@ def main() -> int:
     py_checks = [
         ("the_files_are_clean", check_the_files_are_clean),
         ("the_footer_count_reads_the_pending_switches", check_the_footer_count_reads_the_pending_switches),
+        ("every_one_of_the_sixteen_switches_is_gated_by_a_module_file", check_every_one_of_the_sixteen_switches_is_gated_by_a_module_file),
         ("the_toc_loads_the_store_before_the_pages_that_gate_on_it", check_the_toc_loads_the_store_before_the_pages_that_gate_on_it),
     ]
     total = len(CHECK_NAMES) + len(GATE_NAMES) + len(py_checks)
