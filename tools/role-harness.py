@@ -875,6 +875,19 @@ function T.dependent_rows_follow_their_switch()
     yes(swatch.disabled, "the melee colours follow their switch")
 end
 
+function T.the_colour_and_warn_rows_say_what_happens_when_the_game_hides_threat()
+    local W = boot({ preWindow = roles() })
+    openAll(W)
+    for _, key in ipairs({ "tank.aggro", "melee.aggro", "ranged.aggro" }) do
+        local e = W.RowByKey(key, "role")
+        yes(e.tip and e.tip:find("hides your threat", 1, true), key .. " tip does not say what a hidden threat does")
+    end
+    for _, key in ipairs({ "melee.pct", "ranged.pct" }) do
+        local e = W.RowByKey(key, "role")
+        yes(e.tip and e.tip:find("hides the percent", 1, true), key .. " tip does not name the fallback")
+    end
+end
+
 function T.the_health_text_row_says_it_is_not_applied_yet()
     local W = boot({ preWindow = roles() })
     W.Open("role", "healer")

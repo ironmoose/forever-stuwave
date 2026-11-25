@@ -24,6 +24,11 @@ local TIP_THREAT = "Aggro % = your share of the mob's threat, 100 means it is on
 local TIP_LOST = "Flashes the plate when a mob you had turns to someone else."
 local TIP_HEALTH = "Missing = how much health they are down."
 local TIP_WARN = "Before you pull the mob off the tank."
+-- Not in the prototype: what the colours do when the game hides threat in combat (ticket C3, criteria 3 and 4).
+local TIP_AGGRO = "Colours the health bar by your threat on each mob. When the game hides your threat in combat, the plate "
+    .. "keeps its own colour."
+local TIP_WARNAT = "The share of the tank's threat at which the plate turns amber. When the game hides the percent, a mob "
+    .. "that is close to pulling counts as close."
 
 local function Ready()
     local Role = FS.Role
@@ -144,9 +149,9 @@ local function Warn(content, role)
     local def = s[pct]
     if def then
         UI.Slider(content, { label = "Warn at", key = pct, min = def.min, max = def.max, step = def.step, fmt = "%d%%",
-            sub = true, needs = warn, nl = "Warn near the tank" })
+            sub = true, needs = warn, nl = "Warn near the tank", tip = TIP_WARNAT })
     end
-    Switch(content, role .. ".aggro", "Aggro colours")
+    Switch(content, role .. ".aggro", "Aggro colours", { tip = TIP_AGGRO })
     Colours(content, role, role .. ".aggro", "Aggro colours")
 end
 
@@ -154,7 +159,7 @@ local BUILD = {}
 
 function BUILD.tank(content)
     RoleSection(content, "Aggro on plates", "tank", TIP_PLATES)
-    Switch(content, "tank.aggro", "Aggro colours")
+    Switch(content, "tank.aggro", "Aggro colours", { tip = TIP_AGGRO })
     Colours(content, "tank", "tank.aggro", "Aggro colours")
     Choice(content, "tank.threat", "Threat text", { tip = TIP_THREAT })
     RoleSection(content, "Alerts", "tank")
