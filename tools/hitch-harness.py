@@ -27,7 +27,8 @@ function GetCVar() return __cvar end
 function SetCVar(_, v) __cvar = v; return true end
 function UpdateAddOnCPUUsage() end
 function GetAddOnCPUUsage(n) return __cpu[n] end
-function GetUnitSpeed() return 7 end
+function GetUnitSpeed() return __speed end
+__speed = 7
 function date() return "now" end
 local realgc = collectgarbage
 function collectgarbage(op) if op == "count" then return __heap end return realgc(op) end
@@ -41,7 +42,7 @@ SlashCmdList = {}
 function CreateFrame()
     return { scripts = {}, SetScript = function(self, n, fn) self.scripts[n] = fn end }
 end
-FS = {}
+FS = { IsSecret = function(v) return v == "SECRET" end }
 """
 
 CHECKS = r"""
@@ -69,6 +70,12 @@ check(saved.addons[1].name == "A" and saved.addons[1].slowMs == 30, "saved, sort
 check(saved.worstMs >= 119 and saved.moving == saved.frames, "worst frame and moving frames counted")
 check(__said[#__said]:find("most CPU in slow frames: A", 1, true) and __said[#__said]:find("/fsbug", 1, true), "summed up in chat")
 check(__cvar == "0" and not ForeverSTUwaveDB.hitchProfileOn, "profiling it turned on goes off again")
+__speed = "SECRET"
+__cvar = "1"
+SlashCmdList.FSHITCH("5")
+local f2 = H.frame.scripts.OnUpdate
+__now = __now + 0.01; f2(H.frame, 0.01)
+check(H.run.frames == 1 and H.run.moving == 0, "a secret speed is never compared and counts as not moving")
 return "ok"
 """
 

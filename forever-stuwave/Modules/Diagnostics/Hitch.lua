@@ -84,7 +84,9 @@ local function Step(_, elapsed)
         if d > s.max[i] then s.max[i] = d end
     end
     s.frames = s.frames + 1
-    local moving = type(GetUnitSpeed) == "function" and (GetUnitSpeed("player") or 0) > 0
+    -- the speed can be a secret on this client: count a frame as moving only from a plain read
+    local speed = type(GetUnitSpeed) == "function" and GetUnitSpeed("player") or nil
+    local moving = type(speed) == "number" and not (FS.IsSecret and FS.IsSecret(speed)) and speed > 0
     if moving then s.moving = s.moving + 1 end
     if s.frames > 2 and ms >= H.SLOW_MS then
         s.slowCount = s.slowCount + 1
