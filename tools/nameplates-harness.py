@@ -55,6 +55,7 @@ def load(name: str, file: str):
 
 AURAS = load("nameplate_auras_harness", "nameplate-auras-harness.py")
 PARSE_GATE = load("parse_gate", "parse-gate.py")
+COMBO_HARNESS = load("nameplatecombo_harness", "nameplatecombo-harness.py")
 
 # The file level locals Nameplates.lua had when the settings were added (parse gate limit 190, fails at 190).
 LOCALS_BEFORE = 189
@@ -732,6 +733,31 @@ def check_file_scope_locals_do_not_grow() -> list[str]:
     return []
 
 
+def check_combo_pips_follow_the_cast_bar_height() -> list[str]:
+    """The pips sit below the slot the cast bar keeps, so a taller or hidden cast bar moves them with it, live."""
+    body = r"""
+local a = Plate("nameplate1")
+W.target = "nameplate1"
+Fire("PLAYER_TARGET_CHANGED")
+local host
+for _, f in ipairs(FRAMES()) do if f.parent == a and f.kind == "Frame" and f.strata == "HIGH" then host = f end end
+check(host ~= nil and host.shown, "the pips show")
+local function drop() local pt = host.points[1] return pt and pt[5] end
+check(drop() == -11, "the default slot is the old one, got " .. tostring(drop()))
+FS.Config.Set("plates.castH", 16)
+check(drop() == -21, "a 16 high cast bar pushes the pips down, got " .. tostring(drop()))
+FS.Config.Set("plates.castH", 0)
+check(drop() == -5, "a hidden cast bar leaves only the gaps, got " .. tostring(drop()))
+FS.Config.Set("plates.castH", 6)
+check(drop() == -11, "back to the default slot, got " .. tostring(drop()))
+FS.Config.Set("plates.castH", 99)
+check(drop() == -21, "a value out of range is held to the limit, got " .. tostring(drop()))
+FS.Config.Set("plates.castH", "tall")
+check(drop() == -11, "a word reads as the default, got " .. tostring(drop()))
+"""
+    return COMBO_HARNESS.run("ROGUE", "FS.Config.RegisterDefault('plates.castH', 6)\n" + body)
+
+
 def check_no_dashes() -> list[str]:
     problems = []
     for path in (SOURCE, PAGE, COMBO, Path(__file__)):
@@ -1166,6 +1192,7 @@ def main() -> int:
         ("nameplates_file_scope_locals_do_not_grow", check_file_scope_locals_do_not_grow()),
         ("no_em_or_en_dash_in_the_plate_files", check_no_dashes()),
         ("page_labels_and_tips_use_neutral_words", check_provider_names_stay_neutral()),
+        ("combo_pips_follow_the_cast_bar_height", check_combo_pips_follow_the_cast_bar_height()),
     ):
         total += 1
         if problems:
