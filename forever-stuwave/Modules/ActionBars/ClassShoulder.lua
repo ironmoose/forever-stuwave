@@ -14,7 +14,8 @@
 -- mockup's stepped composite of four nested strokes: .546 at the edge, stepping down to nothing by 10 px).
 --
 -- It builds ONLY for a class in OWNERS (a Paladin whose SealBar owns the forms, a Warrior whose StanceBar does, a
--- Shaman whose TotemBar is built; the Shaman's forms stay on the stance bar),
+-- Shaman whose TotemBar is built; the Shaman's forms stay on the stance bar; a Druid, Hunter, Mage, Rogue or Warlock
+-- with a class tab of its own: ClassTab below),
 -- ONLY while the Console is drawn, ONLY out of combat. Every other class gets none.
 -- The art is a plain non-secure child of the Console root. The owner's host (protected, it parents the secure
 -- buttons) is its own frame anchored to the Console root, NEVER to this art: nothing secure may be anchored to
@@ -78,9 +79,39 @@ local function BlockSize(cols, rows)
 end
 ClassShoulder.C = C
 
+-- The class tabs of ShapeshiftTab.lua, CallPetTab.lua, PortalsTab.lua, ConjureTab.lua, PoisonsTab.lua and DemonTab.lua: a
+-- block `rows` tall and as wide as the tab's Cols(), standing while its OwnsShoulder() says so, its Sync() told when the
+-- block came, went or moved. `after` seats a second tab of one class right of the first, like the shoulders below.
+local function ClassTab(key, field, rows, after)
+    return {
+        key = key, cols = 1, rows = rows, after = after,
+        colsFn = function()
+            local tab = FS[field]
+            return tab and tab.Cols and tab.Cols() or 1
+        end,
+        wants = function()
+            local tab = FS[field]
+            return tab and tab.OwnsShoulder and tab.OwnsShoulder()
+        end,
+        changed = function()
+            local tab = FS[field]
+            if tab and tab.Sync then tab.Sync() end
+        end,
+    }
+end
+
+-- The Mage's two tabs: portals and teleports (two rows), then food and water 16 design px right of it
+local MAGE = ClassTab("mage", "PortalsTab", 2)
+MAGE.also = { ClassTab("mageconjure", "ConjureTab", 1, 16) }
+
 -- The classes that own a shoulder, by class token: the block (mockup lsRowW(cols) wide, `rows` tall) and the
 -- question whose answer says the class's bar is up. Append only; a class not listed here never gets one.
 local OWNERS = {
+    DRUID = ClassTab("druid", "ShapeshiftTab", 1),
+    HUNTER = ClassTab("hunter", "CallPetTab", 1),
+    MAGE = MAGE,
+    ROGUE = ClassTab("rogue", "PoisonsTab", 1),
+    WARLOCK = ClassTab("warlock", "DemonTab", 1),
     PALADIN = {
         key = "paladin", cols = C.COLS, rows = C.ROWS,
         wants = function()
