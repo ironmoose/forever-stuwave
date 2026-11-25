@@ -159,10 +159,23 @@ local EngineState = { container = nil, armed = false, failures = 0, gaveUp = fal
     parked = {}, seenIds = nil, rebuilds = 0, passTried = false, noImbue = false, retryAt = nil }
 BuffTab.Engine = EngineState
 
--- true while `button` shows the engine drawn combat state: in combat, the setting on, the container armed (read back),
--- the tile has a slot and no slot of ANY tile is unproven or off its icon. Cheap enough for every paint.
--- true when no tile with slots is unproven or misplaced. ONE predicate for the container's alpha and for every tile, so
--- a tile is live only when the container is really visible (an unproven tile hides the container for all).
+-- true when this tile's engine slots are proven (not unproven or misplaced). The live/frozen decision is PER TILE: a bad
+-- imbue tile no longer holds the shield tile on its frozen estimate. A tile with no slots is never proven.
+local function TileProven(button)
+    local eng = button.fsEngine
+    return eng ~= nil and eng.declared > 0 and not eng.bad
+end
+
+-- true when SOME tile has a proven slot: the shared container shows then (alpha 1), and each unproven tile's slot frames
+-- are hidden on their own (SeatSlotAlpha), so no stray lit icon draws over a tile that shows its frozen state.
+local function AnyProven()
+    for _, button in ipairs(BT.list) do
+        if TileProven(button) then return true end
+    end
+    return false
+end
+
+-- true when no tile with slots is unproven or misplaced (kept for the state line and diagnostics).
 local function AllProven()
     for _, button in ipairs(BT.list) do
         local eng = button.fsEngine
@@ -171,10 +184,13 @@ local function AllProven()
     return true
 end
 EngineState.allProven = AllProven
+EngineState.anyProven = AnyProven
 
+-- true while `button` shows the engine drawn combat state: in combat, the setting on, the container armed (read back),
+-- and THIS tile has a proven slot that is on its icon. Cheap enough for every paint.
 local function EngineLive(button)
     local eng = button.fsEngine
-    if not (eng and eng.declared > 0 and AllProven() and EngineState.armed and InCombatLockdown()) then return false end
+    if not (eng and eng.declared > 0 and not eng.bad and EngineState.armed and InCombatLockdown()) then return false end
     -- an item enchantment tile is live only once a slot was SEEN shown out of combat while the plain read said an imbue
     -- is on (ProveEngine): until then the engine is not known to draw this client's imbues at all, and the tile keeps
     -- its frozen estimate, which counts down from the last read, rather than showing a missing look over a live buff
@@ -1002,6 +1018,7 @@ local function InitSlot(tile, ownIcon)
         eng.parts[#eng.parts + 1] = part
         eng.bad = true                               -- UNPROVEN until a proof pass out of combat has read it
         tile.fsSig = nil
+        if Quiet(slot, "SetAlpha", 0) then part.alpha = 0 end   -- hidden until proven (SeatSlotAlpha)
         pcall(function() slot:SetAllPoints(tile.icon) end)
         pcall(CoverSlot, tile, part)
         pcall(function()
@@ -1230,6 +1247,18 @@ local function ReadPart(part)
     end
 end
 
+-- Hides the slot frames of an unproven tile and shows those of a proven one, one write per change, OUT OF COMBAT only
+-- (a slot frame is restricted in combat; a tile's proof only changes out of combat, so the per tile alpha is already
+-- right when the fight starts). The container alpha is shared, so this is the per tile handle.
+local function SeatSlotAlpha(button)
+    local eng = button.fsEngine
+    if not eng or InCombatLockdown() then return end
+    local want = eng.bad and 0 or 1
+    for _, part in ipairs(eng.parts) do
+        if part.alpha ~= want and Quiet(part.slot, "SetAlpha", want) then part.alpha = want end
+    end
+end
+
 -- The PROOF pass, out of combat only (SeatEngine, and the tick every second): every slot frame of every tile read against
 -- the tile's icon BEFORE anything is written. A slot found off the icon is put back (its tile is not live until the next
 -- pass reads it right); one that cannot be read is unproven, except that an IDLE slot (hidden, or with no size: nothing to
@@ -1285,6 +1314,7 @@ local function ProveEngine()
                 eng.bad = bad
                 button.fsSig = nil
             end
+            SeatSlotAlpha(button)
             if eng.item and not eng.seen then
                 local v = ViewOf(button)
                 if v and (v.mode == "on" or v.mode == "exp") then
@@ -1507,13 +1537,14 @@ local function EngineTick()
     SaveStatus()
 end
 
--- The only thing combat writes: 1 while in combat and the state is on and every slot of every tile is proven (a tile
--- that shows its frozen state must not have a stray lit icon drawn over it), 0 otherwise.
+-- The only thing combat writes: 1 while in combat and the state is on and at least one tile is proven, 0 otherwise. A
+-- tile that shows its frozen state has its slot frames at alpha 0 (SeatSlotAlpha, out of combat), so it has no stray lit
+-- icon drawn over it while another tile is live.
 local function SyncEngineAlpha()
     local container = EngineState.container
     if not container then return SaveStatus() end
     local alpha = (InCombatLockdown() and EngineState.armed and Setting(BT.SETTINGS.combatstate)) and 1 or 0
-    if alpha == 1 and not AllProven() then alpha = 0 end
+    if alpha == 1 and not AnyProven() then alpha = 0 end
     if EngineState.alpha ~= alpha and Quiet(container, "SetAlpha", alpha) then EngineState.alpha = alpha end
     SaveStatus()
 end

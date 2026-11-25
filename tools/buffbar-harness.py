@@ -2938,8 +2938,9 @@ def check_a_layout_pass_after_our_seat_is_caught_by_the_next_tick():
     assert not bt(lua).EngineLive("shield") and bt(lua).EngineLive("imbue") is not None
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
-    assert float(acs(lua)[0]._alpha) == 0, "one bad tile hides the container for all"
-    assert not bt(lua).EngineLive("shield")
+    assert float(acs(lua)[0]._alpha) == 1, "the imbue tile is proven: the container shows"
+    assert not bt(lua).EngineLive("shield"), "the bad shield tile stays frozen"
+    assert float(g(lua).__acs[1]._slots.shield.frame._alpha) == 0, "its slot frame is hidden on its own"
     # an engine that lets the repair stand: the slot is back on the icon, the next pass proves it
     lua = engine_world()
     run(lua, "local f = __acs[1]._slots.shield.frame\nf._points = {}\nf._points[1] = { point = 'TOPLEFT', rel = UIParent, relPoint = 'BOTTOMLEFT', x = 7, y = 9 }")
@@ -3147,11 +3148,42 @@ def check_one_misplaced_tile_hides_the_container_and_no_tile_claims_the_engine_s
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     update(lua)
-    assert float(acs(lua)[0]._alpha) == 0, "the container is hidden"
-    assert not bt(lua).EngineLive("shield") and not bt(lua).EngineLive("imbue"), "a tile is live only if the container shows"
-    assert tile(lua, SHIELD)["text"] == "~3", "the shield shows its frozen state, not a dim base over a hidden container"
+    assert float(acs(lua)[0]._alpha) == 1, "the shield tile is proven: the container shows"
+    assert bt(lua).EngineLive("shield") and not bt(lua).EngineLive("imbue"), "each tile decides for itself"
+    assert float(g(lua).__acs[1]._ench[2]._alpha) == 0 and float(g(lua).__acs[1]._ench[1]._alpha) == 0, "the imbue slots are hidden on their own"
+    assert float(g(lua).__acs[1]._slots.shield.frame._alpha) == 1
     assert tile(lua, IMBUE)["text"] != ""
     assert g(lua).FS.BuffTab.Engine.allProven() is False
+
+
+def check_an_unreadable_imbue_slot_does_not_hold_a_proven_shield_tile_frozen():
+    # live 2026-11-25: the imbue tile read bad=true (hundreds of unreadable rect reads) and froze the shield tile too
+    lua = engine_world(tips={16: ["Rockbiter 1 (30 min)"]})
+    shield_aura_up(lua)
+    for ref in ("__acs[1]._ench[1]", "__acs[1]._ench[2]"):
+        run(lua, f"{ref}._noRect = true\n{ref}.IsShown = function() return __SECRET end")
+    for _ in range(8):
+        tick(lua, 1.1)
+    assert btn(lua, IMBUE).fsEngine.bad is True and btn(lua, SHIELD).fsEngine.bad is False
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert bt(lua).EngineLive("shield"), "the proven shield tile is live in combat"
+    assert not bt(lua).EngineLive("imbue"), "the bad imbue tile stays on its frozen estimate"
+    assert float(acs(lua)[0]._alpha) == 1
+    assert float(g(lua).__acs[1]._slots.shield.frame._alpha) == 1
+    assert float(g(lua).__acs[1]._ench[1]._alpha) == 0 and float(g(lua).__acs[1]._ench[2]._alpha) == 0
+    assert tile(lua, IMBUE)["text"] != "", "the imbue tile keeps its frozen text"
+    # every tile bad: the container is hidden again
+    leave_combat(lua)
+    run(lua, "__acs[1]._slots.shield.frame._forceLeft, __acs[1]._slots.shield.frame._forceTop = 7, 9")
+    tick(lua, 1.1)
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert not bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 0
+    # no slot frame is written in combat
+    assert int(g(lua).__slotBlocked) == 0
 
 
 def check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_keeps_its_proof():
@@ -3237,7 +3269,8 @@ def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unrea
     assert btn(lua, SHIELD).fsEngine.bad is True, "a lone collapsed shield slot was taken as proven"
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
-    assert not bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 0, "a blank state would be painted over the buff"
+    assert not bt(lua).EngineLive("shield"), "a blank state would be painted over the buff"
+    assert float(g(lua).__acs[1]._slots.shield.frame._alpha) == 0
     leave_combat(lua)
     lua = engine_world()
     run(lua, "for _, part in ipairs(FS.BuffTab.BT.byKey.imbue.fsEngine.parts) do part.ok = false end")
@@ -3252,7 +3285,8 @@ def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unrea
     assert btn(lua, IMBUE).fsEngine.bad is True and g(lua).FS.BuffTab.Engine.allProven() is False
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
-    assert not bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 0, "an unproven sized slot hides the container"
+    assert bt(lua).EngineLive("shield") and not bt(lua).EngineLive("imbue"), "an unproven sized slot freezes only its own tile"
+    assert float(g(lua).__acs[1]._ench[2]._alpha) == 0
     leave_combat(lua)
     # a slot that was proven and then went idle keeps the proof
     lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
@@ -4151,6 +4185,7 @@ CHECKS = [
     check_a_changed_spellbook_rebuilds_the_container_with_the_new_shield_ids,
     check_flapping_shield_ids_rebuild_only_for_a_new_id_and_at_most_three_times,
     check_one_misplaced_tile_hides_the_container_and_no_tile_claims_the_engine_state,
+    check_an_unreadable_imbue_slot_does_not_hold_a_proven_shield_tile_frozen,
     check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_keeps_its_proof,
     check_a_sized_slot_with_no_rect_is_idle_while_its_tile_has_no_buff_up,
     check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unreadable_one_is,
