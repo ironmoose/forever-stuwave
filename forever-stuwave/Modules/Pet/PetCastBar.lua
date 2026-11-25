@@ -741,6 +741,32 @@ end
 -- ShowIdle does the full reset (effects, lit segments, OnUpdate, the panel's alpha), so
 -- this is also how an abandoned cast or a hold is ended. Called from the engine's
 -- onFinished and for every other end of a cast.
+-- The pet cast bar settings (pet.cast*): the whole plate, whether it shows between casts, and the icon, name and timer
+-- of a cast. Plain alphas on frames this file owns, so it runs in combat too. `casting` is true from BeginCast.
+local function ApplyCastStyle(casting)
+    local host = castPanel and castPanel:GetParent()
+    if not host then return end
+    local Config = FS.Config
+    if not Config then return end
+    local on = Config.Get("pet.cast") ~= false
+    local show = Config.Get("pet.castShow")
+    local _, playerClass = UnitClass("player")
+    local hideIdle = show == "casting" or (show == "auto" and playerClass == "HUNTER")
+    local idle = not casting and mode == nil
+    host:SetAlpha((on and not (idle and hideIdle)) and 1 or 0)
+    local function Part(region, key)
+        if region then region:SetAlpha(Config.Get(key) ~= false and 1 or 0) end
+    end
+    Part(nameText, "pet.castName")
+    Part(timerText, "pet.castTimer")
+    Part(timerSmall, "pet.castTimer")
+    Part(iconTexture, "pet.castIcon")
+    Part(iconHover, "pet.castIcon")
+    if iconEdges then
+        for _, edge in ipairs(iconEdges) do edge.tex:SetAlpha(Config.Get("pet.castIcon") ~= false and 1 or 0) end
+    end
+end
+
 local function GoIdle()
     mode = nil
     castPetGUID = nil
@@ -754,6 +780,7 @@ local function GoIdle()
     if outline then outline:SetAlpha(OUTLINE_IDLE_ALPHA) end
     HideName()
     ghostOn = true
+    ApplyCastStyle(false)
     if run then
         -- The engine's filled row is parked at alpha 0: the ghost outlines draw the idle row.
         run:ShowIdle(0)
@@ -794,6 +821,7 @@ local function BeginCast(info)
     castPetGUID = UnitGUID("pet")
     stripBar:Hide()
     ghostOn = false
+    ApplyCastStyle(true)
     SyncGhosts()
     SetIconBox(true)
     iconTexture:SetTexture(info.texture)
@@ -1173,6 +1201,9 @@ local function Build()
     run.onLayout = OnRunLayout
     ApplyGeometry()
     GoIdle()
+    for _, key in ipairs({ "pet.cast", "pet.castShow", "pet.castIcon", "pet.castName", "pet.castTimer" }) do
+        if FS.Config then FS.Config.OnChange(key, function() ApplyCastStyle(mode ~= nil) end) end
+    end
 
     -- FS.Layout.OnRescale may not exist on this client -- feature-detected
     -- exactly like PetFrame.lua does it.

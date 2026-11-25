@@ -471,6 +471,25 @@ function T.rows_a_frame_does_not_apply_yet_say_so_and_the_raid_rows_it_does_appl
     yes(not FS.ConfigBars.IsWired("raid", "hpFmt") and not FS.ConfigBars.IsWired("party", "hpH"))
 end
 
+function T.the_pet_page_has_its_cast_bar_rows_the_hunter_dot_and_greyed_rows_for_what_is_not_applied()
+    local S, C, CW = boot()
+    CW.Open("pet", "style")
+    for _, key in ipairs({ "pet.cast", "pet.castShow", "pet.castFree", "pet.castIcon", "pet.castName", "pet.castTimer", "pet.previewKind" }) do
+        yes(CW.RowByKey(key, "pet"), key)
+    end
+    local free = CW.RowByKey("pet.castFree", "pet")
+    yes(not free.row:IsShown(), "When hidden waits for a cast bar that is not always shown")
+    C.Set("pet.castShow", "casting"); CW.RefreshAll()
+    yes(free.row:IsShown(), "When hidden shows once the bar can hide")
+    CW.Open("pet", "hunter")
+    yes(CW.RowByKey("pet.happy", "pet"), "happiness dot")
+    eq(C.Get("pet.happy"), false)
+    CW.Open("pet", "style")
+    local w = CW.RowByKey("bars.hpH", "pet")
+    yes(w, "shared rows build for the pet frame")
+    yes(w.row.fsRowOff, "a row the pet frame does not apply yet is greyed")
+end
+
 function T.pointing_at_a_switch_turns_the_feature_on_in_the_preview_for_the_moment()
     local S, C, CW = boot()
     openStyle(CW)

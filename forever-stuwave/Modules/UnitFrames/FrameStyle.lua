@@ -107,6 +107,15 @@ end
 
 -- The frame the shared Style tab on Unit Frames is showing (a remembered pick, not a frame setting).
 Config.RegisterDefault("bars.module", "target")
+-- The pet page: the cast bar plate (PetCastBar.lua), the happiness dot (PetFrame.lua) and which pet the preview shows.
+Config.RegisterDefault("pet.cast", true)
+Config.RegisterDefault("pet.castShow", "always")
+Config.RegisterDefault("pet.castFree", "wider")
+Config.RegisterDefault("pet.castIcon", true)
+Config.RegisterDefault("pet.castName", true)
+Config.RegisterDefault("pet.castTimer", true)
+Config.RegisterDefault("pet.happy", false)
+Config.RegisterDefault("pet.previewKind", "hunter")
 Config.RegisterDefault("raid.scale", 100)
 Config.RegisterDefault("raid.arrange", "columns")
 Config.RegisterDefault("raid.perRow", 5)
