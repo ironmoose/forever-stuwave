@@ -674,11 +674,14 @@ function F.AddTest(sec, id)
     return b
 end
 
--- Which alert the shared scale row stands for: the player's own class when it has one, else the warrior's.
+-- Which alert the shared scale row stands for: the player's own class's, or nil for a class with no pop up alert (a
+-- Priest is never shown a Warrior's Overpower as if it were theirs: no Test button and no hover sample on that class).
 local function ScaleOwner()
     local DC = FS.DruidClearcasting
     if DC and DC.Applies and DC.Applies() then return "druid" end
-    return "warrior"
+    local PU = FS.WarriorPowerUps
+    if PU and PU.Applies and PU.Applies() then return "warrior" end
+    return nil
 end
 
 F.ScaleOwner = ScaleOwner

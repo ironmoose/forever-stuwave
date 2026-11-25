@@ -43,9 +43,11 @@ local function PlateTab(content)
     })
     local alertsSec = UI.Section(content, {
         title = "Alerts",
-        tip = "The pop up alerts class modules show above your character: Overpower, Revenge and Victory Rush, and Clearcasting.",
+        tip = "The pop up alerts class modules show above your character: Overpower, Revenge and Victory Rush for Warriors, Clearcasting for Druids. "
+            .. "Test shows on those two classes.",
     })
-    if CW.Flash and CW.Flash.AddTest then CW.Flash.AddTest(alertsSec, CW.Flash.ScaleOwner()) end
+    local owner = CW.Flash and CW.Flash.ScaleOwner and CW.Flash.ScaleOwner()
+    if owner and CW.Flash.AddTest then CW.Flash.AddTest(alertsSec, owner) end
     UI.Slider(content, {
         label = "Alert scale", key = set.alertScale.key, min = set.alertScale.min, max = set.alertScale.max,
         step = set.alertScale.step, fmt = "%d%%",

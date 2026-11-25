@@ -1266,9 +1266,23 @@ local function alertStub(W)
     function p.IsShown() return p.shown end
     FS.WarriorPowerUps = FS.WarriorPowerUps or {}
     FS.WarriorPowerUps.Preview = p
+    FS.WarriorPowerUps.Applies = function() return __alertClass == "WARRIOR" end
+    __alertClass = "WARRIOR"
     FS.GunsightAreas = FS.GunsightAreas or {}
     FS.GunsightAreas.ALERT_SCALE_KEY = "gunsight.alertScale"
     return p
+end
+
+function T.a_class_with_no_pop_up_alert_never_previews_the_warriors_on_the_scale_row()
+    local W = boot()
+    local p = alertStub(W)
+    __alertClass = "PRIEST"
+    local row = { fsTrack = { fsDragging = false }, fsEdit = { HasFocus = function() return false end } }
+    eq(W.Flash.ScaleOwner(), nil, "a priest owns no pop up alert")
+    W.SetHover({ key = "gunsight.alertScale", row = row })
+    no(p.shown, "the scale row shows no Overpower on a priest")
+    W.SetHover(nil)
+    __alertClass = "WARRIOR"
 end
 
 local function alertTick(W, dt) local d = W.Flash.alertDriver; d.scripts.OnUpdate(d, dt) end
@@ -1284,7 +1298,7 @@ function T.pointing_at_an_alert_row_shows_its_preview_and_leaving_hides_it()
     no(p.shown, "down when the pointer leaves"); eq(p.hides, 1)
     local scale = { key = "gunsight.alertScale", row = row }
     W.SetHover(scale)
-    yes(p.shown, "the shared scale row shows the class alert (no druid here: the warrior's)")
+    yes(p.shown, "the shared scale row shows the class alert (a warrior here)")
     W.SetHover(nil)
     W.SetHover({ key = "chat.w", row = row })
     no(p.shown, "a row of another setting shows nothing")
