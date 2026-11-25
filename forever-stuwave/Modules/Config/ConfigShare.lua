@@ -258,6 +258,13 @@ local function SelectAll()
     if not ui.box then return end
     ui.box:SetFocus()
     ui.box:HighlightText()
+    -- text set this frame can need the selection asked for once more after it has laid out
+    local timer = _G.C_Timer
+    if timer and timer.After then
+        timer.After(0, function()
+            if Share.mode == "export" and ui.overlay:IsShown() and ui.box:HasFocus() then ui.box:HighlightText() end
+        end)
+    end
 end
 
 local function SetWhat(what)
@@ -381,7 +388,7 @@ local function Build()
     box:SetAutoFocus(false)
     box:SetFont(Theme.FONT_MONO, S.TEXT, "")
     box:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
-    Safe(box, "SetSpacing", LINE_H - S.TEXT)
+    Safe(box, "SetSpacing", 2)   -- the font is about 14 tall at this size, so a line lands near the prototype's 16
     box:SetMaxLetters(0)
     Safe(box, "SetMaxBytes", 0)
     box:SetWidth(BOX_VIEW_W)
