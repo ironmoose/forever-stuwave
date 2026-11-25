@@ -41,8 +41,13 @@
 --     (which then sits above the stance bar).
 --
 --   * COMBAT STATE: the reads above freeze in combat, so one AuraContainer on "player" inside the host draws the real
---     shield and weapon enchant over the tiles there (see "The engine drawn state in combat" below); out of combat
---     the plain reads draw and the container is invisible.
+--     shield over its tile there (see "The engine drawn state in combat" below); out of combat the plain reads draw and
+--     the container is invisible. The IMBUE tile does not depend on the container's item enchantment slots: the engine
+--     lays those out itself (CustomAuraContainerFlowLayoutMixin re-anchors each one with secret wrapped arguments), so on
+--     this client they were never located on the tile (state line: bad=true, seen=false, hundreds of unreadable reads).
+--     In combat it follows the game's own enchant read through ShamanBuffs.lua (C_PaperDollInfo.
+--     GetTemporaryEnchantmentInfo, WEAPON_ENCHANT_CHANGED), and shows the hollow "?" when that cannot be read, never a
+--     stale "up".
 --
 -- Loads after ShamanBuffs.lua, which loads after TotemBar.lua. Nothing here is verified in game.
 
@@ -113,22 +118,21 @@ local function Scale()
     return (FS.Layout and FS.Layout.Scale and FS.Layout.Scale()) or 1
 end
 
--- One chat line per distinct problem, once per session (LogDegradeOnce does not dedupe).
-local function WarnOnce(key, text)
-    if BT.warned[key] then return end
-    BT.warned[key] = true
-    FS.LogDegradeOnce(key, "|cffff4488Forever STUwave|r: " .. text)
-end
-
--- The same, silent: the failure goes to the degrade log on disk (FS.LogQuiet) and not to chat, for a problem the player cannot
--- act on. `err` is the error value; its text is built inside the pcall, so an error that will not turn into text (a secret)
--- cannot make the report itself throw.
+-- A failure goes to the degrade log on disk (FS.LogQuiet, read after a /reload) once per problem per session, and never to
+-- chat: nothing here is for the player to act on, and a line that reads like an error on every reload is worse than none
+-- (FS.LogDegradeOnce is the one that prints). `err` is the error value; its text is built inside the pcall, so an error
+-- that will not turn into text (a secret) cannot make the report itself throw.
 local function QuietOnce(key, text, err)
     if BT.warned[key] then return end
     BT.warned[key] = true
     if FS.LogQuiet then
         pcall(function() FS.LogQuiet(key, err == nil and text or (text .. tostring(err))) end)
     end
+end
+
+-- The same for a notice whose text is complete (the call sites that were chat lines before).
+local function WarnOnce(key, text)
+    QuietOnce(key, text)
 end
 
 -- Settings: read by the config window (Unit Frames page), explained there by the `tip` (a ? icon).
@@ -192,8 +196,9 @@ local function EngineLive(button)
     local eng = button.fsEngine
     if not (eng and eng.declared > 0 and not eng.bad and EngineState.armed and InCombatLockdown()) then return false end
     -- an item enchantment tile is live only once a slot was SEEN shown out of combat while the plain read said an imbue
-    -- is on (ProveEngine): until then the engine is not known to draw this client's imbues at all, and the tile keeps
-    -- its frozen estimate, which counts down from the last read, rather than showing a missing look over a live buff
+    -- is on (ProveEngine): until then the engine is not known to draw this client's imbues at all, and the tile shows what
+    -- ShamanBuffs reads from the game in combat (an up time, missing, or the "?" look), rather than a missing look over a
+    -- live buff
     if eng.item and not eng.seen then return false end
     return Setting(BT.SETTINGS.combatstate)
 end
@@ -310,7 +315,8 @@ function BuffTab.TipLines(key)
             add("No imbue on your " .. (v.lackHand == "off" and "off" or "main") .. " hand.", { 1, 1, 1 }, true)
         else
             add(v.spell or "Weapon imbue", muted)
-            add("The imbue time cannot be read yet.", { 1, 1, 1 }, true)
+            add(v.unreadable == "combat" and "The imbue cannot be read in combat." or "The imbue time cannot be read yet.",
+                { 1, 1, 1 }, true)
         end
         if click then add(click, muted, true) end
         return lines
@@ -1080,7 +1086,7 @@ local function AddShieldSlot(container, tile, ids)
         eng.declared = 1
     else
         tile.fsEngine = nil
-        WarnOnce("bufftab_engine_shield", "the shield tile carries no combat state (" .. tostring(err) .. ")")
+        WarnOnce("bufftab_engine_shield", "the shield tile has no engine slot (" .. tostring(err) .. ")")
     end
 end
 
@@ -1089,7 +1095,7 @@ end
 local function AddImbueSlots(container, tile, s)
     if type(container.AddItemEnchantment) ~= "function" or type(container.SetItemEnchantmentLayout) ~= "function"
         or type(_G.AuraContainerItemEnchantmentSlot) ~= "table" then
-        WarnOnce("bufftab_engine_imbue", "the imbue tile carries no combat state (this client has no item enchantment slots)")
+        WarnOnce("bufftab_engine_imbue", "the imbue tile has no engine slots (this client has no item enchantment slots)")
         return
     end
     local eng = NewEngineTile(tile)
@@ -1290,7 +1296,7 @@ local function ProveEngine()
                     elseif placed == nil then
                         part.nils = (part.nils or 0) + 1
                         if part.nils >= BT.UNREADABLE_TICKS then
-                            WarnOnce("bufftab_engine_unreadable", "a combat state slot cannot be located; that tile keeps the last known state")
+                            WarnOnce("bufftab_engine_unreadable", "a combat state slot cannot be located; that tile is not drawn by the engine in combat")
                         end
                     else
                         part.nils = 0
@@ -1300,7 +1306,7 @@ local function ProveEngine()
                     elseif not part.ok then
                         bad = true
                         if placed == false then
-                            WarnOnce("bufftab_engine_layout", "a combat state slot is not on its tile; that tile keeps the last known state")
+                            WarnOnce("bufftab_engine_layout", "a combat state slot is not on its tile; that tile is not drawn by the engine in combat")
                             pcall(part.slot.SetAllPoints, part.slot, button.icon)
                         end
                     end
@@ -1401,7 +1407,7 @@ local function EnsureEngine(retry)
     local ok, result, ids = pcall(BuildContainer, not EngineState.noImbue)
     if not ok and type(result) == "table" and result.imbue then
         EngineState.noImbue = true
-        WarnOnce("bufftab_engine_imbue", "the imbue tile carries no combat state (" .. result.imbue .. ")")
+        WarnOnce("bufftab_engine_imbue", "the imbue tile has no engine slots (" .. result.imbue .. ")")
         ok, result, ids = pcall(BuildContainer, false)
     end
     if ok then
@@ -1886,7 +1892,7 @@ local function Apply()
 
     local ok, err = pcall(Build)
     if not ok then
-        print("|cff22e0ffForever STUwave|r: buff tab failed to build (" .. tostring(err) .. ")")
+        QuietOnce("bufftab_build", "the buff tab could not be built: ", err)
         return
     end
 

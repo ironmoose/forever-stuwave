@@ -418,6 +418,24 @@ end
 function __water() __snap = { buffs = { { name = "Water Shield", count = 3, spellId = 24398, expirationTime = __now + 600 } } } end
 function __noshield() __snap = { buffs = { { name = "Mark of the Wild", count = 0, expirationTime = 0 } } } end
 function __castOk(id) __fire_event("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", id) end
+-- C_PaperDollInfo.GetTemporaryEnchantmentInfo (the read the engine's own item enchantment slots use; the docs mark no
+-- return as secret): slot -> { ms = remaining milliseconds | nil for an enchant with no time }, nil for none. __enchMode:
+-- "throw", "secret" (the whole answer) or "secretfields" (a table whose fields are secret); __enchCalls counts the reads
+-- made in combat and out of it.
+__ench, __enchMode, __enchCalls = {}, nil, { combat = 0, calm = 0 }
+function __setEnch(slot, ms, timed) __ench[slot] = ms and { ms = ms, timed = timed ~= false } or nil end
+C_PaperDollInfo = { GetTemporaryEnchantmentInfo = function(slot)
+    local k = __combat and "combat" or "calm"
+    __enchCalls[k] = __enchCalls[k] + 1
+    if __enchMode == "throw" then error("GetTemporaryEnchantmentInfo blew up") end
+    if __enchMode == "secret" then return __SECRET end
+    local e = __ench[slot]
+    if not e then return nil end
+    if __enchMode == "secretfields" then
+        return { enchantID = __SECRET, remainingTimeMs = __SECRET, chargesRemaining = 0, hasExpirationTime = __SECRET }
+    end
+    return { enchantID = 7, remainingTimeMs = e.ms, chargesRemaining = 0, hasExpirationTime = e.timed }
+end }
 function __tickAll(dt)
     __advance(dt)
     local list = {}
@@ -755,7 +773,9 @@ def check_a_two_handed_weapon_without_an_imbue_asks_for_one():
     assert view(lua, "imbue").mode == "warn"
 
 
-def check_the_tooltip_is_never_read_in_combat_and_the_clock_counts_down_from_the_last_read():
+def check_the_tooltip_is_never_read_in_combat_and_a_hand_nothing_confirms_is_unknown_until_its_time_ran_out():
+    # the game's own read answers nothing here (as when the client holds it back): the tooltip is not the fallback, and the
+    # clock of an unconfirmed hand is not shown as if it were a read
     lua = world(tips={16: ["Rockbiter 1 (10 min)"]})
     before = len(tip_calls(lua))
     assert view(lua, "imbue").text == "10m"
@@ -769,11 +789,10 @@ def check_the_tooltip_is_never_read_in_combat_and_the_clock_counts_down_from_the
     assert all(not c for _, c in tip_calls(lua)), f"the tooltip was read in combat: {tip_calls(lua)}"
     assert len(tip_calls(lua)) == before, "no read at all happened in combat"
     v = view(lua, "imbue")
-    assert (v.mode, v.text) == ("exp", "2m"), (v.mode, v.text)         # 10 min less 460 s is 2m 20s
+    assert (v.mode, v.text) == ("hollow", "?"), (v.mode, v.text)         # 460 s into a 600 s imbue nothing confirms
     tick(lua, 60)
-    assert view(lua, "imbue").text == "1m", view(lua, "imbue").text
     tick(lua, 30)
-    assert view(lua, "imbue").text == "50s", view(lua, "imbue").text
+    assert view(lua, "imbue").mode == "hollow", "ten minutes are not up yet"
     tick(lua, 60)
     assert view(lua, "imbue").mode == "warn", "an imbue that ran out in combat asks for another"
 
@@ -889,6 +908,193 @@ def check_get_weapon_enchant_info_counts_only_when_it_answers_true():
     run(lua, "__gwei = { __SECRET, __SECRET, 0, 0, __SECRET, __SECRET, 0, 0 }")
     fire(lua, "UNIT_INVENTORY_CHANGED", "player")
     assert view(lua, "imbue").mode == "warn"
+
+
+# The game's own read of a weapon's temporary enchantment (C_PaperDollInfo.GetTemporaryEnchantmentInfo, the source the
+# engine's item enchantment slots draw from, with no return marked secret in the client's API documentation) is what the
+# tile follows in combat, where the weapon tooltip cannot be read.
+
+
+def set_ench(lua, slot, minutes=None, timed=True):
+    """What the game's temporary enchantment read answers for a weapon slot: minutes left, or None for no enchant."""
+    ms = "nil" if minutes is None else str(int(minutes * 60 * 1000))
+    run(lua, f"__setEnch({slot}, {ms}, {'true' if timed else 'false'})")
+
+
+def ench_world(minutes=30, **kw):
+    """A Shaman whose main hand carries Rockbiter (the tooltip and the game's own read agree), calm, after the first sync."""
+    kw.setdefault("tips", {16: [f"Rockbiter 1 ({minutes} min)"]})
+    lua = world(**kw)
+    set_ench(lua, 16, minutes)
+    return lua
+
+
+def start_combat(lua):
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+
+
+def check_an_imbue_cancelled_in_combat_turns_the_tile_to_missing_from_the_games_enchant_read():
+    # live 2026-11-25: right clicking the imbue off in a fight left the IMBUE tile up. Its engine slot is never proven on
+    # this client and the model read nothing in combat, so it counted down a stale hour.
+    lua = ench_world(30)
+    assert view(lua, "imbue").mode == "on"
+    start_combat(lua)
+    v = view(lua, "imbue")
+    assert (v.mode, v.text, v.hand) == ("on", "30m", "main"), (v.mode, v.text, v.hand)
+    set_ench(lua, 16, None)             # the right click: the weapon carries nothing now, and the game says so
+    fire(lua, "WEAPON_ENCHANT_CHANGED")
+    v = view(lua, "imbue")
+    assert (v.mode, v.text, v.lackHand) == ("warn", "IMBUE", "main"), (v.mode, v.text, v.lackHand)
+    assert_warn_is_red(tile(lua, IMBUE), "an imbue cancelled in combat")
+    assert not bt(lua).EngineLive("imbue"), "this is the plain read, not the engine slot"
+    assert all(not c for _, c in tip_calls(lua)), "the weapon tooltip was read in combat"
+    # cast again in the fight: up at once on the cast, then the game's own time takes over
+    cast(lua, "Rockbiter Weapon")
+    v = view(lua, "imbue")
+    assert (v.mode, v.text) == ("on", "60m"), (v.mode, v.text)
+    set_ench(lua, 16, 59)
+    fire(lua, "WEAPON_ENCHANT_CHANGED")
+    tick(lua, 2)
+    v = view(lua, "imbue")
+    assert (v.mode, v.text) == ("on", "59m"), (v.mode, v.text)
+    # the fight ends: the tooltip is the authority again
+    tip(lua, 16, ["Rockbiter 1 (58 min)"])
+    leave_combat(lua)
+    assert view(lua, "imbue").text == "58m"
+
+
+def check_a_refreshed_imbue_in_combat_takes_the_games_own_time_every_tick():
+    lua = ench_world(5)
+    start_combat(lua)
+    v = view(lua, "imbue")
+    assert (v.mode, v.text) == ("exp", "5m"), (v.mode, v.text)
+    set_ench(lua, 16, 58)               # a recast in the fight
+    fire(lua, "WEAPON_ENCHANT_CHANGED")
+    v = view(lua, "imbue")
+    assert (v.mode, v.text) == ("on", "58m"), (v.mode, v.text)
+    # with no event delivered the once a second tick still follows the game's answer
+    set_ench(lua, 16, 40)
+    tick(lua, 1.1)
+    assert view(lua, "imbue").text == "40m", view(lua, "imbue").text
+    # the read is made in combat only from the game's own API, never the tooltip
+    assert int(g(lua).__enchCalls.combat) > 0 and all(not c for _, c in tip_calls(lua))
+
+
+def check_no_answer_in_combat_with_no_change_event_is_unknown_not_missing():
+    # a read that answers nothing might be the client holding back, not an enchant that is gone: nothing said it changed
+    lua = ench_world(30)
+    start_combat(lua)
+    set_ench(lua, 16, None)
+    tick(lua, 1.1)
+    v = view(lua, "imbue")
+    assert (v.mode, v.text) == ("hollow", "?"), (v.mode, v.text)
+    t = tile(lua, IMBUE)
+    close(t["ring"], C["muted"], "unknown border")
+    assert t["text"] == "?" and not t["word"], t
+    fire(lua, "WEAPON_ENCHANT_CHANGED")                 # now the game says it changed: it is gone
+    v = view(lua, "imbue")
+    assert (v.mode, v.text) == ("warn", "IMBUE"), (v.mode, v.text)
+    # an imbue that simply ran its time out in the fight is missing with no event at all
+    lua = ench_world(1)
+    start_combat(lua)
+    set_ench(lua, 16, None)
+    tick(lua, 61)
+    assert view(lua, "imbue").mode == "warn", view(lua, "imbue").mode
+    # a hand that already read "no imbue" before the fight stays missing
+    lua = world(tips={16: ["Heavy Axe"]})
+    start_combat(lua)
+    tick(lua, 1.1)
+    assert view(lua, "imbue").mode == "warn", view(lua, "imbue").mode
+
+
+def check_an_unreadable_enchant_read_in_combat_shows_the_unknown_look_not_a_stale_up():
+    for label, setup in (("throws", '__enchMode = "throw"'), ("secret", '__enchMode = "secret"'),
+                         ("no api", "C_PaperDollInfo = nil"), ("no function", "C_PaperDollInfo = {}")):
+        lua = ench_world(30, pre_login="__chat = 0\nFS.LogDegradeOnce = function() __chat = __chat + 1 end")
+        run(lua, setup)
+        start_combat(lua)
+        tick(lua, 1.1)
+        v = view(lua, "imbue")
+        assert (v.mode, v.text) == ("hollow", "?"), f"{label}: {v.mode} {v.text}"
+        t = tile(lua, IMBUE)
+        assert t["text"] == "?" and icon(lua, IMBUE)["desat"], f"{label}: the tile is not the unknown look"
+        assert any("cannot be read in combat" in ln for ln in tip_text(lua, IMBUE)), f"{label}: {tip_text(lua, IMBUE)}"
+        assert int(g(lua).__chat) == 0, f"{label}: something was said in chat"
+        # the fight ends: the weapon tooltip reads it again
+        leave_combat(lua)
+        v = view(lua, "imbue")
+        assert (v.mode, v.text) == ("on", "29m"), f"{label} after combat: {v.mode} {v.text}"     # 30 less the tick
+    # an enchant the game confirms but gives no readable time for (no time of its own, or secret fields): it is on, and
+    # the time the tooltip gave keeps counting; the answer that it is gone is still believed on a change event
+    for label, setup in (("untimed", "__setEnch(16, 0, false)"), ("secret fields", '__enchMode = "secretfields"')):
+        lua = ench_world(30)
+        run(lua, setup)
+        start_combat(lua)
+        tick(lua, 1.1)
+        v = view(lua, "imbue")
+        assert (v.mode, v.text) == ("on", "29m"), f"{label}: {v.mode} {v.text}"
+        run(lua, "__enchMode = nil\n__setEnch(16, nil)")
+        fire(lua, "WEAPON_ENCHANT_CHANGED")
+        assert view(lua, "imbue").mode == "warn", f"{label}: the end was not taken"
+
+
+def check_an_enchant_change_event_reads_the_weapon_at_once_out_of_combat():
+    lua = world(tips={16: ["Rockbiter 1 (30 min)"]})
+    assert view(lua, "imbue").mode == "on"
+    tip(lua, 16, ["Heavy Axe"])                          # right clicked off in calm: no inventory event comes with it
+    fire(lua, "WEAPON_ENCHANT_CHANGED")
+    assert view(lua, "imbue").mode == "warn", "a cancelled imbue waited for the slow read"
+    tip(lua, 16, ["Flametongue 1 (59 min)"])
+    fire(lua, "WEAPON_ENCHANT_CHANGED")
+    v = view(lua, "imbue")
+    assert (v.mode, v.code, v.text) == ("on", "FT", "59m"), (v.mode, v.code, v.text)
+    # nothing reads the game's enchant API out of combat: the tooltip names the imbue, so it stays the authority
+    assert int(g(lua).__enchCalls.calm) == 0
+
+
+def check_a_cast_in_combat_stands_through_the_grace_against_the_games_old_answer():
+    lua = ench_world(3, spells=("Rockbiter Weapon", "Flametongue Weapon", "Lightning Shield"))
+    start_combat(lua)
+    cast(lua, "Flametongue Weapon")
+    fire(lua, "WEAPON_ENCHANT_CHANGED")                  # the game has not caught up: it still says the old three minutes
+    v = view(lua, "imbue")
+    assert (v.mode, v.code, v.text) == ("on", "FT", "60m"), (v.mode, v.code, v.text)
+    set_ench(lua, 16, 59)
+    tick(lua, 2)                                         # past the grace: the game's own time replaces the guess
+    v = view(lua, "imbue")
+    assert (v.mode, v.code, v.text) == ("on", "FT", "59m"), (v.mode, v.code, v.text)
+
+
+def check_dual_wield_in_combat_asks_for_the_hand_the_game_says_lost_its_enchant():
+    lua = boot(weapons={16: "INVTYPE_WEAPONMAINHAND", 17: "INVTYPE_WEAPONOFFHAND"},
+               tips={16: ["Windfury 1 (50 min)"], 17: ["Flametongue 1 (20 min)"]})
+    set_ench(lua, 16, 50)
+    set_ench(lua, 17, 20)
+    start_combat(lua)
+    v = view(lua, "imbue")
+    assert (v.mode, v.text, v.hand) == ("on", "20m", "off"), (v.mode, v.text, v.hand)
+    set_ench(lua, 17, None)
+    fire(lua, "WEAPON_ENCHANT_CHANGED")
+    v = view(lua, "imbue")
+    assert (v.mode, v.text, v.lackHand) == ("warn", "IMBUE", "off"), (v.mode, v.text, v.lackHand)
+    # a hand with no weapon is never asked about
+    lua = boot(weapons={16: "INVTYPE_WEAPON", 17: "INVTYPE_SHIELD"}, tips={16: ["Rockbiter 1 (30 min)"]})
+    set_ench(lua, 16, 30)
+    start_combat(lua)
+    assert view(lua, "imbue").mode == "on"
+    assert int(g(lua).__enchCalls.combat) >= 1
+
+
+def check_an_unchanged_combat_tick_reads_the_game_once_a_second_at_most():
+    lua = ench_world(30)
+    start_combat(lua)
+    before = int(g(lua).__enchCalls.combat)
+    for _ in range(10):
+        update(lua)                                       # repaints without time passing are not reads
+    assert int(g(lua).__enchCalls.combat) == before, "a repaint read the game again"
+    tick(lua, 1.1)
+    assert int(g(lua).__enchCalls.combat) <= before + 2, "one tick is at most one read per hand"
 
 
 def check_no_imbue_known_means_no_tile_and_learning_one_brings_it():
@@ -1392,7 +1598,8 @@ def check_only_a_shaman_gets_a_tab():
         assert g(lua).FSBuffTab is None, f"{klass} got a buff host"
         assert not bt(lua).OwnsShoulder(), f"{klass}: the buff tab claims a shoulder"
         assert not csh.cs(lua).IsShown("shamanbuff"), f"{klass}: the buff shoulder stands"
-        for event in ("UNIT_SPELLCAST_SUCCEEDED", "UNIT_INVENTORY_CHANGED", "PLAYER_EQUIPMENT_CHANGED"):
+        for event in ("UNIT_SPELLCAST_SUCCEEDED", "UNIT_INVENTORY_CHANGED", "PLAYER_EQUIPMENT_CHANGED",
+                      "WEAPON_ENCHANT_CHANGED", "WEAPON_SLOT_CHANGED"):
             assert not listeners(lua, event), f"{klass}: something listens to {event}"
         assert not [f for f in g(lua).__frames.values() if f._scripts.OnUpdate and f._name is None
                     and False], "x"
@@ -1408,7 +1615,8 @@ def check_a_failed_build_leaves_no_listener_running():
     assert btn(lua, 2) is None
     assert not bt(lua).OwnsShoulder(), "a failed build still claims the shoulder"
     assert not csh.cs(lua).IsShown("shamanbuff")
-    for event in ("UNIT_SPELLCAST_SUCCEEDED", "UNIT_INVENTORY_CHANGED", "PLAYER_EQUIPMENT_CHANGED", "UNIT_AURA"):
+    for event in ("UNIT_SPELLCAST_SUCCEEDED", "UNIT_INVENTORY_CHANGED", "PLAYER_EQUIPMENT_CHANGED", "UNIT_AURA",
+                  "WEAPON_ENCHANT_CHANGED", "WEAPON_SLOT_CHANGED"):
         assert not listeners(lua, event), f"a listener for {event} runs for a tab that never drew"
     cast(lua, "Rockbiter Weapon")        # and a cast changes nothing
     assert sbuf(lua).View().imbue.mode is None
@@ -1416,7 +1624,8 @@ def check_a_failed_build_leaves_no_listener_running():
 
 def check_the_listeners_start_once_the_tiles_exist_and_only_for_the_unit_player():
     lua = world(tips={16: ["Rockbiter 1 (59 min)"]})
-    for event in ("UNIT_SPELLCAST_SUCCEEDED", "UNIT_INVENTORY_CHANGED", "UNIT_AURA", "PLAYER_EQUIPMENT_CHANGED"):
+    for event in ("UNIT_SPELLCAST_SUCCEEDED", "UNIT_INVENTORY_CHANGED", "UNIT_AURA", "PLAYER_EQUIPMENT_CHANGED",
+                  "WEAPON_ENCHANT_CHANGED", "WEAPON_SLOT_CHANGED"):
         assert len(listeners(lua, event)) == 1, f"{event}: {len(listeners(lua, event))} listeners"
     # another unit's cast, aura or inventory changes nothing
     run(lua, '__shield(3, 480)')
@@ -2027,6 +2236,7 @@ def check_a_secret_missing_or_raising_answer_leaves_the_tile_tint_as_it_was():
         tbh.use_mode(lua, mode)
         fire(lua, "SPELL_UPDATE_USABLE")
         assert tile(lua, IMBUE) == tinted, f"{mode}: the tint moved"
+    set_ench(lua, 16, 56)           # in combat the tile follows the game's own enchant read: keep the imbue up
     set_combat(lua, True)
     tbh.use_mode(lua, "secret")
     fire(lua, "SPELL_UPDATE_USABLE")
@@ -2573,11 +2783,12 @@ def check_the_imbue_tile_goes_live_in_combat_only_after_a_slot_was_seen_shown_wi
     run(lua, "FSBuffTabButton1.fsEngine.seen = nil")          # as if no pass had seen them shown yet
     tick(lua, 2)
     assert btn(lua, IMBUE).fsEngine.seen is not True
+    set_ench(lua, 16, 30)
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     update(lua)
     assert not bt(lua).EngineLive("imbue") and bt(lua).EngineLive("shield"), "only the shield tile is live"
-    assert tile(lua, IMBUE)["text"] in ("30m", "29m") and not icon(lua, IMBUE)["desat"], "the imbue tile keeps its counting-down estimate"
+    assert tile(lua, IMBUE)["text"] == "30m" and not icon(lua, IMBUE)["desat"], "the imbue tile shows the game's own read"
     assert tile(lua, SHIELD)["text"] == "SHIELD", "the shield tile is on the engine path"
     leave_combat(lua)
     # an imbue on and a slot seen shown: the tile is live from the next fight
@@ -2606,6 +2817,55 @@ def check_the_cover_plate_margin_is_the_tile_plates_not_the_skin_chamfer():
         for part in parts_of(lua, i):
             assert float(part.coverPlate._slice[1]) == float(g(lua).FS.Theme.SLICE_CUT_MARGIN)
             assert float(part.coverRing._slice[1]) == 4, "the ring follows the skin chamfer"
+
+
+CHAT_PRE = "__chat = 0\nFS.LogDegradeOnce = function() __chat = __chat + 1 end"
+
+
+def check_every_buff_tab_notice_goes_to_the_degrade_log_and_none_to_chat():
+    # live 2026-11-25: "a combat state slot cannot be located; that tile keeps the last known state" printed in chat on
+    # every reload. Nothing here is for the player to act on, so each notice is kept on disk and none is said in chat.
+    def quiet(lua, key, what):
+        assert int(g(lua).__chat) == 0, f"{what}: a line reached chat"
+        assert not len(list(g(lua).__prints.keys())), f"{what}: something was printed"
+        assert g(lua).__quiet[key] is not None, f"{what}: {key} is not in the degrade log: {list(g(lua).__quiet.keys())}"
+        assert "|c" not in str(g(lua).__quiet[key]), f"{what}: colour codes in the log text"
+
+    # the live case: the imbue slots can be sized but not located
+    lua = engine_world(pre=CHAT_PRE)
+    for ref in ("__acs[1]._ench[1]", "__acs[1]._ench[2]"):
+        run(lua, f"{ref}._noRect = true\n{ref}.IsShown = function() return __SECRET end")
+    for _ in range(7):
+        tick(lua, 1.1)
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable
+    quiet(lua, "bufftab_engine_unreadable", "unreadable slot")
+    lua = engine_world(pre='__acOverride = "sticky"\n' + CHAT_PRE)
+    shield_aura_up(lua)
+    quiet(lua, "bufftab_engine_layout", "slot off its tile")
+    lua = engine_world(pre="__acMouseOn = true\n" + CHAT_PRE)
+    quiet(lua, "bufftab_engine_mouse", "slot with the mouse on")
+    lua = engine_world(pre="__acThrows = true\n" + CHAT_PRE)
+    quiet(lua, "bufftab_engine_build", "failed build")
+    lua = world(pre_login=CHAT_PRE)                       # __template stays false: the client has no container
+    tick(lua, 1.1)
+    quiet(lua, "bufftab_engine_template", "no container template")
+    lua = engine_world(pre="__noEnchantApi = true\n" + CHAT_PRE)
+    quiet(lua, "bufftab_engine_imbue", "no item enchantment slots")
+    lua = engine_world(pre='__acSlotThrows = "shield"\n' + CHAT_PRE)
+    quiet(lua, "bufftab_engine_shield", "shield slot refused")
+    # a repaint or a sync that throws
+    lua = world(pre_login=CHAT_PRE)
+    run(lua, "FS.ShamanBuffs.Update = function() error('boom') end")
+    tick(lua, 1.1)
+    quiet(lua, "bufftab_tick", "failed repaint")
+    # a listener of the data model that throws
+    lua = world(pre_login=CHAT_PRE)
+    run(lua, "FS.ShamanBuffs.OnChange(function() error('boom') end)")
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    quiet(lua, "shamanbuffs_change", "failed change listener")
+    # a build that fails
+    lua = boot(pre_login='__failBuild = "FSBuffTabButton2"\n' + CHAT_PRE)
+    quiet(lua, "bufftab_build", "failed build of the tiles")
 
 
 def check_the_state_line_reports_each_imbue_slot_for_the_live_test():
@@ -2754,7 +3014,7 @@ def check_nothing_is_built_in_combat_whoever_asks():
 
 
 def check_a_failed_build_logs_once_leaves_today_and_gives_up_after_three_passes():
-    lua = engine_world(pre="__acThrows = true\n__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    lua = engine_world(pre="__acThrows = true\n__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end")
     assert int(g(lua).__acAttempts) == 1, "the login burst of syncs is one pass, one attempt"
     for _ in range(6):
         fire(lua, "SPELLS_CHANGED")
@@ -2827,7 +3087,10 @@ def check_a_client_without_the_template_or_item_enchantments_keeps_todays_tiles(
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     update(lua)
-    assert tile(lua, IMBUE)["text"] == "30m", "the imbue tile keeps its estimate"
+    assert tile(lua, IMBUE)["text"] == "?", "no engine slot and no read of the game's: the imbue tile is the unknown look"
+    set_ench(lua, 16, 30)
+    fire(lua, "WEAPON_ENCHANT_CHANGED")
+    assert tile(lua, IMBUE)["text"] == "30m", "with the game's own read the imbue tile shows its time"
     assert tile(lua, SHIELD)["text"] == "SHIELD", "the engine tile wears the missing base"
 
 
@@ -2906,7 +3169,7 @@ def check_a_lazy_slot_flushed_out_of_combat_is_proven_by_the_next_tick_and_a_bad
     fire(lua, "PLAYER_REGEN_DISABLED")
     assert bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 1
     # a layout the engine owns for good: every tick reads it off the icon, the tiles never go live
-    lua = engine_world(pre='__acLazy = true\n__acOverride = "sticky"\n__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end')
+    lua = engine_world(pre='__acLazy = true\n__acOverride = "sticky"\n__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end')
     run(lua, "__acFlush()")
     for _ in range(3):
         tick(lua, 1.1)
@@ -2977,7 +3240,7 @@ def check_the_engine_state_is_entered_only_on_a_proven_arm():
 
 def check_a_slot_that_is_not_on_its_tiles_icon_clears_that_tiles_engine_state():
     # the engine's layout re-anchors the slot for good: no tile can be trusted
-    lua = engine_world(pre='__acOverride = "sticky"\n__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end')
+    lua = engine_world(pre='__acOverride = "sticky"\n__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end')
     shield_aura_up(lua)
     for i in (SHIELD, IMBUE):
         assert btn(lua, i).fsEngine.bad is True, i
@@ -3063,7 +3326,7 @@ def check_the_in_combat_tooltip_says_the_game_shows_the_state_and_that_any_encha
 
 
 def check_a_slot_found_with_the_mouse_on_is_made_click_through_and_logged():
-    lua = engine_world(pre="__acMouseOn = true\n__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    lua = engine_world(pre="__acMouseOn = true\n__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end")
     c = acs(lua)[0]
     slots = [c._slots["shield"].frame, c._ench[1], c._ench[2]]
     for slot in slots:
@@ -3075,7 +3338,7 @@ def check_a_slot_found_with_the_mouse_on_is_made_click_through_and_logged():
     for slot in (c._slots["shield"].frame, c._ench[1], c._ench[2]):
         assert slot._propClicks is True and slot._propMotion is True
     # a slot with the mouse already off is left alone
-    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    lua = engine_world(pre="__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end")
     assert int(g(lua).__logs) == 0
 
 
@@ -3198,7 +3461,7 @@ def check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_
     tick(lua, 1.1)
     assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable, "logged after five ticks"
     # a hidden slot (no aura) with no readable rect keeps the proof it had, and never logs
-    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    lua = engine_world(pre="__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end")
     tick(lua, 1.1)
     assert btn(lua, SHIELD).fsEngine.bad is False
     run(lua, f"{slot}._noRect = true\n{slot}:Hide()")
@@ -3224,7 +3487,7 @@ def check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_
 def check_a_sized_slot_with_no_rect_is_idle_while_its_tile_has_no_buff_up():
     # live (release client, Tauren Shaman, level 2, Rockbiter known, no imbue on the weapon): both enchantment slots read
     # 26x26 with no rect and a secret IsShown; with no imbue up there is nothing to locate, so nothing is reported
-    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end", tips={16: ["Worn Mace"]})
+    lua = engine_world(pre="__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end", tips={16: ["Worn Mace"]})
     assert view(lua, "imbue").mode == "warn"
     for ref in ("__acs[1]._ench[1]", "__acs[1]._ench[2]"):
         run(lua, f"{ref}._noRect = true\n{ref}.IsShown = function() return __SECRET end")
@@ -3246,7 +3509,7 @@ def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unrea
     # on every pass; that is a slot with nothing to draw, not a slot to warn about
     off = "__acs[1]._ench[2]"
     idle = f"{off}:ClearAllPoints()\n{off}:SetSize(0, 0)\n{off}._noRect = true\n{off}.IsShown = function() return __SECRET end"
-    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    lua = engine_world(pre="__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end")
     run(lua, "local part = FS.BuffTab.BT.byKey.imbue.fsEngine.parts[1]; part.ok = false")     # the off hand slot, never proven
     run(lua, idle)
     for _ in range(12):
@@ -3289,7 +3552,7 @@ def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unrea
     assert float(g(lua).__acs[1]._ench[2]._alpha) == 0
     leave_combat(lua)
     # a slot that was proven and then went idle keeps the proof
-    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    lua = engine_world(pre="__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end")
     tick(lua, 1.1)
     assert btn(lua, IMBUE).fsEngine.bad is False
     run(lua, idle)
@@ -3297,12 +3560,12 @@ def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unrea
         tick(lua, 1.1)
     assert btn(lua, IMBUE).fsEngine.bad is False and int(g(lua).__logs) == 0, "an idle proven slot lost its proof"
     # the same slot with a size but no readable rect is still a fault, and one that stands elsewhere still logs
-    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    lua = engine_world(pre="__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end")
     run(lua, f"{off}._noRect = true\n{off}.IsShown = function() return __SECRET end")
     for _ in range(5):
         tick(lua, 1.1)
     assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable and int(g(lua).__logs) == 1
-    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    lua = engine_world(pre="__logs = 0\nFS.LogQuiet = function() __logs = __logs + 1 end")
     run(lua, f"{off}._forceLeft, {off}._forceTop = 7, 9")
     tick(lua, 1.1)
     assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_layout
@@ -4081,7 +4344,7 @@ CHECKS = [
     check_dual_wield_shows_the_least_time_and_asks_for_the_missing_hand,
     check_a_shield_or_an_empty_off_hand_never_asks_for_an_imbue,
     check_a_two_handed_weapon_without_an_imbue_asks_for_one,
-    check_the_tooltip_is_never_read_in_combat_and_the_clock_counts_down_from_the_last_read,
+    check_the_tooltip_is_never_read_in_combat_and_a_hand_nothing_confirms_is_unknown_until_its_time_ran_out,
     check_tile_fonts_are_the_design_size_at_every_scale_and_after_a_rescale,
     check_the_missing_word_is_9_px_where_it_fits_the_band_and_fitted_below_that,
     check_a_fitted_tile_string_never_goes_below_six_pixels,
@@ -4098,6 +4361,14 @@ CHECKS = [
     check_a_recast_on_the_other_hand_does_not_hide_the_sooner_expiring_one,
     check_a_pending_cast_outlasts_an_early_none_read_only_for_the_grace,
     check_get_weapon_enchant_info_counts_only_when_it_answers_true,
+    check_an_imbue_cancelled_in_combat_turns_the_tile_to_missing_from_the_games_enchant_read,
+    check_a_refreshed_imbue_in_combat_takes_the_games_own_time_every_tick,
+    check_no_answer_in_combat_with_no_change_event_is_unknown_not_missing,
+    check_an_unreadable_enchant_read_in_combat_shows_the_unknown_look_not_a_stale_up,
+    check_an_enchant_change_event_reads_the_weapon_at_once_out_of_combat,
+    check_a_cast_in_combat_stands_through_the_grace_against_the_games_old_answer,
+    check_dual_wield_in_combat_asks_for_the_hand_the_game_says_lost_its_enchant,
+    check_an_unchanged_combat_tick_reads_the_game_once_a_second_at_most,
     check_no_imbue_known_means_no_tile_and_learning_one_brings_it,
     check_the_shield_shows_ls_and_its_orbs_then_its_time_when_expiring,
     check_a_missing_shield_is_red_and_no_snapshot_yet_is_a_hollow_question_mark,
@@ -4162,6 +4433,7 @@ CHECKS = [
     check_in_combat_the_tiles_wear_the_out_of_combat_missing_look_and_only_the_alpha_is_written,
     check_the_imbue_tile_goes_live_in_combat_only_after_a_slot_was_seen_shown_with_an_imbue_on,
     check_the_cover_plate_margin_is_the_tile_plates_not_the_skin_chamfer,
+    check_every_buff_tab_notice_goes_to_the_degrade_log_and_none_to_chat,
     check_the_state_line_reports_each_imbue_slot_for_the_live_test,
     check_the_key_label_frame_is_above_every_slot_and_slot_child_and_follows_the_host_out_of_combat,
     check_the_host_moving_to_another_level_takes_the_key_label_frames_with_it,

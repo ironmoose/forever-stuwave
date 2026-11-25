@@ -11,11 +11,19 @@
 -- time in the brackets comes from Blizzard's own ITEM_ENCHANT_TIME_LEFT_* strings (a generic "(N unit)" is the
 -- fallback). Each hand keeps its own record { state = "imbue" | "none" | "unknown", code, expiry }, and the tile shows
 -- the hand with the LEAST time left. The tooltip is read OUT OF COMBAT ONLY (what it answers in combat is
--- unverified): on inventory, equipment and cast events, at regen, and on a slow tick. In combat the expiry counts
--- down from the last read, and a cast of an imbue starts a fresh hour on the hand it most likely went to (the first
--- weapon hand without one, the main hand first; the next read out of combat corrects a wrong guess). A weapon change
--- in combat forgets that hand (it shows "?" rather than a stale time). GetWeaponEnchantInfo stays as a secondary
--- source and is believed only when it answers a plain true.
+-- unverified): on inventory, equipment, cast and enchant change events, at regen, and on a slow tick. GetWeaponEnchantInfo
+-- stays as a secondary source and is believed only when it answers a plain true.
+--
+-- IN COMBAT the tooltip is not read; the game's own temporary enchantment read is (C_PaperDollInfo.
+-- GetTemporaryEnchantmentInfo, the source the engine's item enchantment slots draw from; its API documentation marks no
+-- return secret). It says whether a weapon carries an enchant and its exact time left, not which imbue, so the code and
+-- icon stay what was last seen. A hand's state from BEFORE the fight is trusted only once that read confirms it (the
+-- hand is `live`); until then, and whenever the read is unavailable, secret or throws, the hand is unknown and the tile
+-- shows the hollow "?" instead of a stale "up". An answer of "nothing" is believed as "the enchant is gone" only when
+-- the game said something changed (WEAPON_ENCHANT_CHANGED since the hand was last confirmed) or the time ran out;
+-- otherwise it might be the client holding back, and the hand stays unknown. A cast of an imbue in combat starts a fresh
+-- hour on the hand it most likely went to (the first weapon hand without one, the main hand first), stands for the
+-- grace, and the next read corrects a wrong guess. A weapon change in combat forgets that hand until the read sees it.
 --
 -- A tooltip says "56 min" for anything from 56 to 57 minutes (or 55 to 56): a new read replaces a stored expiry only
 -- when it differs by a whole unit or more, so the countdown does not stair-step under the reads.
@@ -46,6 +54,7 @@ local M = {
     READ_EVERY = 5,                         -- seconds between tooltip reads out of combat while a hand is unsettled
     READ_SETTLED = 30,                      -- ... and once both hands are settled (a tooltip read allocates ~25 KB)
     READ_CLOSE = 120,                       -- an imbue with this little left reads at READ_EVERY again (seconds clock)
+    READ_COMBAT = 1,                        -- seconds between reads of the game's enchant API in combat (one call per hand)
     AFTER_CAST = { 0.5, 2.0 },              -- reads after an imbue cast: the weapon catches up a moment later
     SHIELD_UNLOCK = 8,                      -- Lightning Shield opens at level 8
     MAIN = 16, OFF = 17,                    -- the weapon slots
@@ -81,12 +90,13 @@ local TIME_FORMATS = {
     { "ITEM_ENCHANT_TIME_LEFT_DAYS", "%s (%d day)", 86400 },
 }
 
+-- A failure of the data model goes to the degrade log on disk (FS.LogQuiet) and never to chat: the player cannot act on it.
 local logged = {}
 local function LogOnce(key, msg)
     if logged[key] then return end
     logged[key] = true
-    if FS.LogDegradeOnce then
-        pcall(FS.LogDegradeOnce, "shamanbuffs_" .. key, "|cffff4488Forever STUwave|r: shaman buffs: " .. tostring(msg))
+    if FS.LogQuiet then
+        pcall(FS.LogQuiet, "shamanbuffs_" .. key, "shaman buffs: " .. tostring(msg))
     end
 end
 
@@ -317,12 +327,16 @@ ShamanBuffs.ReadTooltip = ReadTooltip
 
 local function NewHand(slot)
     -- weapon: true, false (a shield, a frill, an empty hand) or nil (not readable); state: "imbue", "none" or "unknown"
+    -- live: in combat, this hand's state was confirmed by the game's own read (or is a cast of ours); sawChange: the
+    -- count of enchant change events heard when it was
     return { slot = slot, weapon = nil, state = "unknown", code = nil, expiry = nil, unit = 1, castAt = nil,
-        estimated = false }
+        estimated = false, live = false, sawChange = 0 }
 end
 local hands = { [M.MAIN] = NewHand(M.MAIN), [M.OFF] = NewHand(M.OFF) }
 local lastCode          -- the last imbue seen or cast, kept for the missing tile
 local nextRead = 0      -- GetTime() of the next slow read
+local changes = 0       -- WEAPON_ENCHANT_CHANGED (and WEAPON_SLOT_CHANGED) events heard
+local wasCombat = false -- the combat state the hands were last synced to (SyncCombat)
 
 local weaponLoc = {}      -- item id -> true when it is a weapon, false when it is not
 
@@ -385,9 +399,78 @@ local function TakeEnchantMs(h, ms, now)
     end
 end
 
--- Both hands, from the weapon tooltips (and, secondarily, GetWeaponEnchantInfo). Out of combat only.
+-- The game's own read of the enchant on a weapon slot, plain values only: "imbue", seconds left (nil when it gave no
+-- time of its own) | "none" | "unreadable". It cannot say which imbue. Allowed in combat.
+local function ReadTemporary(slot)
+    local api = C_PaperDollInfo and C_PaperDollInfo.GetTemporaryEnchantmentInfo
+    if type(api) ~= "function" then return "unreadable" end
+    local ok, info = pcall(api, slot)
+    if not ok or IsSecret(info) then return "unreadable" end
+    if info == nil then return "none" end
+    if type(info) ~= "table" then return "unreadable" end
+    local timed, ms = PlainOf(info.hasExpirationTime, "boolean"), PlainOf(info.remainingTimeMs, "number")
+    if timed ~= false and ms and ms > 0 then return "imbue", ms / 1000 end
+    return "imbue"
+end
+ShamanBuffs.ReadTemporary = ReadTemporary
+
+-- One hand in combat. A cast of ours the weapon has not caught up with stands for the grace. An enchant with a plain time
+-- is the truth (the exact time replaces the tooltip's rounded one); one with no time of its own confirms a state we
+-- already count down; "nothing" confirms the end only on a change event or a run out time (see the header); anything else
+-- leaves the hand unknown.
+local function ReadHandInCombat(h, now)
+    if h.weapon == false then return end
+    local fresh = h.castAt and now < h.castAt + M.CAST_GRACE
+    local status, secs = ReadTemporary(h.slot)
+    if status == "imbue" then
+        if fresh then return end
+        h.weapon = true
+        if secs then
+            ApplyImbue(h, h.code or lastCode or "IM", secs, 1, now)
+            h.live, h.sawChange = true, changes
+        elseif h.state == "imbue" and h.expiry and h.expiry > now then
+            h.live, h.sawChange = true, changes
+        else
+            h.live = false
+        end
+    elseif status == "none" then
+        if fresh then return end
+        if h.state == "none" then
+            h.live = true
+        elseif h.state == "imbue" and (h.sawChange ~= changes or (h.expiry and h.expiry <= now)) then
+            ClearHand(h)
+            h.live, h.sawChange = true, changes
+        else
+            h.live = false
+        end
+    else
+        h.live = false
+    end
+end
+
+local function ReadHandsInCombat(now)
+    for i = 1, #SLOTS do ReadHandInCombat(hands[SLOTS[i]], now) end
+end
+
+-- A fight begins (or the first call finds one running): what was read before it holds only once the game's own read says
+-- so, except a cast of ours the weapon has not shown yet. Called by every way in, so it does not depend on an event.
+local function SyncCombat(now)
+    local combat = InCombat()
+    if combat == wasCombat then return end
+    wasCombat = combat
+    if not combat then return end
+    for i = 1, #SLOTS do
+        local h = hands[SLOTS[i]]
+        h.live, h.sawChange = h.castAt ~= nil, changes
+    end
+    ReadHandsInCombat(now)
+    nextRead = now + M.READ_COMBAT
+end
+
+-- Both hands, from the weapon tooltips (and, secondarily, GetWeaponEnchantInfo) in calm; from the game's enchant read in
+-- combat.
 local function ReadHands(now)
-    if InCombat() then return end
+    if InCombat() then return ReadHandsInCombat(now) end
     for i = 1, #SLOTS do
         local slot = SLOTS[i]
         local h = hands[slot]
@@ -446,12 +529,19 @@ local function ReadInterval(now)
     return M.READ_SETTLED
 end
 
+-- Seconds to the next read: in a fight the game's read is cheap and the only source, so it follows the tick; in calm the
+-- tooltip's slower pace.
+local function NextInterval(now)
+    return InCombat() and M.READ_COMBAT or ReadInterval(now)
+end
+
 local function ReadSoon(delay)
     if C_Timer and C_Timer.After then
         C_Timer.After(delay, function()
             local ok, err = pcall(function()
+                SyncCombat(Now())
                 ReadHands(Now())
-                nextRead = Now() + ReadInterval(Now())
+                nextRead = Now() + NextInterval(Now())
             end)
             if not ok then LogOnce("read", err) end
             Changed()
@@ -462,6 +552,7 @@ end
 local function OnImbueCast(def, now)
     local h = CastTarget(now)
     h.state, h.code, h.expiry, h.unit, h.estimated, h.castAt = "imbue", def.code, now + M.IMBUE_S, 60, true, now
+    h.live, h.sawChange = true, changes          -- a cast of ours is the evidence, in a fight, until the game's read says more
     lastCode = def.code
     for _, delay in ipairs(M.AFTER_CAST) do ReadSoon(delay) end
 end
@@ -575,14 +666,21 @@ local view = {
 local function EvaluateImbue(now)
     local v = view.imbue
     v.mode, v.code, v.text, v.remaining, v.hand, v.lackHand, v.spell, v.spellId = nil, nil, nil, nil, nil, nil, nil, nil
+    v.unreadable = nil
     local nKnown, onlyKnown = KnownImbues()
     local best -- the imbued hand with the least time left
     local lacking
+    local stale = false     -- a hand whose state is from before the fight and has not been confirmed since
+    local combat = InCombat()
     for i = 1, #SLOTS do
         local h = hands[SLOTS[i]]
-        if h.state == "imbue" and h.expiry and h.expiry > now then
+        local state = h.state
+        if combat and not h.live and state ~= "unknown" then
+            state, stale = "unknown", true
+        end
+        if state == "imbue" and h.expiry and h.expiry > now then
             if not best or h.expiry < best.expiry then best = h end
-        elseif h.weapon == true and (h.state == "none" or h.state == "imbue") then
+        elseif h.weapon == true and (state == "none" or state == "imbue") then
             lacking = lacking or h
         end
     end
@@ -599,6 +697,7 @@ local function EvaluateImbue(now)
         v.hand = best.slot == M.MAIN and "main" or "off"
     else
         v.mode, v.text = "hollow", "?"
+        v.unreadable = stale and "combat" or nil      -- the unknown look says why in the tooltip
         code = lastCode or BestKnownImbue()
     end
     if not code and nKnown == 1 then code = onlyKnown end
@@ -658,9 +757,10 @@ end
 -- adds "locked".
 function ShamanBuffs.Update(now)
     now = now or Now()
-    if now >= nextRead and not InCombat() then
-        ReadHands(now)
-        nextRead = now + ReadInterval(now)
+    SyncCombat(now)
+    if now >= nextRead then
+        ReadHands(now)       -- calm: the weapon tooltips; in a fight: the game's own enchant read
+        nextRead = now + NextInterval(now)
     end
     ReadShield(now)       -- cheap: in combat it only notes that the snapshot is frozen, so the "~" appears at once
     EvaluateImbue(now)
@@ -736,6 +836,7 @@ local SPELLBOOK_EVENTS = {
 
 local function OnEvent(_, event, unit, _, spellId)
     local now = Now()
+    SyncCombat(now)         -- first, so a cast or a read below lands in the right state
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         if not IsSecret(unit) and unit ~= "player" then return end
         if not NoteCast(spellId, now) then return end       -- not ours: nothing moved, nobody is told
@@ -752,10 +853,19 @@ local function OnEvent(_, event, unit, _, spellId)
             local h = slot and hands[slot]
             if h then
                 h.weapon, h.state, h.code, h.expiry, h.estimated, h.castAt = nil, "unknown", nil, nil, false, nil
+                h.live = false
             end
         else
             ReadHands(now)
         end
+    elseif event == "WEAPON_ENCHANT_CHANGED" or event == "WEAPON_SLOT_CHANGED" then
+        -- the game says an enchant came, went or was renewed: out of combat the tooltip names it (a right click that took
+        -- the imbue off sends no inventory event), in combat the game's own read takes it, and an answer of "nothing"
+        -- that follows is a real end (ReadHandInCombat)
+        changes = changes + 1
+        ReadHands(now)
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        -- SyncCombat above did the work
     elseif SPELLBOOK_EVENTS[event] or event == "PLAYER_ENTERING_WORLD" then
         known = {}
         RefreshKnown()
@@ -769,7 +879,7 @@ local function OnEvent(_, event, unit, _, spellId)
         shield.holdUntil = now + M.REGEN_HOLD
         shield.frozen = true
     end
-    nextRead = now + ReadInterval(now)
+    nextRead = now + NextInterval(now)
     Changed()
 end
 
@@ -792,6 +902,9 @@ function ShamanBuffs.Start()
     reg("UNIT_AURA", true)
     reg("PLAYER_EQUIPMENT_CHANGED")
     reg("PLAYER_REGEN_ENABLED")
+    reg("PLAYER_REGEN_DISABLED")
+    reg("WEAPON_ENCHANT_CHANGED")
+    reg("WEAPON_SLOT_CHANGED")
     reg("PLAYER_ENTERING_WORLD")
     for event in pairs(SPELLBOOK_EVENTS) do reg(event) end
     events:SetScript("OnEvent", function(...)
@@ -800,9 +913,10 @@ function ShamanBuffs.Start()
     end)
     RefreshKnown()
     local now = Now()
+    pcall(SyncCombat, now)
     pcall(ReadHands, now)
     pcall(ReadShield, now)
-    nextRead = now + ReadInterval(now)
+    nextRead = now + NextInterval(now)
     return true
 end
 
@@ -810,6 +924,7 @@ end
 function ShamanBuffs.Reset()
     for slot in pairs(hands) do hands[slot] = NewHand(slot) end
     lastCode, nextRead, known, candidates, timePatterns = nil, 0, {}, {}, nil
+    changes, wasCombat = 0, false
     shield.seen, shield.count, shield.expiry, shield.duration, shield.appliedAt, shield.castAt = nil, nil, nil, nil, nil, nil
     shield.other, shield.frozen, shield.available, shield.holdUntil = false, false, false, 0
 end

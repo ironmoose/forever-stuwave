@@ -234,11 +234,12 @@ local function Scale()
     return (FS.Layout and FS.Layout.Scale and FS.Layout.Scale()) or 1
 end
 
--- One chat line per distinct problem (LogDegradeOnce does not dedupe).
+-- One log entry per distinct problem, kept out of chat: a player can do nothing about these, and a chat line reads
+-- like an error on every reload. /fsbug carries the degrade log.
 local function WarnOnce(key, text)
     if warned[key] then return end
     warned[key] = true
-    if FS.LogDegradeOnce then FS.LogDegradeOnce(key, "|cffff4488Forever STUwave|r: " .. text) end
+    if FS.LogQuiet then FS.LogQuiet(key, text) end
 end
 
 local function Console()

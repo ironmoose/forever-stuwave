@@ -552,12 +552,12 @@ def check_a_refused_gap_owner_is_logged_once_and_the_shoulder_does_not_overwrite
     assert cs(lua).IsShown(), "the art should still draw"
     c = calls(lua)
     assert [x for x in c if x.startswith("gap:")] == [], f"SetDockGap called without the gap: {c}"
-    assert g(lua).__degraded["classshoulder_gap"] is not None or g(lua).__degradeCount >= 1, "no log"
-    n = g(lua).__degradeCount
+    assert g(lua).__quiet["classshoulder_gap"] is not None or g(lua).__quietCount >= 1, "no log"
+    n = g(lua).__quietCount
     fire(lua, "PLAYER_ENTERING_WORLD")
     console(lua).SetActive(False)
     console(lua).SetActive(True)
-    assert g(lua).__degradeCount == n, "the refusal was logged again"
+    assert g(lua).__quietCount == n, "the refusal was logged again"
 
 
 def check_combat_touches_nothing_protected_and_the_reseat_waits_for_regen():
@@ -615,7 +615,7 @@ def check_a_gap_the_console_refused_is_set_at_regen():
 def check_a_console_without_the_chassis_look_builds_no_shoulder():
     lua = boot(pre_login="FS.Console.FILL_TOP = nil")
     assert shoulder(lua) is None and not cs(lua).IsShown()
-    assert g(lua).__degraded["classshoulder_notokens"], "the missing look was not logged"
+    assert g(lua).__quiet["classshoulder_notokens"], "the missing look was not logged"
     assert calls(lua) == [], f"gap calls without a shoulder: {calls(lua)}"
     assert g(lua).FSSealBar._points[1].rel._name == "FSConsole" and all(sb.shown(b) for b in buttons(lua))
 
@@ -1062,13 +1062,13 @@ def check_a_throwing_build_logs_once_and_leaves_the_bare_seat():
     p = g(lua).FSSealBar._points[1]
     assert p.rel._name == "FSConsole" and abs(p.x - DX) < 0.5, "the buttons lost their seat"
     assert all(sb.shown(b) for b in buttons(lua))
-    n = g(lua).__degradeCount
+    n = g(lua).__quietCount
     assert n >= 1, "the failure was not logged"
     n_frames = len(seq(lua.eval("__frames")))
     for event in ("SPELLS_CHANGED", "PLAYER_ENTERING_WORLD"):
         fire(lua, event)
     cs(lua).Refresh()
-    assert g(lua).__degradeCount == n, "the failure was logged again"
+    assert g(lua).__quietCount == n, "the failure was logged again"
     assert len(seq(lua.eval("__frames"))) == n_frames, "a failed build was retried"
     assert g(lua).__tries == 1, f"the failed build was attempted {g(lua).__tries} times"
 
@@ -1077,7 +1077,7 @@ def check_a_missing_petdock_builds_no_shoulder_and_leaves_the_bare_seat():
     lua = sb.boot(1.0, extra_lua=PATCH, extra_files=(CLASSSHOULDER,))
     # PetDock.lua was never loaded: NewShoulder does not exist, so there is no shoulder, nothing throws, one log
     assert shoulder(lua) is None and not cs(lua).IsShown()
-    assert g(lua).__degraded["classshoulder_nodock"], "the missing PetDock was not logged"
+    assert g(lua).__quiet["classshoulder_nodock"], "the missing PetDock was not logged"
     assert g(lua).FSSealBar._points[1].rel._name == "FSConsole", "the buttons lost their seat"
     assert all(sb.shown(b) for b in buttons(lua))
 
