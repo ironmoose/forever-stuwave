@@ -493,6 +493,30 @@ function T.register_after_the_window_is_built_adds_a_nav_entry()
     eq(owner(fs, "fsCategory").fsCategory, "mine")
 end
 
+function T.a_hidden_build_makes_the_rows_without_showing_or_selecting()
+    local W = boot()
+    local built = 0
+    W.RegisterCategory({ key = "mine", label = "Mine", group = "GENERAL", order = 1.5, build = function(content)
+        built = built + 1
+        W.UI.Toggle(content, { key = "mine.flag", label = "Mine flag" })
+    end })
+    W.Open("profiles")
+    local selects = 0
+    W.On("select", function() selects = selects + 1 end)
+    yes(W.BuildTabHidden("mine"))
+    eq(built, 1)
+    eq(selects, 0, "no select event")
+    eq(select(1, W.Current()), "profiles", "the shown page stays")
+    yes(W.RowByKey("mine.flag", "mine"), "its rows are in the registry")
+    no(W.I.ui.tabs["mine/main"].page:IsShown(), "and its page is hidden")
+    yes(W.BuildTabHidden("mine"))
+    eq(built, 1, "built once")
+    W.Open("mine")
+    eq(built, 1)
+    yes(W.I.ui.tabs["mine/main"].page:IsShown())
+    no(W.BuildTabHidden("nosuch"))
+end
+
 function T.a_page_builds_once_and_only_when_first_shown()
     local W = boot()
     local built = 0

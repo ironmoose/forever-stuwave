@@ -899,6 +899,7 @@ function T.the_pre_build_keeps_the_page_the_tab_the_scroll_and_the_typed_text()
     local W = boot()
     fixture(W)
     filler(W, 60)
+    W.BuildTabHidden = nil   -- the window has the hook now; this one pins the older flip it falls back to
     W.Open("fl")
     local rec = W.I.ui.tabs["fl/main"]
     rec.page:SetVerticalScroll(120)

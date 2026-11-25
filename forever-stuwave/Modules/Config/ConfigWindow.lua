@@ -1004,6 +1004,24 @@ local function Select(cat, tab)
     if changedTab then Fire("select", cat.key, tab.key) end
 end
 
+-- Builds one tab nobody has opened without showing it: no Select, no "select" event, no scroll reset, no refresh. The
+-- page stays hidden and is marked stale, so its controls repaint when it is first shown. True when the tab is built.
+function CW.BuildTabHidden(page, tab)
+    local ok, err = pcall(CW.EnsureBuilt)
+    if not ok then Forward(err) return false end
+    local cat = ResolveCategory(page)
+    if not cat then return false end
+    local rec = TabRec(cat, ResolveTab(cat, tab) or cat.tabs[1])
+    if rec.page then return true end
+    BuildTab(rec)
+    if rec ~= ui.tabRec then
+        rec.page:Hide()
+        if rec.band then rec.band:Hide() end
+        rec.stale = true
+    end
+    return true
+end
+
 -- Does nothing while the window is hidden: Open and Select refresh before anything is seen.
 local function RunAll(list)
     for _, fn in ipairs(list) do
