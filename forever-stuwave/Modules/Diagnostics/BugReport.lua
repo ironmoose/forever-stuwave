@@ -750,10 +750,14 @@ function BR.Build(note)
     report.minimapSeat = Guard(MinimapSeat)
     report.refusedEvents = Guard(RefusedEvents)
     report.classInspect = Guard(ClassInspect)
-    -- the last /fsperf sample (Hitch.lua), as saved
+    -- the last /fsperf samples (Hitch.lua), as saved: profiled and plain
     report.hitch = Guard(function()
         local db = _G.ForeverSTUwaveDB
         return type(db) == "table" and type(db.hitch) == "table" and db.hitch or "none"
+    end)
+    report.hitchPlain = Guard(function()
+        local db = _G.ForeverSTUwaveDB
+        return type(db) == "table" and type(db.hitchPlain) == "table" and db.hitchPlain or "none"
     end)
 
     local errors, errorCount, otherCount = Guard(Errors)

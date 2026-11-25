@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """/fsperf (Modules/Diagnostics/Hitch.lua) against the real Lua with a scripted clock and CPU counters.
 
-  * with profiling off it turns it on and asks for a /reload, and turns it off again when the sample ends;
+  * with profiling off it takes a plain sample (frame times, events) and never switches profiling; /fsperf on and off do;
   * per frame CPU is the difference of the cumulative counters, and a slow frame keeps its top addons;
   * a heap that shrank in a slow frame is counted;
   * the sample ends on time, removes its OnUpdate and saves ForeverSTUwaveDB.hitch sorted by CPU in slow frames.
@@ -40,8 +40,10 @@ C_AddOns = {
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, m) __said[#__said + 1] = m end }
 SlashCmdList = {}
 function CreateFrame()
-    return { scripts = {}, SetScript = function(self, n, fn) self.scripts[n] = fn end,
+    local f = { scripts = {}, SetScript = function(self, n, fn) self.scripts[n] = fn end, RegisterEvent = function() end,
         RegisterAllEvents = function(self) self.all = true end, UnregisterAllEvents = function(self) self.all = false end }
+    __created = __created or {}; __created[#__created + 1] = f
+    return f
 end
 __fa = { GetDebugName = function() return "TrackerEvents" end, GetScript = function(_, n) return n == "OnEvent" or nil end }
 __fb = { GetDebugName = function() return "Quiet" end, GetScript = function() return nil end }
@@ -54,8 +56,18 @@ FS = { IsSecret = function(v) return v == "SECRET" end }
 CHECKS = r"""
 local function check(ok, msg) if not ok then error(msg, 2) end end
 local H = FS.Hitch
-SlashCmdList.FSPERF("")
-check(H.run == nil and __cvar == "1" and __said[1]:find("/reload, then /fsperf", 1, true), "turns profiling on and asks for a reload")
+SlashCmdList.FSPERF("5")
+check(H.run and not H.run.cpu and __cvar == "0" and __said[1]:find("frame times", 1, true), "with profiling off: a plain sample, profiling left off")
+local fp = H.frame.scripts.OnUpdate
+__now = __now + 0.01; fp(H.frame, 0.01); __now = __now + 0.01; fp(H.frame, 0.01); __now = __now + 0.01; fp(H.frame, 0.01)
+H.events.scripts.OnEvent(H.events, "QUEST_LOG_UPDATE")
+__now = __now + 0.09; fp(H.frame, 0.09)
+__now = __now + 6; fp(H.frame, 0.01)
+local plain = ForeverSTUwaveDB.hitchPlain
+check(H.run == nil and plain and plain.slowCount == 1 and plain.slow[1].events == "QUEST_LOG_UPDATE" and plain.profiled == false, "the plain sample keeps slow frames and their events")
+check(plain.addons == nil and ForeverSTUwaveDB.hitch == nil and __said[#__said]:find("/fsperf on", 1, true), "and points at /fsperf on")
+SlashCmdList.FSPERF("on")
+check(__cvar == "1" and H.run == nil, "/fsperf on turns profiling on and samples nothing")
 SlashCmdList.FSPERF("10")
 check(H.run and #H.run.names == 2, "samples the loaded addons only")
 local f = H.frame.scripts.OnUpdate
@@ -85,7 +97,13 @@ check(saved.timed["databar fps"].n == 2 and saved.timed["databar fps"].total == 
 check(saved.addons[1].name == "A" and saved.addons[1].slowMs == 30, "saved, sorted by CPU in slow frames")
 check(saved.worstMs >= 119 and saved.moving == saved.frames, "worst frame and moving frames counted")
 check(__said[#__said]:find("most CPU in slow frames: A", 1, true) and __said[#__said]:find("/fsbug", 1, true), "summed up in chat")
-check(__cvar == "0" and not ForeverSTUwaveDB.hitchProfileOn, "profiling it turned on goes off again")
+check(__cvar == "1", "a sample never switches profiling")
+SlashCmdList.FSPERF("off")
+check(__cvar == "0", "/fsperf off turns it off")
+local loginFrame = __created[1]
+__cvar = "1"; local said = #__said
+loginFrame.scripts.OnEvent(loginFrame, "PLAYER_LOGIN")
+check(#__said == said + 1 and __said[#__said]:find("/fsperf off", 1, true), "a login with profiling on says so")
 __speed = "SECRET"
 __cvar = "1"
 SlashCmdList.FSPERF("5")

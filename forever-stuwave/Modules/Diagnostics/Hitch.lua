@@ -1,8 +1,11 @@
 -- /fsperf [seconds]: samples every frame for a while (60 s by default) and saves what the slow frames had in them, so a
--- hitch can be pinned on an addon (or on none) instead of guessed at. Needs the scriptProfile CVar on, which only takes at
--- a /reload: with it off, the command turns it on and asks for a /reload and the command again; a sample that ends turns
--- it back off (from the next /reload) when this command was what turned it on, since profiling costs a little itself.
--- /fsbug carries the last sample (BugReport.lua `hitch`), so a tester sends it with the usual report.
+-- hitch can be pinned on an addon (or on none) instead of guessed at. Two kinds of sample:
+--   * PLAIN, with the scriptProfile CVar off (the default, and how the game is really played): frame times, heap drops
+--     and the events of each slow frame, saved to ForeverSTUwaveDB.hitchPlain;
+--   * PROFILED, with it on: the same plus each addon's CPU per frame and per frame object, saved to ForeverSTUwaveDB.hitch.
+-- Profiling is never switched by a sample: only `/fsperf on` and `/fsperf off` set it (it takes at the next /reload), and a
+-- login with it on says so once, since profiling slows every addon a little.
+-- /fsbug carries both (BugReport.lua `hitch`, `hitchPlain`), so a tester sends them with the usual report.
 --
 -- Per frame: UpdateAddOnCPUUsage, each loaded addon's CPU since the last frame (GetAddOnCPUUsage is cumulative), the
 -- frame's own time and the Lua heap (a heap that shrank means a garbage collection step ran in that frame). A frame
@@ -49,6 +52,8 @@ local AddOns = C_AddOns or {}
 local NumAddOns = AddOns.GetNumAddOns or GetNumAddOns
 local AddOnInfo = AddOns.GetAddOnInfo or GetAddOnInfo
 local IsLoaded = AddOns.IsAddOnLoaded or IsAddOnLoaded
+
+local EMPTY = {}
 
 local function Say(msg)
     if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cffff4488Forever STUwave|r: " .. msg) end
@@ -144,30 +149,34 @@ local function Finish()
     table.sort(list, function(a, b) return a.slowMs > b.slowMs end)
     local seconds = GetTime() - s.startAt
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.hitch = {
+    local saved = {
         at = date and date("%Y-%m-%d %H:%M:%S") or nil, seconds = seconds, frames = s.frames, slowCount = s.slowCount,
-        worstMs = s.worstMs, gcSteps = s.gcSteps, slowWithGc = s.slowWithGc, addons = list, slow = s.slow,
-        moving = s.moving, spikes = s.spikes, frameCpu = TopFrames(s.frameCpu or {}), timed = s.timed,
+        worstMs = s.worstMs, gcSteps = s.gcSteps, slowWithGc = s.slowWithGc, slow = s.slow, moving = s.moving,
+        timed = s.timed, profiled = s.cpu,
     }
-    local top = list[1]
-    Say(("sample saved: %d frames, %d slow (worst %.0f ms, %d with a heap drop); most CPU in slow frames: %s. Type /fsbug to send it.")
-        :format(s.frames, s.slowCount, s.worstMs, s.slowWithGc, top and top.name or "none"))
-    if ForeverSTUwaveDB.hitchProfileOn and type(SetCVar) == "function" then
-        ForeverSTUwaveDB.hitchProfileOn = nil
-        pcall(SetCVar, "scriptProfile", "0")       -- off again from the next /reload
+    if not s.cpu then
+        ForeverSTUwaveDB.hitchPlain = saved
+        Say(("sample saved: %d frames in %.0f s, %d slow (worst %.0f ms). Type /fsbug to send it; /fsperf on adds addon detail.")
+            :format(s.frames, seconds, s.slowCount, s.worstMs))
+        return
     end
+    saved.addons, saved.spikes, saved.frameCpu = list, s.spikes, TopFrames(s.frameCpu or {})
+    ForeverSTUwaveDB.hitch = saved
+    local top = list[1]
+    Say(("sample saved: %d frames, %d slow (worst %.0f ms, %d with a heap drop); most CPU in slow frames: %s. Type /fsbug to send it, and /fsperf off when done.")
+        :format(s.frames, s.slowCount, s.worstMs, s.slowWithGc, top and top.name or "none"))
 end
 
 local function Step(_, elapsed)
     local s = H.run
     if not s then return end
-    UpdateAddOnCPUUsage()
+    if s.cpu then UpdateAddOnCPUUsage() end
     local ms = (elapsed or 0) * 1000
     local heap = collectgarbage("count")
     local dropped = s.heap and heap < s.heap
     if dropped then s.gcSteps = s.gcSteps + 1 end
     s.heap = heap
-    local deltas, names = s.deltas, s.names
+    local deltas, names = s.deltas, s.cpu and s.names or EMPTY
     for i = 1, #names do
         local cur = GetAddOnCPUUsage(names[i]) or 0
         local d = cur - (s.last[i] or cur)
@@ -217,25 +226,13 @@ end
 
 function H.Start(seconds)
     if H.run then Say("a sample is already running.") return end
-    if type(GetCVar) == "function" and GetCVar("scriptProfile") ~= "1" then
-        if type(SetCVar) == "function" and pcall(SetCVar, "scriptProfile", "1") then
-            ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-            ForeverSTUwaveDB.hitchProfileOn = true
-            Say("CPU profiling is now on. Type /reload, then /fsperf again.")
-        else
-            Say("CPU profiling is off and could not be turned on.")
-        end
-        return
-    end
-    if type(UpdateAddOnCPUUsage) ~= "function" or type(GetAddOnCPUUsage) ~= "function" then
-        Say("this client has no addon CPU readout.")
-        return
-    end
-    local names = LoadedNames()
-    local s = { names = names, last = {}, total = {}, max = {}, inSlow = {}, deltas = {}, slow = {}, spikes = {}, timed = {}, frames = 0,
+    local hasCpu = type(UpdateAddOnCPUUsage) == "function" and type(GetAddOnCPUUsage) == "function"
+    local cpu = hasCpu and type(GetCVar) == "function" and GetCVar("scriptProfile") == "1"
+    local names = cpu and LoadedNames() or {}
+    local s = { cpu = cpu, names = names, last = {}, total = {}, max = {}, inSlow = {}, deltas = {}, slow = {}, spikes = {}, timed = {}, frames = 0,
         slowCount = 0, worstMs = 0, gcSteps = 0, slowWithGc = 0, moving = 0 }
     for i = 1, #names do s.total[i], s.max[i], s.inSlow[i], s.deltas[i] = 0, 0, 0, 0 end
-    s.frameCpu = FrameCPU()
+    s.frameCpu = cpu and FrameCPU() or nil
     s.startAt = GetTime()
     s.stopAt = s.startAt + seconds
     H.run = s
@@ -247,11 +244,39 @@ function H.Start(seconds)
         H.events:SetScript("OnEvent", NoteEvent)
         H.events:RegisterAllEvents()
     end
-    Say(("sampling %d addons for %d s. Play as usual."):format(#names, seconds))
+    if cpu then
+        Say(("sampling %d addons for %d s. Play as usual."):format(#names, seconds))
+    else
+        Say(("sampling frame times for %d s. Play as usual."):format(seconds))
+    end
 end
 
 SLASH_FSPERF1 = "/fsperf"
+-- `/fsperf on` / `/fsperf off`: the scriptProfile CVar, from the next /reload.
+function H.SetProfiling(on)
+    if type(SetCVar) ~= "function" or not pcall(SetCVar, "scriptProfile", on and "1" or "0") then
+        Say("CPU profiling could not be changed on this client.")
+        return
+    end
+    if on then
+        Say("CPU profiling is on from your next /reload. Then /fsperf takes the detailed sample; /fsperf off when done.")
+    else
+        Say("CPU profiling is off from your next /reload.")
+    end
+end
+
 SlashCmdList["FSPERF"] = function(msg)
+    local word = type(msg) == "string" and msg:lower():match("^%s*(%a+)") or nil
+    if word == "on" or word == "off" then H.SetProfiling(word == "on") return end
     local n = tonumber(msg and msg:match("%d+"))
     H.Start((n and n >= 5 and n <= 600) and n or H.DEFAULT_S)
 end
+
+-- Profiling slows every addon a little, so a login with it on says so once.
+local login = CreateFrame("Frame")
+login:RegisterEvent("PLAYER_LOGIN")
+login:SetScript("OnEvent", function()
+    if type(GetCVar) == "function" and GetCVar("scriptProfile") == "1" then
+        Say("CPU profiling is on (/fsperf off turns it off).")
+    end
+end)

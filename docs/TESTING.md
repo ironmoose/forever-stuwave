@@ -27,13 +27,12 @@ Other commands:
 
 ## Stutters and hitches
 
-If the game stutters, a short sample shows whether an addon is behind it.
+If the game stutters, a short sample shows when it happens and whether an addon is behind it.
 
-1. Type `/fsperf`. The first time it turns on CPU profiling and asks for a `/reload`; reload, then type `/fsperf` again.
-2. Play for 60 seconds the way that stutters (running around, fighting). Chat says "sample saved" when it is done.
-3. Type `/fsbug stutter` and send the report as above. It carries the sample.
+1. Type `/fsperf` and play for 60 seconds the way that stutters (running around, fighting). Chat says "sample saved" when it is done.
+2. Type `/fsbug stutter` and send the report as above. It carries the sample.
 
-Profiling costs a little itself, so it turns off again at your next `/reload`.
+For addon detail, turn on CPU profiling first: `/fsperf on`, then `/reload`, then steps 1 and 2. Profiling slows the game a little, so type `/fsperf off` and `/reload` when you are done. It is off unless you turn it on.
 
 ## Minimap on a new character's first login
 
