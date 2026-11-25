@@ -525,7 +525,7 @@ function T.a_pending_reload_marks_the_row_the_nav_count_and_the_registry_and_cle
     local W = msboot()
     W.Open("modules")
     local entry = W.RowByKey("m.cast", "modules")
-    no(anyText("RELOAD"), "no tag yet")
+    no(visibleText("RELOAD"), "no tag yet")
     local nav = navButton(W, "modules")
     local function chip()
         for _, o in ipairs(ALL) do
@@ -545,7 +545,7 @@ function T.a_pending_reload_marks_the_row_the_nav_count_and_the_registry_and_cle
     eq(entry.reload(), nil, "turning it back clears the registry line")
     eq(chip():GetText(), "1")
     yes(press_label("Minimap"))
-    no(anyText("RELOAD"), "turning both back clears the tag")
+    no(visibleText("RELOAD"), "turning both back clears the tag")
     no(chip(), "and the count")
     errorsClean()
 end
@@ -555,7 +555,7 @@ function T.a_live_row_has_no_reload_tag()
     W.Open("modules")
     yes(press_label("Nameplates"))
     eq(MS().Wanted("m.np"), false)
-    no(anyText("RELOAD"))
+    no(visibleText("RELOAD"))
     eq(W.RowByKey("m.np", "modules").reload(), nil)
 end
 
@@ -760,10 +760,19 @@ def check_the_toc_loads_the_store_before_the_pages_that_gate_on_it() -> list[str
     return problems
 
 
+def check_the_footer_count_reads_the_pending_switches() -> list[str]:
+    src = MODULES_FILE.read_text(encoding="utf-8")
+    problems = []
+    if "CW.AddReloadSource" not in src or "MS.PendingKeys()" not in src:
+        problems.append("ConfigModules.lua must hand MS.PendingKeys() to the footer through CW.AddReloadSource")
+    return problems
+
+
 def main() -> int:
     failed = run_lua_checks()
     py_checks = [
         ("the_files_are_clean", check_the_files_are_clean),
+        ("the_footer_count_reads_the_pending_switches", check_the_footer_count_reads_the_pending_switches),
         ("the_toc_loads_the_store_before_the_pages_that_gate_on_it", check_the_toc_loads_the_store_before_the_pages_that_gate_on_it),
     ]
     total = len(CHECK_NAMES) + len(py_checks)

@@ -466,6 +466,17 @@ end
 CW.On("show", Refresh)
 CW.On("select", Refresh)
 
+-- The footer's Reload UI count: every switch that waits on a reload, even one flipped before the Modules page was built.
+if CW.AddReloadSource then
+    CW.AddReloadSource(function()
+        local list = {}
+        for _, key in ipairs(MS.PendingKeys()) do
+            list[#list + 1] = { MS.Label(key) or key, "Takes a Reload UI." }
+        end
+        return list
+    end)
+end
+
 -- Any change of a switch (a click, ALL ON, an import): repaint the buttons, the card, the tags and the list.
 MS.OnAnyChange(function()
     if not ui.frame then return end
