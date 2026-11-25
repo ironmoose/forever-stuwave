@@ -1806,8 +1806,7 @@ local B5B_GS_HOST = {
 }
 B5B_CLASSES.PRIEST = { id = 5 }
 
-local function gunsightOffRow(token)
-    classWorld({ "m.gs" }, token)
+local function gunsightNotBuilt()
     eq(FS.ModuleSwitch.On("m.gs"), false)
     eq(FS.ModuleSwitch.Built("m.gs"), false, "nothing was built")
     for _, f in ipairs(hudFiles()) do
@@ -1819,6 +1818,11 @@ local function gunsightOffRow(token)
         "ForeverSTUwaveGunsightTargetSide", "ForeverSTUwaveGunsightTargetMenu", "ForeverSTUwaveGunsightMyBuffs" }) do
         no(MadeNamed(name), name .. " exists")
     end
+end
+
+local function gunsightOffRow(token)
+    classWorld({ "m.gs" }, token)
+    gunsightNotBuilt()
 end
 
 function T.gunsight_off_builds_nothing_for_a_druid() gunsightOffRow("DRUID") end
@@ -1882,6 +1886,102 @@ function T.the_hunter_ammo_tab_still_has_its_state_with_the_gunsight_off()
     classWorld({ "m.gs" }, "HUNTER")
     yes(MadeNamed("FSAmmoTab"), "the ammo tab is the Addon tabs module's, not the HUD's")
     eq(type(FS.HunterState), "table")
+end
+
+-- ---- every pair of the four off together ------------------------------------------------------------------------------
+-- The two that are off build nothing, the two that are on build as they do alone, and no module file raises an error through
+-- the fight, the shapeshift, the pet summon and the slash commands. A Hunter (pet, ammo tab) and a Shaman (totems, the drop)
+-- are the two classes that reach the most of the four.
+local B5B_PAIR_HOST = { m_ab = "FSActionBarStack", m_pet = "FSPetContainer", m_gs = "ForeverSTUwaveGunsight" }
+
+local function pairRow(a, b, token)
+    classWorld({ a, b }, token)
+    local MS = FS.ModuleSwitch
+    local function isOff(key) return key == a or key == b end
+    for _, key in ipairs({ "m.ab", "m.class", "m.gs", "m.pet" }) do eq(MS.On(key), not isOff(key), key .. " switch") end
+    b5bClean("m.ab"); b5bClean("m.class"); b5bClean("m.pet")
+    for _, f in ipairs(hudFiles()) do loaded(f) end
+    -- what is off is not built
+    for _, key in ipairs({ "m.ab", "m.class", "m.pet" }) do
+        if isOff(key) then b5bNotBuilt(key) end
+    end
+    if isOff("m.gs") then gunsightNotBuilt() end
+    -- what is on is built as it is alone
+    if not isOff("m.ab") then
+        eq(MS.Built("m.ab"), true, "action bars built"); yes(MadeNamed("FSActionBarStack"), "the stack")
+    end
+    if not isOff("m.pet") then
+        eq(MS.Built("m.pet"), true, "pet bar built"); yes(MadeNamed("FSPetContainer"), "the pet panel")
+    end
+    if not isOff("m.gs") then
+        eq(MS.Built("m.gs"), true, "Gunsight built"); yes(MadeNamed("ForeverSTUwaveGunsight"), "the Gunsight root")
+    end
+    if not isOff("m.class") and not isOff("m.ab") then
+        eq(MS.Built("m.class"), true, "tabs built"); yes(MadeNamed(B5B_CLASSES[token].host), "the " .. token .. " tab")
+    end
+    -- a tab with no action bars under it is never seated or shown (a store that turns the tabs on and the bars off by hand
+    -- still builds the tab frames, empty and hidden), and the Console is not made
+    if isOff("m.ab") then
+        no(MadeNamed("FSConsole"), "no Console")
+        local standing = 0
+        FS.ClassShoulder.EachStanding(function() standing = standing + 1 end)
+        eq(standing, 0, "no class shoulder stands without the Console")
+        for _, f in ipairs(B5B["m.class"].files) do eq(ErrorsFrom(f), "", f .. " raised no error") end
+    end
+    -- the Blizzard frames of the off modules were never touched (the on modules dim theirs, as they do alone)
+    for _, key in ipairs({ "m.ab", "m.pet" }) do
+        if isOff(key) then
+            for _, name in ipairs(B5B[key].blizzard) do
+                for _, file in ipairs(B5B[key].files) do eq(TouchesOn(name, file), "", name .. " untouched by " .. file) end
+            end
+        end
+    end
+end
+
+function T.pair_action_bars_and_addon_tabs_off_for_a_hunter() pairRow("m.ab", "m.class", "HUNTER") end
+function T.pair_action_bars_and_gunsight_off_for_a_hunter() pairRow("m.ab", "m.gs", "HUNTER") end
+function T.pair_action_bars_and_pet_bar_off_for_a_hunter() pairRow("m.ab", "m.pet", "HUNTER") end
+function T.pair_addon_tabs_and_gunsight_off_for_a_hunter() pairRow("m.class", "m.gs", "HUNTER") end
+function T.pair_addon_tabs_and_pet_bar_off_for_a_hunter() pairRow("m.class", "m.pet", "HUNTER") end
+function T.pair_gunsight_and_pet_bar_off_for_a_hunter() pairRow("m.gs", "m.pet", "HUNTER") end
+function T.pair_action_bars_and_addon_tabs_off_for_a_shaman() pairRow("m.ab", "m.class", "SHAMAN") end
+function T.pair_action_bars_and_gunsight_off_for_a_shaman() pairRow("m.ab", "m.gs", "SHAMAN") end
+function T.pair_action_bars_and_pet_bar_off_for_a_shaman() pairRow("m.ab", "m.pet", "SHAMAN") end
+function T.pair_addon_tabs_and_gunsight_off_for_a_shaman() pairRow("m.class", "m.gs", "SHAMAN") end
+function T.pair_addon_tabs_and_pet_bar_off_for_a_shaman() pairRow("m.class", "m.pet", "SHAMAN") end
+function T.pair_gunsight_and_pet_bar_off_for_a_shaman() pairRow("m.gs", "m.pet", "SHAMAN") end
+
+function T.all_four_off_together_still_loads_and_runs_clean()
+    classWorld({ "m.ab", "m.class", "m.gs", "m.pet" }, "SHAMAN")
+    for _, key in ipairs({ "m.ab", "m.class", "m.pet" }) do b5bClean(key); b5bNotBuilt(key) end
+    for _, f in ipairs(hudFiles()) do loaded(f) end
+    gunsightNotBuilt()
+end
+
+-- the Deck holds the micro bar (action bars) and the bag bar (bags): it is built while either is on, never when both are off
+function T.the_deck_is_built_with_only_the_bags_on()
+    classWorld({ "m.ab" }, "SHAMAN")
+    yes(MadeNamed("ForeverSTUwaveDeck"), "the deck stands for the bag bar")
+    loaded("Modules/ActionBars/Deck.lua")
+end
+
+function T.the_deck_is_built_with_only_the_action_bars_on()
+    classWorld({ "m.bags" }, "SHAMAN")
+    yes(MadeNamed("ForeverSTUwaveDeck"), "the deck stands for the micro bar")
+    loaded("Modules/ActionBars/Deck.lua")
+end
+
+function T.the_deck_is_not_built_with_the_action_bars_and_the_bags_both_off()
+    classWorld({ "m.ab", "m.bags" }, "SHAMAN")
+    no(MadeNamed("ForeverSTUwaveDeck"), "no deck")
+    no(MadeNamed("ForeverSTUwaveDeckMicroSlot")); no(MadeNamed("ForeverSTUwaveDeckBagSlot"))
+    loaded("Modules/ActionBars/Deck.lua"); loaded("Modules/ActionBars/MicroBars.lua"); loaded("Modules/Bags/BagBar.lua")
+end
+
+function T.the_deck_is_built_with_both_on()
+    classWorld({}, "SHAMAN")
+    yes(MadeNamed("ForeverSTUwaveDeck"))
+    loaded("Modules/ActionBars/Deck.lua")
 end
 
 return T
